@@ -1,6 +1,6 @@
 # Mobile
 
-The mobile app is built with Expo and React Native. It provides the baseline auth flow using the same API contracts as web.
+The mobile app is built with Expo and React Native. It provides the baseline auth flow using the same API contracts as the webapp.
 
 ## Project Surface Status
 

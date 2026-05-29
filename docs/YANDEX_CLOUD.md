@@ -9,7 +9,7 @@ DigitalOcean remains the default provider in this template. Do not ask the user 
 - Backend/API: Yandex Serverless Containers, running a Docker image from Yandex Container Registry.
 - Production database: Yandex Managed Service for PostgreSQL.
 - Uploads and media: Yandex Object Storage.
-- Static `web` and `landing`: Yandex Object Storage static website hosting.
+- Static `webapp` and `website`: Yandex Object Storage static website hosting.
 - CDN: Yandex Cloud CDN in front of public static sites and public media when production performance, custom domains, or cache controls matter.
 - Real-time Pub/Sub: Yandex Managed Service for Valkey only when horizontally scaled WebSocket features need cross-instance fanout.
 - CLI: Yandex Cloud CLI, `yc`.
@@ -18,8 +18,8 @@ DigitalOcean remains the default provider in this template. Do not ask the user 
 
 Ask only product and release questions:
 
-- which surfaces are being deployed now: backend/API, web, landing, mobile, or full-stack;
-- production domains for API, web, landing, media/CDN, and the mobile API endpoint;
+- which surfaces are being deployed now: backend/API, webapp, website, mobile, or full-stack;
+- production domains for API, webapp, website, media/CDN, and the mobile API endpoint;
 - whether backend/database traffic may stay private inside a Yandex Cloud network or must be reachable from the internet;
 - whether uploads/media are public, private, or mixed;
 - whether real-time chat, presence, collaboration, live notifications, or WebSocket-style updates must work across multiple backend instances;
@@ -87,7 +87,7 @@ Production env must include:
 ```bash
 DATABASE_URL=postgresql://...
 JWT_SECRET=<at-least-32-random-characters>
-CORS_ORIGINS=https://web.example.com,https://landing.example.com
+CORS_ORIGINS=https://webapp.example.com,https://website.example.com
 ACCESS_TOKEN_TTL_SECONDS=900
 REFRESH_TOKEN_TTL_DAYS=30
 COOKIE_SECURE=true
@@ -126,15 +126,15 @@ When the backend runs as one container instance, WebSocket connection state can 
 
 Each backend instance should publish domain events to Valkey and subscribe to the channels it needs to deliver events to its own local WebSocket connections. Keep Valkey out of baseline local setup and ordinary request/response APIs; add it only for cross-instance real-time fanout.
 
-## Static Web And Landing
+## Static Webapp And Website
 
-Deploy `web` and `landing` as static websites in Yandex Object Storage.
+Deploy `webapp` and `website` as static websites in Yandex Object Storage. (Once a `website` route opts into SSR, that surface must move to a Serverless Container runtime instead of static hosting.)
 
 Build locally or in CI:
 
 ```bash
-bun run build:web
-bun run build:landing
+bun run build:webapp
+bun run build:website
 ```
 
 Before uploading, create a Yandex Object Storage static access key for a service account and configure the AWS CLI with it. Yandex's Object Storage docs recommend `aws configure` with the static key and `ru-central1` as the region.
@@ -149,8 +149,8 @@ aws configure
 Upload built assets to public website buckets:
 
 ```bash
-aws --endpoint-url=https://storage.yandexcloud.net/ s3 cp --recursive web/dist/ s3://<web-bucket>/
-aws --endpoint-url=https://storage.yandexcloud.net/ s3 cp --recursive landing/dist/ s3://<landing-bucket>/
+aws --endpoint-url=https://storage.yandexcloud.net/ s3 cp --recursive webapp/dist/ s3://<webapp-bucket>/
+aws --endpoint-url=https://storage.yandexcloud.net/ s3 cp --recursive website/dist/ s3://<website-bucket>/
 ```
 
 Configure Object Storage static website hosting with `index.html` as the home page. For the React SPA, also use `index.html` as the error document or configure equivalent CDN routing so route refreshes do not break client-side routing.
@@ -167,14 +167,14 @@ Example website settings file:
 Apply it with:
 
 ```bash
-yc storage bucket update --name <web-bucket> --website-settings-from-file <path-to-website-settings.json>
+yc storage bucket update --name <webapp-bucket> --website-settings-from-file <path-to-website-settings.json>
 ```
 
 Object Storage static website hosting requires public read access to the bucket objects and object list. Do not put secrets in frontend build output or static website buckets.
 
 ## CDN And Domains
 
-For production `web`, `landing`, and public media, put Yandex Cloud CDN in front of Object Storage when the product needs lower latency, custom cache behavior, HTTPS/domain management, or protection controls.
+For production `webapp`, `website`, and public media, put Yandex Cloud CDN in front of Object Storage when the product needs lower latency, custom cache behavior, HTTPS/domain management, or protection controls.
 
 Cloud CDN can use an Object Storage bucket as an origin. Create a CDN resource, attach the public domain, configure caching rules, and point DNS to the CDN load balancer with a `CNAME` record. Do not use `ANAME` for CDN distribution domains.
 
@@ -186,7 +186,7 @@ Yandex Object Storage is S3-compatible. Use it for durable uploads, generated fi
 
 Recommended production setup:
 
-- One bucket per environment and purpose when practical, for example `<project>-prod-media`, `<project>-prod-web`, and `<project>-prod-landing`.
+- One bucket per environment and purpose when practical, for example `<project>-prod-media`, `<project>-prod-webapp`, and `<project>-prod-website`.
 - Use service-account static access keys for S3-compatible SDKs and upload tools.
 - Use `https://storage.yandexcloud.net` as the Object Storage endpoint.
 - Use `ru-central1` as the S3 SDK region unless the current Yandex docs say otherwise.
@@ -221,8 +221,8 @@ After deployment:
 - verify browser auth only from allowed `CORS_ORIGINS`;
 - verify cookie-backed refresh/logout reject missing or untrusted browser `Origin` headers;
 - verify Managed PostgreSQL connectivity and that Prisma migrations applied exactly once;
-- verify `web` route refreshes load the SPA fallback instead of a broken 404 page;
-- verify `landing` static assets load from the production domain;
+- verify `webapp` route refreshes load the SPA fallback instead of a broken 404 page;
+- verify `website` static assets load from the production domain;
 - verify public media loads through the Cloud CDN domain when storage is active;
 - verify private file links expire and require backend authorization when private storage is active.
 

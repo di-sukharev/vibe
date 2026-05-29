@@ -149,7 +149,7 @@ function runPrepareSpecs(extraEnv = {}, { skipReleaseGitCheck = true } = {}) {
       DO_GITHUB_REPO: 'owner/repo',
       DO_GIT_BRANCH: 'main',
       JWT_SECRET: 'abcdefghijklmnopqrstuvwxyz123456',
-      DO_WEB_URL: 'https://web.example.com',
+      DO_WEBAPP_URL: 'https://webapp.example.com',
       ...extraEnv,
     },
   });

@@ -49,7 +49,7 @@ services:
         scope: RUN_TIME
         type: SECRET
       - key: CORS_ORIGINS
-        value: "https://REPLACE_WITH_WEB_DEFAULT_INGRESS"
+        value: "https://REPLACE_WITH_WEBAPP_DEFAULT_INGRESS"
         scope: RUN_TIME
         type: GENERAL
       - key: ACCESS_TOKEN_TTL_SECONDS

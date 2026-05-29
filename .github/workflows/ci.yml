@@ -27,8 +27,8 @@ jobs:
       - name: Contract tests
         run: bun run test:contracts
 
-      - name: Web client tests
-        run: bun run test:web
+      - name: Webapp client tests
+        run: bun run test:webapp
 
       - name: Mobile client tests
         run: bun run test:mobile
@@ -37,7 +37,7 @@ jobs:
         run: bun run test:backend
 
       - name: Install Playwright browser
-        run: bun run --cwd web e2e:install
+        run: bun run --cwd webapp e2e:install
 
-      - name: Web E2E smoke
-        run: bun run e2e:web
+      - name: Webapp E2E smoke
+        run: bun run e2e:webapp

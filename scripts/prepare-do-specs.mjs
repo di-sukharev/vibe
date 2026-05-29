@@ -8,7 +8,7 @@ import { validateDigitalOceanCronSchedule } from './do-cron.mjs'
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const scratchDir = resolve(repoRoot, '.scratch/deploy')
-const targets = new Set(['backend-initial', 'backend-final', 'web', 'landing', 'all'])
+const targets = new Set(['backend-initial', 'backend-final', 'webapp', 'website', 'all'])
 const target = process.argv[2]
 const knownWeakJwtSecrets = new Set(['replace-with-at-least-32-random-characters'])
 const appPlatformInstanceSizeSlugs = new Set([
@@ -29,7 +29,7 @@ const appPlatformInstanceSizeSlugs = new Set([
 ])
 
 // Budget-bearing DigitalOcean defaults live here so generated specs, tests, and docs have one owner.
-// Web and landing use Static Site templates on purpose, so they do not get runtime machine sizing.
+// Webapp and website use Static Site templates on purpose, so they do not get runtime machine sizing.
 const defaultApiServiceInstanceSizeSlug = 'apps-s-1vcpu-1gb'
 const defaultApiServiceInstanceCount = 1
 const defaultBackendWorkerInstanceSizeSlug = defaultApiServiceInstanceSizeSlug
@@ -64,30 +64,30 @@ await mkdir(scratchDir, { recursive: true })
 if (target === 'backend-initial' || target === 'backend-final' || target === 'all') {
   const jwtSecret = requiredEnv('JWT_SECRET')
   assertStrongJwtSecret(jwtSecret)
-  const webUrl = target === 'backend-initial' ? 'https://placeholder.invalid' : requiredUrlEnv('DO_WEB_URL')
+  const webappUrl = target === 'backend-initial' ? 'https://placeholder.invalid' : requiredUrlEnv('DO_WEBAPP_URL')
 
   await writePreparedSpec('backend-app.yaml.example', 'backend-app.yaml', {
     ...commonReplacements(),
     REPLACE_WITH_AT_LEAST_32_RANDOM_CHARS: jwtSecret,
-    'https://REPLACE_WITH_WEB_DEFAULT_INGRESS': webUrl,
+    'https://REPLACE_WITH_WEBAPP_DEFAULT_INGRESS': webappUrl,
     REPLACE_WITH_OPTIONAL_BACKEND_WORKERS: optionalBackendWorkersBlock(),
     REPLACE_WITH_OPTIONAL_BACKEND_CRON_JOBS: optionalBackendCronJobsBlock(),
   })
 }
 
-if (target === 'web' || target === 'all') {
-  // Frontend builds are deployed as Static Site components; do not add service machine tiers here.
-  await writePreparedSpec('web-static-app.yaml.example', 'web-static-app.yaml', {
+if (target === 'webapp' || target === 'all') {
+  // The CSR webapp is deployed as a Static Site component; do not add service machine tiers here.
+  await writePreparedSpec('webapp-static-app.yaml.example', 'webapp-static-app.yaml', {
     ...commonReplacements(),
     'https://REPLACE_WITH_BACKEND_DEFAULT_INGRESS': requiredUrlEnv('DO_BACKEND_URL'),
   })
 }
 
-if (target === 'landing' || target === 'all') {
-  // Landing is also a Static Site component until a product requirement needs a runtime process.
-  await writePreparedSpec('landing-static-app.yaml.example', 'landing-static-app.yaml', {
+if (target === 'website' || target === 'all') {
+  // The website is a Static Site component until a route opts into SSR and needs a runtime process.
+  await writePreparedSpec('website-static-app.yaml.example', 'website-static-app.yaml', {
     ...commonReplacements(),
-    'https://REPLACE_WITH_WEB_DEFAULT_INGRESS': requiredUrlEnv('DO_WEB_URL'),
+    'https://REPLACE_WITH_WEBAPP_DEFAULT_INGRESS': requiredUrlEnv('DO_WEBAPP_URL'),
   })
 }
 
@@ -130,10 +130,10 @@ function printUsage() {
   console.error('Required env:')
   console.error('  all targets: DO_GITHUB_REPO, optional DO_PROJECT_SLUG, DO_GIT_BRANCH, DO_APP_REGION')
   console.error('  backend-initial: JWT_SECRET')
-  console.error('  backend-final: JWT_SECRET, DO_WEB_URL')
-  console.error('  web: DO_BACKEND_URL')
-  console.error('  landing: DO_WEB_URL')
-  console.error('  all: JWT_SECRET, DO_BACKEND_URL, DO_WEB_URL')
+  console.error('  backend-final: JWT_SECRET, DO_WEBAPP_URL')
+  console.error('  webapp: DO_BACKEND_URL')
+  console.error('  website: DO_WEBAPP_URL')
+  console.error('  all: JWT_SECRET, DO_BACKEND_URL, DO_WEBAPP_URL')
   console.error('')
   console.error('Optional deployment settings:')
   console.error('  API sizing: DO_API_INSTANCE_SIZE_SLUG, DO_API_INSTANCE_COUNT')
@@ -294,7 +294,7 @@ function assertSafeProductionEnv(outputName, contents) {
     assertCorsOrigins(outputName, corsOrigins)
   }
 
-  for (const key of ['VITE_API_URL', 'PUBLIC_WEB_APP_URL']) {
+  for (const key of ['VITE_API_URL', 'PUBLIC_WEBAPP_URL']) {
     const value = findEnvValue(contents, key)
     if (value !== undefined) {
       assertBuildTimeHttpsUrl(outputName, key, value)

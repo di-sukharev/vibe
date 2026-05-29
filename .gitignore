@@ -9,7 +9,7 @@ coverage/
 .scratch/
 playwright-report/
 test-results/
-web/e2e/.artifacts/
+webapp/e2e/.artifacts/
 mobile/.maestro/reports/
 
 # Runtime and logs

@@ -5,8 +5,8 @@ WORKDIR /app
 COPY package.json bun.lock bunfig.toml ./
 COPY packages/contracts/package.json packages/contracts/package.json
 COPY backend/package.json backend/package.json
-COPY web/package.json web/package.json
-COPY landing/package.json landing/package.json
+COPY webapp/package.json webapp/package.json
+COPY website/package.json website/package.json
 COPY mobile/package.json mobile/package.json
 
 RUN bun install --frozen-lockfile
