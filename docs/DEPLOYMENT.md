@@ -174,7 +174,7 @@ Backend service requirements:
 - Attach DigitalOcean Managed PostgreSQL or provide its connection string as `DATABASE_URL`.
 - Add Spaces env only when the product uses storage. Leave Spaces env blank for projects without uploads.
 
-The default one-container shape is not a high-availability floor; it is the budget starter that keeps backend plus the smallest Managed PostgreSQL cluster around $27/month before taxes, traffic overages, storage, and optional add-ons. Raise `instance_count` to two or three when availability or traffic justifies the extra monthly cost. Use `apps-s-1vcpu-2gb` or larger shared containers when memory pressure is the primary limit. Move to dedicated CPU only after metrics show CPU-bound work, noisy shared-CPU performance, strict latency requirements, or a need for CPU-based autoscaling. `webapp` and `website` are Static Site components and do not have App Platform runtime container sizes, until a `website` route opts into SSR and is deployed as a service.
+The default one-container shape is not a high-availability floor; it is the budget starter that keeps backend plus the smallest Managed PostgreSQL cluster around $27/month before taxes, traffic overages, storage, and optional add-ons. Raise `instance_count` to two or three when availability or traffic justifies the extra monthly cost. Use `apps-s-1vcpu-2gb` or larger shared containers when memory pressure is the primary limit. Move to dedicated CPU only after metrics show CPU-bound work, noisy shared-CPU performance, strict latency requirements, or a need for CPU-based autoscaling. `webapp` and fully prerendered `website` output are Static Site components and do not have App Platform runtime container sizes. A `website` route with SSR/on-demand rendering or server islands needs a runtime service.
 
 Apply Prisma migrations from a protected one-off App Platform console/job with the same production env:
 
@@ -246,9 +246,13 @@ App Platform Static Sites are served through DigitalOcean's global CDN by defaul
 
 ## Website Static Site
 
-Deploy `website` as an App Platform Static Site component while every route is prerendered (the default build).
+Deploy `website` as an App Platform Static Site component while it has only fully prerendered output and no server islands or runtime-rendered routes.
 
-The minimum sufficient website tier is Static Site only. Keep it a Static Site until a route opts into SSR with `export const prerender = false`; that route then needs the Node adapter at runtime and must be deployed as an App Platform **service** (a runtime container, like the backend) instead of a Static Site. Per-page incremental static regeneration (ISR) is a Vercel/Netlify platform feature and is not available on App Platform, so keep dynamic pages fresh with CDN cache headers (`Cache-Control`, `stale-while-revalidate`) instead.
+The minimum sufficient website tier is Static Site only. This is still the default for the public SEO catalog of a marketplace. Use rebuild/redeploy for durable listing/category/content changes, and do not move the full authenticated app into Astro just because the product has public SEO pages. Keep `webapp` for buyer account, seller/admin, checkout/account, dashboard, and other non-indexed workflows.
+
+Move only request-specific `website` routes to SSR/hybrid with `export const prerender = false`; those routes need the Node adapter at runtime and must be deployed as an App Platform **service** (a runtime container, like the backend) instead of a Static Site. Astro server islands also need an adapter and runtime service even when the surrounding page is prerendered. When server islands appear on cached pages or rolling deploys, generate a stable key with `astro create-key` and configure `ASTRO_KEY` as a secret in both build and runtime environments. Never commit it, expose it as `PUBLIC_*`, print it in logs, or bake it into static output. Per-page incremental static regeneration (ISR) is a Vercel/Netlify-style platform feature and is not available on App Platform Static Sites, so keep runtime pages fresh with CDN cache headers (`Cache-Control`, `stale-while-revalidate`) instead.
+
+Use shared CDN caching only for anonymous, public-equivalent website responses. Auth-dependent or personalized routes and server islands must use `private` or `no-store`, or a deliberately supported `Vary: Cookie`/`Authorization` strategy. `ASTRO_KEY` protects server-island prop encryption across builds; it does not make personalized responses safe for shared caches.
 
 Required component shape (static build):
 
@@ -305,7 +309,7 @@ DigitalOcean Spaces and Spaces CDN do not provide first-party dynamic image tran
 
 ## CDN And Domains
 
-For `webapp` and `website`, App Platform Static Sites already use DigitalOcean's global CDN. This is the default path.
+For `webapp` and fully prerendered `website` output, App Platform Static Sites already use DigitalOcean's global CDN. This is the default path.
 
 Use an external CDN only for explicit advanced needs such as custom WAF rules, bot filtering, custom rate limiting, or geographic traffic controls. If an external CDN is used in front of App Platform:
 

@@ -1,18 +1,10 @@
-import { createHash } from 'node:crypto'
 import { createServer } from 'node:net'
-import { resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import {
+  preferredBackendPort,
+  preferredPostgresTestPort,
+  preferredWebPort,
+} from './env'
 import { portFromUrl } from './url'
-
-export const repositoryRoot = resolve(fileURLToPath(new URL('../..', import.meta.url)))
-export const repositoryHash = createHash('sha256').update(repositoryRoot).digest('hex').slice(0, 12)
-
-const preferredPostgresTestPort =
-  30000 + (Number.parseInt(repositoryHash.slice(0, 6), 16) % 20000)
-const preferredBackendPort =
-  50000 + (Number.parseInt(repositoryHash.slice(6, 12), 16) % 5000)
-const preferredWebPort =
-  55000 + (Number.parseInt(repositoryHash.slice(0, 6), 16) % 5000)
 
 export type PortPlan = {
   backendPort: number

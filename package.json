@@ -29,7 +29,7 @@
     "typecheck:mobile": "bun run --cwd mobile typecheck",
     "typecheck:backend": "bun run --cwd backend typecheck",
     "test": "bun run test:deploy && bun run test:contracts && bun run test:backend && bun run test:webapp && bun run test:mobile",
-    "test:deploy": "bun test scripts/do-cron.test.mjs scripts/prepare-do-specs.test.mjs",
+    "test:deploy": "bun test scripts/do-cron.test.mjs scripts/prepare-do-specs.test.mjs scripts/repo-env.test.mjs",
     "test:contracts": "bun run --cwd packages/contracts test",
     "test:backend": "bun run --cwd backend test",
     "test:backend:unit": "bun run --cwd backend test:unit",

@@ -9,7 +9,7 @@ DigitalOcean remains the default provider in this template. Do not ask the user 
 - Backend/API: Yandex Serverless Containers, running a Docker image from Yandex Container Registry.
 - Production database: Yandex Managed Service for PostgreSQL.
 - Uploads and media: Yandex Object Storage.
-- Static `webapp` and `website`: Yandex Object Storage static website hosting.
+- Static `webapp` and fully prerendered `website` output: Yandex Object Storage static website hosting.
 - CDN: Yandex Cloud CDN in front of public static sites and public media when production performance, custom domains, or cache controls matter.
 - Real-time Pub/Sub: Yandex Managed Service for Valkey only when horizontally scaled WebSocket features need cross-instance fanout.
 - CLI: Yandex Cloud CLI, `yc`.
@@ -128,7 +128,9 @@ Each backend instance should publish domain events to Valkey and subscribe to th
 
 ## Static Webapp And Website
 
-Deploy `webapp` and `website` as static websites in Yandex Object Storage. (Once a `website` route opts into SSR, that surface must move to a Serverless Container runtime instead of static hosting.)
+Deploy `webapp` and fully prerendered `website` output as static websites in Yandex Object Storage. Once `website` uses SSR/on-demand rendering or Astro server islands, that surface needs an Astro adapter and must move to a Serverless Container runtime instead of static hosting. When server islands appear on cached pages or rolling deploys, generate a stable key with `astro create-key` and configure `ASTRO_KEY` as a secret in both build and runtime environments. Never commit it, expose it as `PUBLIC_*`, print it in logs, or bake it into static output.
+
+Use shared CDN caching only for anonymous, public-equivalent website responses. Auth-dependent or personalized routes and server islands must use `private` or `no-store`, or a deliberately supported `Vary: Cookie`/`Authorization` strategy. `ASTRO_KEY` is not a cache privacy boundary.
 
 Build locally or in CI:
 

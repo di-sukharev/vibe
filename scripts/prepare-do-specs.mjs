@@ -84,7 +84,8 @@ if (target === 'webapp' || target === 'all') {
 }
 
 if (target === 'website' || target === 'all') {
-  // The website is a Static Site component until a route opts into SSR and needs a runtime process.
+  // Fully prerendered website output is a Static Site component; SSR/on-demand routes,
+  // server islands, or other runtime-rendered routes need a runtime service instead.
   await writePreparedSpec('website-static-app.yaml.example', 'website-static-app.yaml', {
     ...commonReplacements(),
     'https://REPLACE_WITH_WEBAPP_DEFAULT_INGRESS': requiredUrlEnv('DO_WEBAPP_URL'),

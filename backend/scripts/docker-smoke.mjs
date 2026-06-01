@@ -73,7 +73,7 @@ async function waitForComposePostgres() {
         'postgres_test',
         'pg_isready',
         '-U',
-        'postgres',
+        'superuser',
         '-d',
         'web_app_demo_test',
       ],

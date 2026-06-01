@@ -24,7 +24,7 @@ async function waitForComposePostgres(service: string, database: string, env: No
   for (let attempt = 1; attempt <= 30; attempt += 1) {
     const result = spawnSync(
       'docker',
-      [...composeArgs, 'exec', '-T', service, 'pg_isready', '-U', 'postgres', '-d', database],
+      [...composeArgs, 'exec', '-T', service, 'pg_isready', '-U', 'superuser', '-d', database],
       {
         cwd: repositoryRoot,
         env,

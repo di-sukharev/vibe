@@ -89,6 +89,7 @@ This block exists only for fresh installs from the template. If this repository 
 - `Direct`: cosmetic, copy, spacing, styling, comments, or obvious local edits that do not change runtime behavior.
 - `Investigation`: diagnosis or debugging when the root cause or failure path is unclear.
 - `TDD-first`: behavior, logic, contracts, auth, permissions, persistence, validation, query semantics, routing, state transitions, concurrency, or non-trivial user-facing changes.
+- Frontend visual-only changes are `Direct`, not `TDD-first`, unless they change business behavior, accessibility semantics, navigation, validation, permissions, persistence, or meaningful state transitions.
 - For `Review`, inspect evidence and report concrete risks, recommendations, and file references. Do not edit unless asked.
 - For `Direct`, inspect the affected file and nearby usage, make the smallest coherent change, and run narrow validation when cheap.
 - For `Investigation`, reproduce or trace the failure path when possible. Identify the owning layer before patching, and stop to reframe if two attempts fail to move the primary signal.
@@ -157,6 +158,8 @@ This block exists only for fresh installs from the template. If this repository 
 - Use E2E for critical journeys and high-risk regressions such as auth/session behavior, persistence, navigation, and important empty/error/recovery states.
 - Choose the highest-confidence practical boundary: E2E for important user-visible cross-layer flows, integration/contract tests for API/auth/persistence/contracts, and unit tests for pure rules, schema matrices, token/env helpers, and retry/cache behavior.
 - Add or expand E2E only when it protects a plausible user-visible regression, can use stable selectors/data, avoids brittle timing or copy coupling, and will remain maintainable.
+- On frontend, E2E tests must cover business logic and meaningful product behavior: data creation or editing, permissions, validation, navigation, error/recovery states, persistence, and important state transitions.
+- Do not add automated tests for cosmetic UI details such as `className`, Tailwind classes, CSS property values, spacing, color, radius, shadows, animation timing, or visual-only layout. Validate cosmetic changes through code review, local runtime checks, or screenshots when useful.
 - If contracts or shared schemas change, validate producer and consumer sides.
 - Treat non-zero exits, runtime errors, unhandled promise rejections, failed assertions, type errors, lint errors, build failures, and timeouts as failed validation.
 - Do not declare success on proxy metrics alone. Green tests, lint, or typecheck are not enough if the primary user-visible signal is still broken.
