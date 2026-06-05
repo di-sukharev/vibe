@@ -113,6 +113,8 @@ describe('storageConfigFromEnv', () => {
         APPLE_IAP_PRODUCT_IDS: [],
         APPLE_AUTH_JWKS_TIMEOUT_MS: 5000,
         GOOGLE_AUTH_CLIENT_IDS: [],
+        GOOGLE_PLAY_PRODUCT_IDS: [],
+        GOOGLE_PLAY_BASE_PLAN_IDS: [],
       }),
     ).toBeNull()
   })

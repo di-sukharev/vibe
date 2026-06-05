@@ -10,6 +10,7 @@ import { SubscriptionState } from '../generated/prisma/enums'
 import { handleError } from '../http/errors'
 import { createIapRoutes } from './routes'
 import type { AppStoreSubscriptionVerifier } from './apple-verifier'
+import type { GooglePlaySubscriptionVerifier } from './google-play-verifier'
 
 const userId = '018fd4f2-1f3a-7c88-bc49-333333333333'
 const otherUserId = '018fd4f2-1f3a-7c88-bc49-444444444444'
@@ -29,6 +30,8 @@ const env: AppEnv = {
   APPLE_IAP_PRODUCT_IDS: ['premium_monthly'],
   APPLE_AUTH_JWKS_TIMEOUT_MS: 5000,
   GOOGLE_AUTH_CLIENT_IDS: [],
+  GOOGLE_PLAY_PRODUCT_IDS: [],
+  GOOGLE_PLAY_BASE_PLAN_IDS: [],
 }
 
 test('offer-code redemption route links tokenless App Store transactions only for the issuing user', async () => {
@@ -89,7 +92,79 @@ test('offer-code redemption route rejects expired redemption tokens before entit
   expect(entitlementUpsert).not.toHaveBeenCalled()
 })
 
-function createTestIapApp(db: DbClient) {
+test('Google Play transaction route verifies purchases through the Google verifier', async () => {
+  const acknowledgeSubscription = mock(async () => undefined)
+  const entitlementUpsert = mock(async () => ({
+    platform: 'android',
+    state: SubscriptionState.active,
+    productId: 'premium',
+    originalTransactionId: null,
+    transactionId: 'GPA.1234-5678-9012-34567',
+    expiresAt: new Date('2026-07-01T00:00:00.000Z'),
+    willAutoRenew: true,
+    updatedAt: new Date('2026-06-01T00:00:00.000Z'),
+  }))
+  const googleUpsert = mock(async () => ({ id: 'google-row-1' }))
+  const app = createTestIapApp(
+    createFakeGoogleDb({ entitlementUpsert, googleUpsert }),
+    {
+      env: {
+        ...env,
+        GOOGLE_PLAY_PRODUCT_IDS: ['premium'],
+        GOOGLE_PLAY_BASE_PLAN_IDS: ['monthly'],
+      },
+      googleVerifier: {
+        acknowledgeSubscription,
+        async getSubscriptionPurchase() {
+          return {
+            acknowledgementState: 'ACKNOWLEDGEMENT_STATE_PENDING',
+            externalAccountIdentifiers: {
+              obfuscatedExternalAccountId: userId,
+            },
+            latestOrderId: 'GPA.1234-5678-9012-34567',
+            lineItems: [
+              {
+                autoRenewingPlan: { autoRenewEnabled: true },
+                expiryTime: '2026-07-01T00:00:00.000Z',
+                offerDetails: { basePlanId: 'monthly' },
+                productId: 'premium',
+              },
+            ],
+            subscriptionState: 'SUBSCRIPTION_STATE_ACTIVE',
+          }
+        },
+      },
+    },
+  )
+
+  const response = await postJson(app, '/api/iap/google-play/transactions', userId, {
+    basePlanId: 'monthly',
+    productId: 'premium',
+    purchaseToken: 'purchase-token',
+  })
+  const body = await response.json()
+
+  expect(response.status).toBe(200)
+  expect(body.subscription).toMatchObject({
+    isActive: true,
+    platform: 'android',
+    transactionId: 'GPA.1234-5678-9012-34567',
+  })
+  expect(acknowledgeSubscription).toHaveBeenCalledWith({
+    productId: 'premium',
+    purchaseToken: 'purchase-token',
+  })
+  expect(googleUpsert).toHaveBeenCalled()
+  expect(entitlementUpsert).toHaveBeenCalled()
+})
+
+function createTestIapApp(
+  db: DbClient,
+  options: {
+    env?: AppEnv
+    googleVerifier?: GooglePlaySubscriptionVerifier
+  } = {},
+) {
   const app = new OpenAPIHono<AppBindings>()
   app.use('*', async (c, next) => {
     c.set('authService', {
@@ -97,8 +172,9 @@ function createTestIapApp(db: DbClient) {
         user: { id: accessToken },
       }),
     } as never)
-    c.set('env', env)
-    c.set('iapVerifier', fakeOfferCodeVerifier())
+    c.set('env', options.env ?? env)
+    c.set('appStoreIapVerifier', fakeOfferCodeVerifier())
+    c.set('googlePlayIapVerifier', options.googleVerifier ?? fakeGooglePlayVerifier())
     c.set('prisma', db)
     c.set('storageService', null)
     await next()
@@ -106,6 +182,28 @@ function createTestIapApp(db: DbClient) {
   app.route('/api/iap', createIapRoutes())
   app.onError(handleError)
   return app
+}
+
+function createFakeGoogleDb({
+  entitlementUpsert,
+  googleUpsert,
+}: {
+  entitlementUpsert: ReturnType<typeof mock>
+  googleUpsert: ReturnType<typeof mock>
+}) {
+  const db = {
+    googlePlaySubscriptionPurchase: {
+      findFirst: mock(async () => null),
+      findMany: mock(async () => []),
+      upsert: googleUpsert,
+    },
+    subscriptionEntitlement: {
+      findUnique: mock(async () => null),
+      upsert: entitlementUpsert,
+    },
+    $transaction: async (callback: (tx: unknown) => unknown) => callback(db),
+  }
+  return db as unknown as DbClient
 }
 
 function createFakeDb({
@@ -154,6 +252,17 @@ function fakeOfferCodeVerifier(): AppStoreSubscriptionVerifier {
     },
     async getSubscriptionStatuses() {
       return []
+    },
+  }
+}
+
+function fakeGooglePlayVerifier(): GooglePlaySubscriptionVerifier {
+  return {
+    async getSubscriptionPurchase() {
+      throw new Error('unexpected Google Play verification')
+    },
+    async acknowledgeSubscription() {
+      throw new Error('unexpected Google Play acknowledge')
     },
   }
 }

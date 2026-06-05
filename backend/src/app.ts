@@ -8,15 +8,17 @@ import { createAuthRoutes } from './auth/routes'
 import { AuthService } from './auth/service'
 import { errorResponse, handleError, validationErrorHook } from './http/errors'
 import { createAppStoreSubscriptionVerifier, type AppStoreSubscriptionVerifier } from './iap/apple-verifier'
+import { createGooglePlaySubscriptionVerifier, type GooglePlaySubscriptionVerifier } from './iap/google-play-verifier'
 import { createAppStoreWebhookRoutes, createIapRoutes } from './iap/routes'
 import { createNotificationRoutes } from './notifications/routes'
 import { createStorageServiceFromEnv, type StorageService } from './storage/service'
 
 export type AppBindings = {
   Variables: {
+    appStoreIapVerifier: AppStoreSubscriptionVerifier
     authService: AuthService
     env: AppEnv
-    iapVerifier: AppStoreSubscriptionVerifier
+    googlePlayIapVerifier: GooglePlaySubscriptionVerifier
     prisma: DbClient
     storageService: StorageService | null
   }
@@ -24,13 +26,16 @@ export type AppBindings = {
 
 type CreateAppOptions = {
   env: AppEnv
+  appStoreIapVerifier?: AppStoreSubscriptionVerifier
+  googlePlayIapVerifier?: GooglePlaySubscriptionVerifier
   iapVerifier?: AppStoreSubscriptionVerifier
   prisma: DbClient
 }
 
-export function createApp({ env, iapVerifier, prisma }: CreateAppOptions) {
+export function createApp({ appStoreIapVerifier, env, googlePlayIapVerifier, iapVerifier, prisma }: CreateAppOptions) {
   const authService = new AuthService(prisma, env)
-  const appStoreIapVerifier = iapVerifier ?? createAppStoreSubscriptionVerifier(env)
+  const appStoreSubscriptionVerifier = appStoreIapVerifier ?? iapVerifier ?? createAppStoreSubscriptionVerifier(env)
+  const googlePlaySubscriptionVerifier = googlePlayIapVerifier ?? createGooglePlaySubscriptionVerifier(env)
   const storageService = createStorageServiceFromEnv(env)
   const app = new OpenAPIHono<AppBindings>({
     defaultHook: validationErrorHook,
@@ -51,9 +56,10 @@ export function createApp({ env, iapVerifier, prisma }: CreateAppOptions) {
     }),
   )
   app.use('*', async (c, next) => {
+    c.set('appStoreIapVerifier', appStoreSubscriptionVerifier)
     c.set('authService', authService)
     c.set('env', env)
-    c.set('iapVerifier', appStoreIapVerifier)
+    c.set('googlePlayIapVerifier', googlePlaySubscriptionVerifier)
     c.set('prisma', prisma)
     c.set('storageService', storageService)
     await next()

@@ -26,6 +26,9 @@ describe('loadEnv', () => {
     expect(env.APPLE_AUTH_BUNDLE_ID).toBeUndefined()
     expect(env.APPLE_AUTH_JWKS_TIMEOUT_MS).toBe(5000)
     expect(env.GOOGLE_AUTH_CLIENT_IDS).toEqual([])
+    expect(env.GOOGLE_PLAY_PACKAGE_NAME).toBeUndefined()
+    expect(env.GOOGLE_PLAY_PRODUCT_IDS).toEqual([])
+    expect(env.GOOGLE_PLAY_BASE_PLAN_IDS).toEqual([])
   })
 
   test('parses backend .env.example with optional blank App Store fields', () => {
@@ -40,6 +43,11 @@ describe('loadEnv', () => {
       'com.example.app.premium.monthly',
       'com.example.app.premium.yearly',
     ])
+    expect(env.GOOGLE_PLAY_PACKAGE_NAME).toBeUndefined()
+    expect(env.GOOGLE_PLAY_PRODUCT_IDS).toEqual([
+      'com.example.app.premium',
+    ])
+    expect(env.GOOGLE_PLAY_BASE_PLAN_IDS).toEqual(['monthly', 'yearly'])
   })
 
   test('parses social auth provider configuration', () => {
@@ -187,6 +195,55 @@ describe('loadEnv', () => {
     })
 
     expect(env.APPLE_IAP_PRODUCT_IDS).toEqual(['premium_monthly', 'premium_yearly'])
+  })
+
+  test('requires complete Google Play IAP verification config when enabled', () => {
+    const baseEnv = {
+      DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
+      JWT_SECRET: '12345678901234567890123456789012',
+    }
+
+    expect(() =>
+      loadEnv({
+        ...baseEnv,
+        GOOGLE_PLAY_PACKAGE_NAME: 'com.example.app',
+      }),
+    ).toThrow('GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64')
+
+    expect(() =>
+      loadEnv({
+        ...baseEnv,
+        GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64: Buffer.from(JSON.stringify({ client_email: 'iap@example.com' })).toString('base64'),
+      }),
+    ).toThrow('GOOGLE_PLAY_PACKAGE_NAME')
+
+    expect(() =>
+      loadEnv({
+        ...baseEnv,
+        GOOGLE_PLAY_PACKAGE_NAME: 'com.example.app',
+        GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64: Buffer.from(JSON.stringify({ client_email: 'iap@example.com' })).toString('base64'),
+      }),
+    ).toThrow('GOOGLE_PLAY_PRODUCT_IDS')
+
+    expect(() =>
+      loadEnv({
+        ...baseEnv,
+        GOOGLE_PLAY_PACKAGE_NAME: 'com.example.app',
+        GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64: Buffer.from(JSON.stringify({ client_email: 'iap@example.com' })).toString('base64'),
+        GOOGLE_PLAY_PRODUCT_IDS: 'premium',
+      }),
+    ).toThrow('GOOGLE_PLAY_BASE_PLAN_IDS')
+
+    const env = loadEnv({
+      ...baseEnv,
+      GOOGLE_PLAY_PACKAGE_NAME: 'com.example.app',
+      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64: Buffer.from(JSON.stringify({ client_email: 'iap@example.com' })).toString('base64'),
+      GOOGLE_PLAY_PRODUCT_IDS: 'premium',
+      GOOGLE_PLAY_BASE_PLAN_IDS: 'monthly, yearly',
+    })
+
+    expect(env.GOOGLE_PLAY_PRODUCT_IDS).toEqual(['premium'])
+    expect(env.GOOGLE_PLAY_BASE_PLAN_IDS).toEqual(['monthly', 'yearly'])
   })
 })
 

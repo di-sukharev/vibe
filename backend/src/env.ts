@@ -25,6 +25,17 @@ const optionalPositiveIntegerSchema = z.preprocess((value) => {
   return trimmed === '' ? undefined : trimmed
 }, z.coerce.number().int().positive().optional())
 
+const commaSeparatedStringArraySchema = z
+  .string()
+  .optional()
+  .default('')
+  .transform((value) =>
+    value
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean),
+  )
+
 const stringWithDefault = (defaultValue: string) =>
   z.preprocess((value) => {
     if (typeof value !== 'string') return value
@@ -66,16 +77,11 @@ const envSchema = z.object({
   APPLE_IAP_KEY_ID: optionalStringSchema,
   APPLE_IAP_PRIVATE_KEY_BASE64: optionalStringSchema,
   APPLE_IAP_ROOT_CERTS_DIR: optionalStringSchema,
-  APPLE_IAP_PRODUCT_IDS: z
-    .string()
-    .optional()
-    .default('')
-    .transform((value) =>
-      value
-        .split(',')
-        .map((productId) => productId.trim())
-        .filter(Boolean),
-    ),
+  APPLE_IAP_PRODUCT_IDS: commaSeparatedStringArraySchema,
+  GOOGLE_PLAY_PACKAGE_NAME: optionalStringSchema,
+  GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64: optionalStringSchema,
+  GOOGLE_PLAY_PRODUCT_IDS: commaSeparatedStringArraySchema,
+  GOOGLE_PLAY_BASE_PLAN_IDS: commaSeparatedStringArraySchema,
   APPLE_AUTH_BUNDLE_ID: optionalStringSchema,
   APPLE_AUTH_JWKS_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
   GOOGLE_AUTH_CLIENT_IDS: z
@@ -99,6 +105,7 @@ const envSchema = z.object({
   validateCorsOrigins(env, ctx)
   validateStorageEnv(env, ctx)
   validateAppleIapEnv(env, ctx)
+  validateGooglePlayIapEnv(env, ctx)
 })
 
 export type AppEnv = z.infer<typeof envSchema>
@@ -248,6 +255,42 @@ function validateAppleIapEnv(env: z.infer<typeof envSchema>, ctx: z.RefinementCt
       code: 'custom',
       path: ['APPLE_IAP_APP_APPLE_ID'],
       message: 'APPLE_IAP_APP_APPLE_ID is required for production App Store verification',
+    })
+  }
+}
+
+function validateGooglePlayIapEnv(env: z.infer<typeof envSchema>, ctx: z.RefinementCtx) {
+  const configuredKeys = [
+    'GOOGLE_PLAY_PACKAGE_NAME',
+    'GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64',
+  ] as const
+  const isConfigured = configuredKeys.some((key) => env[key] !== undefined)
+
+  if (!isConfigured) return
+
+  for (const key of configuredKeys) {
+    if (env[key] === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [key],
+        message: `${key} is required when Google Play IAP verification is configured`,
+      })
+    }
+  }
+
+  if (env.GOOGLE_PLAY_PRODUCT_IDS.length === 0) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['GOOGLE_PLAY_PRODUCT_IDS'],
+      message: 'GOOGLE_PLAY_PRODUCT_IDS must list every Google Play subscription product ID when Google Play IAP verification is configured',
+    })
+  }
+
+  if (env.GOOGLE_PLAY_BASE_PLAN_IDS.length === 0) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['GOOGLE_PLAY_BASE_PLAN_IDS'],
+      message: 'GOOGLE_PLAY_BASE_PLAN_IDS must list every accepted Google Play subscription base plan ID when Google Play IAP verification is configured',
     })
   }
 }

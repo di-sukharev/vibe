@@ -85,6 +85,7 @@ const fakeDocument = {
 };
 
 type Purchase = {
+  productId?: string;
   purchaseState?: string;
   purchaseToken?: string | null;
   store?: string;
@@ -169,8 +170,10 @@ const pendingPurchase = {
 let authState: {
   api: {
     createAppStoreOfferCodeRedemption: ReturnType<typeof mock>;
+    ingestGooglePlayTransaction: ReturnType<typeof mock>;
     iapEntitlement: ReturnType<typeof mock>;
     ingestAppStoreTransaction: ReturnType<typeof mock>;
+    reconcileGooglePlayTransactions: ReturnType<typeof mock>;
     reconcileAppStoreTransactions: ReturnType<typeof mock>;
   };
   isBootstrapping: boolean;
@@ -197,6 +200,12 @@ let iapDiagnostics: Array<{ event: string; payload: Record<string, unknown> }> =
 let latestUseIapOptions: UseIapOptions = {};
 let latestContext: IapContextProbe | null = null;
 let updateHookAvailablePurchases: ((purchases: Purchase[]) => void) | null = null;
+
+process.env.EXPO_PUBLIC_IAP_ANDROID_MONTHLY_PRODUCT_ID = 'premium';
+process.env.EXPO_PUBLIC_IAP_ANDROID_MONTHLY_BASE_PLAN_ID = 'monthly';
+process.env.EXPO_PUBLIC_IAP_ANDROID_YEARLY_PRODUCT_ID = 'premium';
+process.env.EXPO_PUBLIC_IAP_ANDROID_YEARLY_BASE_PLAN_ID = 'yearly';
+process.env.EXPO_PUBLIC_IAP_ANDROID_PACKAGE_NAME = 'com.example.app';
 
 mock.module('react-native', () => ({
   ActivityIndicator: NativeHost('span'),
@@ -228,7 +237,7 @@ mock.module('react-native', () => ({
 }));
 
 mock.module('expo-iap', () => ({
-  deepLinkToSubscriptions: () => deepLinkToSubscriptionsMock(),
+  deepLinkToSubscriptions: (options?: unknown) => deepLinkToSubscriptionsMock(options),
   getAvailablePurchases: (options?: unknown) => getAvailablePurchasesMock(options),
   openRedeemOfferCodeAndroid: mock(async () => undefined),
   presentCodeRedemptionSheetIOS: () => presentCodeRedemptionSheetIOSMock(),
@@ -293,8 +302,14 @@ beforeEach(() => {
   authState = {
     api: {
       createAppStoreOfferCodeRedemption: mock(async () => ({ token: 'offer-code-redemption-token' })),
+      ingestGooglePlayTransaction: mock(async () => ({
+        subscription: { ...activeSubscription, platform: 'android', originalTransactionId: null, productId: 'premium' },
+      })),
       iapEntitlement: mock(async () => ({ subscription: inactiveSubscription })),
       ingestAppStoreTransaction: mock(async () => ({ subscription: activeSubscription })),
+      reconcileGooglePlayTransactions: mock(async () => ({
+        subscription: { ...activeSubscription, platform: 'android', originalTransactionId: null, productId: 'premium' },
+      })),
       reconcileAppStoreTransactions: mock(async () => ({ subscription: activeSubscription })),
     },
     isBootstrapping: false,
@@ -728,32 +743,86 @@ test('IapProvider ignores user-cancelled offer-code redemption sheets', async ()
   }
 });
 
-test('IapProvider keeps Android billing deferred without initializing expo-iap actions', async () => {
+test('IapProvider purchases Android subscriptions through Google Play before finishing', async () => {
   platformOS = 'android';
+  currentIap.subscriptions = [androidSubscriptionProduct()];
 
   const root = await renderProvider();
+  await waitForEffects();
 
-  expect(useIapCallCount).toBe(0);
+  expect(useIapCallCount).toBeGreaterThan(0);
   expect(latestContext?.platform).toBe('android');
-  expect(latestContext?.isSupported).toBe(false);
-  expect(latestContext?.isConnected).toBe(false);
+  expect(latestContext?.isSupported).toBe(true);
+  expect(latestContext?.isConnected).toBe(true);
 
   await act(async () => {
     await latestContext?.purchase();
-    await latestContext?.restore();
-    await latestContext?.redeemOfferCode();
-    await latestContext?.manageSubscriptions();
-    await latestContext?.sync();
     await waitForEffects();
   });
 
-  expect(authState.api.createAppStoreOfferCodeRedemption).not.toHaveBeenCalled();
-  expect(authState.api.ingestAppStoreTransaction).not.toHaveBeenCalled();
-  expect(authState.api.iapEntitlement).not.toHaveBeenCalled();
-  expect(authState.api.reconcileAppStoreTransactions).not.toHaveBeenCalled();
-  expect(currentIap.requestPurchase).not.toHaveBeenCalled();
+  expect(currentIap.requestPurchase).toHaveBeenCalledWith({
+    type: 'subs',
+    request: {
+      google: {
+        skus: ['premium'],
+        obfuscatedAccountId: '018fd4f2-1f3a-7c88-bc49-333333333333',
+        obfuscatedProfileId: '018fd4f2-1f3a-7c88-bc49-333333333333',
+        subscriptionOffers: [{ sku: 'premium', offerToken: 'monthly-offer-token' }],
+      },
+    },
+  });
+
+  await act(async () => {
+    await latestUseIapOptions.onPurchaseSuccess?.({
+      productId: 'premium',
+      purchaseState: 'purchased',
+      purchaseToken: 'google-purchase-token',
+      store: 'google',
+      transactionId: 'GPA.1234',
+    });
+    await waitForEffects();
+  });
+
+  expect(authState.api.ingestGooglePlayTransaction).toHaveBeenCalledWith({
+    basePlanId: 'monthly',
+    productId: 'premium',
+    purchaseToken: 'google-purchase-token',
+  });
+  expect(currentIap.finishTransaction).toHaveBeenCalledTimes(1);
+  await unmount(root);
+});
+
+test('IapProvider restore reconciles Android available purchases without StoreKit restore', async () => {
+  platformOS = 'android';
+  currentIap.subscriptions = [androidSubscriptionProduct()];
+  availablePurchases = [
+    {
+      productId: 'premium',
+      purchaseState: 'purchased',
+      purchaseToken: 'google-purchase-token',
+      store: 'google',
+      transactionId: 'GPA.1234',
+    },
+  ];
+
+  const root = await renderProvider();
+  await waitForEffects();
+  authState.api.reconcileGooglePlayTransactions = mock(async () => ({ subscription: inactiveSubscription }));
+
+  await act(async () => {
+    await latestContext?.restore();
+    await waitForEffects();
+  });
+
   expect(currentIap.restorePurchases).not.toHaveBeenCalled();
-  expect(deepLinkToSubscriptionsMock).not.toHaveBeenCalled();
+  expect(authState.api.reconcileGooglePlayTransactions).toHaveBeenCalledWith({
+    purchases: [
+      {
+        productId: 'premium',
+        purchaseToken: 'google-purchase-token',
+      },
+    ],
+  });
   await unmount(root);
 });
 
@@ -1122,6 +1191,28 @@ test('IapProvider blocks store actions while the App Store connection is not rea
   expect(deepLinkToSubscriptionsMock).not.toHaveBeenCalled();
   await unmount(root);
 });
+
+function androidSubscriptionProduct() {
+  return {
+    description: 'Premium access',
+    displayName: 'Premium',
+    displayPrice: '$4.99',
+    id: 'premium',
+    subscriptionOffers: [
+      {
+        basePlanIdAndroid: 'monthly',
+        displayPrice: '$4.99/month',
+        offerTokenAndroid: 'monthly-offer-token',
+      },
+      {
+        basePlanIdAndroid: 'yearly',
+        displayPrice: '$49.99/year',
+        offerTokenAndroid: 'yearly-offer-token',
+      },
+    ],
+    title: 'Premium',
+  };
+}
 
 async function renderProvider() {
   const container = fakeDocument.createElement('div');

@@ -2,7 +2,9 @@ import { expect, test } from 'bun:test';
 
 const {
   buildReconcilePayloadFromPurchases,
+  buildGooglePlayReconcilePayloadFromPurchases,
   buildSubscriptionPurchaseRequest,
+  extractGooglePlayPurchaseToken,
   extractSignedTransactionInfo,
   friendlyIapErrorMessage,
   iapDiagnosticPayload,
@@ -16,7 +18,9 @@ const {
   purchaseButtonLabel,
   retryIapOperation,
   shouldSuppressPostSuccessError,
+  selectGooglePlaySubscriptionOffer,
   validateAppStorePurchaseForIngest,
+  validateGooglePlayPurchaseForIngest,
 } = await import('../src/lib/iap-utils');
 const { ApiRequestError } = await import('../src/lib/api');
 
@@ -48,9 +52,35 @@ test('builds iOS subscription purchase requests with backend-owned finishing', (
   expect(() => buildSubscriptionPurchaseRequest('premium_monthly', 'user-uuid')).toThrow('UUID');
 });
 
+test('builds Android subscription purchase requests with Google offer tokens and obfuscated ids', () => {
+  expect(
+    buildSubscriptionPurchaseRequest({
+      appAccountToken: '018fd4f2-1f3a-7c88-bc49-333333333333',
+      offerToken: 'offer-token',
+      platform: 'android',
+      productId: 'premium',
+    }),
+  ).toEqual({
+    type: 'subs',
+    request: {
+      google: {
+        skus: ['premium'],
+        obfuscatedAccountId: '018fd4f2-1f3a-7c88-bc49-333333333333',
+        obfuscatedProfileId: '018fd4f2-1f3a-7c88-bc49-333333333333',
+        subscriptionOffers: [{ sku: 'premium', offerToken: 'offer-token' }],
+      },
+    },
+  });
+});
+
 test('extracts signed App Store transaction info from purchase tokens', () => {
   expect(extractSignedTransactionInfo({ purchaseToken: ' signed-jws ' } as never)).toBe('signed-jws');
   expect(extractSignedTransactionInfo({ purchaseToken: '' } as never)).toBeNull();
+});
+
+test('extracts Google Play purchase tokens from purchase callbacks', () => {
+  expect(extractGooglePlayPurchaseToken({ purchaseToken: ' purchase-token ' } as never)).toBe('purchase-token');
+  expect(extractGooglePlayPurchaseToken({ purchaseToken: '' } as never)).toBeNull();
 });
 
 test('builds restore reconcile payloads from available App Store purchases', () => {
@@ -62,6 +92,30 @@ test('builds restore reconcile payloads from available App Store purchases', () 
       { purchaseToken: 'signed-1' },
     ] as never, ['original-1', 'original-1']),
   ).toEqual({ signedTransactions: ['signed-1', 'signed-2'], originalTransactionIds: ['original-1'] });
+});
+
+test('builds Google Play reconcile payloads from available purchases', () => {
+  const basePlanIds = new Map([['premium', 'monthly']]);
+
+  expect(
+    buildGooglePlayReconcilePayloadFromPurchases(
+      [
+        { productId: 'premium', purchaseState: 'purchased', purchaseToken: 'token-1', store: 'google' },
+        { productId: 'premium', purchaseState: 'purchased', purchaseToken: 'token-1', store: 'google' },
+        { productId: 'premium', purchaseState: 'pending', purchaseToken: 'token-2', store: 'google' },
+        { productId: 'premium', purchaseState: 'purchased', purchaseToken: 'signed-apple', store: 'apple' },
+      ] as never,
+      basePlanIds,
+    ),
+  ).toEqual({
+    purchases: [
+      {
+        basePlanId: 'monthly',
+        productId: 'premium',
+        purchaseToken: 'token-1',
+      },
+    ],
+  });
 });
 
 test('finishes purchases only after backend ingest succeeds', async () => {
@@ -197,7 +251,7 @@ test('classifies retryable IAP errors and returns friendly messages', async () =
   expect(attempts).toBe(1);
 });
 
-test('maps backend IAP errors and StoreKit errors to user-facing messages', () => {
+test('maps backend IAP errors and store errors to user-facing messages', () => {
   expect(iapErrorMessage(new ApiRequestError(503, 'IAP_NOT_CONFIGURED', 'server not configured'))).toBe(
     'Subscriptions are not configured on the server yet.',
   );
@@ -208,7 +262,15 @@ test('maps backend IAP errors and StoreKit errors to user-facing messages', () =
     'linked to another account',
   );
   expect(iapErrorMessage(new ApiRequestError(500, 'INTERNAL_ERROR', 'backend failed'))).toBe('backend failed');
-  expect(iapErrorMessage({ code: 'network-error' })).toContain('temporarily unavailable');
+  expect(iapErrorMessage({ code: 'network-error' })).toBe(
+    'The store is temporarily unavailable. Check your connection and try again.',
+  );
+  expect(iapErrorMessage({ code: 'deferred-payment' })).toBe(
+    'Purchase is pending approval. Premium will unlock after the store approves it.',
+  );
+  expect(iapErrorMessage({ code: 'user-error' })).toBe(
+    'The store could not complete the purchase. Check your store payment settings and try again.',
+  );
 });
 
 test('builds structured IAP diagnostics without depending on React provider state', () => {
@@ -309,6 +371,86 @@ test('validates App Store purchases before backend ingest', () => {
       purchaseState: 'purchased',
     } as never),
   ).toMatchObject({ ok: false, pending: false });
+});
+
+test('validates Google Play purchases before backend ingest', () => {
+  expect(
+    validateGooglePlayPurchaseForIngest({
+      productId: 'premium',
+      purchaseState: 'purchased',
+      purchaseToken: 'purchase-token',
+      store: 'google',
+      transactionId: 'GPA.1234',
+    } as never),
+  ).toEqual({
+    ok: true,
+    productId: 'premium',
+    purchaseToken: 'purchase-token',
+    transactionKey: 'GPA.1234',
+  });
+
+  expect(
+    validateGooglePlayPurchaseForIngest({
+      productId: 'premium',
+      purchaseState: 'pending',
+      purchaseToken: 'purchase-token',
+      store: 'google',
+    } as never),
+  ).toMatchObject({ ok: false, pending: true });
+
+  expect(
+    validateGooglePlayPurchaseForIngest({
+      productId: 'premium',
+      purchaseState: 'purchased',
+      store: 'google',
+    } as never),
+  ).toMatchObject({ ok: false, pending: false });
+
+  expect(
+    validateGooglePlayPurchaseForIngest({
+      purchaseState: 'purchased',
+      purchaseToken: 'purchase-token',
+      store: 'google',
+    } as never),
+  ).toMatchObject({ ok: false, pending: false });
+});
+
+test('selects Google Play subscription offers by configured base plan', () => {
+  const product = {
+    displayPrice: '$9.99',
+    subscriptionOffers: [
+      {
+        basePlanIdAndroid: 'monthly',
+        displayPrice: '$4.99/month',
+        offerTokenAndroid: 'monthly-offer-token',
+      },
+      {
+        basePlanIdAndroid: 'yearly',
+        displayPrice: '$49.99/year',
+        offerTokenAndroid: 'yearly-offer-token',
+      },
+    ],
+  } as never;
+
+  expect(selectGooglePlaySubscriptionOffer(product, 'yearly')).toEqual({
+    displayPrice: '$49.99/year',
+    offerToken: 'yearly-offer-token',
+  });
+  expect(selectGooglePlaySubscriptionOffer(product, 'weekly')).toBeNull();
+  expect(
+    selectGooglePlaySubscriptionOffer(
+      {
+        displayPrice: '$9.99',
+        subscriptionOfferDetailsAndroid: [
+          {
+            basePlanId: 'yearly',
+            offerToken: 'deprecated-offer-token',
+          },
+        ],
+      } as never,
+      'yearly',
+    ),
+  ).toBeNull();
 });
 
 test('formats iOS introductory offer copy by payment mode', () => {

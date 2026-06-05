@@ -10,7 +10,7 @@ export const subscriptionStateSchema = z.enum([
   'revoked',
 ])
 
-export const subscriptionPlatformSchema = z.enum(['ios']).nullable()
+export const subscriptionPlatformSchema = z.enum(['ios', 'android']).nullable()
 
 export const subscriptionSnapshotSchema = z.object({
   entitlement: z.literal('premium'),
@@ -50,6 +50,18 @@ export const appStoreWebhookRequestSchema = z.object({
   signedPayload: z.string().trim().min(1),
 })
 
+export const googlePlayPurchaseReferenceSchema = z.object({
+  productId: z.string().trim().min(1),
+  purchaseToken: z.string().trim().min(1),
+  basePlanId: z.string().trim().min(1).optional(),
+})
+
+export const googlePlayTransactionRequestSchema = googlePlayPurchaseReferenceSchema
+
+export const googlePlayReconcileRequestSchema = z.object({
+  purchases: z.array(googlePlayPurchaseReferenceSchema).max(20).optional(),
+}).default({})
+
 export const iapEntitlementResponseSchema = z.object({
   subscription: subscriptionSnapshotSchema,
 })
@@ -65,6 +77,9 @@ export type SubscriptionSnapshot = z.infer<typeof subscriptionSnapshotSchema>
 export type AppStoreTransactionRequest = z.infer<typeof appStoreTransactionRequestSchema>
 export type AppStoreReconcileRequest = z.infer<typeof appStoreReconcileRequestSchema>
 export type AppStoreWebhookRequest = z.infer<typeof appStoreWebhookRequestSchema>
+export type GooglePlayPurchaseReference = z.infer<typeof googlePlayPurchaseReferenceSchema>
+export type GooglePlayTransactionRequest = z.infer<typeof googlePlayTransactionRequestSchema>
+export type GooglePlayReconcileRequest = z.infer<typeof googlePlayReconcileRequestSchema>
 export type IapEntitlementResponse = z.infer<typeof iapEntitlementResponseSchema>
 export type IapMutationResponse = z.infer<typeof iapMutationResponseSchema>
 export type AppStoreOfferCodeRedemptionResponse = z.infer<typeof appStoreOfferCodeRedemptionResponseSchema>

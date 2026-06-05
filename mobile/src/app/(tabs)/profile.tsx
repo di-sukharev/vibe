@@ -22,7 +22,7 @@ export default function ProfileScreen() {
       <KeyValueCard label="User ID" value={auth.user.id} />
       <KeyValueCard label="Subscription" value={subscriptionLabel(auth.user.subscription.state)} />
 
-      {auth.user.subscription.platform === 'ios' ? (
+      {auth.user.subscription.platform === 'ios' || auth.user.subscription.platform === 'android' ? (
         <Button
           disabled={!iap.isConnected || iap.isManagingSubscriptions}
           loading={iap.isManagingSubscriptions}

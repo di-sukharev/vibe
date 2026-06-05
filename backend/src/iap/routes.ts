@@ -4,6 +4,8 @@ import {
   appStoreOfferCodeRedemptionResponseSchema,
   appStoreTransactionRequestSchema,
   appStoreWebhookRequestSchema,
+  googlePlayReconcileRequestSchema,
+  googlePlayTransactionRequestSchema,
   iapEntitlementResponseSchema,
   iapMutationResponseSchema,
 } from '@web-app-demo/contracts'
@@ -14,7 +16,9 @@ import type { AppBindings } from '../app'
 import {
   createOfferCodeRedemptionToken,
   getSubscriptionSnapshot,
+  ingestGooglePlayTransaction,
   ingestAppStoreTransaction,
+  reconcileGooglePlayTransactions,
   reconcileAppStoreTransactions,
   recordAndProcessAppStoreWebhook,
 } from './service'
@@ -84,6 +88,46 @@ const transactionRoute = createRoute({
   },
 })
 
+const googlePlayTransactionRoute = createRoute({
+  method: 'post',
+  path: '/google-play/transactions',
+  request: {
+    body: {
+      content: {
+        'application/json': {
+          schema: googlePlayTransactionRequestSchema,
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      content: {
+        'application/json': {
+          schema: iapMutationResponseSchema,
+        },
+      },
+      description: 'Verified and stored Google Play transaction',
+    },
+    400: {
+      content: errorResponseContent,
+      description: 'Invalid Google Play transaction',
+    },
+    401: {
+      content: errorResponseContent,
+      description: 'Unauthorized',
+    },
+    403: {
+      content: errorResponseContent,
+      description: 'Transaction belongs to another user',
+    },
+    503: {
+      content: errorResponseContent,
+      description: 'Google Play IAP verification is not configured',
+    },
+  },
+})
+
 const offerCodeRedemptionRoute = createRoute({
   method: 'post',
   path: '/app-store/offer-code-redemption',
@@ -143,6 +187,46 @@ const reconcileRoute = createRoute({
   },
 })
 
+const googlePlayReconcileRoute = createRoute({
+  method: 'post',
+  path: '/google-play/reconcile',
+  request: {
+    body: {
+      content: {
+        'application/json': {
+          schema: googlePlayReconcileRequestSchema,
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      content: {
+        'application/json': {
+          schema: iapMutationResponseSchema,
+        },
+      },
+      description: 'Reconciled Google Play subscription state',
+    },
+    400: {
+      content: errorResponseContent,
+      description: 'Invalid reconcile payload',
+    },
+    401: {
+      content: errorResponseContent,
+      description: 'Unauthorized',
+    },
+    403: {
+      content: errorResponseContent,
+      description: 'Transaction belongs to another user',
+    },
+    503: {
+      content: errorResponseContent,
+      description: 'Google Play IAP verification is not configured',
+    },
+  },
+})
+
 const webhookRoute = createRoute({
   method: 'post',
   path: '/app-store',
@@ -184,11 +268,27 @@ export function createIapRoutes() {
     const subscription = await ingestAppStoreTransaction({
       db: c.get('prisma'),
       env: c.get('env'),
-      verifier: c.get('iapVerifier'),
+      verifier: c.get('appStoreIapVerifier'),
       userId: user.id,
       signedTransactionInfo: payload.signedTransactionInfo,
       signedRenewalInfo: payload.signedRenewalInfo,
       offerCodeRedemptionToken: payload.offerCodeRedemptionToken,
+    })
+
+    return c.json({ subscription }, 200)
+  })
+
+  routes.openapi(googlePlayTransactionRoute, async (c) => {
+    const { user } = await requireUser(c)
+    const payload = c.req.valid('json')
+    const subscription = await ingestGooglePlayTransaction({
+      basePlanId: payload.basePlanId,
+      db: c.get('prisma'),
+      env: c.get('env'),
+      productId: payload.productId,
+      purchaseToken: payload.purchaseToken,
+      userId: user.id,
+      verifier: c.get('googlePlayIapVerifier'),
     })
 
     return c.json({ subscription }, 200)
@@ -210,10 +310,24 @@ export function createIapRoutes() {
     const subscription = await reconcileAppStoreTransactions({
       db: c.get('prisma'),
       env: c.get('env'),
-      verifier: c.get('iapVerifier'),
+      verifier: c.get('appStoreIapVerifier'),
       userId: user.id,
       signedTransactions: payload.signedTransactions,
       originalTransactionIds: payload.originalTransactionIds,
+    })
+
+    return c.json({ subscription }, 200)
+  })
+
+  routes.openapi(googlePlayReconcileRoute, async (c) => {
+    const { user } = await requireUser(c)
+    const payload = c.req.valid('json')
+    const subscription = await reconcileGooglePlayTransactions({
+      db: c.get('prisma'),
+      env: c.get('env'),
+      purchases: payload.purchases,
+      userId: user.id,
+      verifier: c.get('googlePlayIapVerifier'),
     })
 
     return c.json({ subscription }, 200)
@@ -230,7 +344,7 @@ export function createAppStoreWebhookRoutes() {
     const result = await recordAndProcessAppStoreWebhook({
       db: c.get('prisma'),
       env: c.get('env'),
-      verifier: c.get('iapVerifier'),
+      verifier: c.get('appStoreIapVerifier'),
       signedPayload: payload.signedPayload,
     })
 

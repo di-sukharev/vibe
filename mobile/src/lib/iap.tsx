@@ -14,6 +14,7 @@ import { useAuth } from './auth';
 import { trackIapDiagnostic } from './iap-diagnostics';
 import {
   buildReconcilePayloadFromPurchases,
+  buildGooglePlayReconcilePayloadFromPurchases,
   buildSubscriptionPurchaseRequest,
   iapDiagnosticPayload,
   iapErrorMessage,
@@ -21,8 +22,10 @@ import {
   isUserCancelledPurchaseError,
   retryIapOperation,
   shouldSuppressPostSuccessError,
+  selectGooglePlaySubscriptionOffer,
   sortProductsByConfiguredOrder,
   validateAppStorePurchaseForIngest,
+  validateGooglePlayPurchaseForIngest,
 } from './iap-utils';
 
 const iosProductIds = [
@@ -31,11 +34,44 @@ const iosProductIds = [
 ]
   .map((productId) => productId?.trim())
   .filter((productId): productId is string => Boolean(productId));
+const androidPlanConfigs = [
+  {
+    basePlanId: process.env.EXPO_PUBLIC_IAP_ANDROID_MONTHLY_BASE_PLAN_ID?.trim(),
+    id: 'android-monthly',
+    label: 'Monthly',
+    productId: process.env.EXPO_PUBLIC_IAP_ANDROID_MONTHLY_PRODUCT_ID?.trim(),
+  },
+  {
+    basePlanId: process.env.EXPO_PUBLIC_IAP_ANDROID_YEARLY_BASE_PLAN_ID?.trim(),
+    id: 'android-yearly',
+    label: 'Yearly',
+    productId: process.env.EXPO_PUBLIC_IAP_ANDROID_YEARLY_PRODUCT_ID?.trim(),
+  },
+].filter(
+  (plan): plan is { basePlanId: string; id: string; label: string; productId: string } =>
+    Boolean(plan.productId && plan.basePlanId),
+);
+const androidProductIds = [...new Set(androidPlanConfigs.map((plan) => plan.productId))];
+const androidPackageName = process.env.EXPO_PUBLIC_IAP_ANDROID_PACKAGE_NAME?.trim() || null;
 const offerCodeRedemptionClientTtlMs = 14 * 60 * 1000;
 const allIosAvailablePurchaseOptions: PurchaseOptions = {
   alsoPublishToEventListenerIOS: false,
   onlyIncludeActiveItemsIOS: false,
 };
+
+type StorePlatform = 'android' | 'ios';
+
+type SubscriptionPlan = {
+  basePlanId: string | null;
+  displayName: string;
+  displayPrice: string;
+  id: string;
+  product: ProductSubscription;
+  productId: string;
+};
+
+type AppStorePurchaseValidation = Extract<ReturnType<typeof validateAppStorePurchaseForIngest>, { ok: true }>;
+type GooglePlayPurchaseValidation = Extract<ReturnType<typeof validateGooglePlayPurchaseForIngest>, { ok: true }>;
 
 type OfferCodeRedemptionSession = {
   expiresAtMs: number;
@@ -62,13 +98,16 @@ type SubscriptionContextValue = {
   isSupported: boolean;
   isSyncing: boolean;
   platform: typeof Platform.OS;
+  plans: SubscriptionPlan[];
   productIds: string[];
   products: ProductSubscription[];
   purchase: () => Promise<void>;
   redeemOfferCode: () => Promise<void>;
   restore: () => Promise<void>;
   manageSubscriptions: () => Promise<void>;
+  selectedPlanId: string | null;
   selectedProductId: string | null;
+  setSelectedPlanId: (planId: string) => void;
   setSelectedProductId: (productId: string) => void;
   subscription: SubscriptionSnapshot | null;
   sync: () => Promise<void>;
@@ -79,7 +118,7 @@ const SubscriptionContext = createContext<SubscriptionContextValue | null>(null)
 export function IapProvider({ children }: PropsWithChildren) {
   const auth = useAuth();
 
-  if (Platform.OS !== 'ios') {
+  if (Platform.OS !== 'ios' && Platform.OS !== 'android') {
     return (
       <SubscriptionContext.Provider value={unsupportedSubscriptionValue(auth.user?.subscription ?? null)}>
         {children}
@@ -87,15 +126,16 @@ export function IapProvider({ children }: PropsWithChildren) {
     );
   }
 
-  return <IosIapProvider>{children}</IosIapProvider>;
+  return <NativeIapProvider platform={Platform.OS}>{children}</NativeIapProvider>;
 }
 
-function IosIapProvider({ children }: PropsWithChildren) {
+function NativeIapProvider({ children, platform }: PropsWithChildren<{ platform: StorePlatform }>) {
   const auth = useAuth();
   const { api, setSubscription } = auth;
   const user = auth.user;
   const userId = user?.id ?? null;
-  const [selectedProductId, setSelectedProductId] = useState<string | null>(iosProductIds[0] ?? null);
+  const productIds = platform === 'ios' ? iosProductIds : androidProductIds;
+  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(defaultPlanId(platform));
   const [error, setError] = useState<string | null>(null);
   const [isLoadingProducts, setIsLoadingProducts] = useState(false);
   const [isManagingSubscriptions, setIsManagingSubscriptions] = useState(false);
@@ -111,6 +151,7 @@ function IosIapProvider({ children }: PropsWithChildren) {
   const handledAvailablePurchasesReconciliationIdsRef = useRef(new Set<number>());
   const nextAvailablePurchasesReconciliationIdRef = useRef(0);
   const pendingAvailablePurchasesReconciliationRef = useRef<AvailablePurchasesReconciliation | null>(null);
+  const pendingGooglePlayBasePlanByProductIdRef = useRef(new Map<string, string>());
   const queuedPurchaseKeysRef = useRef(new Set<string>());
   const queuedPurchasesRef = useRef<Purchase[]>([]);
   const lastPurchaseSuccessAtRef = useRef<number | null>(null);
@@ -126,6 +167,54 @@ function IosIapProvider({ children }: PropsWithChildren) {
     queuedPurchasesRef.current.push(purchase);
   }, []);
 
+  const finishPurchase = useCallback((nextPurchase: Purchase) => {
+    if (!iapRef.current) {
+      throw new Error('Store connection is not ready.');
+    }
+    return iapRef.current.finishTransaction({ purchase: nextPurchase, isConsumable: false });
+  }, []);
+
+  const ingestAndFinishAppStorePurchase = useCallback(
+    (purchase: Purchase, validation: AppStorePurchaseValidation) => {
+      const offerCodeRedemptionToken = currentOfferCodeRedemptionToken(offerCodeRedemptionTokenRef.current);
+      if (!offerCodeRedemptionToken) {
+        offerCodeRedemptionTokenRef.current = null;
+      }
+
+      return ingestAndFinishPurchase({
+        purchase,
+        signedTransactionInfo: validation.signedTransactionInfo,
+        ingest: (request) =>
+          api.ingestAppStoreTransaction({
+            ...request,
+            ...(offerCodeRedemptionToken ? { offerCodeRedemptionToken } : {}),
+          }),
+        finish: finishPurchase,
+      });
+    },
+    [api, finishPurchase],
+  );
+
+  const ingestAndFinishGooglePlayPurchase = useCallback(
+    async (purchase: Purchase, validation: GooglePlayPurchaseValidation) => {
+      const basePlanId = pendingGooglePlayBasePlanByProductIdRef.current.get(validation.productId);
+      const response = await api.ingestGooglePlayTransaction({
+        productId: validation.productId,
+        purchaseToken: validation.purchaseToken,
+        ...(basePlanId ? { basePlanId } : {}),
+      });
+
+      try {
+        await retryIapOperation(() => finishPurchase(purchase));
+        pendingGooglePlayBasePlanByProductIdRef.current.delete(validation.productId);
+        return { finishError: null, subscription: response.subscription };
+      } catch (finishError) {
+        return { finishError, subscription: response.subscription };
+      }
+    },
+    [api, finishPurchase],
+  );
+
   const handlePurchase = useCallback(
     async (purchase: Purchase) => {
       if (!userId) {
@@ -135,7 +224,10 @@ function IosIapProvider({ children }: PropsWithChildren) {
         return;
       }
 
-      const validation = validateAppStorePurchaseForIngest(purchase);
+      const validation =
+        platform === 'ios'
+          ? validateAppStorePurchaseForIngest(purchase)
+          : validateGooglePlayPurchaseForIngest(purchase);
       if (!validation.ok) {
         if (!validation.pending) {
           reportIapDiagnostic('purchase-invalid', validation.message);
@@ -161,25 +253,10 @@ function IosIapProvider({ children }: PropsWithChildren) {
       setError(null);
 
       try {
-        const offerCodeRedemptionToken = currentOfferCodeRedemptionToken(offerCodeRedemptionTokenRef.current);
-        if (!offerCodeRedemptionToken) {
-          offerCodeRedemptionTokenRef.current = null;
-        }
-        const result = await ingestAndFinishPurchase({
-          purchase,
-          signedTransactionInfo: validation.signedTransactionInfo,
-          ingest: (request) =>
-            api.ingestAppStoreTransaction({
-              ...request,
-              ...(offerCodeRedemptionToken ? { offerCodeRedemptionToken } : {}),
-            }),
-          finish: (nextPurchase) => {
-            if (!iapRef.current) {
-              throw new Error('Store connection is not ready.');
-            }
-            return iapRef.current.finishTransaction({ purchase: nextPurchase, isConsumable: false });
-          },
-        });
+        const result =
+          platform === 'ios'
+            ? await ingestAndFinishAppStorePurchase(purchase, validation as AppStorePurchaseValidation)
+            : await ingestAndFinishGooglePlayPurchase(purchase, validation as GooglePlayPurchaseValidation);
         offerCodeRedemptionTokenRef.current = null;
         setSubscription(result.subscription);
         if (result.finishError) {
@@ -197,7 +274,14 @@ function IosIapProvider({ children }: PropsWithChildren) {
         setIsPurchasing(false);
       }
     },
-    [api, queuePurchaseUntilAuthenticated, setSubscription, userId],
+    [
+      ingestAndFinishAppStorePurchase,
+      ingestAndFinishGooglePlayPurchase,
+      platform,
+      queuePurchaseUntilAuthenticated,
+      setSubscription,
+      userId,
+    ],
   );
 
   const iap = useIAP({
@@ -235,7 +319,7 @@ function IosIapProvider({ children }: PropsWithChildren) {
   } = iap;
 
   const loadProducts = useCallback(async () => {
-    if (iosProductIds.length === 0) {
+    if (productIds.length === 0) {
       setError('Subscription product IDs are not configured.');
       return;
     }
@@ -244,14 +328,17 @@ function IosIapProvider({ children }: PropsWithChildren) {
     setError(null);
 
     try {
-      await retryIapOperation(() => fetchProducts({ skus: iosProductIds, type: 'subs' }));
+      await retryIapOperation(() => fetchProducts({ skus: productIds, type: 'subs' }));
     } catch (caughtError) {
       reportIapDiagnostic('product-fetch-error', caughtError);
       setError(iapErrorMessage(caughtError));
     } finally {
       setIsLoadingProducts(false);
     }
-  }, [fetchProducts]);
+  }, [fetchProducts, productIds]);
+
+  const plans = useMemo(() => buildSubscriptionPlans(platform, subscriptions), [platform, subscriptions]);
+  const selectedPlan = plans.find((plan) => plan.id === selectedPlanId) ?? null;
 
   const reconcileAndFinishPurchases = useCallback(
     async ({
@@ -269,7 +356,10 @@ function IosIapProvider({ children }: PropsWithChildren) {
 
       if (finishPurchases) {
         for (const purchase of purchases) {
-          const validation = validateAppStorePurchaseForIngest(purchase);
+          const validation =
+            platform === 'ios'
+              ? validateAppStorePurchaseForIngest(purchase)
+              : validateGooglePlayPurchaseForIngest(purchase);
           if (!validation.ok) {
             if (validation.pending) {
               pendingPurchaseMessage ??= validation.message;
@@ -284,7 +374,10 @@ function IosIapProvider({ children }: PropsWithChildren) {
             continue;
           }
 
-          const reconcileKey = `signed:${validation.signedTransactionInfo}`;
+          const reconcileKey =
+            platform === 'ios'
+              ? `signed:${(validation as AppStorePurchaseValidation).signedTransactionInfo}`
+              : `google:${(validation as GooglePlayPurchaseValidation).productId}:${(validation as GooglePlayPurchaseValidation).purchaseToken}`;
           if (inFlightReconcileKeysRef.current.has(reconcileKey)) {
             continue;
           }
@@ -293,25 +386,10 @@ function IosIapProvider({ children }: PropsWithChildren) {
           processingTransactionsRef.current.add(validation.transactionKey);
 
           try {
-            const offerCodeRedemptionToken = currentOfferCodeRedemptionToken(offerCodeRedemptionTokenRef.current);
-            if (!offerCodeRedemptionToken) {
-              offerCodeRedemptionTokenRef.current = null;
-            }
-            const result = await ingestAndFinishPurchase({
-              purchase,
-              signedTransactionInfo: validation.signedTransactionInfo,
-              ingest: (request) =>
-                api.ingestAppStoreTransaction({
-                  ...request,
-                  ...(offerCodeRedemptionToken ? { offerCodeRedemptionToken } : {}),
-                }),
-              finish: (nextPurchase) => {
-                if (!iapRef.current) {
-                  throw new Error('Store connection is not ready.');
-                }
-                return iapRef.current.finishTransaction({ purchase: nextPurchase, isConsumable: false });
-              },
-            });
+            const result =
+              platform === 'ios'
+                ? await ingestAndFinishAppStorePurchase(purchase, validation as AppStorePurchaseValidation)
+                : await ingestAndFinishGooglePlayPurchase(purchase, validation as GooglePlayPurchaseValidation);
             offerCodeRedemptionTokenRef.current = null;
             setSubscription(result.subscription);
             latestSubscription = result.subscription;
@@ -328,6 +406,32 @@ function IosIapProvider({ children }: PropsWithChildren) {
             processingTransactionsRef.current.delete(validation.transactionKey);
             inFlightReconcileKeysRef.current.delete(reconcileKey);
           }
+        }
+      }
+
+      if (platform === 'android') {
+        const basePlanIdsByProductId = new Map(pendingGooglePlayBasePlanByProductIdRef.current);
+        const googlePayload = buildGooglePlayReconcilePayloadFromPurchases(purchases, basePlanIdsByProductId);
+        const googleReconcileKey = (googlePayload.purchases ?? [])
+          .map((purchase) => `google:${purchase.productId}:${purchase.purchaseToken}`)
+          .join('|') || 'google:stored';
+
+        if (inFlightReconcileKeysRef.current.has(googleReconcileKey)) {
+          if (latestSubscription) return latestSubscription;
+          if (firstError) throw firstError;
+          return null;
+        }
+
+        inFlightReconcileKeysRef.current.add(googleReconcileKey);
+        try {
+          const response = await api.reconcileGooglePlayTransactions(googlePayload);
+          setSubscription(response.subscription);
+          if (pendingPurchaseMessage && !response.subscription.isActive) {
+            setError(pendingPurchaseMessage);
+          }
+          return response.subscription;
+        } finally {
+          inFlightReconcileKeysRef.current.delete(googleReconcileKey);
         }
       }
 
@@ -363,7 +467,13 @@ function IosIapProvider({ children }: PropsWithChildren) {
         inFlightReconcileKeysRef.current.delete(originalReconcileKey);
       }
     },
-    [api, setSubscription],
+    [
+      api,
+      ingestAndFinishAppStorePurchase,
+      ingestAndFinishGooglePlayPurchase,
+      platform,
+      setSubscription,
+    ],
   );
 
   useEffect(() => {
@@ -389,13 +499,13 @@ function IosIapProvider({ children }: PropsWithChildren) {
             !subscription?.isActive
           ) {
             setError(iapErrorMessage(pendingReconciliation.restoreError));
-          } else if (!subscription && availablePurchases.length === 0) {
+          } else if (!subscription?.isActive && availablePurchases.length === 0) {
             setError(
               pendingReconciliation.restoreError
                 ? iapErrorMessage(pendingReconciliation.restoreError)
                 : pendingReconciliation.hasKnownOriginalTransaction
-                  ? 'Apple did not return an active subscription for this account. Please try again.'
-                  : 'No restorable App Store subscription was found for this account.',
+                  ? `${storeDisplayName(platform)} did not return an active subscription for this account. Please try again.`
+                  : `No restorable ${storeDisplayName(platform)} subscription was found for this account.`,
             );
           }
         }
@@ -413,7 +523,7 @@ function IosIapProvider({ children }: PropsWithChildren) {
         }
       }
     })();
-  }, [availablePurchases, reconcileAndFinishPurchases]);
+  }, [availablePurchases, platform, reconcileAndFinishPurchases]);
 
   const sync = useCallback(async () => {
     if (!userId) return;
@@ -424,7 +534,7 @@ function IosIapProvider({ children }: PropsWithChildren) {
     try {
       const entitlement = await api.iapEntitlement();
       setSubscription(entitlement.subscription);
-      const originalTransactionIds = entitlement.subscription.originalTransactionId
+      const originalTransactionIds = platform === 'ios' && entitlement.subscription.originalTransactionId
         ? [entitlement.subscription.originalTransactionId]
         : undefined;
 
@@ -440,16 +550,26 @@ function IosIapProvider({ children }: PropsWithChildren) {
         };
 
         try {
-          await retryIapOperation(() => getAvailablePurchases(allIosAvailablePurchaseOptions));
+          await retryIapOperation(() =>
+            platform === 'ios' ? getAvailablePurchases(allIosAvailablePurchaseOptions) : getAvailablePurchases(),
+          );
           waitingForAvailablePurchasesState = true;
           return;
         } catch (storeError) {
           pendingAvailablePurchasesReconciliationRef.current = null;
-          if (!originalTransactionIds) {
+          if (!originalTransactionIds && platform !== 'android') {
             throw storeError;
           }
           reportIapDiagnostic('available-purchases-error', storeError);
         }
+      }
+
+      if (platform === 'android') {
+        await reconcileAndFinishPurchases({
+          finishPurchases: false,
+          purchases: [],
+        });
+        return;
       }
 
       if (originalTransactionIds) {
@@ -467,20 +587,14 @@ function IosIapProvider({ children }: PropsWithChildren) {
         setIsSyncing(false);
       }
     }
-  }, [api, connected, getAvailablePurchases, reconcileAndFinishPurchases, setSubscription, userId]);
+  }, [api, connected, getAvailablePurchases, platform, reconcileAndFinishPurchases, setSubscription, userId]);
 
   const purchase = useCallback(async () => {
-    if (!user || !selectedProductId) return;
+    if (!user || !selectedPlan) return;
     if (purchaseRequestInFlightRef.current) return;
 
     if (!connected) {
-      setError('App Store connection is not ready yet. Please try again in a moment.');
-      return;
-    }
-
-    const selectedProduct = subscriptions.find((product) => product.id === selectedProductId);
-    if (!selectedProduct) {
-      setError('Selected subscription is not available in the App Store yet.');
+      setError(`${storeDisplayName(platform)} connection is not ready yet. Please try again in a moment.`);
       return;
     }
 
@@ -489,7 +603,35 @@ function IosIapProvider({ children }: PropsWithChildren) {
     setError(null);
 
     try {
-      await requestPurchase(buildSubscriptionPurchaseRequest(selectedProduct.id, user.id));
+      if (platform === 'android') {
+        if (!selectedPlan.basePlanId) {
+          throw new Error('Google Play base plan is not configured for this subscription.');
+        }
+
+        const offer = selectGooglePlaySubscriptionOffer(selectedPlan.product, selectedPlan.basePlanId);
+        if (!offer) {
+          throw new Error('Configured Google Play base plan is not available for this account.');
+        }
+
+        pendingGooglePlayBasePlanByProductIdRef.current.set(selectedPlan.productId, selectedPlan.basePlanId);
+        await requestPurchase(
+          buildSubscriptionPurchaseRequest({
+            appAccountToken: user.id,
+            offerToken: offer.offerToken,
+            platform: 'android',
+            productId: selectedPlan.productId,
+          }),
+        );
+        return;
+      }
+
+      await requestPurchase(
+        buildSubscriptionPurchaseRequest({
+          appAccountToken: user.id,
+          platform: 'ios',
+          productId: selectedPlan.productId,
+        }),
+      );
     } catch (caughtError) {
       purchaseRequestInFlightRef.current = false;
       setIsPurchasing(false);
@@ -498,13 +640,13 @@ function IosIapProvider({ children }: PropsWithChildren) {
         setError(iapErrorMessage(caughtError));
       }
     }
-  }, [connected, requestPurchase, selectedProductId, subscriptions, user]);
+  }, [connected, platform, requestPurchase, selectedPlan, user]);
 
   const restore = useCallback(async () => {
     if (!user) return;
 
     if (!connected) {
-      setError('App Store connection is not ready yet. Please try again in a moment.');
+      setError(`${storeDisplayName(platform)} connection is not ready yet. Please try again in a moment.`);
       return;
     }
 
@@ -515,17 +657,19 @@ function IosIapProvider({ children }: PropsWithChildren) {
     try {
       let restoreError: unknown = null;
       let restoreCancelled = false;
-      await restorePurchases(allIosAvailablePurchaseOptions).catch((caughtError) => {
-        if (isUserCancelledPurchaseError(caughtError)) {
-          restoreCancelled = true;
-          return;
-        }
-        restoreError = caughtError;
-        reportIapDiagnostic('storekit-restore-sync-error', caughtError);
-      });
+      if (platform === 'ios') {
+        await restorePurchases(allIosAvailablePurchaseOptions).catch((caughtError) => {
+          if (isUserCancelledPurchaseError(caughtError)) {
+            restoreCancelled = true;
+            return;
+          }
+          restoreError = caughtError;
+          reportIapDiagnostic('storekit-restore-sync-error', caughtError);
+        });
+      }
       if (restoreCancelled) return;
 
-      const originalTransactionIds = user.subscription.originalTransactionId
+      const originalTransactionIds = platform === 'ios' && user.subscription.originalTransactionId
         ? [user.subscription.originalTransactionId]
         : undefined;
       const reconciliationId = nextAvailablePurchasesReconciliationIdRef.current + 1;
@@ -538,7 +682,9 @@ function IosIapProvider({ children }: PropsWithChildren) {
         originalTransactionIds,
         restoreError,
       };
-      await retryIapOperation(() => getAvailablePurchases(allIosAvailablePurchaseOptions));
+      await retryIapOperation(() =>
+        platform === 'ios' ? getAvailablePurchases(allIosAvailablePurchaseOptions) : getAvailablePurchases(),
+      );
       waitingForAvailablePurchasesState = true;
     } catch (caughtError) {
       pendingAvailablePurchasesReconciliationRef.current = null;
@@ -549,10 +695,14 @@ function IosIapProvider({ children }: PropsWithChildren) {
         setIsRestoring(false);
       }
     }
-  }, [connected, getAvailablePurchases, restorePurchases, user]);
+  }, [connected, getAvailablePurchases, platform, restorePurchases, user]);
 
   const redeemOfferCode = useCallback(async () => {
     if (!user) return;
+    if (platform !== 'ios') {
+      setError('Offer code redemption is only available for App Store subscriptions.');
+      return;
+    }
     if (!connected) {
       setError('App Store connection is not ready yet. Please try again in a moment.');
       return;
@@ -582,11 +732,11 @@ function IosIapProvider({ children }: PropsWithChildren) {
     } finally {
       setIsRedeemingOfferCode(false);
     }
-  }, [api, connected, sync, user]);
+  }, [api, connected, platform, sync, user]);
 
   const manageSubscriptions = useCallback(async () => {
     if (!connected) {
-      setError('App Store connection is not ready yet. Please try again in a moment.');
+      setError(`${storeDisplayName(platform)} connection is not ready yet. Please try again in a moment.`);
       return;
     }
 
@@ -594,7 +744,17 @@ function IosIapProvider({ children }: PropsWithChildren) {
     setError(null);
 
     try {
-      await deepLinkToSubscriptions({});
+      if (platform === 'android' && !androidPackageName) {
+        throw new Error('Google Play package name is not configured.');
+      }
+      await deepLinkToSubscriptions(
+        platform === 'android'
+          ? {
+              packageNameAndroid: androidPackageName ?? undefined,
+              skuAndroid: user?.subscription.productId ?? selectedPlan?.productId ?? undefined,
+            }
+          : {},
+      );
     } catch (caughtError) {
       if (isUserCancelledPurchaseError(caughtError)) {
         return;
@@ -603,7 +763,7 @@ function IosIapProvider({ children }: PropsWithChildren) {
     } finally {
       setIsManagingSubscriptions(false);
     }
-  }, [connected]);
+  }, [connected, platform, selectedPlan?.productId, user?.subscription.productId]);
 
   useEffect(() => {
     if (connected && userId) {
@@ -625,13 +785,12 @@ function IosIapProvider({ children }: PropsWithChildren) {
   }, [handlePurchase, userId]);
 
   useEffect(() => {
-    if (subscriptions.length === 0) return;
+    if (plans.length === 0) return;
 
-    const orderedSubscriptions = sortProductsByConfiguredOrder(subscriptions, iosProductIds);
-    if (!selectedProductId || !orderedSubscriptions.some((product) => product.id === selectedProductId)) {
-      setSelectedProductId(orderedSubscriptions[0]?.id ?? null);
+    if (!selectedPlanId || !plans.some((plan) => plan.id === selectedPlanId)) {
+      setSelectedPlanId(plans[0]?.id ?? null);
     }
-  }, [subscriptions, selectedProductId]);
+  }, [plans, selectedPlanId]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (state) => {
@@ -645,6 +804,15 @@ function IosIapProvider({ children }: PropsWithChildren) {
     };
   }, [sync]);
 
+  const setSelectedProductId = useCallback(
+    (productId: string) => {
+      const matchingPlan = plans.find((plan) => plan.id === productId || plan.productId === productId);
+      setSelectedPlanId(matchingPlan?.id ?? productId);
+    },
+    [plans],
+  );
+  const selectedProductId = selectedPlan?.productId ?? null;
+
   const value = useMemo<SubscriptionContextValue>(
     () => ({
       error,
@@ -657,13 +825,16 @@ function IosIapProvider({ children }: PropsWithChildren) {
       isSupported: true,
       isSyncing,
       platform: Platform.OS,
-      productIds: iosProductIds,
-      products: sortProductsByConfiguredOrder(subscriptions, iosProductIds),
+      plans,
+      productIds,
+      products: sortProductsByConfiguredOrder(subscriptions, productIds),
       purchase,
       redeemOfferCode,
       restore,
       manageSubscriptions,
+      selectedPlanId,
       selectedProductId,
+      setSelectedPlanId,
       setSelectedProductId,
       subscription: user?.subscription ?? null,
       sync,
@@ -679,9 +850,13 @@ function IosIapProvider({ children }: PropsWithChildren) {
       isSyncing,
       manageSubscriptions,
       purchase,
+      productIds,
+      plans,
       redeemOfferCode,
       restore,
+      selectedPlanId,
       selectedProductId,
+      setSelectedProductId,
       sync,
       user?.subscription,
       subscriptions,
@@ -712,13 +887,16 @@ function unsupportedSubscriptionValue(subscription: SubscriptionSnapshot | null)
     isSupported: false,
     isSyncing: false,
     platform: Platform.OS,
+    plans: [],
     productIds: [],
     products: [],
     purchase: async () => undefined,
     redeemOfferCode: async () => undefined,
     restore: async () => undefined,
     manageSubscriptions: async () => undefined,
+    selectedPlanId: null,
     selectedProductId: null,
+    setSelectedPlanId: () => undefined,
     setSelectedProductId: () => undefined,
     subscription,
     sync: async () => undefined,
@@ -730,9 +908,52 @@ function currentOfferCodeRedemptionToken(session: OfferCodeRedemptionSession | n
   return session.expiresAtMs > Date.now() ? session.token : undefined;
 }
 
+function defaultPlanId(platform: StorePlatform) {
+  return platform === 'ios' ? iosProductIds[0] ?? null : androidPlanConfigs[0]?.id ?? null;
+}
+
+function buildSubscriptionPlans(platform: StorePlatform, products: ProductSubscription[]): SubscriptionPlan[] {
+  if (platform === 'ios') {
+    return sortProductsByConfiguredOrder(products, iosProductIds).map((product) => ({
+      basePlanId: null,
+      displayName: product.displayName ?? product.title,
+      displayPrice: product.displayPrice,
+      id: product.id,
+      product,
+      productId: product.id,
+    }));
+  }
+
+  return androidPlanConfigs.flatMap((config) => {
+    const product = products.find((candidate) => candidate.id === config.productId);
+    if (!product) return [];
+
+    const offer = selectGooglePlaySubscriptionOffer(product, config.basePlanId);
+    if (!offer) return [];
+
+    return [
+      {
+        basePlanId: config.basePlanId,
+        displayName: product.displayName ?? config.label,
+        displayPrice: offer.displayPrice,
+        id: config.id,
+        product,
+        productId: product.id,
+      },
+    ];
+  });
+}
+
+function storeDisplayName(platform: StorePlatform) {
+  return platform === 'ios' ? 'App Store' : 'Google Play';
+}
+
 function purchaseQueueKey(purchase: Purchase) {
   const validation = validateAppStorePurchaseForIngest(purchase);
   if (validation.ok) return validation.transactionKey;
+
+  const googleValidation = validateGooglePlayPurchaseForIngest(purchase);
+  if (googleValidation.ok) return googleValidation.transactionKey;
 
   return purchase.transactionId?.trim() || purchase.purchaseToken?.trim() || null;
 }

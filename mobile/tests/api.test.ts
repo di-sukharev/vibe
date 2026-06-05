@@ -370,6 +370,14 @@ test('mobile ApiClient calls IAP entitlement, ingest, and reconcile endpoints wi
       return json({ subscription: inactiveSubscription }, 200);
     }
 
+    if (path === '/api/iap/google-play/transactions') {
+      return json({ subscription: { ...inactiveSubscription, platform: 'android', state: 'active', isActive: true } }, 200);
+    }
+
+    if (path === '/api/iap/google-play/reconcile') {
+      return json({ subscription: inactiveSubscription }, 200);
+    }
+
     return json({ error: { code: 'NOT_FOUND', message: 'Unexpected request' } }, 404);
   };
 
@@ -390,6 +398,18 @@ test('mobile ApiClient calls IAP entitlement, ingest, and reconcile endpoints wi
   });
   await expect(
     client.reconcileAppStoreTransactions({ signedTransactions: ['signed-transaction'] }),
+  ).resolves.toEqual({ subscription: inactiveSubscription });
+  await expect(
+    client.ingestGooglePlayTransaction({
+      basePlanId: 'monthly',
+      productId: 'premium',
+      purchaseToken: 'purchase-token',
+    }),
+  ).resolves.toMatchObject({ subscription: { isActive: true, platform: 'android' } });
+  await expect(
+    client.reconcileGooglePlayTransactions({
+      purchases: [{ productId: 'premium', purchaseToken: 'purchase-token' }],
+    }),
   ).resolves.toEqual({ subscription: inactiveSubscription });
 
   expect(calls).toEqual([
@@ -412,6 +432,16 @@ test('mobile ApiClient calls IAP entitlement, ingest, and reconcile endpoints wi
       path: '/api/iap/app-store/reconcile',
       authorization: 'Bearer access-token',
       body: { signedTransactions: ['signed-transaction'] },
+    },
+    {
+      path: '/api/iap/google-play/transactions',
+      authorization: 'Bearer access-token',
+      body: { basePlanId: 'monthly', productId: 'premium', purchaseToken: 'purchase-token' },
+    },
+    {
+      path: '/api/iap/google-play/reconcile',
+      authorization: 'Bearer access-token',
+      body: { purchases: [{ productId: 'premium', purchaseToken: 'purchase-token' }] },
     },
   ]);
 });

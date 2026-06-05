@@ -30,6 +30,8 @@ maybeDescribe('iap API integration', () => {
     APPLE_IAP_PRODUCT_IDS: ['premium_monthly', 'premium_yearly'],
     APPLE_AUTH_JWKS_TIMEOUT_MS: 5000,
     GOOGLE_AUTH_CLIENT_IDS: [],
+    GOOGLE_PLAY_PRODUCT_IDS: [],
+    GOOGLE_PLAY_BASE_PLAN_IDS: [],
   }
   const prisma = createPrisma(databaseUrl ?? skippedDatabaseUrl)
   let verifier = new FakeAppStoreVerifier()

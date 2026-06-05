@@ -14,7 +14,15 @@ import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAuth } from '@/lib/auth';
 import { useSubscriptionIap } from '@/lib/iap';
-import { introOfferLabel, purchaseButtonLabel } from '@/lib/iap-utils';
+import { introOfferLabel } from '@/lib/iap-utils';
+
+type PaywallPlan = {
+  displayName: string;
+  displayPrice: string;
+  id: string;
+  product: ProductSubscription;
+  productId: string;
+};
 
 export default function PaywallScreen() {
   const auth = useAuth();
@@ -39,8 +47,8 @@ export default function PaywallScreen() {
       <Screen centered testID={TEST_IDS.paywall.screen}>
         <PageHeader
           eyebrow="Premium"
-          title="iOS subscriptions come first."
-          description="Android billing and Google Play code redemption are intentionally deferred for this MVP. Your account, profile, and logout remain available."
+          title="Subscriptions are not available here."
+          description="Open this screen in the iOS or Android app to subscribe through the native store. Your account, profile, and logout remain available."
         />
         <View style={styles.actions}>
           <Button testID={TEST_IDS.paywall.profileButton} onPress={() => router.push('/profile')} variant="outline">
@@ -54,10 +62,11 @@ export default function PaywallScreen() {
     );
   }
 
-  const selectedProduct = iap.products.find((product) => product.id === iap.selectedProductId) ?? null;
+  const selectedPlan = iap.plans.find((plan) => plan.id === iap.selectedPlanId) ?? null;
   const isPrimaryLoading = iap.isPurchasing || iap.isSyncing;
   const isConnecting = !iap.isConnected && !iap.error;
-  const isProductListEmpty = iap.isConnected && !iap.isLoadingProducts && iap.products.length === 0;
+  const isProductListEmpty = iap.isConnected && !iap.isLoadingProducts && iap.plans.length === 0;
+  const storeName = iap.platform === 'android' ? 'Google Play' : 'App Store';
 
   return (
     <Screen
@@ -68,26 +77,26 @@ export default function PaywallScreen() {
       <PageHeader
         eyebrow="Premium"
         title="Unlock the full component workspace."
-        description="Subscribe through the App Store. The backend verifies every transaction before premium access is granted."
+        description={`Subscribe through ${storeName}. The backend verifies every transaction before premium access is granted.`}
       />
 
       <Card>
         <CardHeader>
           <CardTitle>Choose a plan</CardTitle>
-          <CardDescription>Monthly and yearly plans are managed by Apple and can be restored any time.</CardDescription>
+          <CardDescription>Monthly and yearly plans are managed by the store and can be restored any time.</CardDescription>
         </CardHeader>
         <CardContent style={styles.cardContent}>
           {iap.isLoadingProducts && iap.products.length === 0 ? (
             <View style={styles.loadingRow} testID={TEST_IDS.paywall.loading}>
               <Spinner />
-              <Typography muted>Loading App Store products...</Typography>
+              <Typography muted>Loading {storeName} products...</Typography>
             </View>
           ) : null}
 
           {isConnecting ? (
             <View style={styles.loadingRow} testID={TEST_IDS.paywall.loading}>
               <Spinner />
-              <Typography muted>Connecting to the App Store...</Typography>
+              <Typography muted>Connecting to {storeName}...</Typography>
             </View>
           ) : null}
 
@@ -102,17 +111,17 @@ export default function PaywallScreen() {
               testID={TEST_IDS.paywall.empty}>
               <Typography weight="600">Products are not available yet.</Typography>
               <Typography muted>
-                Check the iOS product IDs, App Store Connect status, sandbox account, real-device build, and custom dev-client.
+                Check the product IDs, base plans, store status, tester account, real-device build, and custom dev-client.
               </Typography>
             </View>
           ) : null}
 
-          {iap.products.map((product) => (
+          {iap.plans.map((plan) => (
             <PlanOption
-              key={product.id}
-              product={product}
-              selected={product.id === selectedProduct?.id}
-              onPress={() => iap.setSelectedProductId(product.id)}
+              key={plan.id}
+              plan={plan}
+              selected={plan.id === selectedPlan?.id}
+              onPress={() => iap.setSelectedPlanId(plan.id)}
             />
           ))}
         </CardContent>
@@ -134,11 +143,11 @@ export default function PaywallScreen() {
 
       <View style={styles.actions}>
         <Button
-          disabled={!selectedProduct || isPrimaryLoading}
+          disabled={!selectedPlan || isPrimaryLoading}
           loading={iap.isPurchasing}
           onPress={() => void iap.purchase()}
           testID={TEST_IDS.paywall.purchaseButton}>
-          {selectedProduct ? purchaseButtonLabel(selectedProduct) : 'Subscribe'}
+          {selectedPlan ? `Subscribe for ${selectedPlan.displayPrice}` : 'Subscribe'}
         </Button>
         <Button
           disabled={!iap.isConnected || iap.isRestoring || iap.isPurchasing}
@@ -148,14 +157,16 @@ export default function PaywallScreen() {
           variant="outline">
           Restore purchases
         </Button>
-        <Button
-          disabled={!iap.isConnected || iap.isRedeemingOfferCode || iap.isPurchasing}
-          loading={iap.isRedeemingOfferCode}
-          onPress={() => void iap.redeemOfferCode()}
-          testID={TEST_IDS.paywall.redeemOfferCodeButton}
-          variant="outline">
-          Redeem offer code
-        </Button>
+        {iap.platform === 'ios' ? (
+          <Button
+            disabled={!iap.isConnected || iap.isRedeemingOfferCode || iap.isPurchasing}
+            loading={iap.isRedeemingOfferCode}
+            onPress={() => void iap.redeemOfferCode()}
+            testID={TEST_IDS.paywall.redeemOfferCodeButton}
+            variant="outline">
+            Redeem offer code
+          </Button>
+        ) : null}
       </View>
 
       <View style={styles.footerActions}>
@@ -172,11 +183,11 @@ export default function PaywallScreen() {
 
 function PlanOption({
   onPress,
-  product,
+  plan,
   selected,
 }: {
   onPress: () => void;
-  product: ProductSubscription;
+  plan: PaywallPlan;
   selected: boolean;
 }) {
   const colors = useTheme();
@@ -193,13 +204,13 @@ function PlanOption({
           borderColor: selected ? colors.text : colors.backgroundElement,
         },
       ]}
-      testID={`${TEST_IDS.paywall.planOption}.${product.id}`}>
+      testID={`${TEST_IDS.paywall.planOption}.${plan.id}`}>
       <View style={styles.planText}>
-        <Typography weight="600">{product.displayName ?? product.title}</Typography>
-        <Typography muted>{product.description || product.id}</Typography>
-        {introOfferLabel(product) ? <Typography muted>{introOfferLabel(product)}</Typography> : null}
+        <Typography weight="600">{plan.displayName}</Typography>
+        <Typography muted>{plan.product.description || plan.productId}</Typography>
+        {introOfferLabel(plan.product) ? <Typography muted>{introOfferLabel(plan.product)}</Typography> : null}
       </View>
-      <Typography weight="700">{product.displayPrice}</Typography>
+      <Typography weight="700">{plan.displayPrice}</Typography>
     </Pressable>
   );
 }

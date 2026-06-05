@@ -4,6 +4,8 @@ import {
   authResponseSchema,
   appStoreReconcileRequestSchema,
   appStoreTransactionRequestSchema,
+  googlePlayReconcileRequestSchema,
+  googlePlayTransactionRequestSchema,
   iapEntitlementResponseSchema,
   iapMutationResponseSchema,
   loginRequestSchema,
@@ -23,6 +25,8 @@ import {
   type AppStoreReconcileRequest,
   type AppStoreTransactionRequest,
   type AppStoreOfferCodeRedemptionResponse,
+  type GooglePlayReconcileRequest,
+  type GooglePlayTransactionRequest,
   type IapEntitlementResponse,
   type IapMutationResponse,
   type LoginRequest,
@@ -147,6 +151,24 @@ export class ApiClient {
   reconcileAppStoreTransactions(input: AppStoreReconcileRequest): Promise<IapMutationResponse> {
     const payload = appStoreReconcileRequestSchema.parse(input);
     return this.request('/api/iap/app-store/reconcile', iapMutationResponseSchema, {
+      method: 'POST',
+      body: payload,
+      auth: true,
+    });
+  }
+
+  ingestGooglePlayTransaction(input: GooglePlayTransactionRequest): Promise<IapMutationResponse> {
+    const payload = googlePlayTransactionRequestSchema.parse(input);
+    return this.request('/api/iap/google-play/transactions', iapMutationResponseSchema, {
+      method: 'POST',
+      body: payload,
+      auth: true,
+    });
+  }
+
+  reconcileGooglePlayTransactions(input: GooglePlayReconcileRequest = {}): Promise<IapMutationResponse> {
+    const payload = googlePlayReconcileRequestSchema.parse(input);
+    return this.request('/api/iap/google-play/reconcile', iapMutationResponseSchema, {
       method: 'POST',
       body: payload,
       auth: true,

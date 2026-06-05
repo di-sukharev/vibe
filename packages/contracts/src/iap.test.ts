@@ -5,6 +5,8 @@ import {
   appStoreReconcileRequestSchema,
   appStoreTransactionRequestSchema,
   appStoreWebhookRequestSchema,
+  googlePlayReconcileRequestSchema,
+  googlePlayTransactionRequestSchema,
   iapEntitlementResponseSchema,
   subscriptionSnapshotSchema,
 } from './iap'
@@ -31,10 +33,10 @@ describe('iap contracts', () => {
         entitlement: 'premium',
         isActive: true,
         state: 'active',
-        platform: 'ios',
+        platform: 'android',
         productId: 'com.example.premium.monthly',
-        originalTransactionId: '1000000000000001',
-        transactionId: '1000000000000002',
+        originalTransactionId: null,
+        transactionId: 'GPA.1234-5678-9012-34567',
         expiresAt: '2026-06-01T00:00:00.000Z',
         willAutoRenew: true,
         updatedAt: '2026-05-19T00:00:00.000Z',
@@ -42,7 +44,7 @@ describe('iap contracts', () => {
     ).toMatchObject({
       isActive: true,
       state: 'active',
-      platform: 'ios',
+      platform: 'android',
     })
   })
 
@@ -68,6 +70,41 @@ describe('iap contracts', () => {
     })
 
     expect(() => appStoreReconcileRequestSchema.parse({})).toThrow()
+  })
+
+  test('validates Google Play transaction and reconcile payloads', () => {
+    expect(
+      googlePlayTransactionRequestSchema.parse({
+        basePlanId: 'monthly',
+        productId: 'premium',
+        purchaseToken: 'purchase-token',
+      }),
+    ).toEqual({
+      basePlanId: 'monthly',
+      productId: 'premium',
+      purchaseToken: 'purchase-token',
+    })
+
+    expect(
+      googlePlayReconcileRequestSchema.parse({
+        purchases: [
+          {
+            productId: 'premium',
+            purchaseToken: 'purchase-token',
+          },
+        ],
+      }),
+    ).toEqual({
+      purchases: [
+        {
+          productId: 'premium',
+          purchaseToken: 'purchase-token',
+        },
+      ],
+    })
+
+    expect(googlePlayReconcileRequestSchema.parse({})).toEqual({})
+    expect(googlePlayReconcileRequestSchema.parse(undefined)).toEqual({})
   })
 
   test('validates entitlement and webhook payloads', () => {

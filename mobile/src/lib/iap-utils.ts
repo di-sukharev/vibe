@@ -1,5 +1,5 @@
-import type { SubscriptionSnapshot } from '@web-app-demo/contracts';
-import type { ExpoPurchaseError, ProductSubscription, Purchase, RequestPurchaseProps } from 'expo-iap';
+import type { GooglePlayPurchaseReference, SubscriptionSnapshot } from '@web-app-demo/contracts';
+import type { ExpoPurchaseError, ProductSubscription, Purchase, RequestPurchaseProps, SubscriptionOffer } from 'expo-iap';
 import { ErrorCode } from 'expo-iap/build/types';
 
 import { ApiRequestError } from './api';
@@ -29,17 +29,58 @@ const recoverableErrorCodes = new Set<ErrorCode>([
   ErrorCode.ServiceError,
 ]);
 
-export function buildSubscriptionPurchaseRequest(productId: string, appAccountToken: string): RequestPurchaseProps {
-  if (!uuidPattern.test(appAccountToken)) {
-    throw new Error('App Store appAccountToken must be a UUID.');
+type SubscriptionPurchaseRequestInput =
+  | {
+      appAccountToken: string;
+      platform: 'ios';
+      productId: string;
+    }
+  | {
+      appAccountToken: string;
+      offerToken: string;
+      platform: 'android';
+      productId: string;
+    };
+
+export function buildSubscriptionPurchaseRequest(productId: string, appAccountToken: string): RequestPurchaseProps;
+export function buildSubscriptionPurchaseRequest(input: SubscriptionPurchaseRequestInput): RequestPurchaseProps;
+export function buildSubscriptionPurchaseRequest(
+  inputOrProductId: string | SubscriptionPurchaseRequestInput,
+  appAccountToken?: string,
+): RequestPurchaseProps {
+  const input =
+    typeof inputOrProductId === 'string'
+      ? {
+          appAccountToken: appAccountToken ?? '',
+          platform: 'ios' as const,
+          productId: inputOrProductId,
+        }
+      : inputOrProductId;
+
+  if (!uuidPattern.test(input.appAccountToken)) {
+    throw new Error(`${input.platform === 'ios' ? 'App Store appAccountToken' : 'Google Play obfuscated account ID'} must be a UUID.`);
+  }
+
+  if (input.platform === 'android') {
+    return {
+      type: 'subs',
+      request: {
+        google: {
+          skus: [input.productId],
+          obfuscatedAccountId: input.appAccountToken,
+          obfuscatedProfileId: input.appAccountToken,
+          subscriptionOffers: [{ sku: input.productId, offerToken: input.offerToken }],
+        },
+      },
+    };
   }
 
   return {
     type: 'subs',
     request: {
       apple: {
-        sku: productId,
-        appAccountToken,
+        sku: input.productId,
+        appAccountToken: input.appAccountToken,
         andDangerouslyFinishTransactionAutomatically: false,
       },
     },
@@ -89,6 +130,35 @@ export function extractSignedTransactionInfo(purchase: Purchase) {
   return purchase.purchaseToken?.trim() || null;
 }
 
+export function buildGooglePlayReconcilePayloadFromPurchases(
+  purchases: Purchase[],
+  basePlanIdsByProductId: ReadonlyMap<string, string> = new Map(),
+) {
+  const references: GooglePlayPurchaseReference[] = [];
+  const seenKeys = new Set<string>();
+
+  for (const purchase of purchases) {
+    const validation = validateGooglePlayPurchaseForIngest(purchase);
+    if (!validation.ok) continue;
+
+    const basePlanId = basePlanIdsByProductId.get(validation.productId);
+    const key = `${validation.productId}:${validation.purchaseToken}`;
+    if (seenKeys.has(key)) continue;
+    seenKeys.add(key);
+    references.push({
+      productId: validation.productId,
+      purchaseToken: validation.purchaseToken,
+      ...(basePlanId ? { basePlanId } : {}),
+    });
+  }
+
+  return references.length > 0 ? { purchases: references } : {};
+}
+
+export function extractGooglePlayPurchaseToken(purchase: Purchase) {
+  return purchase.purchaseToken?.trim() || null;
+}
+
 export function isUserCancelledPurchaseError(error: unknown) {
   return getIapErrorCode(error) === ErrorCode.UserCancelled || isLegacyUserCancelledMessage(error);
 }
@@ -120,27 +190,27 @@ export function friendlyIapErrorMessage(error: unknown) {
       return 'Purchase was cancelled.';
     case ErrorCode.DeferredPayment:
     case ErrorCode.Pending:
-      return 'Purchase is pending approval. Premium will unlock after Apple approves it.';
+      return 'Purchase is pending approval. Premium will unlock after the store approves it.';
     case ErrorCode.NetworkError:
     case ErrorCode.RemoteError:
     case ErrorCode.ServiceDisconnected:
     case ErrorCode.ServiceError:
     case ErrorCode.InitConnection:
     case ErrorCode.QueryProduct:
-      return 'The App Store is temporarily unavailable. Check your connection and try again.';
+      return 'The store is temporarily unavailable. Check your connection and try again.';
     case ErrorCode.IapNotAvailable:
     case ErrorCode.BillingUnavailable:
     case ErrorCode.FeatureNotSupported:
       return 'In-app purchases are not available on this device or account.';
     case ErrorCode.ItemUnavailable:
     case ErrorCode.SkuNotFound:
-      return 'This subscription is not available in the App Store for this account.';
+      return 'This subscription is not available from the store for this account.';
     case ErrorCode.ItemNotOwned:
-      return 'No restorable App Store subscription was found for this account.';
+      return 'No restorable subscription was found for this store account.';
     case ErrorCode.UserError:
-      return 'Apple could not complete the purchase. Check your App Store payment settings and try again.';
+      return 'The store could not complete the purchase. Check your store payment settings and try again.';
     case ErrorCode.AlreadyOwned:
-      return 'This App Store account already owns the subscription. Use Restore purchases.';
+      return 'This store account already owns the subscription. Use Restore purchases.';
     case ErrorCode.EmptySkuList:
       return 'Subscription products are not configured correctly.';
     default:
@@ -154,9 +224,9 @@ export function iapErrorMessage(error: unknown) {
       case 'IAP_NOT_CONFIGURED':
         return 'Subscriptions are not configured on the server yet.';
       case 'IAP_INVALID_TRANSACTION':
-        return 'The App Store transaction could not be verified. Use Restore purchases or try again.';
+        return 'The store transaction could not be verified. Use Restore purchases or try again.';
       case 'IAP_OWNERSHIP_MISMATCH':
-        return 'This App Store purchase is linked to another account.';
+        return 'This store purchase is linked to another account.';
       default:
         return error.message;
     }
@@ -260,6 +330,69 @@ export function validateAppStorePurchaseForIngest(purchase: Purchase) {
   };
 }
 
+export function validateGooglePlayPurchaseForIngest(purchase: Purchase) {
+  if (purchase.store !== 'google') {
+    return {
+      ok: false as const,
+      message: 'This purchase did not come from Google Play.',
+      pending: false,
+    };
+  }
+
+  if (purchase.purchaseState === 'pending') {
+    return {
+      ok: false as const,
+      message: 'Purchase is pending approval. Premium will unlock after Google Play completes it.',
+      pending: true,
+    };
+  }
+
+  if (purchase.purchaseState === 'unknown') {
+    return {
+      ok: false as const,
+      message: 'Google Play has not confirmed this purchase yet. Please try restore again.',
+      pending: false,
+    };
+  }
+
+  const purchaseToken = extractGooglePlayPurchaseToken(purchase);
+  if (!purchaseToken) {
+    return {
+      ok: false as const,
+      message: 'Google Play purchase is missing a purchase token. Use Restore purchases or try again on a Play-enabled Android build.',
+      pending: false,
+    };
+  }
+
+  const productId = purchase.productId?.trim();
+  if (!productId) {
+    return {
+      ok: false as const,
+      message: 'Google Play purchase is missing a product ID. Use Restore purchases or try again.',
+      pending: false,
+    };
+  }
+
+  return {
+    ok: true as const,
+    productId,
+    purchaseToken,
+    transactionKey: purchase.transactionId?.trim() || `${productId}:${purchaseToken}`,
+  };
+}
+
+export function selectGooglePlaySubscriptionOffer(product: ProductSubscription, basePlanId: string) {
+  const standardizedOffer = product.subscriptionOffers?.find((offer) => isMatchingGooglePlayOffer(offer, basePlanId));
+  if (standardizedOffer?.offerTokenAndroid) {
+    return {
+      displayPrice: standardizedOffer.displayPrice || product.displayPrice,
+      offerToken: standardizedOffer.offerTokenAndroid,
+    };
+  }
+
+  return null;
+}
+
 export function sortProductsByConfiguredOrder(products: ProductSubscription[], productIds: string[]) {
   return [...products].sort((left, right) => {
     const leftIndex = productIds.indexOf(left.id);
@@ -307,6 +440,10 @@ export function getIapErrorCode(error: unknown): ErrorCode | null {
 
 function normalizedProductIndex(index: number) {
   return index === -1 ? Number.MAX_SAFE_INTEGER : index;
+}
+
+function isMatchingGooglePlayOffer(offer: SubscriptionOffer, basePlanId: string) {
+  return offer.basePlanIdAndroid === basePlanId && Boolean(offer.offerTokenAndroid?.trim());
 }
 
 function diagnosticMessage(error: unknown) {

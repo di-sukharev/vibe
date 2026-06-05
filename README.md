@@ -87,7 +87,7 @@ If backend/API, full-stack, uploads, or any database-backed validation is active
 - `docs/LOCAL_DATABASE.md` - cross-platform local PostgreSQL setup for Windows, macOS, and Linux.
 - `docs/STORAGE.md` - DigitalOcean Spaces, CDN, uploads, and image/media storage rules.
 - `docs/SOCIAL_AUTH.md` - Apple and Google social auth setup for the Expo mobile app.
-- `docs/IAP.md` - iOS App Store subscription setup, backend verification, sandbox testing, restore, and deferred Android scope.
+- `docs/IAP.md` - App Store and Google Play subscription setup, backend verification, sandbox/internal testing, restore, and production freshness notes.
 - `docs/YANDEX_CLOUD.md` - optional Yandex Cloud deployment path when the user explicitly chooses it.
 
 ## Choosing `webapp` vs `website`
@@ -177,6 +177,13 @@ EXPO_PUBLIC_API_URL=http://localhost:3000
 EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID=
 EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=
 EXPO_PUBLIC_GOOGLE_IOS_URL_SCHEME=
+EXPO_PUBLIC_IAP_IOS_MONTHLY_PRODUCT_ID=com.example.app.premium.monthly
+EXPO_PUBLIC_IAP_IOS_YEARLY_PRODUCT_ID=com.example.app.premium.yearly
+EXPO_PUBLIC_IAP_ANDROID_PACKAGE_NAME=com.example.app
+EXPO_PUBLIC_IAP_ANDROID_MONTHLY_PRODUCT_ID=com.example.app.premium
+EXPO_PUBLIC_IAP_ANDROID_MONTHLY_BASE_PLAN_ID=monthly
+EXPO_PUBLIC_IAP_ANDROID_YEARLY_PRODUCT_ID=com.example.app.premium
+EXPO_PUBLIC_IAP_ANDROID_YEARLY_BASE_PLAN_ID=yearly
 ```
 
 Android emulators usually need `http://10.0.2.2:3000` instead of `localhost`.
@@ -213,7 +220,7 @@ Test runners use the separate Docker Compose `postgres_test` service and the `TE
 - [docs/LOCAL_DATABASE.md](docs/LOCAL_DATABASE.md) - Docker Compose PostgreSQL setup and reset workflow.
 - [docs/STORAGE.md](docs/STORAGE.md) - DigitalOcean Spaces, CDN, uploads, and image/media storage rules.
 - [docs/SOCIAL_AUTH.md](docs/SOCIAL_AUTH.md) - Apple and Google mobile social auth setup.
-- [docs/IAP.md](docs/IAP.md) - iOS App Store subscription setup and troubleshooting.
+- [docs/IAP.md](docs/IAP.md) - App Store and Google Play subscription setup and troubleshooting.
 - [docs/YANDEX_CLOUD.md](docs/YANDEX_CLOUD.md) - optional Yandex Cloud deployment path when explicitly selected.
 - [webapp/README.md](webapp/README.md) - CSR browser client setup, env, and Playwright smoke.
 - [mobile/README.md](mobile/README.md) - Expo setup, push notifications, development builds, and Maestro smoke.

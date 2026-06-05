@@ -7,10 +7,12 @@ import { SubscriptionState } from '../generated/prisma/enums'
 import type { AppStoreSubscriptionVerifier } from './apple-verifier'
 import {
   createOfferCodeRedemptionToken,
+  ingestGooglePlayTransaction,
   ingestAppStoreTransaction,
   reconcileAppStoreTransactions,
   recordAndProcessAppStoreWebhook,
 } from './service'
+import type { GooglePlaySubscriptionVerifier } from './google-play-verifier'
 
 const env: AppEnv = {
   PORT: 3000,
@@ -28,6 +30,15 @@ const env: AppEnv = {
   APPLE_IAP_PRODUCT_IDS: ['premium_monthly'],
   APPLE_AUTH_JWKS_TIMEOUT_MS: 5000,
   GOOGLE_AUTH_CLIENT_IDS: [],
+  GOOGLE_PLAY_PRODUCT_IDS: [],
+  GOOGLE_PLAY_BASE_PLAN_IDS: [],
+}
+const googlePlayEnv: AppEnv = {
+  ...env,
+  GOOGLE_PLAY_PACKAGE_NAME: 'com.example.app',
+  GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64: Buffer.from(JSON.stringify({ client_email: 'iap@example.com' })).toString('base64'),
+  GOOGLE_PLAY_PRODUCT_IDS: ['premium'],
+  GOOGLE_PLAY_BASE_PLAN_IDS: ['monthly', 'yearly'],
 }
 
 test('releases webhook claims when final processed marker write fails', async () => {
@@ -388,6 +399,272 @@ test('rejects verified App Store transactions that are not auto-renewable subscr
     message: 'App Store transaction is not an auto-renewable subscription',
   })
 })
+
+test('ingests active Google Play purchases and acknowledges before returning entitlement', async () => {
+  const userId = '018fd4f2-1f3a-7c88-bc49-333333333333'
+  const acknowledgeSubscription = mock(async () => undefined)
+  const googleUpsert = mock(async () => ({ id: 'google-row-1' }))
+  const entitlementUpsert = mock(async (args: { create: { platform: string; state: SubscriptionState } }) => ({
+    platform: args.create.platform,
+    state: args.create.state,
+    productId: 'premium',
+    originalTransactionId: null,
+    transactionId: 'GPA.1234-5678-9012-34567',
+    expiresAt: new Date('2026-07-01T00:00:00.000Z'),
+    willAutoRenew: true,
+    updatedAt: new Date('2026-06-01T00:00:00.000Z'),
+  }))
+  const db = googlePlayDb({
+    entitlementFindUnique: mock(async () => null),
+    entitlementUpsert,
+    googleFindFirst: mock(async () => null),
+    googleFindMany: mock(async () => []),
+    googleUpsert,
+  })
+
+  const subscription = await ingestGooglePlayTransaction({
+    db,
+    env: googlePlayEnv,
+    verifier: googlePlayVerifier({
+      acknowledgementState: 'ACKNOWLEDGEMENT_STATE_PENDING',
+      subscriptionState: 'SUBSCRIPTION_STATE_ACTIVE',
+      acknowledgeSubscription,
+    }),
+    userId,
+    productId: 'premium',
+    basePlanId: 'monthly',
+    purchaseToken: 'purchase-token',
+  })
+
+  expect(subscription).toMatchObject({
+    isActive: true,
+    platform: 'android',
+    state: 'active',
+    productId: 'premium',
+    originalTransactionId: null,
+    transactionId: 'GPA.1234-5678-9012-34567',
+  })
+  expect(acknowledgeSubscription).toHaveBeenCalledWith({
+    productId: 'premium',
+    purchaseToken: 'purchase-token',
+  })
+  expect(googleUpsert).toHaveBeenCalledWith(
+    expect.objectContaining({
+      create: expect.objectContaining({
+        acknowledgementState: 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED',
+        basePlanId: 'monthly',
+        productId: 'premium',
+      }),
+    }),
+  )
+})
+
+test('rejects Google Play purchases linked to another app user', async () => {
+  const db = googlePlayDb({
+    entitlementFindUnique: mock(async () => null),
+    entitlementUpsert: mock(async () => {
+      throw new Error('unexpected entitlement write')
+    }),
+    googleFindFirst: mock(async () => null),
+    googleFindMany: mock(async () => []),
+    googleUpsert: mock(async () => {
+      throw new Error('unexpected Google row write')
+    }),
+  })
+
+  await expect(
+    ingestGooglePlayTransaction({
+      db,
+      env: googlePlayEnv,
+      verifier: googlePlayVerifier({
+        externalAccountId: '018fd4f2-1f3a-7c88-bc49-444444444444',
+        subscriptionState: 'SUBSCRIPTION_STATE_ACTIVE',
+      }),
+      userId: '018fd4f2-1f3a-7c88-bc49-333333333333',
+      productId: 'premium',
+      basePlanId: 'monthly',
+      purchaseToken: 'purchase-token',
+    }),
+  ).rejects.toMatchObject({ code: 'IAP_OWNERSHIP_MISMATCH' })
+})
+
+test('rejects Google Play purchases when backend base plans are not allowlisted', async () => {
+  const db = googlePlayDb({
+    entitlementFindUnique: mock(async () => null),
+    entitlementUpsert: mock(async () => {
+      throw new Error('unexpected entitlement write')
+    }),
+    googleFindFirst: mock(async () => null),
+    googleFindMany: mock(async () => []),
+    googleUpsert: mock(async () => {
+      throw new Error('unexpected Google row write')
+    }),
+  })
+
+  await expect(
+    ingestGooglePlayTransaction({
+      db,
+      env: {
+        ...googlePlayEnv,
+        GOOGLE_PLAY_BASE_PLAN_IDS: [],
+      },
+      verifier: googlePlayVerifier(),
+      userId: '018fd4f2-1f3a-7c88-bc49-333333333333',
+      productId: 'premium',
+      basePlanId: 'monthly',
+      purchaseToken: 'purchase-token',
+    }),
+  ).rejects.toMatchObject({ code: 'IAP_NOT_CONFIGURED' })
+})
+
+test('does not grant pending Google Play purchases', async () => {
+  const entitlementUpsert = mock(async (args: { create: { state: SubscriptionState } }) => ({
+    platform: 'android',
+    state: args.create.state,
+    productId: 'premium',
+    originalTransactionId: null,
+    transactionId: null,
+    expiresAt: null,
+    willAutoRenew: null,
+    updatedAt: new Date('2026-06-01T00:00:00.000Z'),
+  }))
+  const db = googlePlayDb({
+    entitlementFindUnique: mock(async () => null),
+    entitlementUpsert,
+    googleFindFirst: mock(async () => null),
+    googleFindMany: mock(async () => []),
+    googleUpsert: mock(async () => ({ id: 'google-row-1' })),
+  })
+
+  const subscription = await ingestGooglePlayTransaction({
+    db,
+    env: googlePlayEnv,
+    verifier: googlePlayVerifier({
+      expiryTime: null,
+      subscriptionState: 'SUBSCRIPTION_STATE_PENDING',
+    }),
+    userId: '018fd4f2-1f3a-7c88-bc49-333333333333',
+    productId: 'premium',
+    basePlanId: 'monthly',
+    purchaseToken: 'purchase-token',
+  })
+
+  expect(subscription).toMatchObject({
+    isActive: false,
+    state: 'pending',
+  })
+})
+
+test('does not let stale Google Play expiration overwrite a fresher active entitlement', async () => {
+  const existingEntitlement = {
+    platform: 'ios',
+    state: SubscriptionState.active,
+    productId: 'ios_premium',
+    originalTransactionId: 'original-ios',
+    transactionId: 'transaction-ios',
+    expiresAt: new Date('2026-08-01T00:00:00.000Z'),
+    willAutoRenew: true,
+    updatedAt: new Date('2026-06-01T00:00:00.000Z'),
+  }
+  const entitlementUpsert = mock(async () => {
+    throw new Error('unexpected entitlement overwrite')
+  })
+  const db = googlePlayDb({
+    entitlementFindUnique: mock(async () => existingEntitlement),
+    entitlementUpsert,
+    googleFindFirst: mock(async () => ({ userId: '018fd4f2-1f3a-7c88-bc49-333333333333' })),
+    googleFindMany: mock(async () => []),
+    googleUpsert: mock(async () => ({ id: 'google-row-1' })),
+  })
+
+  const subscription = await ingestGooglePlayTransaction({
+    db,
+    env: googlePlayEnv,
+    verifier: googlePlayVerifier({
+      expiryTime: '2026-06-01T00:00:00.000Z',
+      subscriptionState: 'SUBSCRIPTION_STATE_EXPIRED',
+    }),
+    userId: '018fd4f2-1f3a-7c88-bc49-333333333333',
+    productId: 'premium',
+    basePlanId: 'monthly',
+    purchaseToken: 'purchase-token',
+  })
+
+  expect(subscription).toMatchObject({
+    isActive: true,
+    platform: 'ios',
+    transactionId: 'transaction-ios',
+  })
+  expect(entitlementUpsert).not.toHaveBeenCalled()
+})
+
+function googlePlayVerifier({
+  acknowledgementState = 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED',
+  acknowledgeSubscription = mock(async () => undefined),
+  externalAccountId = '018fd4f2-1f3a-7c88-bc49-333333333333',
+  expiryTime = '2026-07-01T00:00:00.000Z',
+  subscriptionState = 'SUBSCRIPTION_STATE_ACTIVE',
+}: {
+  acknowledgementState?: string
+  acknowledgeSubscription?: ReturnType<typeof mock>
+  externalAccountId?: string
+  expiryTime?: string | null
+  subscriptionState?: string
+} = {}): GooglePlaySubscriptionVerifier {
+  return {
+    acknowledgeSubscription,
+    async getSubscriptionPurchase() {
+      return {
+        acknowledgementState,
+        externalAccountIdentifiers: {
+          obfuscatedExternalAccountId: externalAccountId,
+          obfuscatedExternalProfileId: externalAccountId,
+        },
+        latestOrderId: subscriptionState === 'SUBSCRIPTION_STATE_PENDING' ? null : 'GPA.1234-5678-9012-34567',
+        lineItems: [
+          {
+            autoRenewingPlan: { autoRenewEnabled: true },
+            expiryTime,
+            offerDetails: {
+              basePlanId: 'monthly',
+            },
+            productId: 'premium',
+          },
+        ],
+        subscriptionState,
+        testPurchase: {},
+      }
+    },
+  }
+}
+
+function googlePlayDb({
+  entitlementFindUnique,
+  entitlementUpsert,
+  googleFindFirst,
+  googleFindMany,
+  googleUpsert,
+}: {
+  entitlementFindUnique: ReturnType<typeof mock>
+  entitlementUpsert: ReturnType<typeof mock>
+  googleFindFirst: ReturnType<typeof mock>
+  googleFindMany: ReturnType<typeof mock>
+  googleUpsert: ReturnType<typeof mock>
+}) {
+  const db = {
+    googlePlaySubscriptionPurchase: {
+      findFirst: googleFindFirst,
+      findMany: googleFindMany,
+      upsert: googleUpsert,
+    },
+    subscriptionEntitlement: {
+      findUnique: entitlementFindUnique,
+      upsert: entitlementUpsert,
+    },
+    $transaction: async (callback: (tx: unknown) => unknown) => callback(db),
+  }
+  return db as unknown as DbClient
+}
 
 function fakeVerifier(): AppStoreSubscriptionVerifier {
   const notification: ResponseBodyV2DecodedPayload = {
