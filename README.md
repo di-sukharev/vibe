@@ -227,6 +227,10 @@ Test runners use the separate Docker Compose `postgres_test` service and the `TE
 - [website/README.md](website/README.md) - Astro website commands, hybrid rendering, and publishing model.
 - [packages/contracts/README.md](packages/contracts/README.md) - shared schema and DTO rules.
 
+## License
+
+This project is licensed under the Apache License 2.0. If you distribute a fork, copy, or derivative work, keep both [LICENSE](LICENSE) and [NOTICE](NOTICE) with the attribution to Dima Sukharev, GitHub profile, and the original repository.
+
 ## Architecture Notes
 
 API contracts live in `packages/contracts` and are imported by every active layer. The backend validates input with those Zod schemas; the webapp and mobile app reuse the same schemas in TanStack Form and API clients.
