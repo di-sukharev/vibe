@@ -53,7 +53,7 @@ Production deployment for the browser app uses DigitalOcean App Platform Static 
 
 ## Practice
 
-Use TanStack Query for server state, TanStack Form for forms, and shared Zod schemas from `packages/contracts` for validation. The access token lives only in browser memory; refresh uses the HttpOnly cookie set by the backend.
+Use TanStack Query for server state, TanStack Mutation for API writes, TanStack Form for forms, and shared Zod schemas from `packages/contracts` for validation. The access token lives only in browser memory; refresh uses the HttpOnly cookie set by the backend. `src/lib/auth-queries.ts`, `src/lib/auth.tsx`, and `src/components/AuthForm.tsx` are the baseline pattern: query `/api/auth/me`, mutate register/login/logout, keep the current-user cache in sync, and validate form submissions with shared contracts before calling the API client.
 
 Keep the API client responsible for base URLs, auth headers, refresh/retry, and error parsing. Do not duplicate API shapes or auth state in page components.
 

@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import type { LoginRequest, RegisterRequest } from '@web-app-demo/contracts'
 import {
   type PropsWithChildren,
@@ -9,10 +9,15 @@ import {
 } from 'react'
 
 import { ApiClient } from './api'
+import {
+  clearAuthenticatedSession,
+  useCurrentUserQuery,
+  useLoginMutation,
+  useLogoutMutation,
+  useRegisterMutation,
+} from './auth-queries'
 import { AuthContext, type AuthContextValue } from './auth-context'
 import { bootstrapAuthSession } from './bootstrap-auth'
-
-const meQueryKey = ['auth', 'me'] as const
 
 export function AuthProvider({ children }: PropsWithChildren) {
   const queryClient = useQueryClient()
@@ -24,8 +29,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     [],
   )
   const handleAuthExpired = useCallback(() => {
-    setAccessToken(null)
-    queryClient.removeQueries({ queryKey: meQueryKey })
+    clearAuthenticatedSession(queryClient, setAccessToken)
   }, [queryClient, setAccessToken])
 
   const api = useMemo(
@@ -64,35 +68,31 @@ export function AuthProvider({ children }: PropsWithChildren) {
     }
   }, [setAccessToken])
 
-  const meQuery = useQuery({
-    queryKey: meQueryKey,
+  const meQuery = useCurrentUserQuery({
+    api,
     enabled: !isBootstrapping && Boolean(accessToken),
-    queryFn: () => api.me(),
   })
+  const { mutateAsync: registerAsync } = useRegisterMutation({ api, setAccessToken })
+  const { mutateAsync: loginAsync } = useLoginMutation({ api, setAccessToken })
+  const { mutateAsync: logoutAsync } = useLogoutMutation({ api, setAccessToken })
 
   const register = useCallback(
     async (input: RegisterRequest) => {
-      const response = await api.register(input)
-      setAccessToken(response.accessToken)
-      queryClient.setQueryData(meQueryKey, { user: response.user })
+      await registerAsync(input)
     },
-    [api, queryClient, setAccessToken],
+    [registerAsync],
   )
 
   const login = useCallback(
     async (input: LoginRequest) => {
-      const response = await api.login(input)
-      setAccessToken(response.accessToken)
-      queryClient.setQueryData(meQueryKey, { user: response.user })
+      await loginAsync(input)
     },
-    [api, queryClient, setAccessToken],
+    [loginAsync],
   )
 
   const logout = useCallback(async () => {
-    await api.logout().catch(() => undefined)
-    setAccessToken(null)
-    queryClient.removeQueries({ queryKey: meQueryKey })
-  }, [api, queryClient, setAccessToken])
+    await logoutAsync()
+  }, [logoutAsync])
 
   const value = useMemo<AuthContextValue>(
     () => ({
