@@ -100,7 +100,7 @@ test('Google Play transaction route verifies purchases through the Google verifi
     productId: 'premium',
     originalTransactionId: null,
     transactionId: 'GPA.1234-5678-9012-34567',
-    expiresAt: new Date('2026-07-01T00:00:00.000Z'),
+    expiresAt: new Date('2099-07-01T00:00:00.000Z'),
     willAutoRenew: true,
     updatedAt: new Date('2026-06-01T00:00:00.000Z'),
   }))
@@ -125,7 +125,7 @@ test('Google Play transaction route verifies purchases through the Google verifi
             lineItems: [
               {
                 autoRenewingPlan: { autoRenewEnabled: true },
-                expiryTime: '2026-07-01T00:00:00.000Z',
+                expiryTime: '2099-07-01T00:00:00.000Z',
                 offerDetails: { basePlanId: 'monthly' },
                 productId: 'premium',
               },

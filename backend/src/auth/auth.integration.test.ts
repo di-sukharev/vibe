@@ -77,6 +77,9 @@ maybeDescribe('auth API integration', () => {
       },
     })
     expect(me.status).toBe(200)
+    const meBody = await me.json()
+    expect(meBody).toEqual({ user: registerBody.user })
+    expect('sessionId' in meBody.user).toBe(false)
 
     const refresh = await app.request('/api/auth/refresh', {
       method: 'POST',
@@ -428,6 +431,53 @@ maybeDescribe('auth API integration', () => {
     expect(body.error.code).toBe('VALIDATION_ERROR')
     expect(body.error.message).toBe('Invalid request payload')
     expect(Array.isArray(body.error.details)).toBe(true)
+  })
+
+  test('me rejects revoked, expired, and missing sessions', async () => {
+    const revoked = await registerForMeGuard('me-revoked@example.com')
+    await prisma.authSession.updateMany({
+      where: {
+        userId: revoked.userId,
+      },
+      data: {
+        revokedAt: new Date(),
+      },
+    })
+    const revokedMe = await app.request('/api/auth/me', {
+      headers: {
+        Authorization: `Bearer ${revoked.accessToken}`,
+      },
+    })
+    expect(revokedMe.status).toBe(401)
+
+    const expired = await registerForMeGuard('me-expired@example.com')
+    await prisma.authSession.updateMany({
+      where: {
+        userId: expired.userId,
+      },
+      data: {
+        expiresAt: new Date(Date.now() - 1000),
+      },
+    })
+    const expiredMe = await app.request('/api/auth/me', {
+      headers: {
+        Authorization: `Bearer ${expired.accessToken}`,
+      },
+    })
+    expect(expiredMe.status).toBe(401)
+
+    const missing = await registerForMeGuard('me-missing@example.com')
+    await prisma.authSession.deleteMany({
+      where: {
+        userId: missing.userId,
+      },
+    })
+    const missingMe = await app.request('/api/auth/me', {
+      headers: {
+        Authorization: `Bearer ${missing.accessToken}`,
+      },
+    })
+    expect(missingMe.status).toBe(401)
   })
 
   test('rejects duplicate email and invalid login', async () => {
@@ -784,4 +834,35 @@ maybeDescribe('auth API integration', () => {
     })
     expect(users).toBe(1)
   })
+
+  async function registerForMeGuard(email: string) {
+    const register = await app.request('/api/auth/register', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Client-Platform': 'mobile',
+      },
+      body: JSON.stringify({
+        email,
+        password: 'password123',
+      }),
+    })
+    const registerBody = await register.json()
+    const user = await prisma.user.findUniqueOrThrow({
+      where: {
+        email,
+      },
+      select: {
+        id: true,
+      },
+    })
+
+    expect(register.status).toBe(201)
+    expect(registerBody.accessToken).toBeString()
+
+    return {
+      accessToken: registerBody.accessToken as string,
+      userId: user.id,
+    }
+  }
 })

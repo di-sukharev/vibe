@@ -410,7 +410,7 @@ test('ingests active Google Play purchases and acknowledges before returning ent
     productId: 'premium',
     originalTransactionId: null,
     transactionId: 'GPA.1234-5678-9012-34567',
-    expiresAt: new Date('2026-07-01T00:00:00.000Z'),
+    expiresAt: new Date('2099-07-01T00:00:00.000Z'),
     willAutoRenew: true,
     updatedAt: new Date('2026-06-01T00:00:00.000Z'),
   }))
@@ -602,7 +602,7 @@ function googlePlayVerifier({
   acknowledgementState = 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED',
   acknowledgeSubscription = mock(async () => undefined),
   externalAccountId = '018fd4f2-1f3a-7c88-bc49-333333333333',
-  expiryTime = '2026-07-01T00:00:00.000Z',
+  expiryTime = '2099-07-01T00:00:00.000Z',
   subscriptionState = 'SUBSCRIPTION_STATE_ACTIVE',
 }: {
   acknowledgementState?: string

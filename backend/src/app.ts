@@ -6,23 +6,15 @@ import type { DbClient } from './db'
 import type { AppEnv } from './env'
 import { createAuthRoutes } from './auth/routes'
 import { AuthService } from './auth/service'
+import type { AppHonoEnv } from './http/context'
 import { errorResponse, handleError, validationErrorHook } from './http/errors'
 import { createAppStoreSubscriptionVerifier, type AppStoreSubscriptionVerifier } from './iap/apple-verifier'
 import { createGooglePlaySubscriptionVerifier, type GooglePlaySubscriptionVerifier } from './iap/google-play-verifier'
 import { createAppStoreWebhookRoutes, createIapRoutes } from './iap/routes'
 import { createNotificationRoutes } from './notifications/routes'
-import { createStorageServiceFromEnv, type StorageService } from './storage/service'
+import { createStorageServiceFromEnv } from './storage/service'
 
-export type AppBindings = {
-  Variables: {
-    appStoreIapVerifier: AppStoreSubscriptionVerifier
-    authService: AuthService
-    env: AppEnv
-    googlePlayIapVerifier: GooglePlaySubscriptionVerifier
-    prisma: DbClient
-    storageService: StorageService | null
-  }
-}
+export type AppBindings = AppHonoEnv
 
 type CreateAppOptions = {
   env: AppEnv
@@ -37,7 +29,7 @@ export function createApp({ appStoreIapVerifier, env, googlePlayIapVerifier, iap
   const appStoreSubscriptionVerifier = appStoreIapVerifier ?? iapVerifier ?? createAppStoreSubscriptionVerifier(env)
   const googlePlaySubscriptionVerifier = googlePlayIapVerifier ?? createGooglePlaySubscriptionVerifier(env)
   const storageService = createStorageServiceFromEnv(env)
-  const app = new OpenAPIHono<AppBindings>({
+  const app = new OpenAPIHono<AppHonoEnv>({
     defaultHook: validationErrorHook,
   })
 

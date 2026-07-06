@@ -15,17 +15,12 @@ import type { Context } from 'hono'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 
 import type { AppEnv } from '../env'
+import type { AppHonoEnv, AuthenticatedHonoEnv } from '../http/context'
+import { userDtoFromAuthenticatedUser } from '../http/context'
 import { AppError, validationErrorHook } from '../http/errors'
-import type { AuthService } from './service'
+import { requireAuth } from './middleware'
 
 const refreshCookieName = 'web_app_demo_refresh'
-
-type AuthRouteEnv = {
-  Variables: {
-    authService: AuthService
-    env: AppEnv
-  }
-}
 
 const authResponseContent = {
   'application/json': {
@@ -223,7 +218,10 @@ const logoutRoute = createRoute({
 })
 
 export function createAuthRoutes() {
-  const routes = new OpenAPIHono<AuthRouteEnv>({
+  const routes = new OpenAPIHono<AppHonoEnv>({
+    defaultHook: validationErrorHook,
+  })
+  const protectedRoutes = new OpenAPIHono<AuthenticatedHonoEnv>({
     defaultHook: validationErrorHook,
   })
 
@@ -271,10 +269,11 @@ export function createAuthRoutes() {
     return c.json(responseForClient(c, result), 200)
   })
 
-  routes.openapi(meRoute, async (c) => {
-    const auth = c.get('authService')
-    return c.json(await auth.getMe(bearerToken(c)), 200)
+  protectedRoutes.use('/me', requireAuth)
+  protectedRoutes.openapi(meRoute, async (c) => {
+    return c.json({ user: userDtoFromAuthenticatedUser(c.var.user) }, 200)
   })
+  routes.route('/', protectedRoutes)
 
   routes.openapi(logoutRoute, async (c) => {
     const auth = c.get('authService')
@@ -306,12 +305,6 @@ function requestMetadata(c: Context): { userAgent?: string; ipAddress?: string }
     userAgent: c.req.header('user-agent'),
     ipAddress: forwardedFor?.split(',')[0]?.trim(),
   }
-}
-
-function bearerToken(c: Context) {
-  const authorization = c.req.header('authorization')
-  if (!authorization?.startsWith('Bearer ')) return undefined
-  return authorization.slice('Bearer '.length)
 }
 
 function getRefreshCookie(c: Context) {
