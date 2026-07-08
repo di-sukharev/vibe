@@ -523,7 +523,7 @@ export default defineConfig([
     },
   },
   {
-    // shadcn registry output intentionally exports variants/helpers next to components.
+    // shadcn registry output intentionally exports variants/hooks/helpers next to components.
     // Keep app-specific wrappers outside src/components/ui so regular lint rules still apply.
     files: [
       'src/components/ui/badge.tsx',
@@ -532,6 +532,8 @@ export default defineConfig([
       'src/components/ui/carousel.tsx',
       'src/components/ui/combobox.tsx',
       'src/components/ui/direction.tsx',
+      'src/components/ui/marker.tsx',
+      'src/components/ui/message-scroller.tsx',
       'src/components/ui/navigation-menu.tsx',
       'src/components/ui/sidebar.tsx',
       'src/components/ui/tabs.tsx',

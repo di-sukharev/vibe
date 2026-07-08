@@ -61,16 +61,17 @@ Use shadcn/ui for web interface primitives. Treat `src/components/ui` as the sha
 
 All web typography must go through `src/components/ui/typography.tsx`. Use `Typography` for page copy, headings `h1` through `h6`, labels, controls, captions, emphasis, shortcuts, code/kbd text, and screen-reader-only text. Do not add raw heading/paragraph/emphasis elements or Tailwind text-size/font/leading/tracking utilities in pages or UI components; the local ESLint typography policy enforces this.
 
-The current shadcn configuration is `radix-maia` with the `hugeicons` icon library and CSS variables, as recorded in `components.json`. This template intentionally includes the full official shadcn component registry from `bunx shadcn@latest add --all -c webapp` so future projects can start from a complete local UI foundation. Do not add community registries, blocks, or custom UI generator output unless the product asks for them.
+The current shadcn configuration is `radix-maia` with the `hugeicons` icon library and CSS variables, as recorded in `components.json`. This template intentionally keeps the official shadcn component registry available in `src/components/ui` so future projects can start from a complete local UI foundation. Do not add community registries, blocks, or custom UI generator output unless the product asks for them.
 
 When adding or refreshing shadcn components:
 
 ```bash
 bun run --cwd webapp ui:info
+bun run --cwd webapp ui:add -- --dry-run <component>
 bun run --cwd webapp ui:add -- <component>
 ```
 
-Use the local `shadcn` devDependency pinned in `webapp/package.json` and `bun.lock`; do not use `shadcn@latest` for routine refreshes because it can produce registry output that no longer matches this template. If generated files need compatibility fixes for current package versions, keep the edits small and leave app-specific composition outside `src/components/ui`.
+Use the local `shadcn` devDependency pinned in `webapp/package.json` and `bun.lock`; do not use `shadcn@latest` for routine refreshes because it can produce registry output that no longer matches this template. Review dry-run diffs before applying updates, especially when the CLI wants to overwrite existing primitives. Keep local compatibility fixes small, preserve `Typography` ownership of text styles, and leave app-specific composition outside `src/components/ui`.
 
 ## E2E
 
