@@ -8,16 +8,16 @@ import {
   useState,
 } from 'react'
 
-import { ApiClient } from './api'
+import { AuthApi } from './api'
 import {
   clearAuthenticatedSession,
   useCurrentUserQuery,
   useLoginMutation,
   useLogoutMutation,
   useRegisterMutation,
-} from './auth-queries'
-import { AuthContext, type AuthContextValue } from './auth-context'
-import { bootstrapAuthSession } from './bootstrap-auth'
+} from './queries'
+import { AuthContext, type AuthContextValue } from './context'
+import { bootstrapAuthSession } from './bootstrap'
 
 export function AuthProvider({ children }: PropsWithChildren) {
   const queryClient = useQueryClient()
@@ -34,7 +34,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   const api = useMemo(
     () =>
-      new ApiClient({
+      new AuthApi({
         getAccessToken: () => accessToken,
         setAccessToken,
         onAuthExpired: handleAuthExpired,
@@ -44,7 +44,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   useEffect(() => {
     let isMounted = true
-    const bootstrapApi = new ApiClient({
+    const bootstrapApi = new AuthApi({
       getAccessToken: () => null,
       setAccessToken,
     })

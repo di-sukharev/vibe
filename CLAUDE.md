@@ -35,6 +35,15 @@
 - Prefer the modular monolithic backend described in `docs/ARCHITECTURE.md`. Add services, queues, brokers, or real-time infrastructure only for a concrete operational need.
 - Route testing, local database, deployment, storage, and provider-specific work to their existing docs rather than duplicating runbooks here.
 
+### Product Modules Architecture
+
+- Follow the progressive DDD-lite module boundaries in `docs/ARCHITECTURE.md`; auth is the backend and web client golden path.
+- Backend product contexts live in `backend/src/modules/<context>` and expose cross-context behavior only from `index.ts` or explicit application ports.
+- Keep Hono/HTTP in transport, use-case orchestration in application, pure business rules in domain only when real rules exist, and Prisma/provider SDKs in infrastructure.
+- Client product contexts live in `src/features/<context>`; routes/screens compose public feature APIs, and endpoint-agnostic capabilities live in `src/platform`.
+- Do not add empty layers, generic/base repositories, CQRS, event sourcing, or state-machine libraries without a concrete product need.
+- Do not move business rules into routes, screens, providers, or UI primitives to avoid defining the owning application/domain boundary.
+
 ## Bootstrap-Only Instructions
 
 <!-- BOOTSTRAP_ONLY_START -->
@@ -94,6 +103,7 @@ This block applies only while installing the template as a new project:
 ## Testing And Validation
 
 - Run the smallest meaningful validation covering the changed surface. Use fast targeted checks first, then wider suites only when risk justifies them.
+- Run `bun run architecture:check` whenever module, feature, contracts, platform, or UI dependency boundaries change.
 - Use existing test infrastructure and choose the highest-confidence practical boundary: stable E2E for critical cross-layer journeys, integration/contract tests for APIs, auth, persistence, and contracts, and unit tests for isolated rules.
 - Cover important success, failure, boundary, permission, persistence, and recovery cases for non-trivial behavior.
 - Add E2E only for plausible user-visible regressions with stable selectors and maintainable setup. When frontend E2E is added, reserve it for business behavior, navigation, validation, permissions, persistence, and meaningful state transitions.

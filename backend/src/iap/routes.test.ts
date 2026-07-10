@@ -167,11 +167,10 @@ function createTestIapApp(
 ) {
   const app = new OpenAPIHono<AppBindings>()
   app.use('*', async (c, next) => {
-    c.set('authService', {
-      getMe: async (accessToken: string | undefined) => ({
-        user: { id: accessToken },
-      }),
-    } as never)
+    c.set(
+      'authenticateAccessToken',
+      (async (accessToken: string | undefined) => ({ id: accessToken })) as never,
+    )
     c.set('env', options.env ?? env)
     c.set('appStoreIapVerifier', fakeOfferCodeVerifier())
     c.set('googlePlayIapVerifier', options.googleVerifier ?? fakeGooglePlayVerifier())

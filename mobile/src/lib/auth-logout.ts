@@ -1,6 +1,10 @@
-import type { LogoutRequest } from '@web-app-demo/contracts';
+import type { TokenLogoutRequest } from '@web-app-demo/contracts';
 
 import type { ApiClient } from './api';
+
+type LogoutRequestInput = Omit<TokenLogoutRequest, 'refreshToken'> & {
+  refreshToken?: string;
+};
 
 type LogoutPushCleanupInput = {
   api: Pick<ApiClient, 'logout' | 'unregisterExpoPushToken'>;
@@ -31,7 +35,7 @@ export async function logoutWithPushCleanup(input: LogoutPushCleanupInput) {
     .then(() => true)
     .catch(() => false);
 
-  const logoutPayload: LogoutRequest = {
+  const logoutPayload: LogoutRequestInput = {
     expoPushToken: storedExpoPushToken ?? undefined,
     expoPushTokens: knownExpoPushTokens,
     refreshToken: refreshToken ?? undefined,

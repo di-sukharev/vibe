@@ -1,7 +1,7 @@
 import { SignJWT, jwtVerify } from 'jose'
 import { z } from 'zod'
 
-import type { AppEnv } from '../env'
+import type { AppEnv } from '../../../env'
 
 const accessTokenPayloadSchema = z.object({
   sub: z.string().min(1),

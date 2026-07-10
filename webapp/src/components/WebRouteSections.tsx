@@ -2,7 +2,7 @@ import { Link } from '@tanstack/react-router'
 import type { UserDto } from '@web-app-demo/contracts'
 import type { PropsWithChildren, ReactNode } from 'react'
 
-import { AuthForm } from '@/components/AuthForm'
+import { AuthForm } from '@/features/auth'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {

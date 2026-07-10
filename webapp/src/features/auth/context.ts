@@ -1,5 +1,5 @@
-import { createContext } from 'react'
 import type { LoginRequest, RegisterRequest, UserDto } from '@web-app-demo/contracts'
+import { createContext } from 'react'
 
 export type AuthContextValue = {
   user: UserDto | null

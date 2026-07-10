@@ -745,11 +745,10 @@ maybeDescribe('push notification API and outbox', () => {
   })
 
   async function registerUser(email: string) {
-    const res = await app.request('/api/auth/register', {
+    const res = await app.request('/api/auth/token/register', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Client-Platform': 'mobile',
       },
       body: JSON.stringify({
         email,

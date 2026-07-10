@@ -97,6 +97,10 @@ Production deployment for the backend uses DigitalOcean App Platform with Digita
 - `POST /api/auth/refresh`
 - `GET /api/auth/me`
 - `POST /api/auth/logout`
+- `POST /api/auth/token/register`
+- `POST /api/auth/token/login`
+- `POST /api/auth/token/refresh`
+- `POST /api/auth/token/logout`
 - `GET /openapi.json`
 - `GET /health`
 
@@ -106,7 +110,7 @@ Social auth users use the provider subject as the stable identity key. The backe
 
 ## Architecture
 
-`src/index.ts` only starts the API server. `src/runtime.ts` loads env and creates the Prisma client for API, worker, and cron entrypoints. The Hono app is created in `src/app.ts`. The auth feature lives in `src/auth`: routes validate and delegate, the service owns session/user logic, middleware owns access-token/session guards, and token helpers isolate JWT and refresh-token mechanics. Protected Hono routes should use `src/auth/middleware.ts` and the env types from `src/http/context.ts` instead of parsing bearer tokens or asserting `c.var` values inside handlers. `src/db.ts` normalizes DigitalOcean Managed PostgreSQL URLs that use `sslmode=require` so the Prisma PostgreSQL adapter uses libpq-compatible TLS handling.
+`src/index.ts` only starts the API server. `src/runtime.ts` loads env and creates the Prisma client for API, worker, and cron entrypoints. `src/app.ts` is the composition root. Product contexts live under `src/modules/<context>` and expose only `index.ts` across context boundaries. Auth is the golden path: `transport` owns Hono/HTTP, `application` owns use cases and ports, optional `domain` code stays pure, and `infrastructure` owns Prisma and token/password adapters. Route factories capture dependencies in closures; request context contains only the authenticated principal. Run `bun run architecture:check` to enforce these dependency rules. `src/db.ts` normalizes DigitalOcean Managed PostgreSQL URLs that use `sslmode=require` so the Prisma PostgreSQL adapter uses libpq-compatible TLS handling.
 
 The storage service lives in `src/storage` and wraps DigitalOcean Spaces through S3-compatible SDK calls. Product-specific upload routes should validate ownership and permissions, then delegate object key generation, presigned upload/download URLs, public CDN URL construction, and deletion to that service.
 

@@ -11,8 +11,8 @@ import type { Context } from 'hono'
 
 import type { AppEnv } from '../env'
 import { AppError, errorResponse } from '../http/errors'
-import type { AuthService } from '../auth/service'
 import type { DbClient } from '../db'
+import type { AuthenticatedPrincipal } from '../modules/auth'
 import {
   buildTestPushInput,
   enqueueAndProcessPushNotification,
@@ -23,7 +23,9 @@ import {
 
 type NotificationRouteEnv = {
   Variables: {
-    authService: AuthService
+    authenticateAccessToken: (
+      accessToken: string | undefined,
+    ) => Promise<AuthenticatedPrincipal>
     env: AppEnv
     prisma: DbClient
   }
@@ -180,8 +182,7 @@ export function createNotificationRoutes() {
 }
 
 async function currentUserId(c: Context<NotificationRouteEnv>) {
-  const auth = c.get('authService')
-  return (await auth.getMe(bearerToken(c))).user.id
+  return (await c.get('authenticateAccessToken')(bearerToken(c))).id
 }
 
 function bearerToken(c: Context) {

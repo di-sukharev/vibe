@@ -357,5 +357,5 @@ export function createAppStoreWebhookRoutes() {
 async function requireUser(c: Context<AppBindings>) {
   const authorization = c.req.header('Authorization')
   const accessToken = authorization?.startsWith('Bearer ') ? authorization.slice('Bearer '.length) : undefined
-  return c.get('authService').getMe(accessToken)
+  return { user: await c.get('authenticateAccessToken')(accessToken) }
 }

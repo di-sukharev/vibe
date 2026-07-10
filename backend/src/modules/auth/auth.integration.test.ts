@@ -1,9 +1,9 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test'
 
-import { createApp } from '../app'
-import { createPrisma } from '../db'
-import type { AppEnv } from '../env'
-import { socialAuthProviderDeps } from './social-providers'
+import { createApp } from '../../app'
+import { createPrisma } from '../../db'
+import type { AppEnv } from '../../env'
+import { socialAuthProviderDeps } from './infrastructure/social-providers'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 
@@ -52,11 +52,10 @@ maybeDescribe('auth API integration', () => {
   })
 
   test('registers, reads me, refreshes, and logs out', async () => {
-    const register = await app.request('/api/auth/register', {
+    const register = await app.request('/api/auth/token/register', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Client-Platform': 'mobile',
       },
       body: JSON.stringify({
         email: 'user@example.com',
@@ -70,6 +69,7 @@ maybeDescribe('auth API integration', () => {
     expect(registerBody.user.email).toBe('user@example.com')
     expect(registerBody.accessToken).toBeString()
     expect(registerBody.refreshToken).toBeString()
+    expect(register.headers.get('set-cookie')).toBeNull()
 
     const me = await app.request('/api/auth/me', {
       headers: {
@@ -81,11 +81,10 @@ maybeDescribe('auth API integration', () => {
     expect(meBody).toEqual({ user: registerBody.user })
     expect('sessionId' in meBody.user).toBe(false)
 
-    const refresh = await app.request('/api/auth/refresh', {
+    const refresh = await app.request('/api/auth/token/refresh', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Client-Platform': 'mobile',
       },
       body: JSON.stringify({ refreshToken: registerBody.refreshToken }),
     })
@@ -94,18 +93,18 @@ maybeDescribe('auth API integration', () => {
     expect(refreshBody.accessToken).toBeString()
     expect(refreshBody.refreshToken).toBeString()
     expect(refreshBody.refreshToken).not.toBe(registerBody.refreshToken)
+    expect(refresh.headers.get('set-cookie')).toBeNull()
 
-    const staleRefresh = await app.request('/api/auth/refresh', {
+    const staleRefresh = await app.request('/api/auth/token/refresh', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Client-Platform': 'mobile',
       },
       body: JSON.stringify({ refreshToken: registerBody.refreshToken }),
     })
     expect(staleRefresh.status).toBe(401)
 
-    const logout = await app.request('/api/auth/logout', {
+    const logout = await app.request('/api/auth/token/logout', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -114,11 +113,10 @@ maybeDescribe('auth API integration', () => {
     })
     expect(logout.status).toBe(204)
 
-    const revokedRefresh = await app.request('/api/auth/refresh', {
+    const revokedRefresh = await app.request('/api/auth/token/refresh', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Client-Platform': 'mobile',
       },
       body: JSON.stringify({ refreshToken: refreshBody.refreshToken }),
     })
@@ -126,11 +124,10 @@ maybeDescribe('auth API integration', () => {
   })
 
   test('logout removes submitted Expo push tokens under refresh-token authority', async () => {
-    const register = await app.request('/api/auth/register', {
+    const register = await app.request('/api/auth/token/register', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Client-Platform': 'mobile',
       },
       body: JSON.stringify({
         email: 'logout-push@example.com',
@@ -151,7 +148,7 @@ maybeDescribe('auth API integration', () => {
       ],
     })
 
-    const logout = await app.request('/api/auth/logout', {
+    const logout = await app.request('/api/auth/token/logout', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -181,11 +178,10 @@ maybeDescribe('auth API integration', () => {
   })
 
   test('logout does not remove push tokens when refresh authority is stale', async () => {
-    const register = await app.request('/api/auth/register', {
+    const register = await app.request('/api/auth/token/register', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Client-Platform': 'mobile',
       },
       body: JSON.stringify({
         email: 'stale-logout-push@example.com',
@@ -200,7 +196,7 @@ maybeDescribe('auth API integration', () => {
       },
     })
 
-    const firstLogout = await app.request('/api/auth/logout', {
+    const firstLogout = await app.request('/api/auth/token/logout', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -211,7 +207,7 @@ maybeDescribe('auth API integration', () => {
     })
     expect(firstLogout.status).toBe(204)
 
-    const staleAuthorityLogout = await app.request('/api/auth/logout', {
+    const staleAuthorityLogout = await app.request('/api/auth/token/logout', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -233,11 +229,10 @@ maybeDescribe('auth API integration', () => {
   })
 
   test('allows only one concurrent refresh rotation for the same token', async () => {
-    const register = await app.request('/api/auth/register', {
+    const register = await app.request('/api/auth/token/register', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Client-Platform': 'mobile',
       },
       body: JSON.stringify({
         email: 'race@example.com',
@@ -247,19 +242,17 @@ maybeDescribe('auth API integration', () => {
     const registerBody = await register.json()
 
     const refreshRequests = await Promise.all([
-      app.request('/api/auth/refresh', {
+      app.request('/api/auth/token/refresh', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Client-Platform': 'mobile',
         },
         body: JSON.stringify({ refreshToken: registerBody.refreshToken }),
       }),
-      app.request('/api/auth/refresh', {
+      app.request('/api/auth/token/refresh', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Client-Platform': 'mobile',
         },
         body: JSON.stringify({ refreshToken: registerBody.refreshToken }),
       }),
@@ -279,12 +272,12 @@ maybeDescribe('auth API integration', () => {
     expect(activeSessions).toBe(1)
   })
 
-  test('web auth uses an HttpOnly refresh cookie instead of response body refresh token', async () => {
+  test('web auth never exposes its HttpOnly refresh token when the client platform header is spoofed', async () => {
     const register = await app.request('/api/auth/register', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Client-Platform': 'web',
+        'X-Client-Platform': 'mobile',
       },
       body: JSON.stringify({
         email: 'web-cookie@example.com',
@@ -305,7 +298,7 @@ maybeDescribe('auth API integration', () => {
       headers: {
         'Content-Type': 'application/json',
         Cookie: setCookie!.split(';')[0],
-        'X-Client-Platform': 'web',
+        'X-Client-Platform': 'mobile',
       },
       body: JSON.stringify({}),
     })
@@ -314,6 +307,26 @@ maybeDescribe('auth API integration', () => {
     expect(refresh.status).toBe(200)
     expect(refreshBody.accessToken).toBeString()
     expect(refreshBody.refreshToken).toBeUndefined()
+  })
+
+  test('does not let cookie and explicit token transports borrow each other credentials', async () => {
+    const refreshToken = 'r'.repeat(32)
+    const cookieWithBodyToken = await app.request('/api/auth/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken }),
+    })
+    expect(cookieWithBodyToken.status).toBe(400)
+
+    const tokenWithCookieOnly = await app.request('/api/auth/token/refresh', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: `web_app_demo_refresh=${refreshToken}`,
+      },
+      body: JSON.stringify({}),
+    })
+    expect(tokenWithCookieOnly.status).toBe(400)
   })
 
   test('production web auth allows exact CORS origin and cross-site refresh cookie', async () => {
@@ -330,7 +343,6 @@ maybeDescribe('auth API integration', () => {
       headers: {
         'Content-Type': 'application/json',
         Origin: 'https://web.example.com',
-        'X-Client-Platform': 'web',
       },
       body: JSON.stringify({
         email: 'production-cookie@example.com',
@@ -364,7 +376,6 @@ maybeDescribe('auth API integration', () => {
       headers: {
         'Content-Type': 'application/json',
         Origin: 'https://web.example.com',
-        'X-Client-Platform': 'web',
       },
       body: JSON.stringify({
         email: 'csrf-cookie@example.com',
@@ -378,7 +389,6 @@ maybeDescribe('auth API integration', () => {
       headers: {
         'Content-Type': 'application/json',
         Cookie: cookie,
-        'X-Client-Platform': 'web',
       },
       body: JSON.stringify({}),
     })
@@ -392,7 +402,6 @@ maybeDescribe('auth API integration', () => {
         'Content-Type': 'application/json',
         Cookie: cookie,
         Origin: 'https://attacker.example',
-        'X-Client-Platform': 'web',
       },
       body: JSON.stringify({}),
     })
@@ -406,7 +415,6 @@ maybeDescribe('auth API integration', () => {
         'Content-Type': 'application/json',
         Cookie: cookie,
         Origin: 'https://web.example.com',
-        'X-Client-Platform': 'web',
       },
       body: JSON.stringify({}),
     })
@@ -525,11 +533,10 @@ maybeDescribe('auth API integration', () => {
       displayName: 'Social User',
     })
 
-    const response = await socialApp.request('/api/auth/social/google', {
+    const response = await socialApp.request('/api/auth/token/social/google', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Client-Platform': 'mobile',
       },
       body: JSON.stringify({
         idToken: 'google-id-token',
@@ -577,11 +584,10 @@ maybeDescribe('auth API integration', () => {
       subject: 'google-returning-subject',
     })
 
-    const response = await socialApp.request('/api/auth/social/google', {
+    const response = await socialApp.request('/api/auth/token/social/google', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Client-Platform': 'mobile',
       },
       body: JSON.stringify({
         idToken: 'google-id-token',
@@ -620,11 +626,10 @@ maybeDescribe('auth API integration', () => {
       }
     }
     const request = () =>
-      socialApp.request('/api/auth/social/google', {
+      socialApp.request('/api/auth/token/social/google', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Client-Platform': 'mobile',
         },
         body: JSON.stringify({
           idToken: 'google-id-token',
@@ -662,11 +667,10 @@ maybeDescribe('auth API integration', () => {
       email: 'apple-user@example.com',
     })
 
-    const initial = await socialApp.request('/api/auth/social/apple', {
+    const initial = await socialApp.request('/api/auth/token/social/apple', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Client-Platform': 'mobile',
       },
       body: JSON.stringify({
         idToken: 'apple-first-token',
@@ -682,11 +686,10 @@ maybeDescribe('auth API integration', () => {
       subject: 'apple-stable-subject',
     })
 
-    const returning = await socialApp.request('/api/auth/social/apple', {
+    const returning = await socialApp.request('/api/auth/token/social/apple', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Client-Platform': 'mobile',
       },
       body: JSON.stringify({
         idToken: 'apple-returning-token',
@@ -712,11 +715,10 @@ maybeDescribe('auth API integration', () => {
       subject: 'apple-no-email-subject',
     })
 
-    const response = await socialApp.request('/api/auth/social/apple', {
+    const response = await socialApp.request('/api/auth/token/social/apple', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Client-Platform': 'mobile',
       },
       body: JSON.stringify({
         idToken: 'apple-token',
@@ -748,11 +750,10 @@ maybeDescribe('auth API integration', () => {
       email: 'existing-password@example.com',
     })
 
-    const response = await socialApp.request('/api/auth/social/google', {
+    const response = await socialApp.request('/api/auth/token/social/google', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Client-Platform': 'mobile',
       },
       body: JSON.stringify({
         idToken: 'google-id-token',
@@ -765,7 +766,7 @@ maybeDescribe('auth API integration', () => {
   })
 
   test('social auth returns configuration and token verification errors', async () => {
-    const missingGoogleConfig = await app.request('/api/auth/social/google', {
+    const missingGoogleConfig = await app.request('/api/auth/token/social/google', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -790,7 +791,7 @@ maybeDescribe('auth API integration', () => {
       throw new Error('invalid token')
     }
 
-    const invalidGoogleToken = await socialApp.request('/api/auth/social/google', {
+    const invalidGoogleToken = await socialApp.request('/api/auth/token/social/google', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -836,11 +837,10 @@ maybeDescribe('auth API integration', () => {
   })
 
   async function registerForMeGuard(email: string) {
-    const register = await app.request('/api/auth/register', {
+    const register = await app.request('/api/auth/token/register', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Client-Platform': 'mobile',
       },
       body: JSON.stringify({
         email,

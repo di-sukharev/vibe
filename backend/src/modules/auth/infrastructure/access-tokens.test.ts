@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import type { AppEnv } from '../env'
+import type { AppEnv } from '../../../env'
 import { signAccessToken, verifyAccessToken } from './access-tokens'
 
 const env: AppEnv = {

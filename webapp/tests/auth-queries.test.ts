@@ -5,7 +5,7 @@ import {
   applyAuthenticatedSession,
   authQueryKeys,
   clearAuthenticatedSession,
-} from '../src/lib/auth-queries'
+} from '../src/features/auth/queries'
 
 const user = {
   id: 'user_1',

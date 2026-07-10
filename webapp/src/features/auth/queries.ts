@@ -5,13 +5,13 @@ import {
   type QueryClient,
 } from '@tanstack/react-query'
 import type {
-  AuthResponse,
+  CookieAuthResponse,
   LoginRequest,
   MeResponse,
   RegisterRequest,
 } from '@web-app-demo/contracts'
 
-import type { ApiClient } from './api'
+import type { AuthApi } from './api'
 
 export const authQueryKeys = {
   all: ['auth'] as const,
@@ -19,12 +19,12 @@ export const authQueryKeys = {
 }
 
 type CurrentUserQueryOptions = {
-  api: Pick<ApiClient, 'me'>
+  api: Pick<AuthApi, 'me'>
   enabled: boolean
 }
 
 type AuthMutationOptions = {
-  api: Pick<ApiClient, 'login' | 'logout' | 'register'>
+  api: Pick<AuthApi, 'login' | 'logout' | 'register'>
   setAccessToken: (accessToken: string | null) => void
 }
 
@@ -74,7 +74,7 @@ export function useLogoutMutation({ api, setAccessToken }: AuthMutationOptions) 
 export function applyAuthenticatedSession(
   queryClient: QueryClient,
   setAccessToken: (accessToken: string | null) => void,
-  response: AuthResponse,
+  response: CookieAuthResponse,
 ) {
   setAccessToken(response.accessToken)
   queryClient.setQueryData(authQueryKeys.me(), { user: response.user } satisfies MeResponse)

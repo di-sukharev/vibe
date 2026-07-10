@@ -3,15 +3,11 @@ import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from 'jose'
 
 import type { SocialAuthProvider } from '@web-app-demo/contracts'
 
-import type { AppEnv } from '../env'
-import { AppError } from '../http/errors'
+import type { AppEnv } from '../../../env'
+import type { SocialIdentity } from '../application/ports'
+import { AuthFailure } from '../domain/errors'
 
-export type VerifiedSocialIdentity = {
-  provider: SocialAuthProvider
-  subject: string
-  email?: string
-  displayName?: string
-}
+export type VerifiedSocialIdentity = SocialIdentity & { provider: SocialAuthProvider }
 
 const appleIssuer = 'https://appleid.apple.com'
 const appleJwksUrl = new URL('https://appleid.apple.com/auth/keys')
@@ -73,7 +69,7 @@ export async function verifySocialIdentity(
 ): Promise<VerifiedSocialIdentity> {
   if (provider === 'google') {
     if (env.GOOGLE_AUTH_CLIENT_IDS.length === 0) {
-      throw new AppError(503, 'AUTH_PROVIDER_NOT_CONFIGURED', 'Google Sign-In is not configured')
+      throw new AuthFailure('provider_not_configured', 'Google Sign-In is not configured')
     }
 
     return socialAuthProviderDeps
@@ -84,7 +80,7 @@ export async function verifySocialIdentity(
   }
 
   if (!env.APPLE_AUTH_BUNDLE_ID) {
-    throw new AppError(503, 'AUTH_PROVIDER_NOT_CONFIGURED', 'Sign in with Apple is not configured')
+    throw new AuthFailure('provider_not_configured', 'Sign in with Apple is not configured')
   }
 
   return socialAuthProviderDeps
@@ -106,21 +102,17 @@ function appleRemoteJwks(timeoutMs: number) {
 }
 
 function providerError(providerName: 'Apple' | 'Google', error: unknown) {
-  if (error instanceof AppError) return error
+  if (error instanceof AuthFailure) return error
 
   if (isProviderUnavailableError(error)) {
-    return new AppError(
-      503,
-      'AUTH_PROVIDER_UNAVAILABLE',
-      `${providerName} Sign-In is temporarily unavailable`,
-    )
+    return new AuthFailure('provider_unavailable', `${providerName} Sign-In is temporarily unavailable`)
   }
 
   return invalidProviderToken(providerName)
 }
 
 function invalidProviderToken(providerName: 'Apple' | 'Google') {
-  return new AppError(401, 'AUTH_INVALID_PROVIDER_TOKEN', `Invalid ${providerName} identity token`)
+  return new AuthFailure('provider_invalid_token', `Invalid ${providerName} identity token`)
 }
 
 function isProviderUnavailableError(error: unknown) {

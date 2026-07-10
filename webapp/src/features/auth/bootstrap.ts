@@ -1,14 +1,14 @@
-import type { RefreshResponse } from '@web-app-demo/contracts'
+import type { CookieRefreshResponse } from '@web-app-demo/contracts'
 
-import type { ApiClient } from './api'
+import type { AuthApi } from './api'
 
 type BootstrapAuthSessionOptions = {
-  api: Pick<ApiClient, 'expireSession' | 'refresh'>
+  api: Pick<AuthApi, 'expireSession' | 'refresh'>
   shouldApply: () => boolean
   setAccessToken: (accessToken: string | null) => void
 }
 
-let bootstrapRefreshPromise: Promise<RefreshResponse> | null = null
+let bootstrapRefreshPromise: Promise<CookieRefreshResponse> | null = null
 
 export async function bootstrapAuthSession({
   api,
@@ -28,7 +28,7 @@ export async function bootstrapAuthSession({
   }
 }
 
-function refreshBootstrapSession(api: Pick<ApiClient, 'refresh'>) {
+function refreshBootstrapSession(api: Pick<AuthApi, 'refresh'>) {
   bootstrapRefreshPromise ??= api.refresh().finally(() => {
     bootstrapRefreshPromise = null
   })

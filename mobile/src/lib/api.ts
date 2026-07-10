@@ -1,7 +1,6 @@
 import {
   apiErrorSchema,
   appStoreOfferCodeRedemptionResponseSchema,
-  authResponseSchema,
   appStoreReconcileRequestSchema,
   appStoreTransactionRequestSchema,
   googlePlayReconcileRequestSchema,
@@ -9,11 +8,8 @@ import {
   iapEntitlementResponseSchema,
   iapMutationResponseSchema,
   loginRequestSchema,
-  logoutRequestSchema,
   meResponseSchema,
   pushMutationResponseSchema,
-  refreshRequestSchema,
-  refreshResponseSchema,
   registerPushTokenRequestSchema,
   registerRequestSchema,
   socialAuthProviderSchema,
@@ -21,7 +17,6 @@ import {
   testPushNotificationRequestSchema,
   testPushNotificationResponseSchema,
   unregisterPushTokenRequestSchema,
-  type AuthResponse,
   type AppStoreReconcileRequest,
   type AppStoreTransactionRequest,
   type AppStoreOfferCodeRedemptionResponse,
@@ -30,14 +25,19 @@ import {
   type IapEntitlementResponse,
   type IapMutationResponse,
   type LoginRequest,
-  type LogoutRequest,
   type MeResponse,
   type PushMutationResponse,
-  type RefreshResponse,
   type RegisterRequest,
   type RegisterPushTokenRequest,
   type SocialAuthProvider,
   type SocialAuthRequest,
+  tokenAuthResponseSchema,
+  tokenLogoutRequestSchema,
+  tokenRefreshRequestSchema,
+  tokenRefreshResponseSchema,
+  type TokenAuthResponse,
+  type TokenLogoutRequest,
+  type TokenRefreshResponse,
   type TestPushNotificationRequest,
   type TestPushNotificationResponse,
   type UnregisterPushTokenRequest,
@@ -66,6 +66,10 @@ type AuthenticatedMutationOptions = {
   retryOnUnauthorized?: boolean;
 };
 
+type TokenLogoutInput = Omit<TokenLogoutRequest, 'refreshToken'> & {
+  refreshToken?: string;
+};
+
 export class ApiRequestError extends Error {
   constructor(
     public readonly status: number,
@@ -77,42 +81,42 @@ export class ApiRequestError extends Error {
 }
 
 export class ApiClient {
-  private refreshPromise: Promise<RefreshResponse> | null = null;
+  private refreshPromise: Promise<TokenRefreshResponse> | null = null;
 
   constructor(private readonly options: ApiClientOptions) {}
 
-  register(input: RegisterRequest): Promise<AuthResponse> {
+  register(input: RegisterRequest): Promise<TokenAuthResponse> {
     const payload = registerRequestSchema.parse(input);
-    return this.request('/api/auth/register', authResponseSchema, {
+    return this.request('/api/auth/token/register', tokenAuthResponseSchema, {
       method: 'POST',
       body: payload,
       auth: false,
     });
   }
 
-  login(input: LoginRequest): Promise<AuthResponse> {
+  login(input: LoginRequest): Promise<TokenAuthResponse> {
     const payload = loginRequestSchema.parse(input);
-    return this.request('/api/auth/login', authResponseSchema, {
+    return this.request('/api/auth/token/login', tokenAuthResponseSchema, {
       method: 'POST',
       body: payload,
       auth: false,
     });
   }
 
-  socialAuth(provider: SocialAuthProvider, input: SocialAuthRequest): Promise<AuthResponse> {
+  socialAuth(provider: SocialAuthProvider, input: SocialAuthRequest): Promise<TokenAuthResponse> {
     const parsedProvider = socialAuthProviderSchema.parse(provider);
     const payload = socialAuthRequestSchema.parse(input);
-    return this.request(`/api/auth/social/${parsedProvider}`, authResponseSchema, {
+    return this.request(`/api/auth/token/social/${parsedProvider}`, tokenAuthResponseSchema, {
       method: 'POST',
       body: payload,
       auth: false,
     });
   }
 
-  async refresh(): Promise<RefreshResponse> {
+  async refresh(): Promise<TokenRefreshResponse> {
     const refreshToken = await this.options.getRefreshToken();
-    const payload = refreshRequestSchema.parse({ refreshToken: refreshToken ?? undefined });
-    return this.request('/api/auth/refresh', refreshResponseSchema, {
+    const payload = tokenRefreshRequestSchema.parse({ refreshToken: refreshToken ?? undefined });
+    return this.request('/api/auth/token/refresh', tokenRefreshResponseSchema, {
       method: 'POST',
       body: payload,
       auth: false,
@@ -206,14 +210,14 @@ export class ApiClient {
     });
   }
 
-  async logout(input: LogoutRequest = {}) {
+  async logout(input: TokenLogoutInput = {}) {
     const storedRefreshToken = await this.options.getRefreshToken();
-    const payload = logoutRequestSchema.parse({
+    const payload = tokenLogoutRequestSchema.parse({
       ...input,
       refreshToken: input.refreshToken ?? storedRefreshToken ?? undefined,
     });
 
-    const response = await this.rawRequest('/api/auth/logout', {
+    const response = await this.rawRequest('/api/auth/token/logout', {
       method: 'POST',
       body: payload,
       auth: false,
@@ -246,9 +250,7 @@ export class ApiClient {
       });
       this.options.setAccessToken(refreshed.accessToken);
 
-      if (refreshed.refreshToken) {
-        await this.options.setRefreshToken(refreshed.refreshToken);
-      }
+      await this.options.setRefreshToken(refreshed.refreshToken);
 
       return this.rawRequest(path, {
         ...options,
@@ -281,9 +283,7 @@ export class ApiClient {
   }
 
   private headers(options: RequestOptions) {
-    const headers = new Headers({
-      'X-Client-Platform': 'mobile',
-    });
+    const headers = new Headers();
 
     if (options.body !== undefined) {
       headers.set('Content-Type', 'application/json');

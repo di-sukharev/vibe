@@ -14,7 +14,7 @@
     "build": "bun run prisma:generate && tsc --noEmit",
     "typecheck": "bun run prisma:generate && tsc --noEmit",
     "test": "bun run test:unit && bun run test:integration",
-    "test:unit": "bun test src/env.test.ts src/db.test.ts src/contracts.test.ts src/cron.test.ts src/auth/access-tokens.test.ts src/auth/passwords.test.ts src/auth/refresh-tokens.test.ts src/auth/middleware.test.ts src/auth/routes.test.ts src/iap/apple-verifier.test.ts src/iap/google-play-verifier.test.ts src/iap/routes.test.ts src/iap/service.test.ts src/notifications/expo-client.test.ts src/storage/service.test.ts",
+    "test:unit": "bun test src/env.test.ts src/db.test.ts src/contracts.test.ts src/cron.test.ts src/modules/auth/infrastructure/access-tokens.test.ts src/modules/auth/infrastructure/passwords.test.ts src/modules/auth/infrastructure/refresh-tokens.test.ts src/modules/auth/transport/middleware.test.ts src/modules/auth/transport/routes.test.ts src/iap/apple-verifier.test.ts src/iap/google-play-verifier.test.ts src/iap/routes.test.ts src/iap/service.test.ts src/notifications/expo-client.test.ts src/storage/service.test.ts",
     "test:integration": "bun scripts/test-integration.mjs",
     "smoke:docker": "bun scripts/docker-smoke.mjs",
     "prisma": "prisma",

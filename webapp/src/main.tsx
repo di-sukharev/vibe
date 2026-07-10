@@ -3,8 +3,8 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 
 import { TooltipProvider } from '@/components/ui/tooltip'
+import { AuthProvider } from '@/features/auth'
 import App from './App'
-import { AuthProvider } from './lib/auth'
 import './index.css'
 
 const queryClient = new QueryClient({

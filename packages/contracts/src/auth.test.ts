@@ -2,20 +2,24 @@ import { describe, expect, test } from 'bun:test'
 
 import {
   apiErrorSchema,
-  authResponseSchema,
+  cookieAuthResponseSchema,
+  cookieLogoutRequestSchema,
+  cookieRefreshRequestSchema,
+  cookieRefreshResponseSchema,
   internalNotificationHrefSchema,
   loginRequestSchema,
-  logoutRequestSchema,
   meResponseSchema,
   pushMutationResponseSchema,
-  refreshRequestSchema,
-  refreshResponseSchema,
-  registerRequestSchema,
   registerPushTokenRequestSchema,
+  registerRequestSchema,
   socialAuthProviderParamsSchema,
   socialAuthRequestSchema,
   testPushNotificationRequestSchema,
   testPushNotificationResponseSchema,
+  tokenAuthResponseSchema,
+  tokenLogoutRequestSchema,
+  tokenRefreshRequestSchema,
+  tokenRefreshResponseSchema,
   unregisterPushTokenRequestSchema,
 } from './index'
 
@@ -39,100 +43,42 @@ const validUser = {
 } as const
 
 describe('auth contracts', () => {
-  test('normalizes registration and login input', () => {
+  test('normalizes registration, login, and social auth input', () => {
     expect(
       registerRequestSchema.parse({
         email: ' USER@Example.COM ',
         password: 'password123',
         displayName: ' Jane ',
       }),
-    ).toEqual({
-      email: 'user@example.com',
-      password: 'password123',
-      displayName: 'Jane',
-    })
-
+    ).toEqual({ email: 'user@example.com', password: 'password123', displayName: 'Jane' })
     expect(
-      registerRequestSchema.parse({
-        email: 'user@example.com',
-        password: 'password123',
-        displayName: '',
-      }),
-    ).toEqual({
-      email: 'user@example.com',
-      password: 'password123',
-      displayName: undefined,
-    })
-
+      loginRequestSchema.parse({ email: ' USER@Example.COM ', password: 'password123' }),
+    ).toEqual({ email: 'user@example.com', password: 'password123' })
+    expect(socialAuthProviderParamsSchema.parse({ provider: 'apple' })).toEqual({ provider: 'apple' })
     expect(
-      loginRequestSchema.parse({
-        email: ' USER@Example.COM ',
-        password: 'password123',
-      }),
-    ).toEqual({
-      email: 'user@example.com',
-      password: 'password123',
-    })
-  })
-
-  test('rejects invalid auth request payloads', () => {
-    expect(() =>
-      registerRequestSchema.parse({
-        email: 'not-an-email',
-        password: 'short',
-        displayName: 'A',
-      }),
-    ).toThrow()
-
-    expect(() =>
-      loginRequestSchema.parse({
-        email: 'user@example.com',
-        password: 'short',
-      }),
-    ).toThrow()
-  })
-
-  test('normalizes social auth input', () => {
-    expect(socialAuthProviderParamsSchema.parse({ provider: 'apple' })).toEqual({
-      provider: 'apple',
-    })
-    expect(socialAuthProviderParamsSchema.parse({ provider: 'google' })).toEqual({
-      provider: 'google',
-    })
-    expect(
-      socialAuthRequestSchema.parse({
-        idToken: ' provider-token ',
-        displayName: ' Jane ',
-      }),
-    ).toEqual({
-      idToken: 'provider-token',
-      displayName: 'Jane',
-    })
-    expect(
-      socialAuthRequestSchema.parse({
-        idToken: 'provider-token',
-        displayName: '',
-      }),
-    ).toEqual({
-      idToken: 'provider-token',
-      displayName: undefined,
-    })
-
+      socialAuthRequestSchema.parse({ idToken: ' provider-token ', displayName: ' Jane ' }),
+    ).toEqual({ idToken: 'provider-token', displayName: 'Jane' })
     expect(() => socialAuthProviderParamsSchema.parse({ provider: 'facebook' })).toThrow()
     expect(() => socialAuthRequestSchema.parse({ idToken: '' })).toThrow()
   })
 
-  test('allows cookie-backed web refresh and explicit mobile refresh tokens', () => {
-    expect(refreshRequestSchema.parse(undefined)).toEqual({})
-    expect(refreshRequestSchema.parse({})).toEqual({})
-    expect(logoutRequestSchema.parse(undefined)).toEqual({})
-    expect(logoutRequestSchema.parse({})).toEqual({})
+  test('rejects invalid auth request payloads', () => {
+    expect(() =>
+      registerRequestSchema.parse({ email: 'not-an-email', password: 'short', displayName: 'A' }),
+    ).toThrow()
+    expect(() =>
+      loginRequestSchema.parse({ email: 'user@example.com', password: 'short' }),
+    ).toThrow()
+  })
+
+  test('keeps cookie requests empty and requires explicit token transport credentials', () => {
+    expect(cookieRefreshRequestSchema.parse(undefined)).toEqual({})
+    expect(cookieLogoutRequestSchema.parse({})).toEqual({})
 
     const refreshToken = 'r'.repeat(32)
-    expect(refreshRequestSchema.parse({ refreshToken })).toEqual({ refreshToken })
-    expect(logoutRequestSchema.parse({ refreshToken })).toEqual({ refreshToken })
+    expect(tokenRefreshRequestSchema.parse({ refreshToken })).toEqual({ refreshToken })
     expect(
-      logoutRequestSchema.parse({
+      tokenLogoutRequestSchema.parse({
         expoPushToken: 'ExponentPushToken[logout-token]',
         expoPushTokens: ['ExponentPushToken[logout-old-token]'],
         refreshToken,
@@ -143,37 +89,37 @@ describe('auth contracts', () => {
       refreshToken,
     })
 
-    expect(() => refreshRequestSchema.parse({ refreshToken: 'short' })).toThrow()
-    expect(() => logoutRequestSchema.parse({ refreshToken: 'short' })).toThrow()
-    expect(() => logoutRequestSchema.parse({ expoPushToken: 'not-a-token' })).toThrow()
-    expect(() => logoutRequestSchema.parse({ expoPushTokens: ['not-a-token'] })).toThrow()
+    expect(() => cookieRefreshRequestSchema.parse({ refreshToken })).toThrow()
+    expect(() => cookieLogoutRequestSchema.parse({ refreshToken })).toThrow()
+    expect(() => tokenRefreshRequestSchema.parse({})).toThrow()
+    expect(() => tokenLogoutRequestSchema.parse({ refreshToken: 'short' })).toThrow()
+    expect(() => tokenLogoutRequestSchema.parse({ refreshToken, expoPushToken: 'bad' })).toThrow()
   })
 
-  test('validates auth response shapes for web and mobile clients', () => {
-    expect(
-      authResponseSchema.parse({
-        user: validUser,
-        accessToken: 'access-token',
-      }),
-    ).toEqual({
-      user: validUser,
+  test('keeps cookie responses token-free and requires tokens for explicit token transport', () => {
+    const cookieResponse = { user: validUser, accessToken: 'access-token' }
+    expect(cookieAuthResponseSchema.parse(cookieResponse)).toEqual(cookieResponse)
+    expect(() =>
+      cookieAuthResponseSchema.parse({ ...cookieResponse, refreshToken: 'must-not-be-exposed' }),
+    ).toThrow()
+
+    const tokenResponse = {
+      ...cookieResponse,
+      refreshToken: 'token-transport-refresh-token',
+    }
+    expect(tokenAuthResponseSchema.parse(tokenResponse)).toEqual(tokenResponse)
+    expect(() => tokenAuthResponseSchema.parse(cookieResponse)).toThrow()
+    expect(cookieRefreshResponseSchema.parse({ accessToken: 'access-token' })).toEqual({
       accessToken: 'access-token',
     })
-
     expect(
-      authResponseSchema.parse({
-        user: validUser,
+      tokenRefreshResponseSchema.parse({
         accessToken: 'access-token',
-        refreshToken: 'mobile-refresh-token',
+        refreshToken: 'token-transport-refresh-token',
       }),
     ).toEqual({
-      user: validUser,
       accessToken: 'access-token',
-      refreshToken: 'mobile-refresh-token',
-    })
-
-    expect(refreshResponseSchema.parse({ accessToken: 'access-token' })).toEqual({
-      accessToken: 'access-token',
+      refreshToken: 'token-transport-refresh-token',
     })
     expect(meResponseSchema.parse({ user: validUser })).toEqual({ user: validUser })
   })
@@ -194,28 +140,15 @@ describe('auth contracts', () => {
         details: [{ path: ['email'], message: 'Invalid email address' }],
       },
     })
-
     expect(() =>
-      apiErrorSchema.parse({
-        error: {
-          code: 'SOMETHING_ELSE',
-          message: 'Nope',
-        },
-      }),
+      apiErrorSchema.parse({ error: { code: 'SOMETHING_ELSE', message: 'Nope' } }),
     ).toThrow()
-
     expect(
       apiErrorSchema.parse({
-        error: {
-          code: 'AUTH_PROVIDER_NOT_CONFIGURED',
-          message: 'Provider is not configured',
-        },
+        error: { code: 'AUTH_PROVIDER_NOT_CONFIGURED', message: 'Provider is not configured' },
       }),
     ).toEqual({
-      error: {
-        code: 'AUTH_PROVIDER_NOT_CONFIGURED',
-        message: 'Provider is not configured',
-      },
+      error: { code: 'AUTH_PROVIDER_NOT_CONFIGURED', message: 'Provider is not configured' },
     })
   })
 
@@ -231,38 +164,27 @@ describe('auth contracts', () => {
       deviceId: 'device-1',
       platform: 'ios',
     })
-
     expect(unregisterPushTokenRequestSchema.parse({})).toEqual({})
     expect(pushMutationResponseSchema.parse({ ok: true })).toEqual({ ok: true })
-
     expect(
       testPushNotificationRequestSchema.parse({
         title: ' Hello ',
         body: ' Ready ',
         href: '/details/components',
       }),
-    ).toEqual({
-      title: 'Hello',
-      body: 'Ready',
-      href: '/details/components',
-    })
-
+    ).toEqual({ title: 'Hello', body: 'Ready', href: '/details/components' })
     expect(testPushNotificationRequestSchema.parse(undefined)).toEqual({
       title: 'Test notification',
       body: 'Expo Push is configured.',
       href: '/',
     })
-
     expect(
       testPushNotificationResponseSchema.parse({
         ok: true,
         outboxId: '018fd4f2-1f3a-7c88-bc49-333333333333',
       }),
     ).toMatchObject({ ok: true })
-
-    expect(() =>
-      registerPushTokenRequestSchema.parse({ expoPushToken: 'not-a-token' }),
-    ).toThrow()
+    expect(() => registerPushTokenRequestSchema.parse({ expoPushToken: 'not-a-token' })).toThrow()
     expect(() => internalNotificationHrefSchema.parse('https://example.com')).toThrow()
     expect(() => internalNotificationHrefSchema.parse('//example.com')).toThrow()
   })

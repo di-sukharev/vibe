@@ -2,35 +2,26 @@ import type { UserDto } from '@web-app-demo/contracts'
 
 import type { DbClient } from '../db'
 import type { AppEnv } from '../env'
-import type { AuthService } from '../auth/service'
 import type { AppStoreSubscriptionVerifier } from '../iap/apple-verifier'
 import type { GooglePlaySubscriptionVerifier } from '../iap/google-play-verifier'
+import type { AuthenticatedPrincipal } from '../modules/auth'
 import type { StorageService } from '../storage/service'
-
-export type AuthenticatedUserContext = UserDto & {
-  sessionId: string
-}
 
 export type AppHonoVariables = {
   appStoreIapVerifier: AppStoreSubscriptionVerifier
-  authService: AuthService
+  authenticateAccessToken: (accessToken: string | undefined) => Promise<AuthenticatedPrincipal>
   env: AppEnv
   googlePlayIapVerifier: GooglePlaySubscriptionVerifier
   prisma: DbClient
   storageService: StorageService | null
 }
 
-export type AppHonoEnv = {
-  Variables: AppHonoVariables
-}
-
+export type AppHonoEnv = { Variables: AppHonoVariables }
 export type AuthenticatedHonoEnv = {
-  Variables: AppHonoVariables & {
-    user: AuthenticatedUserContext
-  }
+  Variables: AppHonoVariables & { user: AuthenticatedPrincipal }
 }
 
-export function userDtoFromAuthenticatedUser(user: AuthenticatedUserContext): UserDto {
+export function userDtoFromAuthenticatedUser(user: AuthenticatedPrincipal): UserDto {
   const { sessionId: _sessionId, ...dto } = user
   return dto
 }

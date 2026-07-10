@@ -90,11 +90,10 @@ maybeDescribe('iap API integration', () => {
     })
     expect(ingest.status).toBe(200)
 
-    const login = await app.request('/api/auth/login', {
+    const login = await app.request('/api/auth/token/login', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Client-Platform': 'mobile',
       },
       body: JSON.stringify({
         email: 'login-subscriber@example.com',
@@ -470,11 +469,10 @@ maybeDescribe('iap API integration', () => {
   })
 
   async function registerAndAuthorize(email: string) {
-    const response = await app.request('/api/auth/register', {
+    const response = await app.request('/api/auth/token/register', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Client-Platform': 'mobile',
       },
       body: JSON.stringify({
         email,

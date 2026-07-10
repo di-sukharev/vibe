@@ -52,7 +52,7 @@ test('mobile ApiClient refreshes with the stored refresh token and retries authe
       return json({ error: { code: 'UNAUTHORIZED', message: 'Expired access token' } }, 401);
     }
 
-    if (path === '/api/auth/refresh') {
+    if (path === '/api/auth/token/refresh') {
       return json({ accessToken: 'fresh-access-token', refreshToken: rotatedRefreshToken }, 200);
     }
 
@@ -80,7 +80,7 @@ test('mobile ApiClient refreshes with the stored refresh token and retries authe
   expect(storedRefreshToken).toBe(rotatedRefreshToken);
   expect(calls.map((call) => call.path)).toEqual([
     '/api/auth/me',
-    '/api/auth/refresh',
+    '/api/auth/token/refresh',
     '/api/auth/me',
   ]);
   expect(calls[0]?.authorization).toBe('Bearer expired-access-token');
@@ -99,7 +99,7 @@ test('mobile ApiClient shares one refresh request across concurrent 401 response
     const authorization = headers.get('Authorization');
     calls.push({ path, authorization });
 
-    if (path === '/api/auth/refresh') {
+    if (path === '/api/auth/token/refresh') {
       await new Promise((resolve) => setTimeout(resolve, 0));
       return json({ accessToken: 'fresh-access-token', refreshToken: rotatedRefreshToken }, 200);
     }
@@ -141,7 +141,7 @@ test('mobile ApiClient shares one refresh request across concurrent 401 response
   });
 
   const [first, second] = await Promise.all([client.me(), client.me()]);
-  const refreshCalls = calls.filter((call) => call.path === '/api/auth/refresh');
+  const refreshCalls = calls.filter((call) => call.path === '/api/auth/token/refresh');
   const meCalls = calls.filter((call) => call.path === '/api/auth/me');
 
   expect(first.user.email).toBe('user@example.com');
@@ -165,7 +165,7 @@ test('mobile ApiClient clears token state when refresh fails', async () => {
       return json({ error: { code: 'UNAUTHORIZED', message: 'Expired access token' } }, 401);
     }
 
-    if (path === '/api/auth/refresh') {
+    if (path === '/api/auth/token/refresh') {
       return json({ error: { code: 'UNAUTHORIZED', message: 'Invalid refresh token' } }, 401);
     }
 
@@ -213,7 +213,7 @@ test('mobile ApiClient sends the stored refresh token when logging out', async (
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     calls.push({ path, body });
 
-    if (path === '/api/auth/logout') {
+    if (path === '/api/auth/token/logout') {
       return new Response(null, {
         status: 204,
         headers: {
@@ -237,7 +237,7 @@ test('mobile ApiClient sends the stored refresh token when logging out', async (
 
   expect(calls).toEqual([
     {
-      path: '/api/auth/logout',
+      path: '/api/auth/token/logout',
       body: {
         expoPushToken: 'ExponentPushToken[logout-token]',
         refreshToken,
@@ -254,7 +254,7 @@ test('mobile ApiClient can send all known Expo push tokens when logging out', as
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     calls.push({ path, body });
 
-    if (path === '/api/auth/logout') {
+    if (path === '/api/auth/token/logout') {
       return new Response(null, {
         status: 204,
         headers: {
@@ -282,7 +282,7 @@ test('mobile ApiClient can send all known Expo push tokens when logging out', as
 
   expect(calls).toEqual([
     {
-      path: '/api/auth/logout',
+      path: '/api/auth/token/logout',
       body: {
         expoPushTokens: ['ExponentPushToken[logout-token]', 'ExponentPushToken[old-token]'],
         refreshToken,
@@ -299,7 +299,7 @@ test('mobile ApiClient exchanges social auth provider tokens', async () => {
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     calls.push({ path, body });
 
-    if (path === '/api/auth/social/google') {
+    if (path === '/api/auth/token/social/google') {
       return json(
         {
           user: {
@@ -336,7 +336,7 @@ test('mobile ApiClient exchanges social auth provider tokens', async () => {
   expect(response.refreshToken).toBe(rotatedRefreshToken);
   expect(calls).toEqual([
     {
-      path: '/api/auth/social/google',
+      path: '/api/auth/token/social/google',
       body: {
         idToken: 'google-id-token',
         displayName: 'Social User',
@@ -534,7 +534,7 @@ test('mobile ApiClient can unregister push tokens without an auth refresh retry'
       return json({ error: { code: 'UNAUTHORIZED', message: 'Expired access token' } }, 401);
     }
 
-    if (path === '/api/auth/refresh') {
+    if (path === '/api/auth/token/refresh') {
       return json({ accessToken: 'fresh-access-token', refreshToken: rotatedRefreshToken }, 200);
     }
 

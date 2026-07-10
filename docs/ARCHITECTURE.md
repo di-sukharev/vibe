@@ -1,6 +1,8 @@
-# Architecture
+# Product Modules Architecture
 
-This repository defines a golden path for web and mobile products: shared contracts, one backend, a CSR browser app (`webapp`), an Astro SSG/SSR site (`website`), and a runnable Expo mobile app, with little custom infrastructure.
+This repository defines a golden path for web and mobile products: shared contracts, a modular-monolith backend, a CSR browser app (`webapp`), an Astro SSG/SSR site (`website`), and a runnable Expo mobile app, with little custom infrastructure.
+
+The approach is **progressive DDD-lite**. Product contexts get explicit ownership and dependency direction without forcing every context to have every layer. Add a `domain` directory only when the feature has real policies, calculations, or state transitions. Do not add empty layers, generic/base repositories, CQRS, event sourcing, or extra services as architecture decoration.
 
 ## Contracts
 
@@ -10,23 +12,36 @@ Do not hand-copy API shapes into clients. When a contract changes, validate prod
 
 ## Backend
 
-Backend API code follows this flow:
+Backend product contexts live under `src/modules/<context>` and follow this flow:
 
 ```text
-Hono route -> Zod validation -> auth/session guard -> feature service -> Prisma -> DTO
+transport -> application -> domain/ports -> infrastructure -> DTO
 ```
 
 - `src/index.ts` is the API runtime entrypoint.
 - `src/worker.ts` is the long-running worker entrypoint. Keep it disabled in deployment specs until a real background handler is registered.
 - `src/cron.ts` is the one-shot scheduled-job entrypoint. Add concrete tasks to its registry and deploy scheduled jobs only for named product tasks.
 - `src/runtime.ts` owns shared env loading, Prisma creation, and runtime cleanup for all backend entrypoints.
-- `src/app.ts` owns the Hono app, CORS, secure headers, error handling, route mounting, and OpenAPI output.
+- `src/app.ts` is the composition root. It owns the Hono app, CORS, secure headers, error handling, module construction, route mounting, and OpenAPI output.
 - `src/env.ts` validates environment variables with Zod.
 - `src/db.ts` creates the Prisma client.
-- `src/auth/*` owns the auth feature: routes, service logic, JWT helpers, password hashing, and refresh-token hashing.
-- `src/notifications/*` owns Expo Push token registration, durable push outbox processing, Expo ticket/receipt handling, and stale-token cleanup.
+- `src/modules/auth/index.ts` is the auth module's public boundary and golden path. Its route factory captures dependencies in closures; request context contains only the authenticated principal.
+- `src/modules/notifications/index.ts` owns Expo Push token registration, durable push outbox processing, Expo ticket/receipt handling, and stale-token cleanup.
 
-Routes should stay thin. Do not put business logic into Hono handlers, UI clients, or child components when the decision belongs in a backend service.
+Backend module ownership:
+
+```text
+modules/<context>/
+  index.ts          # only cross-context import boundary
+  transport/        # Hono, HTTP validation and representation
+  application/      # use cases, permissions, transactions, orchestration
+  domain/           # optional pure policies, transitions and calculations
+  infrastructure/   # Prisma and external provider adapters
+```
+
+Transport must not import Prisma. Application and domain must not import Hono, Prisma, environment configuration, or provider SDKs. Infrastructure implements context-specific ports; repositories expose product operations rather than generic CRUD. Cross-context collaboration goes through public `index.ts` APIs or explicit application ports such as auth's `ProjectUser` and `LogoutCleanup`, never through another context's internals.
+
+Routes stay thin and translate HTTP into application calls and application failures into the stable API error shape. Do not put business rules into Hono handlers, UI clients, or child components.
 
 ## Runtime Shape And Real-Time
 
@@ -47,8 +62,8 @@ Auth v1 is custom JWT-based auth:
 - Passwords use `Bun.password.hash/verify` with Argon2id.
 - Access tokens are short-lived JWTs signed and verified with `jose`.
 - Refresh tokens are opaque random tokens; only their SHA-256 hash is stored in PostgreSQL.
-- The webapp keeps the refresh token in an HttpOnly cookie and keeps the access token in memory. Local HTTP uses `SameSite=Lax`; HTTPS production uses `Secure` and `SameSite=None` so browser auth works across separate webapp/API origins.
-- Mobile keeps the refresh token in `expo-secure-store` and keeps the access token in memory.
+- Browser routes under `/api/auth/*` keep the refresh token only in an HttpOnly cookie and never return it in JSON. Local HTTP uses `SameSite=Lax`; HTTPS production uses `Secure` and `SameSite=None` so browser auth works across separate webapp/API origins.
+- Native routes under `/api/auth/token/*` never read or set cookies and explicitly exchange refresh tokens in JSON/body payloads. Mobile stores refresh tokens in `expo-secure-store` and keeps access tokens in memory.
 - Mobile social auth uses Apple/Google provider subjects as stable identity keys. Social auth does not auto-link to existing password accounts by email; products that need linking should add an explicit authenticated account-linking flow.
 
 Refresh-token rotation creates a new session and revokes the previous one. `/api/auth/me` checks both the JWT and the active database session.
@@ -62,7 +77,12 @@ The webapp and mobile app follow the same client rules:
 - TanStack Query owns server state.
 - TanStack Form owns form state.
 - Zod schemas come from `@web-app-demo/contracts`.
-- The API client centralizes base URL handling, auth headers, refresh/retry behavior, and error shape parsing.
+- `src/platform/api` owns endpoint-agnostic fetch, base URL handling, response parsing, and the shared API error.
+- `src/features/<context>` owns endpoint paths, schemas, server-state adapters, providers, and product UI for that context.
+- Routes and `src/main.tsx` are thin composition files and import features through their public `index.ts`.
+- `src/components/ui` and `src/platform` never import product features. Features may use platform code and UI primitives; cross-feature imports must use the target feature's public index.
+
+Auth in `src/features/auth` is the client golden path: its API adapter owns auth endpoints and refresh/retry, its provider exposes only auth behavior, and pages never receive a universal API service locator. Future providers should receive narrow context APIs such as `BillingApi` or `NotificationsApi` from composition.
 
 Do not create a new form, query, auth, or API abstraction until the existing pattern stops solving the current problem.
 
@@ -77,6 +97,8 @@ Astro remains the default website stack because it is content-first, static-firs
 Backend unit/integration tests verify contracts and auth behavior at the owning layer. Webapp E2E uses Playwright and starts a real backend + Vite through `webServer`. Mobile E2E uses Maestro and stable React Native `testID` selectors.
 
 Client E2E in this template is a happy-path smoke layer, not the place for large validation matrices. Keep negative payloads, password/JWT/session rules, and error-shape checks in backend tests. Add fast client-level tests for form validation and API state edge cases when those surfaces grow.
+
+Run `bun run architecture:check` as part of every validation ladder. The dependency-free checker reports forbidden static imports as `path:line`, has fixture tests for each rule family, and runs in CI. File length is deliberately not an architecture rule; ownership and dependency direction are.
 
 ## Prisma
 

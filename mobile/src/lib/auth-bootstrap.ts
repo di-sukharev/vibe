@@ -1,8 +1,8 @@
-import type { RefreshResponse } from '@web-app-demo/contracts';
+import type { TokenRefreshResponse } from '@web-app-demo/contracts';
 
 import type { ApiClient } from './api';
 
-let bootstrapRefreshPromise: Promise<RefreshResponse | null> | null = null;
+let bootstrapRefreshPromise: Promise<TokenRefreshResponse | null> | null = null;
 
 export function refreshBootstrapSession(
   api: ApiClient,

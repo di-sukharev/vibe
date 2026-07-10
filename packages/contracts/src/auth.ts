@@ -6,10 +6,7 @@ import { expoPushTokenSchema } from './notifications'
 const displayNameSchema = z
   .union([z.string().trim().min(2).max(80), z.literal('')])
   .optional()
-  .transform((value) => {
-    if (value === '' || value === undefined) return undefined
-    return value
-  })
+  .transform((value) => (value === '' || value === undefined ? undefined : value))
 
 export const emailSchema = z.string().trim().toLowerCase().email().max(254)
 
@@ -38,46 +35,41 @@ export const loginRequestSchema = z.object({
 })
 
 export const socialAuthProviderSchema = z.enum(['apple', 'google'])
-
-export const socialAuthProviderParamsSchema = z.object({
-  provider: socialAuthProviderSchema,
-})
-
+export const socialAuthProviderParamsSchema = z.object({ provider: socialAuthProviderSchema })
 export const socialAuthRequestSchema = z.object({
   idToken: z.string().trim().min(1).max(4096),
   displayName: displayNameSchema,
 })
 
-export const refreshRequestSchema = z
+export const cookieRefreshRequestSchema = z.object({}).strict().optional().default({})
+export const cookieLogoutRequestSchema = z.object({}).strict().optional().default({})
+
+export const tokenRefreshRequestSchema = z.object({
+  refreshToken: z.string().min(32),
+})
+
+export const tokenLogoutRequestSchema = tokenRefreshRequestSchema.extend({
+  expoPushToken: expoPushTokenSchema.optional(),
+  expoPushTokens: z.array(expoPushTokenSchema).max(20).optional(),
+})
+
+export const cookieAuthResponseSchema = z
   .object({
-    refreshToken: z.string().min(32).optional(),
+    user: userSchema,
+    accessToken: z.string(),
   })
-  .optional()
-  .default({})
+  .strict()
 
-export const logoutRequestSchema = z
-  .object({
-    expoPushToken: expoPushTokenSchema.optional(),
-    expoPushTokens: z.array(expoPushTokenSchema).max(20).optional(),
-    refreshToken: z.string().min(32).optional(),
-  })
-  .optional()
-  .default({})
-
-export const authResponseSchema = z.object({
-  user: userSchema,
-  accessToken: z.string(),
-  refreshToken: z.string().optional(),
+export const tokenAuthResponseSchema = cookieAuthResponseSchema.extend({
+  refreshToken: z.string(),
 })
 
-export const refreshResponseSchema = z.object({
-  accessToken: z.string(),
-  refreshToken: z.string().optional(),
+export const cookieRefreshResponseSchema = z.object({ accessToken: z.string() }).strict()
+export const tokenRefreshResponseSchema = cookieRefreshResponseSchema.extend({
+  refreshToken: z.string(),
 })
 
-export const meResponseSchema = z.object({
-  user: userSchema,
-})
+export const meResponseSchema = z.object({ user: userSchema })
 
 export type UserDto = z.infer<typeof userSchema>
 export type RegisterRequest = z.input<typeof registerRequestSchema>
@@ -86,8 +78,12 @@ export type LoginRequest = z.infer<typeof loginRequestSchema>
 export type SocialAuthProvider = z.infer<typeof socialAuthProviderSchema>
 export type SocialAuthRequest = z.input<typeof socialAuthRequestSchema>
 export type SocialAuthPayload = z.output<typeof socialAuthRequestSchema>
-export type RefreshRequest = z.infer<typeof refreshRequestSchema>
-export type LogoutRequest = z.infer<typeof logoutRequestSchema>
-export type AuthResponse = z.infer<typeof authResponseSchema>
-export type RefreshResponse = z.infer<typeof refreshResponseSchema>
+export type CookieRefreshRequest = z.infer<typeof cookieRefreshRequestSchema>
+export type CookieLogoutRequest = z.infer<typeof cookieLogoutRequestSchema>
+export type TokenRefreshRequest = z.infer<typeof tokenRefreshRequestSchema>
+export type TokenLogoutRequest = z.infer<typeof tokenLogoutRequestSchema>
+export type CookieAuthResponse = z.infer<typeof cookieAuthResponseSchema>
+export type TokenAuthResponse = z.infer<typeof tokenAuthResponseSchema>
+export type CookieRefreshResponse = z.infer<typeof cookieRefreshResponseSchema>
+export type TokenRefreshResponse = z.infer<typeof tokenRefreshResponseSchema>
 export type MeResponse = z.infer<typeof meResponseSchema>

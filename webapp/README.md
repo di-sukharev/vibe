@@ -53,9 +53,9 @@ Production deployment for the browser app uses DigitalOcean App Platform Static 
 
 ## Practice
 
-Use TanStack Query for server state, TanStack Mutation for API writes, TanStack Form for forms, and shared Zod schemas from `packages/contracts` for validation. The access token lives only in browser memory; refresh uses the HttpOnly cookie set by the backend. `src/lib/auth-queries.ts`, `src/lib/auth.tsx`, and `src/components/AuthForm.tsx` are the baseline pattern: query `/api/auth/me`, mutate register/login/logout, keep the current-user cache in sync, and validate form submissions with shared contracts before calling the API client.
+Use TanStack Query for server state, TanStack Mutation for API writes, TanStack Form for forms, and shared Zod schemas from `packages/contracts` for validation. The access token lives only in browser memory; refresh uses the HttpOnly cookie set by the backend. `src/features/auth` is the golden path: its public index exposes the provider, user context, and auth UI; its API adapter owns auth paths and refresh/retry; and its split register/login forms validate submissions with shared contracts without putting product logic in pages.
 
-Keep the API client responsible for base URLs, auth headers, refresh/retry, and error parsing. Do not duplicate API shapes or auth state in page components.
+Keep raw fetch, base URL handling, and shared error parsing in the endpoint-agnostic `src/platform/api`. Each `src/features/<context>` owns its paths, schemas, queries, and provider. Pages import features only through public `index.ts`; features use platform and UI primitives; platform and `src/components/ui` never import product features. Run `bun run architecture:check` after changing boundaries.
 
 Use shadcn/ui for web interface primitives. Treat `src/components/ui` as the shared UI primitive layer: most files are shadcn registry output, plus project-wide primitives such as `Typography`. Import those primitives through `@/components/ui/*`. Put app-specific wrappers and composed product components in `src/components` so normal lint rules keep applying. Avoid adding new one-off global CSS classes for product UI; compose screens with Tailwind utilities and shadcn theme tokens from `src/index.css`.
 

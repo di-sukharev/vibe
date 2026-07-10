@@ -73,7 +73,7 @@ run(
   'bun',
   [
     'test',
-    'src/auth/auth.integration.test.ts',
+    'src/modules/auth/auth.integration.test.ts',
     'src/iap/iap.integration.test.ts',
     'src/notifications/notifications.integration.test.ts',
   ],

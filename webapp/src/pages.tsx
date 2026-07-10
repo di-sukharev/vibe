@@ -8,11 +8,10 @@ import {
   LoginRequiredSection,
   SessionLoadingSection,
 } from '@/components/WebRouteSections'
-import { useAuth } from '@/lib/use-auth'
+import { useAuth } from '@/features/auth'
 
 export function RootLayout() {
   const auth = useAuth()
-
   return (
     <AppShell isAuthenticated={auth.isAuthenticated} onLogout={() => void auth.logout()}>
       <Outlet />
@@ -22,28 +21,14 @@ export function RootLayout() {
 
 export function HomePage() {
   const auth = useAuth()
-
-  if (auth.isBootstrapping) {
-    return <SessionLoadingSection />
-  }
-
-  if (auth.user) {
-    return <ActiveSessionSection user={auth.user} />
-  }
-
+  if (auth.isBootstrapping) return <SessionLoadingSection />
+  if (auth.user) return <ActiveSessionSection user={auth.user} />
   return <GuestAuthSection />
 }
 
 export function AppPage() {
   const auth = useAuth()
-
-  if (auth.isBootstrapping) {
-    return <SessionLoadingSection />
-  }
-
-  if (!auth.user) {
-    return <LoginRequiredSection />
-  }
-
+  if (auth.isBootstrapping) return <SessionLoadingSection />
+  if (!auth.user) return <LoginRequiredSection />
   return <CurrentUserSection user={auth.user} />
 }

@@ -1,22 +1,28 @@
-FROM oven/bun:1
+FROM oven/bun:1.3.14 AS build
 
 WORKDIR /app
 
-COPY package.json bun.lock bunfig.toml ./
-COPY packages/contracts/package.json packages/contracts/package.json
-COPY backend/package.json backend/package.json
-COPY webapp/package.json webapp/package.json
-COPY website/package.json website/package.json
-COPY mobile/package.json mobile/package.json
+# Copy the repository instead of enumerating workspace manifests. The master branch
+# intentionally has no mobile package, while the mobile branch does; this build must
+# remain valid for both repository shapes.
+COPY . .
 
-RUN bun install --frozen-lockfile
-
-COPY packages/contracts packages/contracts
-COPY backend backend
+RUN bun install --frozen-lockfile --filter @web-app-demo/backend
 
 WORKDIR /app/backend
 
 RUN DATABASE_URL="postgresql://superuser:superpassword@localhost:5432/web_app_demo?schema=public" bun run prisma:generate
+
+FROM oven/bun:1.3.14 AS runtime
+
+WORKDIR /app
+
+COPY --from=build /app/package.json /app/bun.lock /app/bunfig.toml ./
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/packages/contracts ./packages/contracts
+COPY --from=build /app/backend ./backend
+
+WORKDIR /app/backend
 
 ENV NODE_ENV=production
 
