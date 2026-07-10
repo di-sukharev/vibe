@@ -1,5 +1,5 @@
 import { createBackendRuntime, type BackendRuntime } from './runtime'
-import { checkPushReceipts, processPushOutbox } from './notifications/service'
+import { createNotificationsModule } from './modules/notifications'
 
 type CronTask = (runtime: BackendRuntime) => Promise<void>
 
@@ -12,8 +12,12 @@ const cronTasks = {
     console.log('Cron db:ping task completed.')
   },
   'notifications:process': async (runtime) => {
-    const outbox = await processPushOutbox(runtime)
-    const receipts = await checkPushReceipts(runtime)
+    const notifications = createNotificationsModule({
+      db: runtime.prisma,
+      env: runtime.env,
+    })
+    const outbox = await notifications.processOutbox()
+    const receipts = await notifications.checkReceipts()
     console.log('Cron notifications:process task completed.', {
       outbox,
       receipts,

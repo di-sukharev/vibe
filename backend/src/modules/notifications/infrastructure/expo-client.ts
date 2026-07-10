@@ -1,8 +1,8 @@
 const expoPushSendUrl = 'https://exp.host/--/api/v2/push/send'
 const expoPushReceiptsUrl = 'https://exp.host/--/api/v2/push/getReceipts'
+export const defaultExpoPushRequestTimeoutMs = 30_000
 const maxSendBatchSize = 100
 const maxReceiptBatchSize = 1000
-export const defaultExpoPushRequestTimeoutMs = 30_000
 
 export type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>
 

@@ -49,7 +49,10 @@ export type AuthRepository = {
     userId: string
     now: Date
   }): Promise<{ id: string; user: AuthUserRecord } | null>
-  revokeSession(input: { refreshTokenHash: string; now: Date }): Promise<string | null>
+  revokeSession(
+    input: { expoPushTokens: string[]; refreshTokenHash: string; now: Date },
+    cleanup: LogoutCleanup,
+  ): Promise<string | null>
 }
 
 export type AccessTokens = {
@@ -84,7 +87,12 @@ export type SocialIdentities = {
 export type SubscriptionReader = (userId: string) =>
   | SubscriptionSnapshot
   | Promise<SubscriptionSnapshot>
+export type LogoutCleanupStore = {
+  removePushTokens(userId: string, expoPushTokens: string[]): Promise<void>
+}
+
 export type LogoutCleanup = (input: {
   expoPushTokens: string[]
+  store: LogoutCleanupStore
   userId: string
 }) => void | Promise<void>

@@ -4,10 +4,10 @@ import type {
   UnregisterPushTokenRequest,
 } from '@web-app-demo/contracts'
 
-import type { DbClient } from '../db'
-import type { AppEnv } from '../env'
-import { Prisma } from '../generated/prisma/client'
-import { PushDeliveryStatus, PushNotificationOutboxStatus } from '../generated/prisma/enums'
+import type { DbClient } from '../../../db'
+import type { AppEnv } from '../../../env'
+import { Prisma } from '../../../generated/prisma/client'
+import { PushDeliveryStatus, PushNotificationOutboxStatus } from '../../../generated/prisma/enums'
 import {
   createExpoPushClient,
   defaultExpoPushRequestTimeoutMs,
@@ -15,47 +15,27 @@ import {
   isDeviceNotRegisteredError,
   type ExpoPushClientOptions,
 } from './expo-client'
+import type {
+  CheckPushReceiptsMetrics,
+  EnqueuePushNotificationInput,
+  NotificationOperations,
+  ProcessPushOutboxMetrics,
+} from '../application/ports'
+import {
+  initialReceiptCheckAt,
+  isReceiptCheckTerminal,
+  isRetryableProviderError,
+  nextReceiptCheckAt,
+  outboxRetryAt,
+  shouldRetryOutbox,
+} from '../domain/retry-policy'
 
-const baseRetryDelayMs = 2 * 60 * 1000
-const maxAttempts = 3
 const defaultProcessLimit = 100
 const defaultProcessMaxLoops = 5
 const defaultProcessMaxRuntimeMs = 55_000
 const defaultProcessingStaleMs = 120_000
 const defaultReceiptCheckLimit = 300
-const initialReceiptCheckDelayMs = 15_000
-const baseReceiptRetryDelayMs = 2 * 60 * 1000
-const maxReceiptCheckAttempts = 8
-const maxReceiptRetryDelayMs = 2 * 60 * 60 * 1000
 const expoSendBatchSize = 100
-const retryableExpoErrorCodes = new Set(['MessageRateExceeded'])
-
-export type EnqueuePushNotificationInput = {
-  body: string
-  data?: Record<string, unknown>
-  dedupeKey: string
-  scheduledFor?: Date
-  title: string
-  userId: string
-}
-
-export type ProcessPushOutboxMetrics = {
-  failed: number
-  loops: number
-  pendingCount: number
-  processed: number
-  requeuedStale: number
-  sent: number
-  skipped: number
-  transientFailed: number
-}
-
-export type CheckPushReceiptsMetrics = {
-  checked: number
-  delivered: number
-  failed: number
-  tokensDisabled: number
-}
 
 type PushServiceContext = {
   env: AppEnv
@@ -81,6 +61,23 @@ type PushTokenRecord = {
 type ReceiptDelivery = {
   id: string
   receiptCheckAttempts: number
+}
+
+export function createNotificationOperations(context: PushServiceContext): NotificationOperations {
+  return {
+    registerToken: (userId, input) => registerPushToken(context.prisma, userId, input),
+    unregisterToken: (userId, input) => unregisterPushToken(context.prisma, userId, input),
+    cleanupTokens: async (userId, expoPushTokens) => {
+      if (expoPushTokens.length === 0) return
+      await context.prisma.pushToken.deleteMany({
+        where: { expoPushToken: { in: expoPushTokens }, userId },
+      })
+    },
+    hasActiveToken: (userId) => hasActivePushToken(context.prisma, userId),
+    enqueueAndProcess: (input) => enqueueAndProcessPushNotification(context, input),
+    processOutbox: (options) => processPushOutbox(context, options),
+    checkReceipts: (options) => checkPushReceipts(context, options),
+  }
 }
 
 export async function registerPushToken(
@@ -387,9 +384,9 @@ export async function checkPushReceipts(
     }
 
     if (
-      isRetryableExpoError(receipt) &&
+      isRetryableProviderError(receipt.details?.error) &&
       delivery.pushTokenId &&
-      delivery.outbox.attempts < maxAttempts
+      shouldRetryOutbox(delivery.outbox.attempts)
     ) {
       await context.prisma.$transaction(async (tx) => {
         await tx.pushDelivery.delete({
@@ -404,7 +401,7 @@ export async function checkPushReceipts(
           data: {
             lastError: receipt.message ?? 'Retryable Expo push receipt failed',
             processedAt: null,
-            scheduledFor: retryDate(delivery.outbox.attempts, now),
+            scheduledFor: outboxRetryAt(delivery.outbox.attempts, now),
             status: PushNotificationOutboxStatus.pending,
           },
         })
@@ -540,7 +537,7 @@ async function processOutboxItem(
               expoPushToken: token.expoPushToken,
               outboxId: item.id,
               pushTokenId: token.id,
-              receiptNextCheckAt: receiptInitialDate(now),
+              receiptNextCheckAt: initialReceiptCheckAt(now),
               status: PushDeliveryStatus.sent,
               ticketId: ticket.id,
               userId: item.userId,
@@ -549,7 +546,7 @@ async function processOutboxItem(
           continue
         }
 
-        if (isRetryableExpoError(ticket)) {
+        if (isRetryableProviderError(ticket.details?.error)) {
           retryableTicketFailures.push({
             message: ticket.message ?? 'Retryable Expo push ticket failed',
             token,
@@ -579,12 +576,12 @@ async function processOutboxItem(
       const nextAttempts = item.attempts + 1
       const message = errorMessage(error)
 
-      if (error instanceof ExpoPushTransientError && nextAttempts < maxAttempts) {
+      if (error instanceof ExpoPushTransientError && shouldRetryOutbox(nextAttempts)) {
         await markOutboxComplete(context.prisma, item.id, {
           attempts: nextAttempts,
           lastError: message,
           processedAt: null,
-          scheduledFor: retryDate(nextAttempts, now),
+          scheduledFor: outboxRetryAt(nextAttempts, now),
           status: PushNotificationOutboxStatus.pending,
         })
         metrics.failed = 1
@@ -608,12 +605,12 @@ async function processOutboxItem(
     const nextAttempts = item.attempts + 1
     const message = `${retryableTicketFailures.length} retryable Expo push ticket(s) failed`
 
-    if (nextAttempts < maxAttempts) {
+    if (shouldRetryOutbox(nextAttempts)) {
       await markOutboxComplete(context.prisma, item.id, {
         attempts: nextAttempts,
         lastError: message,
         processedAt: null,
-        scheduledFor: retryDate(nextAttempts, now),
+        scheduledFor: outboxRetryAt(nextAttempts, now),
         status: PushNotificationOutboxStatus.pending,
       })
       metrics.failed = 1
@@ -811,7 +808,7 @@ async function handleMissingReceipt(
 ) {
   const nextAttempts = delivery.receiptCheckAttempts + 1
 
-  if (nextAttempts >= maxReceiptCheckAttempts) {
+  if (isReceiptCheckTerminal(nextAttempts)) {
     await prisma.pushDelivery.update({
       where: {
         id: delivery.id,
@@ -834,27 +831,9 @@ async function handleMissingReceipt(
     },
     data: {
       receiptCheckAttempts: nextAttempts,
-      receiptNextCheckAt: receiptRetryDate(nextAttempts, now),
+      receiptNextCheckAt: nextReceiptCheckAt(nextAttempts, now),
     },
   })
-}
-
-function retryDate(attempts: number, now: Date) {
-  return new Date(now.getTime() + baseRetryDelayMs * 2 ** Math.max(attempts - 1, 0))
-}
-
-function receiptInitialDate(now: Date) {
-  return new Date(now.getTime() + initialReceiptCheckDelayMs)
-}
-
-function receiptRetryDate(attempts: number, now: Date) {
-  return new Date(
-    now.getTime() +
-      Math.min(
-        baseReceiptRetryDelayMs * 2 ** Math.max(attempts - 1, 0),
-        maxReceiptRetryDelayMs,
-      ),
-  )
 }
 
 function isUniqueConstraintError(error: unknown) {
@@ -871,10 +850,6 @@ function jsonObjectToRecord(value: Prisma.JsonValue | null): Record<string, unkn
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Unknown push notification error'
-}
-
-function isRetryableExpoError(value: { details?: { error?: string }; status: string }) {
-  return Boolean(value.details?.error && retryableExpoErrorCodes.has(value.details.error))
 }
 
 function emptyOutboxMetrics(): ProcessPushOutboxMetrics {

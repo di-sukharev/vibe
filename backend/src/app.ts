@@ -4,7 +4,6 @@ import { secureHeaders } from 'hono/secure-headers'
 
 import type { DbClient } from './db'
 import type { AppEnv } from './env'
-import type { AppHonoEnv } from './http/context'
 import { errorResponse, handleError, validationErrorHook } from './http/errors'
 import { createAuthModule } from './modules/auth'
 import {
@@ -12,10 +11,7 @@ import {
   type AppStoreSubscriptionVerifier,
   type GooglePlaySubscriptionVerifier,
 } from './modules/billing'
-import { createNotificationRoutes } from './notifications/routes'
-import { createStorageServiceFromEnv } from './storage/service'
-
-export type AppBindings = AppHonoEnv
+import { createNotificationsModule } from './modules/notifications'
 
 type CreateAppOptions = {
   env: AppEnv
@@ -32,25 +28,20 @@ export function createApp({
   iapVerifier,
   prisma,
 }: CreateAppOptions) {
-  const storageService = createStorageServiceFromEnv(env)
   const billing = createBillingModule({
     appStoreVerifier: appStoreIapVerifier ?? iapVerifier,
     db: prisma,
     env,
     googlePlayVerifier: googlePlayIapVerifier,
   })
+  const notifications = createNotificationsModule({ db: prisma, env })
   const auth = createAuthModule({
     db: prisma,
     env,
-    logoutCleanup: async ({ expoPushTokens, userId }) => {
-      if (expoPushTokens.length === 0) return
-      await prisma.pushToken.deleteMany({
-        where: { expoPushToken: { in: expoPushTokens }, userId },
-      })
-    },
+    logoutCleanup: notifications.logoutCleanup,
     subscriptionReader: billing.getSubscription,
   })
-  const app = new OpenAPIHono<AppHonoEnv>({ defaultHook: validationErrorHook })
+  const app = new OpenAPIHono({ defaultHook: validationErrorHook })
 
   app.use(secureHeaders())
   app.use(
@@ -66,20 +57,12 @@ export function createApp({
       maxAge: 600,
     }),
   )
-  app.use('*', async (c, next) => {
-    c.set('authenticateAccessToken', auth.authenticateAccessToken)
-    c.set('env', env)
-    c.set('prisma', prisma)
-    c.set('storageService', storageService)
-    await next()
-  })
-
   app.get('/', (c) => c.json({ name: 'web_app_demo backend', status: 'ok' }))
   app.get('/health', (c) => c.json({ status: 'ok' }))
 
   app.route('/api/auth', auth.routes)
   app.route('/api/iap', billing.createRoutes(auth.authenticateAccessToken))
-  app.route('/api/notifications', createNotificationRoutes())
+  app.route('/api/notifications', notifications.createRoutes(auth.authenticateAccessToken))
   app.route('/api/webhooks', billing.webhookRoutes)
 
   app.doc('/openapi.json', {

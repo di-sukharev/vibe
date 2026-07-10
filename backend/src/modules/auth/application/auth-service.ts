@@ -170,14 +170,15 @@ export class AuthService {
   async logout(refreshToken: string | undefined, expoPushTokens: string[] = []) {
     if (!refreshToken) return false
 
-    const userId = await this.dependencies.repository.revokeSession({
-      refreshTokenHash: this.dependencies.refreshTokens.hash(refreshToken),
-      now: this.dependencies.clock.now(),
-    })
-    if (!userId) return false
-
-    await this.dependencies.logoutCleanup({ expoPushTokens, userId })
-    return true
+    const userId = await this.dependencies.repository.revokeSession(
+      {
+        expoPushTokens,
+        refreshTokenHash: this.dependencies.refreshTokens.hash(refreshToken),
+        now: this.dependencies.clock.now(),
+      },
+      this.dependencies.logoutCleanup,
+    )
+    return Boolean(userId)
   }
 
   private async issueSession(user: AuthUserRecord, metadata: SessionMetadata) {

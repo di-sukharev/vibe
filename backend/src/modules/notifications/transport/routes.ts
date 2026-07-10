@@ -9,27 +9,13 @@ import {
 import { createRoute, OpenAPIHono } from '@hono/zod-openapi'
 import type { Context } from 'hono'
 
-import type { AppEnv } from '../env'
-import { AppError, errorResponse } from '../http/errors'
-import type { DbClient } from '../db'
-import type { AuthenticatedPrincipal } from '../modules/auth'
-import {
-  buildTestPushInput,
-  enqueueAndProcessPushNotification,
-  hasActivePushToken,
-  registerPushToken,
-  unregisterPushToken,
-} from './service'
+import { AppError, errorResponse } from '../../../http/errors'
+import type { AuthenticatedPrincipal } from '../../auth'
+import type { NotificationService } from '../application/notification-service'
 
-type NotificationRouteEnv = {
-  Variables: {
-    authenticateAccessToken: (
-      accessToken: string | undefined,
-    ) => Promise<AuthenticatedPrincipal>
-    env: AppEnv
-    prisma: DbClient
-  }
-}
+type AuthenticateAccessToken = (
+  accessToken: string | undefined,
+) => Promise<AuthenticatedPrincipal>
 
 const errorResponseContent = {
   'application/json': {
@@ -135,8 +121,11 @@ const testPushRoute = createRoute({
   },
 })
 
-export function createNotificationRoutes() {
-  const routes = new OpenAPIHono<NotificationRouteEnv>({
+export function createNotificationRoutes(input: {
+  authenticateAccessToken: AuthenticateAccessToken
+  service: NotificationService
+}) {
+  const routes = new OpenAPIHono({
     defaultHook: (result, c) => {
       if (!result.success) {
         return c.json(
@@ -148,32 +137,25 @@ export function createNotificationRoutes() {
   })
 
   routes.openapi(registerPushTokenRoute, async (c) => {
-    const userId = await currentUserId(c)
-    await registerPushToken(c.get('prisma'), userId, c.req.valid('json'))
+    const userId = await currentUserId(c, input.authenticateAccessToken)
+    await input.service.registerToken(userId, c.req.valid('json'))
     return c.json({ ok: true as const }, 200)
   })
 
   routes.openapi(unregisterPushTokenRoute, async (c) => {
-    const userId = await currentUserId(c)
-    await unregisterPushToken(c.get('prisma'), userId, c.req.valid('json'))
+    const userId = await currentUserId(c, input.authenticateAccessToken)
+    await input.service.unregisterToken(userId, c.req.valid('json'))
     return c.json({ ok: true as const }, 200)
   })
 
   routes.openapi(testPushRoute, async (c) => {
-    const userId = await currentUserId(c)
-    const prisma = c.get('prisma')
+    const userId = await currentUserId(c, input.authenticateAccessToken)
 
-    if (!(await hasActivePushToken(prisma, userId))) {
+    if (!(await input.service.hasActiveToken(userId))) {
       throw new AppError(409, 'CONFLICT', 'No active Expo push token registered for this user')
     }
 
-    const queued = await enqueueAndProcessPushNotification(
-      {
-        env: c.get('env'),
-        prisma,
-      },
-      buildTestPushInput(userId, c.req.valid('json')),
-    )
+    const queued = await input.service.sendTestPush(userId, c.req.valid('json'))
 
     return c.json({ ok: true as const, outboxId: queued.id }, 200)
   })
@@ -181,8 +163,8 @@ export function createNotificationRoutes() {
   return routes
 }
 
-async function currentUserId(c: Context<NotificationRouteEnv>) {
-  return (await c.get('authenticateAccessToken')(bearerToken(c))).id
+async function currentUserId(c: Context, authenticateAccessToken: AuthenticateAccessToken) {
+  return (await authenticateAccessToken(bearerToken(c))).id
 }
 
 function bearerToken(c: Context) {

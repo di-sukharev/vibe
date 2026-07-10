@@ -1,5 +1,5 @@
 import { createBackendRuntime, type BackendRuntime } from './runtime'
-import { checkPushReceipts, processPushOutbox } from './notifications/service'
+import { createNotificationsModule } from './modules/notifications'
 
 type WorkerMode = 'notifications' | 'noop'
 
@@ -20,13 +20,17 @@ export async function runNotificationsWorker(
   } = {},
 ) {
   const pollIntervalMs = options.pollIntervalMs ?? 5_000
+  const notifications = createNotificationsModule({
+    db: runtime.prisma,
+    env: runtime.env,
+  })
   console.log(`Notification worker started; polling every ${pollIntervalMs}ms.`)
 
   while (!options.signal?.aborted) {
-    await processPushOutbox(runtime).catch((error: unknown) => {
+    await notifications.processOutbox().catch((error: unknown) => {
       console.error('[NotificationWorker] processPushOutbox failed:', error)
     })
-    await checkPushReceipts(runtime).catch((error: unknown) => {
+    await notifications.checkReceipts().catch((error: unknown) => {
       console.error('[NotificationWorker] checkPushReceipts failed:', error)
     })
     await delay(pollIntervalMs, options.signal)

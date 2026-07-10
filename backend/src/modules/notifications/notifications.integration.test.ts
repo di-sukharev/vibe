@@ -1,15 +1,15 @@
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 
-import { createApp } from '../app'
-import { createPrisma } from '../db'
-import type { AppEnv } from '../env'
-import { PushDeliveryStatus, PushNotificationOutboxStatus } from '../generated/prisma/enums'
+import { createApp } from '../../app'
+import { createPrisma } from '../../db'
+import type { AppEnv } from '../../env'
+import { PushDeliveryStatus, PushNotificationOutboxStatus } from '../../generated/prisma/enums'
 import {
   checkPushReceipts,
   claimPushOutboxItemForProcessing,
   enqueuePushNotification,
   processPushOutbox,
-} from './service'
+} from './infrastructure/notification-operations'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 const maybeDescribe = databaseUrl ? describe : describe.skip

@@ -130,16 +130,30 @@ export function createPrismaAuthRepository(db: DbClient): AuthRepository {
       })
     },
 
-    revokeSession(input) {
+    revokeSession(input, cleanup) {
       return db.$transaction(async (tx) => {
         const session = await tx.authSession.findFirst({
           where: {
             refreshTokenHash: input.refreshTokenHash,
             revokedAt: null,
+            expiresAt: { gt: input.now },
           },
           select: { id: true, userId: true },
         })
         if (!session) return null
+
+        await cleanup({
+          expoPushTokens: input.expoPushTokens,
+          store: {
+            async removePushTokens(userId, expoPushTokens) {
+              if (expoPushTokens.length === 0) return
+              await tx.pushToken.deleteMany({
+                where: { expoPushToken: { in: expoPushTokens }, userId },
+              })
+            },
+          },
+          userId: session.userId,
+        })
 
         const revoked = await tx.authSession.updateMany({
           where: { id: session.id, revokedAt: null },
