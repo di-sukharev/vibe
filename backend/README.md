@@ -61,7 +61,7 @@ Mobile social auth is optional. Configure `APPLE_AUTH_BUNDLE_ID`, `APPLE_AUTH_JW
 
 DigitalOcean Spaces env is optional. Leave `SPACES_*` blank until the product needs uploads, media, exports, or downloads. When storage is active, configure the complete Spaces group in `backend/.env` and follow [../docs/STORAGE.md](../docs/STORAGE.md).
 
-Expo Push is optional at first run, but the backend foundation is ready. APNs and FCM credentials are configured in Expo/EAS for the mobile project; the backend only needs `EXPO_PUSH_ACCESS_TOKEN` when Expo push security is enabled. Product code should call `enqueuePushNotification` from `src/notifications/service.ts` after committing the domain event, using a stable per-user `dedupeKey`, `title`, `body`, and optional `data.href`.
+Expo Push is optional at first run, but the backend foundation is ready. APNs and FCM credentials are configured in Expo/EAS for the mobile project; the backend only needs `EXPO_PUSH_ACCESS_TOKEN` when Expo push security is enabled. Product code should use the public notifications module in `src/modules/notifications/index.ts` after committing the domain event, with a stable per-user `dedupeKey`, `title`, `body`, and optional `data.href`.
 
 ## Runtime Entrypoints
 
@@ -92,13 +92,13 @@ Production deployment for the backend uses DigitalOcean App Platform with Digita
 
 - `POST /api/auth/register`
 - `POST /api/auth/login`
-- `POST /api/auth/social/apple`
-- `POST /api/auth/social/google`
 - `POST /api/auth/refresh`
 - `GET /api/auth/me`
 - `POST /api/auth/logout`
 - `POST /api/auth/token/register`
 - `POST /api/auth/token/login`
+- `POST /api/auth/token/social/apple`
+- `POST /api/auth/token/social/google`
 - `POST /api/auth/token/refresh`
 - `POST /api/auth/token/logout`
 - `GET /openapi.json`

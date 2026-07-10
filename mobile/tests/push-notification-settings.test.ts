@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { shouldEnablePushNotifications } from '../src/lib/push-notification-settings';
+import { shouldEnablePushNotifications } from '../src/features/notifications/push-notification-settings';
 
 const enabledRuntime = {
   isDevice: true,

@@ -41,6 +41,7 @@ bun run web
 bun run typecheck
 bun run lint
 bun run build
+bun run doctor
 bun run e2e:maestro
 ```
 
@@ -171,7 +172,7 @@ Stable selectors live in `src/constants/testIds.ts`, the flow is `.maestro/flows
 
 Use TanStack Query for server state, TanStack Form for forms, and shared Zod schemas for validation. The refresh token is stored in `expo-secure-store` on native platforms; the access token lives only in app memory.
 
-Keep API URL handling, auth headers, refresh/retry, and error parsing centralized in the API client. Add stable `testID` constants for interactive controls that E2E needs to touch.
+Product code lives in `src/features/auth`, `src/features/billing`, and `src/features/notifications`. `src/composition` builds the namespaced APIs and passes each provider only its own interface. `src/platform/api` owns endpoint-agnostic fetch, auth retry, base URL, and error parsing; each feature API owns its endpoint paths and schemas. Routes are thin wrappers that import features through public indexes. Run `bun run architecture:check` after boundary changes and `bun run doctor` (pinned to Expo Doctor 1.20.0) after Expo dependency changes.
 
 Mobile UI primitives live in `src/components/ui` and mirror the local Web ShadCN registry by file name. They are React Native-first implementations using native style props, controlled/uncontrolled values, and native touch patterns instead of DOM/Radix props such as `className` or `asChild`. The protected `/components` route is the local component catalog and the post-auth smoke surface.
 

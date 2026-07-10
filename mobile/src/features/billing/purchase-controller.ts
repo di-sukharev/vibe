@@ -2,7 +2,7 @@ import type { GooglePlayPurchaseReference, SubscriptionSnapshot } from '@web-app
 import type { ExpoPurchaseError, ProductSubscription, Purchase, RequestPurchaseProps, SubscriptionOffer } from 'expo-iap';
 import { ErrorCode } from 'expo-iap/build/types';
 
-import { ApiRequestError } from './api';
+import { ApiRequestError } from '@/platform/api';
 import type { IapDiagnosticPayload } from './iap-diagnostics';
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

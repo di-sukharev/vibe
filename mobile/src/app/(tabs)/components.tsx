@@ -167,7 +167,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Toaster, useToast } from '@/components/ui/sonner';
 import { Typography } from '@/components/ui/typography';
 import { TEST_IDS } from '@/constants/testIds';
-import { useAuth } from '@/lib/auth';
+import { useAuth } from '@/features/auth';
 
 export default function ComponentsScreen() {
   return (

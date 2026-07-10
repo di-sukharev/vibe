@@ -3,7 +3,7 @@ import { expect, test } from 'bun:test';
 import {
   googleSignInConfigFromEnv,
   isGoogleSignInConfiguredForPlatform,
-} from '../src/lib/social-auth-config';
+} from '../src/features/auth/social-auth-config';
 
 test('Google Sign-In config trims public Expo env values', () => {
   expect(

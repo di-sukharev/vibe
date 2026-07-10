@@ -7,7 +7,10 @@ const repoRoot = resolve(import.meta.dir, '../..');
 
 test('alternative billing remains deferred unless product scope is updated', () => {
   const appConfig = readFileSync(resolve(repoRoot, 'mobile/app.config.js'), 'utf8');
-  const iapProvider = readFileSync(resolve(repoRoot, 'mobile/src/lib/iap.tsx'), 'utf8');
+  const iapProvider = readFileSync(
+    resolve(repoRoot, 'mobile/src/features/billing/provider.tsx'),
+    'utf8',
+  );
   const docs = readFileSync(resolve(repoRoot, 'docs/IAP.md'), 'utf8');
 
   expect(appConfig).not.toContain('iosAlternativeBilling');

@@ -6,7 +6,7 @@ const scriptDir = fileURLToPath(new URL('.', import.meta.url))
 const mobileRoot = resolve(scriptDir, '../..')
 const flowPath = resolve(mobileRoot, '.maestro/flows/auth-smoke.yaml')
 const envExamplePath = resolve(mobileRoot, '.maestro/.env.example')
-const appPath = resolve(mobileRoot, 'src/app/index.tsx')
+const appPath = resolve(mobileRoot, 'src/features/auth/screens/AuthScreen.tsx')
 
 const requiredEnvKeys = [
   'APP_ID',

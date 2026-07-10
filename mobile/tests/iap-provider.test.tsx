@@ -171,7 +171,7 @@ let authState: {
   api: {
     createAppStoreOfferCodeRedemption: ReturnType<typeof mock>;
     ingestGooglePlayTransaction: ReturnType<typeof mock>;
-    iapEntitlement: ReturnType<typeof mock>;
+    entitlement: ReturnType<typeof mock>;
     ingestAppStoreTransaction: ReturnType<typeof mock>;
     reconcileGooglePlayTransactions: ReturnType<typeof mock>;
     reconcileAppStoreTransactions: ReturnType<typeof mock>;
@@ -255,13 +255,13 @@ mock.module('expo-iap', () => ({
   },
 }));
 
-mock.module('../src/lib/auth', () => ({
+mock.module('@/features/auth', () => ({
   useAuth() {
     return authState;
   },
 }));
 
-mock.module('../src/lib/iap-diagnostics', () => ({
+mock.module('../src/features/billing/iap-diagnostics', () => ({
   trackIapDiagnostic(event: string, payload: Record<string, unknown>) {
     iapDiagnostics.push({ event, payload });
   },
@@ -305,7 +305,7 @@ beforeEach(() => {
       ingestGooglePlayTransaction: mock(async () => ({
         subscription: { ...activeSubscription, platform: 'android', originalTransactionId: null, productId: 'premium' },
       })),
-      iapEntitlement: mock(async () => ({ subscription: inactiveSubscription })),
+      entitlement: mock(async () => ({ subscription: inactiveSubscription })),
       ingestAppStoreTransaction: mock(async () => ({ subscription: activeSubscription })),
       reconcileGooglePlayTransactions: mock(async () => ({
         subscription: { ...activeSubscription, platform: 'android', originalTransactionId: null, productId: 'premium' },
@@ -640,7 +640,7 @@ test('IapProvider accepts offer-code sheet implementations that return no result
   expect(authState.api.createAppStoreOfferCodeRedemption).toHaveBeenCalledTimes(1);
   expect(presentCodeRedemptionSheetIOSMock).toHaveBeenCalledTimes(1);
   expect(latestContext?.error).toBeNull();
-  expect(authState.api.iapEntitlement).toHaveBeenCalled();
+  expect(authState.api.entitlement).toHaveBeenCalled();
   await unmount(root);
 });
 
@@ -1029,7 +1029,7 @@ test('IapProvider does not finish available purchases that backend ingest reject
     id: '018fd4f2-1f3a-7c88-bc49-333333333333',
     subscription: activeSubscription,
   };
-  authState.api.iapEntitlement = mock(async () => ({ subscription: activeSubscription }));
+  authState.api.entitlement = mock(async () => ({ subscription: activeSubscription }));
   authState.api.ingestAppStoreTransaction = mock(async () => {
     throw new Error('backend rejected purchase');
   });
@@ -1058,7 +1058,7 @@ test('IapProvider startup sync scans non-active StoreKit purchases for unfinishe
     id: '018fd4f2-1f3a-7c88-bc49-333333333333',
     subscription: activeSubscription,
   };
-  authState.api.iapEntitlement = mock(async () => ({ subscription: activeSubscription }));
+  authState.api.entitlement = mock(async () => ({ subscription: activeSubscription }));
   availablePurchases = [purchase];
 
   const root = await renderProvider();
@@ -1081,12 +1081,12 @@ test('IapProvider reconciles known original transactions even before StoreKit co
     id: '018fd4f2-1f3a-7c88-bc49-333333333333',
     subscription: activeSubscription,
   };
-  authState.api.iapEntitlement = mock(async () => ({ subscription: activeSubscription }));
+  authState.api.entitlement = mock(async () => ({ subscription: activeSubscription }));
 
   const root = await renderProvider();
   await waitForEffects();
 
-  expect(authState.api.iapEntitlement).toHaveBeenCalledTimes(1);
+  expect(authState.api.entitlement).toHaveBeenCalledTimes(1);
   expect(authState.api.reconcileAppStoreTransactions).toHaveBeenCalledWith({
     originalTransactionIds: ['original-1'],
   });
@@ -1102,7 +1102,7 @@ test('IapProvider falls back to server reconcile when available purchases fail f
     id: '018fd4f2-1f3a-7c88-bc49-333333333333',
     subscription: activeSubscription,
   };
-  authState.api.iapEntitlement = mock(async () => ({ subscription: activeSubscription }));
+  authState.api.entitlement = mock(async () => ({ subscription: activeSubscription }));
   getAvailablePurchasesMock = mock(async () => {
     throw { code: 'unknown' };
   });
@@ -1134,12 +1134,12 @@ test('IapProvider does not resync just because an unchanged subscription rerende
   const root = await renderProvider();
   await waitForEffects();
 
-  expect(authState.api.iapEntitlement).toHaveBeenCalledTimes(1);
+  expect(authState.api.entitlement).toHaveBeenCalledTimes(1);
 
   await rerenderProvider(root);
   await waitForEffects();
 
-  expect(authState.api.iapEntitlement).toHaveBeenCalledTimes(1);
+  expect(authState.api.entitlement).toHaveBeenCalledTimes(1);
 });
 
 test('IapProvider blocks store actions while the App Store connection is not ready', async () => {
@@ -1228,7 +1228,7 @@ async function rerenderProvider(root: Root) {
 }
 
 async function renderProviderTree(root: Root) {
-  const { IapProvider, useSubscriptionIap } = await import('../src/lib/iap');
+  const { IapProvider, useSubscriptionIap } = await import('../src/features/billing/provider');
 
   function Probe() {
     latestContext = useSubscriptionIap();
@@ -1237,7 +1237,7 @@ async function renderProviderTree(root: Root) {
 
   await act(async () => {
     root.render(
-      <IapProvider>
+      <IapProvider api={authState.api}>
         <Probe />
       </IapProvider>,
     );

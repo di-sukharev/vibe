@@ -115,8 +115,6 @@ function checkBackendLayers(filePath, specifier, report) {
 
 function checkBackendModuleBoundary(filePath, specifier, report) {
   const sourceModule = filePath.match(/^backend\/src\/modules\/([^/]+)\//)?.[1]
-  if (!sourceModule) return
-
   const target = resolveRepositoryImport(filePath, specifier)
   const match = target?.match(/^backend\/src\/modules\/([^/]+)(?:\/(.*))?$/)
   if (!match || match[1] === sourceModule) return
@@ -138,7 +136,7 @@ function checkClientBoundary(filePath, specifier, report) {
 
   const sourceFeature = filePath.match(new RegExp(`^${client}/src/features/([^/]+)/`))?.[1]
   const targetFeature = target.match(new RegExp(`^${client}/src/features/([^/]+)(?:/(.*))?$`))
-  if (sourceFeature && targetFeature && targetFeature[1] !== sourceFeature) {
+  if (targetFeature && targetFeature[1] !== sourceFeature) {
     if (targetFeature[2] && targetFeature[2] !== 'index' && targetFeature[2] !== 'index.ts') {
       report(
         'client-feature-public-api',

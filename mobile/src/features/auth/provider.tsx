@@ -14,22 +14,12 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from 'react';
 
-import { ApiClient } from './api';
-import { clearBootstrapAuthState, refreshBootstrapSession } from './auth-bootstrap';
-import { logoutWithPushCleanup } from './auth-logout';
-import {
-  clearPendingExpoPushTokenCleanup,
-  clearStoredExpoPushToken,
-  getKnownExpoPushTokens,
-  getStoredExpoPushToken,
-  markStoredExpoPushTokenForCleanup,
-  setPendingExpoPushTokenCleanup,
-  unregisterStoredExpoPushToken,
-} from './push-token-store';
+import type { AuthApiPort } from './api';
+import { clearBootstrapAuthState, refreshBootstrapSession } from './bootstrap';
+import { logoutWithPushCleanup, type LogoutPushCleanupInput } from './logout';
 import {
   clearStoredRefreshToken,
   getStoredRefreshToken,
@@ -38,7 +28,6 @@ import {
 
 type AuthContextValue = {
   user: UserDto | null;
-  api: ApiClient;
   isBootstrapping: boolean;
   isAuthenticated: boolean;
   refreshUser: () => Promise<void>;
@@ -53,45 +42,46 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 const meQueryKey = ['auth', 'me'] as const;
 type MeQueryData = { user: UserDto };
 
-export function AuthProvider({ children }: PropsWithChildren) {
+export type AuthSessionPort = {
+  setAccessToken: (accessToken: string | null) => void;
+  setExpiredHandler: (handler: () => void | Promise<void>) => void;
+};
+
+export type AuthLogoutSupport = Omit<LogoutPushCleanupInput, 'authApi'> & {
+  markStoredExpoPushTokenForCleanup: () => Promise<void>;
+};
+
+export function AuthProvider({
+  api,
+  children,
+  logoutSupport,
+  session,
+}: PropsWithChildren<{
+  api: AuthApiPort;
+  logoutSupport: AuthLogoutSupport;
+  session: AuthSessionPort;
+}>) {
   const queryClient = useQueryClient();
-  const accessTokenRef = useRef<string | null>(null);
-  const apiRef = useRef<ApiClient | null>(null);
   const [accessToken, setAccessTokenState] = useState<string | null>(null);
   const [isBootstrapping, setIsBootstrapping] = useState(true);
 
   const setAccessToken = useCallback((nextAccessToken: string | null) => {
-    accessTokenRef.current = nextAccessToken;
+    session.setAccessToken(nextAccessToken);
     setAccessTokenState(nextAccessToken);
-  }, []);
+  }, [session]);
   const handleAuthExpired = useCallback(async () => {
-    const currentApi = apiRef.current;
-    if (currentApi) {
-      await unregisterStoredExpoPushToken(currentApi, {
-        clearStoredOnFailure: true,
-        retryOnUnauthorized: false,
-      }).catch(() => undefined);
-    } else {
-      await markStoredExpoPushTokenForCleanup().catch(() => undefined);
-    }
+    await logoutSupport.unregisterStoredExpoPushToken(logoutSupport.notificationsApi, {
+      clearStoredOnFailure: true,
+      retryOnUnauthorized: false,
+    }).catch(() => logoutSupport.markStoredExpoPushTokenForCleanup().catch(() => undefined));
     setAccessToken(null);
     await clearStoredRefreshToken();
     queryClient.removeQueries({ queryKey: meQueryKey });
-  }, [queryClient, setAccessToken]);
+  }, [logoutSupport, queryClient, setAccessToken]);
 
-  const api = useMemo(
-    () =>
-      new ApiClient({
-        getAccessToken: () => accessTokenRef.current,
-        setAccessToken,
-        getRefreshToken: getStoredRefreshToken,
-        setRefreshToken: setStoredRefreshToken,
-        clearRefreshToken: clearStoredRefreshToken,
-        onAuthExpired: handleAuthExpired,
-      }),
-    [handleAuthExpired, setAccessToken],
-  );
-  apiRef.current = api;
+  useEffect(() => {
+    session.setExpiredHandler(handleAuthExpired);
+  }, [handleAuthExpired, session]);
 
   useEffect(() => {
     let isMounted = true;
@@ -101,16 +91,15 @@ export function AuthProvider({ children }: PropsWithChildren) {
         if (!isMounted || !response) return;
         setAccessToken(response.accessToken);
 
-        if (response.refreshToken) {
-          await setStoredRefreshToken(response.refreshToken);
-        }
+        await setStoredRefreshToken(response.refreshToken);
       })
       .catch(async () => {
         if (!isMounted) return;
         await clearBootstrapAuthState({
-          clearStoredExpoPushToken,
+          clearStoredExpoPushToken: logoutSupport.clearStoredExpoPushToken,
           clearStoredRefreshToken,
-          markStoredExpoPushTokenForCleanup,
+          markStoredExpoPushTokenForCleanup:
+            logoutSupport.markStoredExpoPushTokenForCleanup,
           setAccessToken,
         });
       })
@@ -123,7 +112,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     return () => {
       isMounted = false;
     };
-  }, [api, setAccessToken]);
+  }, [api, logoutSupport, setAccessToken]);
 
   const meQuery = useQuery({
     queryKey: meQueryKey,
@@ -152,9 +141,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       const response = await api.register(input);
       setAccessToken(response.accessToken);
 
-      if (response.refreshToken) {
-        await setStoredRefreshToken(response.refreshToken);
-      }
+      await setStoredRefreshToken(response.refreshToken);
 
       queryClient.setQueryData(meQueryKey, { user: response.user });
     },
@@ -166,9 +153,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       const response = await api.login(input);
       setAccessToken(response.accessToken);
 
-      if (response.refreshToken) {
-        await setStoredRefreshToken(response.refreshToken);
-      }
+      await setStoredRefreshToken(response.refreshToken);
 
       queryClient.setQueryData(meQueryKey, { user: response.user });
     },
@@ -180,9 +165,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       const response = await api.socialAuth(provider, input);
       setAccessToken(response.accessToken);
 
-      if (response.refreshToken) {
-        await setStoredRefreshToken(response.refreshToken);
-      }
+      await setStoredRefreshToken(response.refreshToken);
 
       queryClient.setQueryData(meQueryKey, { user: response.user });
     },
@@ -191,23 +174,17 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   const logout = useCallback(async () => {
     await logoutWithPushCleanup({
-      api,
-      clearPendingExpoPushTokenCleanup,
-      clearStoredExpoPushToken,
-      getKnownExpoPushTokens,
-      getStoredExpoPushToken,
+      authApi: api,
+      ...logoutSupport,
       getStoredRefreshToken,
-      setPendingExpoPushTokenCleanup,
-      unregisterStoredExpoPushToken,
     });
     setAccessToken(null);
     await clearStoredRefreshToken();
     queryClient.removeQueries({ queryKey: meQueryKey });
-  }, [api, queryClient, setAccessToken]);
+  }, [api, logoutSupport, queryClient, setAccessToken]);
 
   const value = useMemo<AuthContextValue>(
     () => ({
-      api,
       user,
       isBootstrapping: isAuthBootstrapping,
       isAuthenticated: Boolean(user),
@@ -218,7 +195,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       logout,
       setSubscription,
     }),
-    [api, isAuthBootstrapping, login, logout, refreshUser, register, setSubscription, socialAuth, user],
+    [isAuthBootstrapping, login, logout, refreshUser, register, setSubscription, socialAuth, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

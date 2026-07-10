@@ -1,4 +1,4 @@
-type PushNotificationRuntime = {
+export type PushNotificationRuntime = {
   disablePushNotifications?: string;
   e2e?: string;
   isDevice: boolean;

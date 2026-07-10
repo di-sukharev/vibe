@@ -3,7 +3,7 @@ import { expect, test } from 'bun:test';
 import {
   cleanupExpoPushRegistrationAfterPermissionDenied,
   syncExpoPushTokenRegistration,
-} from '../src/lib/push-registration';
+} from '../src/features/notifications/push-registration';
 
 test('syncExpoPushTokenRegistration registers and stores a new token', async () => {
   const calls: unknown[] = [];

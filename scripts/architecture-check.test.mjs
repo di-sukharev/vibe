@@ -33,6 +33,7 @@ describe('public module and feature indexes', () => {
 
     expect(check([file('webapp/src/features/auth/provider.tsx', "import { usePlan } from '../billing'")])).toEqual([])
     expect(check([file('webapp/src/features/auth/provider.tsx', "import { usePlan } from '../billing/provider'")])[0]?.rule).toBe('client-feature-public-api')
+    expect(check([file('mobile/src/composition/api.ts', "import { AuthApi } from '@/features/auth/api'")])[0]?.rule).toBe('client-feature-public-api')
   })
 })
 

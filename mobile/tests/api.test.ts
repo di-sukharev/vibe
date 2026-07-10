@@ -1,6 +1,9 @@
 import { afterEach, expect, test } from 'bun:test';
 
-import { ApiClient } from '../src/lib/api';
+import { AuthApi } from '../src/features/auth/api';
+import { BillingApi } from '../src/features/billing/api';
+import { NotificationsApi } from '../src/features/notifications/api';
+import { ApiTransport } from '../src/platform/api';
 
 const originalFetch = globalThis.fetch;
 const refreshToken = 'r'.repeat(32);
@@ -59,7 +62,7 @@ test('mobile ApiClient refreshes with the stored refresh token and retries authe
     return json({ error: { code: 'NOT_FOUND', message: 'Unexpected request' } }, 404);
   };
 
-  const client = new ApiClient({
+  const { auth: client } = createTestApis({
     getAccessToken: () => accessToken,
     setAccessToken: (nextAccessToken) => {
       accessToken = nextAccessToken;
@@ -126,7 +129,7 @@ test('mobile ApiClient shares one refresh request across concurrent 401 response
     return json({ error: { code: 'NOT_FOUND', message: 'Unexpected request' } }, 404);
   };
 
-  const client = new ApiClient({
+  const { auth: client } = createTestApis({
     getAccessToken: () => accessToken,
     setAccessToken: (nextAccessToken) => {
       accessToken = nextAccessToken;
@@ -172,7 +175,7 @@ test('mobile ApiClient clears token state when refresh fails', async () => {
     return json({ error: { code: 'NOT_FOUND', message: 'Unexpected request' } }, 404);
   };
 
-  const client = new ApiClient({
+  const { auth: client } = createTestApis({
     getAccessToken: () => accessToken,
     setAccessToken: (nextAccessToken) => {
       accessToken = nextAccessToken;
@@ -225,7 +228,7 @@ test('mobile ApiClient sends the stored refresh token when logging out', async (
     return json({ error: { code: 'NOT_FOUND', message: 'Unexpected request' } }, 404);
   };
 
-  const client = new ApiClient({
+  const { auth: client } = createTestApis({
     getAccessToken: () => null,
     setAccessToken: () => undefined,
     getRefreshToken: async () => refreshToken,
@@ -266,7 +269,7 @@ test('mobile ApiClient can send all known Expo push tokens when logging out', as
     return json({ error: { code: 'NOT_FOUND', message: 'Unexpected request' } }, 404);
   };
 
-  const client = new ApiClient({
+  const { auth: client } = createTestApis({
     getAccessToken: () => null,
     setAccessToken: () => undefined,
     getRefreshToken: async () => refreshToken,
@@ -319,7 +322,7 @@ test('mobile ApiClient exchanges social auth provider tokens', async () => {
     return json({ error: { code: 'NOT_FOUND', message: 'Unexpected request' } }, 404);
   };
 
-  const client = new ApiClient({
+  const { auth: client } = createTestApis({
     getAccessToken: () => null,
     setAccessToken: () => undefined,
     getRefreshToken: async () => null,
@@ -381,7 +384,7 @@ test('mobile ApiClient calls IAP entitlement, ingest, and reconcile endpoints wi
     return json({ error: { code: 'NOT_FOUND', message: 'Unexpected request' } }, 404);
   };
 
-  const client = new ApiClient({
+  const { billing: client } = createTestApis({
     getAccessToken: () => 'access-token',
     setAccessToken: () => undefined,
     getRefreshToken: async () => refreshToken,
@@ -389,7 +392,7 @@ test('mobile ApiClient calls IAP entitlement, ingest, and reconcile endpoints wi
     clearRefreshToken: async () => undefined,
   });
 
-  await expect(client.iapEntitlement()).resolves.toEqual({ subscription: inactiveSubscription });
+  await expect(client.entitlement()).resolves.toEqual({ subscription: inactiveSubscription });
   await expect(
     client.ingestAppStoreTransaction({ signedTransactionInfo: 'signed-transaction' }),
   ).resolves.toMatchObject({ subscription: { isActive: true } });
@@ -470,7 +473,7 @@ test('mobile ApiClient registers, unregisters, and sends test push notifications
     return json({ error: { code: 'NOT_FOUND', message: 'Unexpected request' } }, 404);
   };
 
-  const client = new ApiClient({
+  const { notifications: client } = createTestApis({
     getAccessToken: () => 'access-token',
     setAccessToken: () => undefined,
     getRefreshToken: async () => refreshToken,
@@ -541,7 +544,7 @@ test('mobile ApiClient can unregister push tokens without an auth refresh retry'
     return json({ error: { code: 'NOT_FOUND', message: 'Unexpected request' } }, 404);
   };
 
-  const client = new ApiClient({
+  const { notifications: client } = createTestApis({
     getAccessToken: () => 'expired-access-token',
     setAccessToken: () => undefined,
     getRefreshToken: async () => refreshToken,
@@ -569,4 +572,34 @@ function json(body: unknown, status: number) {
       'Content-Type': 'application/json',
     },
   });
+}
+
+function createTestApis(options: {
+  clearRefreshToken: () => Promise<void>;
+  getAccessToken: () => string | null;
+  getRefreshToken: () => Promise<string | null>;
+  onAuthExpired?: () => void | Promise<void>;
+  setAccessToken: (accessToken: string | null) => void;
+  setRefreshToken: (refreshToken: string) => Promise<void>;
+}) {
+  let auth!: AuthApi;
+  const transport = new ApiTransport({
+    expire: async () => {
+      try {
+        await options.onAuthExpired?.();
+      } finally {
+        options.setAccessToken(null);
+        await options.clearRefreshToken();
+      }
+    },
+    getAccessToken: options.getAccessToken,
+    refresh: () => auth.refresh(),
+    setAccessToken: options.setAccessToken,
+  });
+  auth = new AuthApi(transport, options);
+  return {
+    auth,
+    billing: new BillingApi(transport),
+    notifications: new NotificationsApi(transport),
+  };
 }

@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { isSafeInternalHref, resolveNotificationHref } from '../src/lib/push-navigation';
+import { isSafeInternalHref, resolveNotificationHref } from '../src/features/notifications/push-navigation';
 
 test('resolveNotificationHref accepts only internal Expo Router paths', () => {
   expect(resolveNotificationHref({ href: '/details/components' })).toBe('/details/components');

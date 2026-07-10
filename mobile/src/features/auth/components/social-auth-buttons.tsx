@@ -7,11 +7,11 @@ import { Button } from '@/components/ui/button';
 import { Typography } from '@/components/ui/typography';
 import { useUiTheme } from '@/components/ui/theme';
 import { TEST_IDS } from '@/constants/testIds';
-import { ApiRequestError } from '@/lib/api';
+import { ApiRequestError } from '@/platform/api';
 import {
   googleSignInConfigFromEnv,
   isGoogleSignInConfiguredForPlatform,
-} from '@/lib/social-auth-config';
+} from '../social-auth-config';
 
 type PendingProvider = SocialAuthProvider | null;
 type GoogleSignInModule = typeof import('@react-native-google-signin/google-signin');

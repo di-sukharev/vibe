@@ -5,7 +5,7 @@ import { PageHeader } from '@/components/page-header';
 import { Screen } from '@/components/screen';
 import { ScreenLoader } from '@/components/screen-states';
 import { TEST_IDS } from '@/constants/testIds';
-import { useAuth } from '@/lib/auth';
+import { useAuth } from '@/features/auth';
 
 export default function DetailsScreen() {
   const auth = useAuth();

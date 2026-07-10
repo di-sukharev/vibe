@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { logoutWithPushCleanup } from '../src/lib/auth-logout';
+import { logoutWithPushCleanup } from '../src/features/auth/logout';
 
 test('logoutWithPushCleanup clears pending push cleanup when access unregister succeeds', async () => {
   const calls: unknown[] = [];
@@ -8,11 +8,13 @@ test('logoutWithPushCleanup clears pending push cleanup when access unregister s
   let pendingCleared = false;
 
   await logoutWithPushCleanup({
-    api: {
+    authApi: {
       logout: async (input) => {
         calls.push(['logout', input]);
         return false;
       },
+    },
+    notificationsApi: {
       unregisterExpoPushToken: async (input, options) => {
         calls.push(['unregister', input, options]);
       },
@@ -59,8 +61,8 @@ test('logoutWithPushCleanup preserves pending cleanup when access unregister and
   let pendingCleared = false;
 
   await logoutWithPushCleanup({
-    api: {
-      logout: async () => false,
+    authApi: { logout: async () => false },
+    notificationsApi: {
       unregisterExpoPushToken: async () => {
         throw new Error('unauthorized');
       },
@@ -98,11 +100,13 @@ test('logoutWithPushCleanup clears pending cleanup when refresh logout confirms 
   let pendingCleared = false;
 
   await logoutWithPushCleanup({
-    api: {
+    authApi: {
       logout: async (input) => {
         expect(input.refreshToken).toBe('r'.repeat(32));
         return true;
       },
+    },
+    notificationsApi: {
       unregisterExpoPushToken: async () => {
         throw new Error('offline');
       },

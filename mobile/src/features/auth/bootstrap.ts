@@ -1,11 +1,11 @@
 import type { TokenRefreshResponse } from '@web-app-demo/contracts';
 
-import type { ApiClient } from './api';
+import type { AuthApiPort } from './api';
 
 let bootstrapRefreshPromise: Promise<TokenRefreshResponse | null> | null = null;
 
 export function refreshBootstrapSession(
-  api: ApiClient,
+  api: Pick<AuthApiPort, 'refresh'>,
   getStoredRefreshToken: () => Promise<string | null>,
 ) {
   bootstrapRefreshPromise ??= getStoredRefreshToken()

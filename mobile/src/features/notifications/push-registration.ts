@@ -1,6 +1,6 @@
 import type { RegisterPushTokenRequest } from '@web-app-demo/contracts';
 
-type PushRegistrationApi = {
+export type PushRegistrationApi = {
   registerExpoPushToken: (input: RegisterPushTokenRequest) => Promise<unknown>;
   unregisterExpoPushToken: (input?: { expoPushToken?: string }) => Promise<unknown>;
 };

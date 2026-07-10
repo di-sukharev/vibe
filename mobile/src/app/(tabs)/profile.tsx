@@ -2,8 +2,8 @@ import { KeyValueCard } from '@/components/key-value-card';
 import { PageHeader } from '@/components/page-header';
 import { Screen } from '@/components/screen';
 import { Button } from '@/components/ui/button';
-import { useAuth } from '@/lib/auth';
-import { useSubscriptionIap } from '@/lib/iap';
+import { useAuth } from '@/features/auth';
+import { useSubscriptionIap } from '@/features/billing';
 
 export default function ProfileScreen() {
   const auth = useAuth();

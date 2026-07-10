@@ -5,7 +5,8 @@ import type * as Notifications from 'expo-notifications';
 import { createContext, type PropsWithChildren, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 
-import { useAuth } from './auth';
+import { useAuth } from '@/features/auth';
+import type { NotificationsApiPort } from './api';
 import {
   clearPendingExpoPushTokenCleanup,
   getPendingExpoPushTokenCleanup,
@@ -30,7 +31,10 @@ type PushNotificationsContextValue = {
 
 const PushNotificationsContext = createContext<PushNotificationsContextValue | null>(null);
 
-export function PushNotificationsProvider({ children }: PropsWithChildren) {
+export function PushNotificationsProvider({
+  api,
+  children,
+}: PropsWithChildren<{ api: NotificationsApiPort }>) {
   const auth = useAuth();
   const router = useRouter();
   const [expoPushToken, setExpoPushToken] = useState<string | null>(null);
@@ -113,7 +117,7 @@ export function PushNotificationsProvider({ children }: PropsWithChildren) {
           setExpoPushToken(null);
           await cleanupExpoPushRegistrationAfterPermissionDenied({
             unregisterStoredExpoPushToken: () =>
-              unregisterStoredExpoPushToken(auth.api, { clearStoredOnFailure: true }),
+              unregisterStoredExpoPushToken(api, { clearStoredOnFailure: true }),
           });
           return;
         }
@@ -132,7 +136,7 @@ export function PushNotificationsProvider({ children }: PropsWithChildren) {
 
         const nextToken = tokenResponse.data;
         await syncExpoPushTokenRegistration({
-          api: auth.api,
+          api,
           clearPendingExpoPushTokenCleanup,
           expoPushToken: nextToken,
           getPendingExpoPushTokenCleanup,
@@ -155,7 +159,7 @@ export function PushNotificationsProvider({ children }: PropsWithChildren) {
     return () => {
       isCancelled = true;
     };
-  }, [auth.api, auth.user, isEnabled, loadNotifications, projectId]);
+  }, [api, auth.user, isEnabled, loadNotifications, projectId]);
 
   useEffect(() => {
     if (!isEnabled) return;

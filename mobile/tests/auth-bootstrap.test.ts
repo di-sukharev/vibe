@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { clearBootstrapAuthState, refreshBootstrapSession } from '../src/lib/auth-bootstrap';
+import { clearBootstrapAuthState, refreshBootstrapSession } from '../src/features/auth/bootstrap';
 
 test('refreshBootstrapSession returns null without stored refresh token', async () => {
   let refreshCalls = 0;

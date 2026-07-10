@@ -4,7 +4,7 @@ import {
   unregisterKnownExpoPushTokens,
   uniqueExpoPushTokens,
   type PushTokenCleanupStorage,
-} from '../src/lib/push-token-cleanup';
+} from '../src/features/notifications/push-token-cleanup';
 
 test('unregisterKnownExpoPushTokens clears only tokens confirmed by the backend', async () => {
   const calls: unknown[] = [];

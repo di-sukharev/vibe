@@ -1,13 +1,15 @@
 import type { TokenLogoutRequest } from '@web-app-demo/contracts';
 
-import type { ApiClient } from './api';
+import type { NotificationsApiPort } from '@/features/notifications';
+import type { AuthApiPort } from './api';
 
 type LogoutRequestInput = Omit<TokenLogoutRequest, 'refreshToken'> & {
   refreshToken?: string;
 };
 
-type LogoutPushCleanupInput = {
-  api: Pick<ApiClient, 'logout' | 'unregisterExpoPushToken'>;
+export type LogoutPushCleanupInput = {
+  authApi: Pick<AuthApiPort, 'logout'>;
+  notificationsApi: Pick<NotificationsApiPort, 'unregisterExpoPushToken'>;
   clearPendingExpoPushTokenCleanup: () => Promise<void>;
   clearStoredExpoPushToken: () => Promise<void>;
   getKnownExpoPushTokens: () => Promise<string[]>;
@@ -15,7 +17,7 @@ type LogoutPushCleanupInput = {
   getStoredRefreshToken: () => Promise<string | null>;
   setPendingExpoPushTokenCleanup: (expoPushToken: string) => Promise<void>;
   unregisterStoredExpoPushToken: (
-    api: Pick<ApiClient, 'unregisterExpoPushToken'>,
+    api: Pick<NotificationsApiPort, 'unregisterExpoPushToken'>,
     options?: { clearStoredOnFailure?: boolean; retryOnUnauthorized?: boolean },
   ) => Promise<void>;
 };
@@ -28,7 +30,7 @@ export async function logoutWithPushCleanup(input: LogoutPushCleanupInput) {
   const refreshToken = await input.getStoredRefreshToken().catch(() => null);
 
   const accessCleanupSucceeded = await input
-    .unregisterStoredExpoPushToken(input.api, {
+    .unregisterStoredExpoPushToken(input.notificationsApi, {
       clearStoredOnFailure: true,
       retryOnUnauthorized: false,
     })
@@ -40,7 +42,7 @@ export async function logoutWithPushCleanup(input: LogoutPushCleanupInput) {
     expoPushTokens: knownExpoPushTokens,
     refreshToken: refreshToken ?? undefined,
   };
-  const sessionRevoked = await input.api.logout(logoutPayload).catch(() => false);
+  const sessionRevoked = await input.authApi.logout(logoutPayload).catch(() => false);
 
   if (knownExpoPushTokens.length === 0 || accessCleanupSucceeded || sessionRevoked) {
     await input.clearStoredExpoPushToken().catch(() => undefined);

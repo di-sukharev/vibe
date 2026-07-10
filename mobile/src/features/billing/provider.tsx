@@ -10,7 +10,8 @@ import {
 import { createContext, type PropsWithChildren, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 
-import { useAuth } from './auth';
+import { useAuth } from '@/features/auth';
+import type { BillingApiPort } from './api';
 import { trackIapDiagnostic } from './iap-diagnostics';
 import {
   buildReconcilePayloadFromPurchases,
@@ -26,7 +27,8 @@ import {
   sortProductsByConfiguredOrder,
   validateAppStorePurchaseForIngest,
   validateGooglePlayPurchaseForIngest,
-} from './iap-utils';
+} from './purchase-controller';
+import { OfferCodeRedemptionController } from './offer-code-controller';
 
 const iosProductIds = [
   process.env.EXPO_PUBLIC_IAP_IOS_MONTHLY_PRODUCT_ID,
@@ -53,7 +55,6 @@ const androidPlanConfigs = [
 );
 const androidProductIds = [...new Set(androidPlanConfigs.map((plan) => plan.productId))];
 const androidPackageName = process.env.EXPO_PUBLIC_IAP_ANDROID_PACKAGE_NAME?.trim() || null;
-const offerCodeRedemptionClientTtlMs = 14 * 60 * 1000;
 const allIosAvailablePurchaseOptions: PurchaseOptions = {
   alsoPublishToEventListenerIOS: false,
   onlyIncludeActiveItemsIOS: false,
@@ -72,11 +73,6 @@ type SubscriptionPlan = {
 
 type AppStorePurchaseValidation = Extract<ReturnType<typeof validateAppStorePurchaseForIngest>, { ok: true }>;
 type GooglePlayPurchaseValidation = Extract<ReturnType<typeof validateGooglePlayPurchaseForIngest>, { ok: true }>;
-
-type OfferCodeRedemptionSession = {
-  expiresAtMs: number;
-  token: string;
-};
 
 type AvailablePurchasesReconciliation = {
   finishPurchases: boolean;
@@ -115,7 +111,7 @@ type SubscriptionContextValue = {
 
 const SubscriptionContext = createContext<SubscriptionContextValue | null>(null);
 
-export function IapProvider({ children }: PropsWithChildren) {
+export function IapProvider({ api, children }: PropsWithChildren<{ api: BillingApiPort }>) {
   const auth = useAuth();
 
   if (Platform.OS !== 'ios' && Platform.OS !== 'android') {
@@ -126,12 +122,15 @@ export function IapProvider({ children }: PropsWithChildren) {
     );
   }
 
-  return <NativeIapProvider platform={Platform.OS}>{children}</NativeIapProvider>;
+  return <NativeIapProvider api={api} platform={Platform.OS}>{children}</NativeIapProvider>;
 }
 
-function NativeIapProvider({ children, platform }: PropsWithChildren<{ platform: StorePlatform }>) {
+function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
+  api: BillingApiPort;
+  platform: StorePlatform;
+}>) {
   const auth = useAuth();
-  const { api, setSubscription } = auth;
+  const { setSubscription } = auth;
   const user = auth.user;
   const userId = user?.id ?? null;
   const productIds = platform === 'ios' ? iosProductIds : androidProductIds;
@@ -155,7 +154,7 @@ function NativeIapProvider({ children, platform }: PropsWithChildren<{ platform:
   const queuedPurchaseKeysRef = useRef(new Set<string>());
   const queuedPurchasesRef = useRef<Purchase[]>([]);
   const lastPurchaseSuccessAtRef = useRef<number | null>(null);
-  const offerCodeRedemptionTokenRef = useRef<OfferCodeRedemptionSession | null>(null);
+  const offerCodeControllerRef = useRef(new OfferCodeRedemptionController());
 
   const queuePurchaseUntilAuthenticated = useCallback((purchase: Purchase) => {
     const queueKey = purchaseQueueKey(purchase);
@@ -176,10 +175,7 @@ function NativeIapProvider({ children, platform }: PropsWithChildren<{ platform:
 
   const ingestAndFinishAppStorePurchase = useCallback(
     (purchase: Purchase, validation: AppStorePurchaseValidation) => {
-      const offerCodeRedemptionToken = currentOfferCodeRedemptionToken(offerCodeRedemptionTokenRef.current);
-      if (!offerCodeRedemptionToken) {
-        offerCodeRedemptionTokenRef.current = null;
-      }
+      const offerCodeRedemptionToken = offerCodeControllerRef.current.current(Date.now());
 
       return ingestAndFinishPurchase({
         purchase,
@@ -257,7 +253,7 @@ function NativeIapProvider({ children, platform }: PropsWithChildren<{ platform:
           platform === 'ios'
             ? await ingestAndFinishAppStorePurchase(purchase, validation as AppStorePurchaseValidation)
             : await ingestAndFinishGooglePlayPurchase(purchase, validation as GooglePlayPurchaseValidation);
-        offerCodeRedemptionTokenRef.current = null;
+        offerCodeControllerRef.current.clear();
         setSubscription(result.subscription);
         if (result.finishError) {
           reportIapDiagnostic('purchase-finish-error', result.finishError);
@@ -390,7 +386,7 @@ function NativeIapProvider({ children, platform }: PropsWithChildren<{ platform:
               platform === 'ios'
                 ? await ingestAndFinishAppStorePurchase(purchase, validation as AppStorePurchaseValidation)
                 : await ingestAndFinishGooglePlayPurchase(purchase, validation as GooglePlayPurchaseValidation);
-            offerCodeRedemptionTokenRef.current = null;
+            offerCodeControllerRef.current.clear();
             setSubscription(result.subscription);
             latestSubscription = result.subscription;
 
@@ -532,7 +528,7 @@ function NativeIapProvider({ children, platform }: PropsWithChildren<{ platform:
     let waitingForAvailablePurchasesState = false;
 
     try {
-      const entitlement = await api.iapEntitlement();
+      const entitlement = await api.entitlement();
       setSubscription(entitlement.subscription);
       const originalTransactionIds = platform === 'ios' && entitlement.subscription.originalTransactionId
         ? [entitlement.subscription.originalTransactionId]
@@ -713,17 +709,14 @@ function NativeIapProvider({ children, platform }: PropsWithChildren<{ platform:
 
     try {
       const response = await api.createAppStoreOfferCodeRedemption();
-      offerCodeRedemptionTokenRef.current = {
-        expiresAtMs: Date.now() + offerCodeRedemptionClientTtlMs,
-        token: response.token,
-      };
+      offerCodeControllerRef.current.store(response.token, Date.now());
       const presented = await presentCodeRedemptionSheetIOS();
       if (presented === false) {
         throw new Error('App Store offer code sheet could not be opened.');
       }
       await sync();
     } catch (caughtError) {
-      offerCodeRedemptionTokenRef.current = null;
+      offerCodeControllerRef.current.clear();
       if (isUserCancelledPurchaseError(caughtError)) {
         return;
       }
@@ -901,11 +894,6 @@ function unsupportedSubscriptionValue(subscription: SubscriptionSnapshot | null)
     subscription,
     sync: async () => undefined,
   };
-}
-
-function currentOfferCodeRedemptionToken(session: OfferCodeRedemptionSession | null) {
-  if (!session) return undefined;
-  return session.expiresAtMs > Date.now() ? session.token : undefined;
 }
 
 function defaultPlanId(platform: StorePlatform) {

@@ -21,8 +21,8 @@ const {
   selectGooglePlaySubscriptionOffer,
   validateAppStorePurchaseForIngest,
   validateGooglePlayPurchaseForIngest,
-} = await import('../src/lib/iap-utils');
-const { ApiRequestError } = await import('../src/lib/api');
+} = await import('../src/features/billing/purchase-controller');
+const { ApiRequestError } = await import('../src/platform/api');
 
 const activeSubscription = {
   entitlement: 'premium' as const,
