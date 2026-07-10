@@ -60,7 +60,7 @@ This block applies only while installing the template as a new project:
 - `Review`: read-only evaluation, explanation, architecture review, or recommendations. Inspect evidence and report concrete findings; do not edit.
 - `Direct`: cosmetic, copy, styling, comments, or obvious local edits without meaningful behavior changes. Make the smallest coherent edit and run narrow validation when useful.
 - `Investigation`: reproduce or trace an unclear failure and identify the owning layer. Diagnosis requests remain read-only unless the user also asks for a fix; if two attempts fail to move the primary signal, stop and reframe.
-- `TDD-first`: behavior, logic, contracts, auth, permissions, persistence, validation, routing, state transitions, concurrency, or non-trivial user-facing changes. Start with the highest-value failing test at the highest-confidence practical boundary, implement the minimum fix, then add only risk-protecting edge coverage.
+- `TDD-first`: behavior, logic, contracts, auth, permissions, persistence, validation, routing, state transitions, concurrency, or non-trivial user-facing changes. Write and run the highest-value test at the highest-confidence practical boundary, and confirm it fails for the expected reason. Implement the minimum change to make it pass, refactor only when it improves current code while keeping the test green, then add only edge coverage that protects real risk.
 - Frontend visual-only work is `Direct` unless it changes accessibility semantics, navigation, validation, permissions, persistence, or meaningful state transitions.
 - Requests to change, build, implement, or fix authorize scoped local edits. Requests only to review, explain, assess, or diagnose do not.
 
