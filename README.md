@@ -201,10 +201,11 @@ Test runners use the separate Docker Compose `postgres_test` service and the `TE
 - `bun run dev:mobile` - start the Expo app.
 - `bun run typecheck` - run TypeScript checks across workspaces.
 - `bun run build` - run production build/typecheck/export scripts for workspaces that define them.
+- `bun run architecture:check` - enforce backend module and client feature dependency boundaries.
 - `bun run test` - run contract, backend, webapp, and mobile unit/integration tests.
 - `bun run test:contracts` - run shared Zod contract tests.
 - `bun run test:backend` - run backend unit and integration tests.
-- `bun run test:backend:integration` - run DB-backed auth and IAP tests through `postgres_test`.
+- `bun run test:backend:integration` - run DB-backed auth, billing, and notifications tests through `postgres_test`.
 - `bun run test:webapp` - run webapp client tests.
 - `bun run test:mobile` - run mobile client tests.
 - `bun run deploy:do:specs` - safely generate concrete DigitalOcean specs under `.scratch/deploy`.
@@ -235,7 +236,7 @@ This project is licensed under the Apache License 2.0. If you distribute a fork,
 
 API contracts live in `packages/contracts` and are imported by every active layer. The backend validates input with those Zod schemas; the webapp and mobile app reuse the same schemas in TanStack Form and API clients.
 
-The backend API flow is `route -> validation -> auth/session guard -> service -> Prisma -> DTO`. Routes stay thin, auth business logic lives in the feature service, and API, worker, and cron entrypoints share `src/runtime.ts` for env and Prisma setup.
+The backend follows the Product Modules flow `transport -> application -> domain/ports -> infrastructure`. Routes own HTTP representation, application services own use cases and orchestration, optional domain code owns pure policies and transitions, and context-specific infrastructure owns Prisma and provider SDKs. Cross-context imports go only through each module's public `index.ts`; API, worker, and cron entrypoints share `src/runtime.ts` for env and Prisma lifecycle.
 
 Keep the default architecture monolithic. For DigitalOcean production, the backend/API default is one `apps-s-1vcpu-1gb` App Platform container so a new project starts inside the expected low-cost budget with Managed PostgreSQL while retaining a clear scale-up path. Add backend worker or scheduled-job components from the same Docker image only when a concrete background or periodic task exists; the deployment generator refuses to deploy the empty worker placeholder. For real-time features, a single backend instance can own its local WebSocket connections. If the backend is horizontally scaled and users connected to different instances must receive the same chat, presence, or live events, add a managed Redis-compatible Pub/Sub broker between instances, using DigitalOcean Managed Valkey on the default path or Yandex Managed Service for Valkey when Yandex Cloud is explicitly selected.
 

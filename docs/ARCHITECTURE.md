@@ -8,7 +8,7 @@ The approach is **progressive DDD-lite**. Product contexts get explicit ownershi
 
 `packages/contracts` is the source of truth for API payloads, DTOs, and error shapes. New endpoints should start with Zod schemas in contracts. The backend then uses those schemas for request validation, while the webapp and mobile app use them in TanStack Form and API clients.
 
-Do not hand-copy API shapes into clients. When a contract changes, validate producer and consumers in one pass: backend route/service, webapp API client/form, and mobile API client/form.
+Do not hand-copy API shapes into clients. When a contract changes, validate producer and consumers in one pass: backend transport/application, webapp feature adapter/form, and mobile feature adapter/form.
 
 ## Backend
 
@@ -39,9 +39,11 @@ modules/<context>/
   infrastructure/   # Prisma and external provider adapters
 ```
 
-Transport must not import Prisma. Application and domain must not import Hono, Prisma, environment configuration, or provider SDKs. Infrastructure implements context-specific ports; repositories expose product operations rather than generic CRUD. Cross-context collaboration goes through public `index.ts` APIs or explicit application ports such as auth's `ProjectUser` and `LogoutCleanup`, never through another context's internals.
+Transport must not import Prisma, database adapters, or module infrastructure. Application and domain must not import Hono, Prisma, environment configuration, HTTP infrastructure, or provider SDKs. Infrastructure implements context-specific ports and never imports HTTP transport; repositories expose product operations rather than generic CRUD. Cross-context collaboration goes through public `index.ts` APIs or explicit application ports such as auth's `SubscriptionReader` and `LogoutCleanup`, never through another context's internals.
 
 Routes stay thin and translate HTTP into application calls and application failures into the stable API error shape. Do not put business rules into Hono handlers, UI clients, or child components.
+
+Application services must own real use-case orchestration through narrow capability ports. Do not introduce context-wide `*Operations` ports or one-to-one forwarding services that merely rename infrastructure methods. Keep provider normalization and persistence details in infrastructure, then expose only the subject-specific operations the use case needs.
 
 ## Runtime Shape And Real-Time
 
@@ -62,8 +64,8 @@ Auth v1 is custom JWT-based auth:
 - Passwords use `Bun.password.hash/verify` with Argon2id.
 - Access tokens are short-lived JWTs signed and verified with `jose`.
 - Refresh tokens are opaque random tokens; only their SHA-256 hash is stored in PostgreSQL.
-- Browser routes under `/api/auth/*` keep the refresh token only in an HttpOnly cookie and never return it in JSON. Local HTTP uses `SameSite=Lax`; HTTPS production uses `Secure` and `SameSite=None` so browser auth works across separate webapp/API origins.
-- Native routes under `/api/auth/token/*` never read or set cookies and explicitly exchange refresh tokens in JSON/body payloads. Mobile stores refresh tokens in `expo-secure-store` and keeps access tokens in memory.
+- Browser routes under `/api/auth/*` are used by the webapp and Expo Web. They keep the refresh token only in an HttpOnly cookie and never return it in JSON. Local HTTP uses `SameSite=Lax`; HTTPS production uses `Secure` and `SameSite=None` so browser auth works across separate client/API origins.
+- Native iOS and Android routes under `/api/auth/token/*` never read or set cookies and explicitly exchange refresh tokens in JSON/body payloads. Native mobile stores refresh tokens in `expo-secure-store` and keeps access tokens in memory.
 - Mobile social auth uses Apple/Google provider subjects as stable identity keys. Social auth does not auto-link to existing password accounts by email; products that need linking should add an explicit authenticated account-linking flow.
 
 Refresh-token rotation creates a new session and revokes the previous one. `/api/auth/me` checks both the JWT and the active database session.
@@ -80,9 +82,11 @@ The webapp and mobile app follow the same client rules:
 - `src/platform/api` owns endpoint-agnostic fetch, base URL handling, response parsing, and the shared API error.
 - `src/features/<context>` owns endpoint paths, schemas, server-state adapters, providers, and product UI for that context.
 - Routes and `src/main.tsx` are thin composition files and import features through their public `index.ts`.
-- `src/components/ui` and `src/platform` never import product features. Features may use platform code and UI primitives; cross-feature imports must use the target feature's public index.
+- `src/components/ui` and `src/platform` never import product features. Features may use platform code and UI primitives; cross-feature imports must use the target feature's public index and the resulting feature graph must stay acyclic. Put collaboration that would create a cycle into composition behind a narrow owning port.
 
 Auth in `src/features/auth` is the client golden path: its API adapter owns auth endpoints and refresh/retry, its provider exposes only auth behavior, and pages never receive a universal API service locator. Future providers should receive narrow context APIs such as `BillingApi` or `NotificationsApi` from composition.
+
+Mobile composition selects cookie auth for Expo Web and token auth for native iOS/Android. Browser refresh credentials must never be persisted in `localStorage`, `sessionStorage`, AsyncStorage, or another JavaScript-readable store.
 
 Do not create a new form, query, auth, or API abstraction until the existing pattern stops solving the current problem.
 
@@ -94,7 +98,7 @@ Astro remains the default website stack because it is content-first, static-firs
 
 ## Testing
 
-Backend unit/integration tests verify contracts and auth behavior at the owning layer. Webapp E2E uses Playwright and starts a real backend + Vite through `webServer`. Mobile E2E uses Maestro and stable React Native `testID` selectors.
+Backend unit/integration tests verify auth, billing, and notifications behavior at their owning layers. Webapp E2E uses Playwright and starts a real backend + Vite through `webServer`. Mobile E2E uses Maestro and stable React Native `testID` selectors.
 
 Client E2E in this template is a happy-path smoke layer, not the place for large validation matrices. Keep negative payloads, password/JWT/session rules, and error-shape checks in backend tests. Add fast client-level tests for form validation and API state edge cases when those surfaces grow.
 
@@ -106,11 +110,11 @@ Do not hand-write Prisma migration SQL. Change `backend/prisma/schema.prisma`, t
 
 ```bash
 bun run --cwd backend prisma:migrate
+```
 
 The template uses database-generated UUIDv7 primary keys (`@default(dbgenerated("uuidv7()")) @db.Uuid`) instead of ORM-generated `cuid()`/`uuid()`. That keeps ID generation consistent for Prisma Client, direct SQL, imports, and any future background workers or non-Prisma writers, but it also means the schema requires PostgreSQL 18+.
 
 Treat UUIDv7 as a repository-level rule, not a one-off model detail. New primary keys should use database-generated UUIDv7, and foreign keys that reference those IDs should use `@db.Uuid` so the type stays native all the way through PostgreSQL and Prisma.
-```
 
 For production, apply already-created migrations:
 

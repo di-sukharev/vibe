@@ -170,7 +170,7 @@ Stable selectors live in `src/constants/testIds.ts`, the flow is `.maestro/flows
 
 ## Practice
 
-Use TanStack Query for server state, TanStack Form for forms, and shared Zod schemas for validation. The refresh token is stored in `expo-secure-store` on native platforms; the access token lives only in app memory.
+Use TanStack Query for server state, TanStack Form for forms, and shared Zod schemas for validation. Native iOS/Android use `/api/auth/token/*`: the refresh token is stored in `expo-secure-store` and the access token lives only in app memory. Expo Web uses cookie-only `/api/auth/*`; its refresh token stays in the backend-issued HttpOnly cookie and is never written to JavaScript storage.
 
 Product code lives in `src/features/auth`, `src/features/billing`, and `src/features/notifications`. `src/composition` builds the namespaced APIs and passes each provider only its own interface. `src/platform/api` owns endpoint-agnostic fetch, auth retry, base URL, and error parsing; each feature API owns its endpoint paths and schemas. Routes are thin wrappers that import features through public indexes. Run `bun run architecture:check` after boundary changes and `bun run doctor` (pinned to Expo Doctor 1.20.0) after Expo dependency changes.
 

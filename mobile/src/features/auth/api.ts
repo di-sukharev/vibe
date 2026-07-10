@@ -1,4 +1,8 @@
 import {
+  cookieAuthResponseSchema,
+  cookieLogoutRequestSchema,
+  cookieRefreshRequestSchema,
+  cookieRefreshResponseSchema,
   loginRequestSchema,
   meResponseSchema,
   registerRequestSchema,
@@ -8,17 +12,17 @@ import {
   tokenLogoutRequestSchema,
   tokenRefreshRequestSchema,
   tokenRefreshResponseSchema,
+  type CookieAuthResponse,
+  type CookieRefreshResponse,
   type LoginRequest,
   type MeResponse,
   type RegisterRequest,
   type SocialAuthProvider,
   type SocialAuthRequest,
-  type TokenAuthResponse,
   type TokenLogoutRequest,
-  type TokenRefreshResponse,
 } from '@web-app-demo/contracts';
 
-import type { ApiTransport } from '@/platform/api';
+import { ApiRequestError, type ApiTransport } from '@/platform/api';
 
 type AuthApiOptions = {
   clearRefreshToken: () => Promise<void>;
@@ -28,13 +32,24 @@ type AuthApiOptions = {
 
 type TokenLogoutInput = Omit<TokenLogoutRequest, 'refreshToken'> & { refreshToken?: string };
 
+export type AuthTransportKind = 'cookie' | 'token';
+export type AuthSessionResponse = CookieAuthResponse & { refreshToken?: string };
+export type AuthRefreshResponse = CookieRefreshResponse & { refreshToken?: string };
+
 export class AuthApi {
   constructor(
     private readonly transport: ApiTransport,
     private readonly options: AuthApiOptions,
+    private readonly kind: AuthTransportKind,
   ) {}
 
-  register(input: RegisterRequest): Promise<TokenAuthResponse> {
+  register(input: RegisterRequest): Promise<AuthSessionResponse> {
+    if (this.kind === 'cookie') {
+      return this.transport.request('/api/auth/register', cookieAuthResponseSchema, {
+        method: 'POST',
+        body: registerRequestSchema.parse(input),
+      });
+    }
     return this.transport.request(
       '/api/auth/token/register',
       tokenAuthResponseSchema,
@@ -42,14 +57,27 @@ export class AuthApi {
     );
   }
 
-  login(input: LoginRequest): Promise<TokenAuthResponse> {
+  login(input: LoginRequest): Promise<AuthSessionResponse> {
+    if (this.kind === 'cookie') {
+      return this.transport.request('/api/auth/login', cookieAuthResponseSchema, {
+        method: 'POST',
+        body: loginRequestSchema.parse(input),
+      });
+    }
     return this.transport.request('/api/auth/token/login', tokenAuthResponseSchema, {
       method: 'POST',
       body: loginRequestSchema.parse(input),
     });
   }
 
-  socialAuth(provider: SocialAuthProvider, input: SocialAuthRequest): Promise<TokenAuthResponse> {
+  socialAuth(provider: SocialAuthProvider, input: SocialAuthRequest): Promise<AuthSessionResponse> {
+    if (this.kind === 'cookie') {
+      throw new ApiRequestError(
+        400,
+        'AUTH_SOCIAL_UNSUPPORTED',
+        'Native social sign-in is unavailable in the Expo web build',
+      );
+    }
     const parsedProvider = socialAuthProviderSchema.parse(provider);
     return this.transport.request(
       `/api/auth/token/social/${parsedProvider}`,
@@ -58,7 +86,14 @@ export class AuthApi {
     );
   }
 
-  async refresh(): Promise<TokenRefreshResponse> {
+  async refresh(): Promise<AuthRefreshResponse> {
+    if (this.kind === 'cookie') {
+      return this.transport.request('/api/auth/refresh', cookieRefreshResponseSchema, {
+        method: 'POST',
+        body: cookieRefreshRequestSchema.parse({}),
+        retryOnUnauthorized: false,
+      });
+    }
     const refreshToken = await this.options.getRefreshToken();
     const response = await this.transport.request(
       '/api/auth/token/refresh',
@@ -78,6 +113,14 @@ export class AuthApi {
   }
 
   async logout(input: TokenLogoutInput = {}) {
+    if (this.kind === 'cookie') {
+      await this.transport.raw('/api/auth/logout', {
+        method: 'POST',
+        body: cookieLogoutRequestSchema.parse({}),
+        retryOnUnauthorized: false,
+      });
+      return true;
+    }
     const storedRefreshToken = await this.options.getRefreshToken();
     const payload = tokenLogoutRequestSchema.parse({
       ...input,
@@ -94,6 +137,13 @@ export class AuthApi {
   clearRefreshToken() {
     return this.options.clearRefreshToken();
   }
+
+  async canRefresh() {
+    return this.kind === 'cookie' || Boolean(await this.options.getRefreshToken());
+  }
 }
 
-export type AuthApiPort = Pick<AuthApi, 'login' | 'logout' | 'me' | 'refresh' | 'register' | 'socialAuth'>;
+export type AuthApiPort = Pick<
+  AuthApi,
+  'canRefresh' | 'login' | 'logout' | 'me' | 'refresh' | 'register' | 'socialAuth'
+>;

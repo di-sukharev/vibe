@@ -8,7 +8,7 @@ import type { AppEnv } from '../../env'
 import { SubscriptionState } from '../../generated/prisma/enums'
 import { handleError } from '../../http/errors'
 import { BillingService } from './application/billing-service'
-import { createBillingOperations } from './infrastructure/billing-operations'
+import { createBillingDependencies } from './infrastructure/billing-adapters'
 import type { AppStoreSubscriptionVerifier } from './infrastructure/apple-verifier'
 import type { GooglePlaySubscriptionVerifier } from './infrastructure/google-play-verifier'
 import { createIapRoutes } from './transport/routes'
@@ -168,7 +168,7 @@ function createTestIapApp(
 ) {
   const app = new OpenAPIHono()
   const service = new BillingService(
-    createBillingOperations({
+    createBillingDependencies({
       appStoreVerifier: fakeOfferCodeVerifier(),
       db,
       env: options.env ?? env,

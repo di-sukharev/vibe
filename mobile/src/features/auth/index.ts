@@ -1,5 +1,5 @@
 export { AuthApi } from './api';
-export type { AuthApiPort } from './api';
+export type { AuthApiPort, AuthTransportKind } from './api';
 export { AuthProvider, useAuth } from './provider';
 export type { AuthLogoutSupport, AuthSessionPort } from './provider';
 export {

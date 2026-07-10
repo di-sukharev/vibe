@@ -35,7 +35,6 @@ test('preserves App Store verifier configuration errors for missing root certifi
   })
 
   await expect(verifier.verifyTransaction('signed-transaction')).rejects.toMatchObject({
-    status: 503,
     code: 'IAP_NOT_CONFIGURED',
   })
 })
@@ -51,7 +50,6 @@ test('preserves App Store verifier configuration errors for missing bundle id', 
     })
 
     await expect(verifier.verifyTransaction('signed-transaction')).rejects.toMatchObject({
-      status: 503,
       code: 'IAP_NOT_CONFIGURED',
     })
   } finally {

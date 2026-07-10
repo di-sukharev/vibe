@@ -1,16 +1,12 @@
-import type { TokenRefreshResponse } from '@web-app-demo/contracts';
+import type { AuthApiPort, AuthRefreshResponse } from './api';
 
-import type { AuthApiPort } from './api';
+let bootstrapRefreshPromise: Promise<AuthRefreshResponse | null> | null = null;
 
-let bootstrapRefreshPromise: Promise<TokenRefreshResponse | null> | null = null;
-
-export function refreshBootstrapSession(
-  api: Pick<AuthApiPort, 'refresh'>,
-  getStoredRefreshToken: () => Promise<string | null>,
-) {
-  bootstrapRefreshPromise ??= getStoredRefreshToken()
-    .then((refreshToken) => {
-      if (!refreshToken) return null;
+export function refreshBootstrapSession(api: Pick<AuthApiPort, 'canRefresh' | 'refresh'>) {
+  bootstrapRefreshPromise ??= api
+    .canRefresh()
+    .then((canRefresh) => {
+      if (!canRefresh) return null;
       return api.refresh();
     })
     .finally(() => {

@@ -38,9 +38,11 @@ jobs:
         run: bun run --cwd webapp lint
 
       - name: Mobile lint
+        if: ${{ hashFiles('mobile/package.json') != '' }}
         run: bun run --cwd mobile lint
 
       - name: Expo Doctor
+        if: ${{ hashFiles('mobile/package.json') != '' }}
         run: bun run --cwd mobile doctor
 
       - name: Deployment and script tests
@@ -53,6 +55,7 @@ jobs:
         run: bun run test:webapp
 
       - name: Mobile client tests
+        if: ${{ hashFiles('mobile/package.json') != '' }}
         run: bun run test:mobile
 
       - name: Backend tests

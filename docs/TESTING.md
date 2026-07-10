@@ -42,13 +42,13 @@ bun run smoke:backend:docker
 
 Contract tests live in `packages/contracts/src/*.test.ts` and protect shared request/response/error schemas used by backend, webapp, and mobile. Webapp and mobile unit tests live in each client `tests/` directory and cover API refresh/retry behavior that would be too expensive and brittle to fully exercise in E2E.
 
-Backend tests live next to backend code and verify auth behavior through services and routes. The integration runner starts `postgres_test`, applies migrations, and runs register/login/refresh/logout/guard/error-shape scenarios. By default, the test database port is derived from the absolute repository path so parallel checkouts do not collide, and `TEST_DATABASE_URL` is derived from that port. Set `POSTGRES_TEST_PORT` and `TEST_DATABASE_URL` only when a fixed test database is required. Local database startup, credentials, and reset behavior are documented in [LOCAL_DATABASE.md](LOCAL_DATABASE.md).
+Backend tests live next to their owning product modules. Integration tests exercise auth, billing, and notifications through application/transport boundaries and real PostgreSQL persistence. The integration runner starts `postgres_test`, applies migrations, and covers session rotation, concurrency, ownership, idempotency, outbox retries, receipts, and stable error shapes. By default, the test database port is derived from the absolute repository path so parallel checkouts do not collide, and `TEST_DATABASE_URL` is derived from that port. Set `POSTGRES_TEST_PORT` and `TEST_DATABASE_URL` only when a fixed test database is required. Local database startup, credentials, and reset behavior are documented in [LOCAL_DATABASE.md](LOCAL_DATABASE.md).
 
 The integration and Docker smoke runners refuse database names that do not end with `_test` unless an override is set intentionally. This protects `web_app_demo` development data from test writes.
 
-The Docker smoke test builds the backend image, starts it against `postgres_test`, waits for `/health`, and removes only the smoke container it created.
+The Docker smoke test uses a unique Compose project and host port for every invocation, builds the backend image, starts it against its own `postgres_test`, waits for `/health`, verifies DB-backed token auth, and removes only the isolated containers, network, and volume it created.
 
-`.github/workflows/ci.yml` runs typecheck, deployment/script tests, contract tests, webapp client tests, mobile client tests, backend tests, and the webapp Playwright smoke flow on pushes to `main` and `master` plus pull requests.
+`.github/workflows/ci.yml` runs typecheck, build, architecture boundaries, deployment/script tests, contract/client/backend tests, Docker smoke, and Playwright on pushes to `main`, `master`, and `mobile` plus pull requests. Mobile lint, tests, and Expo Doctor run only when `mobile/package.json` exists, so the same workflow remains valid on the web-only `master` branch.
 
 ## Webapp E2E
 

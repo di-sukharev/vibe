@@ -1,6 +1,6 @@
 # Mobile Social Auth
 
-This template includes mobile-first Apple and Google authentication on top of the existing backend session model. Social auth returns the same `{ user, accessToken, refreshToken }` response as email/password auth.
+This template includes native mobile Apple and Google authentication on top of the existing backend session model. The native `/api/auth/token/*` password and social endpoints return `{ user, accessToken, refreshToken }`. Browser password auth uses cookie-only `/api/auth/*` endpoints instead and never returns a refresh token in JSON; browser social auth is not part of this template.
 
 ## Behavior
 
@@ -24,8 +24,10 @@ GOOGLE_AUTH_CLIENT_IDS=ios-client-id.apps.googleusercontent.com,web-client-id.ap
 
 The backend endpoints are:
 
-- `POST /api/auth/social/apple`
-- `POST /api/auth/social/google`
+- `POST /api/auth/token/social/apple`
+- `POST /api/auth/token/social/google`
+
+These are explicit-token native endpoints. They never read or set browser cookies and return both access and refresh tokens in JSON.
 
 Payload:
 

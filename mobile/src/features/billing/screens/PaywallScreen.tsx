@@ -13,7 +13,8 @@ import { TEST_IDS } from '@/constants/testIds';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAuth } from '@/features/auth';
-import { introOfferLabel, useSubscriptionIap } from '@/features/billing';
+import { useSubscriptionIap } from '../provider';
+import { introOfferLabel } from '../purchase-controller';
 
 type PaywallPlan = {
   displayName: string;

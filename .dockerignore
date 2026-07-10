@@ -4,6 +4,8 @@ dist
 **/dist
 build
 coverage
+**/*.test.ts
+**/*.test.tsx
 .git
 .scratch
 .env

@@ -1,6 +1,5 @@
 import type {
   RegisterPushTokenRequest,
-  TestPushNotificationPayload,
   UnregisterPushTokenRequest,
 } from '@web-app-demo/contracts'
 
@@ -18,7 +17,7 @@ import {
 import type {
   CheckPushReceiptsMetrics,
   EnqueuePushNotificationInput,
-  NotificationOperations,
+  NotificationServiceDependencies,
   ProcessPushOutboxMetrics,
 } from '../application/ports'
 import {
@@ -63,20 +62,28 @@ type ReceiptDelivery = {
   receiptCheckAttempts: number
 }
 
-export function createNotificationOperations(context: PushServiceContext): NotificationOperations {
+export function createNotificationAdapters(
+  context: PushServiceContext,
+): Omit<NotificationServiceDependencies, 'createDedupeId'> {
   return {
-    registerToken: (userId, input) => registerPushToken(context.prisma, userId, input),
-    unregisterToken: (userId, input) => unregisterPushToken(context.prisma, userId, input),
-    cleanupTokens: async (userId, expoPushTokens) => {
-      if (expoPushTokens.length === 0) return
-      await context.prisma.pushToken.deleteMany({
-        where: { expoPushToken: { in: expoPushTokens }, userId },
-      })
+    tokens: {
+      register: (userId, input) => registerPushToken(context.prisma, userId, input),
+      unregister: (userId, input) => unregisterPushToken(context.prisma, userId, input),
+      cleanup: async (userId, expoPushTokens) => {
+        if (expoPushTokens.length === 0) return
+        await context.prisma.pushToken.deleteMany({
+          where: { expoPushToken: { in: expoPushTokens }, userId },
+        })
+      },
+      hasActive: (userId) => hasActivePushToken(context.prisma, userId),
     },
-    hasActiveToken: (userId) => hasActivePushToken(context.prisma, userId),
-    enqueueAndProcess: (input) => enqueueAndProcessPushNotification(context, input),
-    processOutbox: (options) => processPushOutbox(context, options),
-    checkReceipts: (options) => checkPushReceipts(context, options),
+    outbox: {
+      enqueue: (input) => enqueuePushNotification(context.prisma, input),
+      process: (options) => processPushOutbox(context, options),
+    },
+    receipts: {
+      check: (options) => checkPushReceipts(context, options),
+    },
   }
 }
 
@@ -166,31 +173,6 @@ export async function enqueuePushNotification(
 
     throw error
   }
-}
-
-export async function enqueueAndProcessPushNotification(
-  context: PushServiceContext,
-  input: EnqueuePushNotificationInput,
-) {
-  const result = await enqueuePushNotification(context.prisma, input)
-  await processPushOutbox(context, {
-    maxLoops: 1,
-    onlyIds: [result.id],
-  })
-  return result
-}
-
-export function buildTestPushInput(userId: string, payload: TestPushNotificationPayload) {
-  return {
-    body: payload.body,
-    data: {
-      href: payload.href,
-      kind: 'test_push',
-    },
-    dedupeKey: `test-push:${userId}:${crypto.randomUUID()}`,
-    title: payload.title,
-    userId,
-  } satisfies EnqueuePushNotificationInput
 }
 
 export async function processPushOutbox(

@@ -28,9 +28,9 @@ Add or change API shapes here before updating backend routes or client forms. Ex
 
 When a schema changes, validate both sides in the same pass:
 
-- backend route/service validation and serialization;
-- web API client, form parsing, and UI state;
-- mobile API client, form parsing, and UI state;
+- backend transport/application validation and serialization;
+- web feature API adapter, form parsing, and UI state;
+- mobile feature API adapters, form parsing, and UI state;
 - relevant unit/integration/E2E tests from [../../docs/TESTING.md](../../docs/TESTING.md).
 
 Do not add runtime-only business logic here. Contracts should stay focused on data validation, normalization, and shared TypeScript types.

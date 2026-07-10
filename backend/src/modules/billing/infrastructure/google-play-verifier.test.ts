@@ -77,7 +77,6 @@ test('Google Play verifier maps invalid purchase and authorization API failures'
     }).getSubscriptionPurchase({ purchaseToken: 'missing-token' }),
   ).rejects.toMatchObject({
     code: 'IAP_INVALID_TRANSACTION',
-    status: 400,
   })
 
   await expect(
@@ -88,6 +87,5 @@ test('Google Play verifier maps invalid purchase and authorization API failures'
     }).acknowledgeSubscription({ productId: 'premium', purchaseToken: 'purchase-token' }),
   ).rejects.toMatchObject({
     code: 'IAP_NOT_CONFIGURED',
-    status: 503,
   })
 })

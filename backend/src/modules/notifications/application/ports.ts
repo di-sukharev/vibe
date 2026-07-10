@@ -1,6 +1,5 @@
 import type {
   RegisterPushTokenRequest,
-  TestPushNotificationPayload,
   UnregisterPushTokenRequest,
 } from '@web-app-demo/contracts'
 
@@ -11,6 +10,15 @@ export type EnqueuePushNotificationInput = {
   scheduledFor?: Date
   title: string
   userId: string
+}
+
+export type ProcessPushOutboxOptions = {
+  limit?: number
+  maxLoops?: number
+  maxRuntimeMs?: number
+  now?: Date
+  onlyIds?: string[]
+  processingStaleMs?: number
 }
 
 export type ProcessPushOutboxMetrics = {
@@ -31,24 +39,27 @@ export type CheckPushReceiptsMetrics = {
   tokensDisabled: number
 }
 
-export type NotificationOperations = {
-  registerToken(userId: string, input: RegisterPushTokenRequest): Promise<void>
-  unregisterToken(userId: string, input: UnregisterPushTokenRequest): Promise<void>
-  cleanupTokens(userId: string, expoPushTokens: string[]): Promise<void>
-  hasActiveToken(userId: string): Promise<boolean>
-  enqueueAndProcess(input: EnqueuePushNotificationInput): Promise<{ created: boolean; id: string }>
-  processOutbox(options?: {
-    limit?: number
-    maxLoops?: number
-    maxRuntimeMs?: number
-    now?: Date
-    onlyIds?: string[]
-    processingStaleMs?: number
-  }): Promise<ProcessPushOutboxMetrics>
-  checkReceipts(options?: { limit?: number; now?: Date }): Promise<CheckPushReceiptsMetrics>
+export type PushTokenRepository = {
+  cleanup(userId: string, expoPushTokens: string[]): Promise<void>
+  hasActive(userId: string): Promise<boolean>
+  register(userId: string, input: RegisterPushTokenRequest): Promise<void>
+  unregister(userId: string, input: UnregisterPushTokenRequest): Promise<void>
 }
 
-export type TestPushInputBuilder = (
-  userId: string,
-  payload: TestPushNotificationPayload,
-) => EnqueuePushNotificationInput
+export type PushOutbox = {
+  enqueue(
+    input: EnqueuePushNotificationInput,
+  ): Promise<{ created: boolean; id: string }>
+  process(options?: ProcessPushOutboxOptions): Promise<ProcessPushOutboxMetrics>
+}
+
+export type PushReceipts = {
+  check(options?: { limit?: number; now?: Date }): Promise<CheckPushReceiptsMetrics>
+}
+
+export type NotificationServiceDependencies = {
+  createDedupeId(): string
+  outbox: PushOutbox
+  receipts: PushReceipts
+  tokens: PushTokenRepository
+}

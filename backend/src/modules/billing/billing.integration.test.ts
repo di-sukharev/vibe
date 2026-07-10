@@ -6,7 +6,7 @@ import { beforeEach, afterAll, describe, expect, test } from 'bun:test'
 import { createApp } from '../../app'
 import { createPrisma } from '../../db'
 import type { AppEnv } from '../../env'
-import { AppError } from '../../http/errors'
+import { BillingFailure } from './domain/errors'
 import type {
   AppStoreSubscriptionVerifier,
   AppStoreVerificationResult,
@@ -42,7 +42,7 @@ maybeDescribe('iap API integration', () => {
 
   beforeEach(async () => {
     verifier = new FakeAppStoreVerifier()
-    app = createApp({ env, prisma, iapVerifier: verifier })
+    app = createApp({ env, prisma, appStoreIapVerifier: verifier })
     await prisma.appStoreWebhook.deleteMany()
     await prisma.appStoreTransaction.deleteMany()
     await prisma.subscriptionEntitlement.deleteMany()
@@ -149,7 +149,7 @@ maybeDescribe('iap API integration', () => {
         APPLE_IAP_PRODUCT_IDS: [],
       },
       prisma,
-      iapVerifier: verifier,
+      appStoreIapVerifier: verifier,
     })
 
     const ingest = await postJson('/api/iap/app-store/transactions', session.accessToken, {
@@ -536,7 +536,7 @@ class FakeAppStoreVerifier implements AppStoreSubscriptionVerifier {
   ): Promise<AppStoreVerificationResult<JWSTransactionDecodedPayload>> {
     const payload = this.transactions.get(signedTransactionInfo)
     if (!payload) {
-      throw new AppError(400, 'IAP_INVALID_TRANSACTION', 'Fake transaction not found')
+      throw new BillingFailure('IAP_INVALID_TRANSACTION', 'Fake transaction not found')
     }
     return { environment: Environment.SANDBOX, payload }
   }
@@ -546,7 +546,7 @@ class FakeAppStoreVerifier implements AppStoreSubscriptionVerifier {
   ): Promise<AppStoreVerificationResult<JWSRenewalInfoDecodedPayload>> {
     const payload = this.renewals.get(signedRenewalInfo)
     if (!payload) {
-      throw new AppError(400, 'IAP_INVALID_TRANSACTION', 'Fake renewal not found')
+      throw new BillingFailure('IAP_INVALID_TRANSACTION', 'Fake renewal not found')
     }
     return { environment: Environment.SANDBOX, payload }
   }
@@ -560,7 +560,7 @@ class FakeAppStoreVerifier implements AppStoreSubscriptionVerifier {
     )
     const payload = this.notifications.get(signedPayload)
     if (!payload) {
-      throw new AppError(400, 'IAP_INVALID_TRANSACTION', 'Fake notification not found')
+      throw new BillingFailure('IAP_INVALID_TRANSACTION', 'Fake notification not found')
     }
     return { environment: Environment.SANDBOX, payload }
   }

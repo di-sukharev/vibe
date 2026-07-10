@@ -3,10 +3,7 @@ import type { AppEnv } from '../../env'
 import type { AuthenticatedPrincipal, LogoutCleanup } from '../auth'
 import { NotificationService } from './application/notification-service'
 import type { ExpoPushClientOptions } from './infrastructure/expo-client'
-import {
-  buildTestPushInput,
-  createNotificationOperations,
-} from './infrastructure/notification-operations'
+import { createNotificationAdapters } from './infrastructure/notification-operations'
 import { createNotificationRoutes } from './transport/routes'
 
 export function createNotificationsModule(input: {
@@ -14,14 +11,15 @@ export function createNotificationsModule(input: {
   env: AppEnv
   pushClientOptions?: ExpoPushClientOptions
 }) {
-  const service = new NotificationService(
-    createNotificationOperations({
-      env: input.env,
-      prisma: input.db,
-      pushClientOptions: input.pushClientOptions,
-    }),
-    buildTestPushInput,
-  )
+  const adapters = createNotificationAdapters({
+    env: input.env,
+    prisma: input.db,
+    pushClientOptions: input.pushClientOptions,
+  })
+  const service = new NotificationService({
+    ...adapters,
+    createDedupeId: () => crypto.randomUUID(),
+  })
 
   return {
     checkReceipts: service.checkReceipts.bind(service),
@@ -38,10 +36,6 @@ export function createNotificationsModule(input: {
   }
 }
 
-export {
-  claimPushOutboxItemForProcessing,
-  enqueuePushNotification,
-} from './infrastructure/notification-operations'
 export type {
   CheckPushReceiptsMetrics,
   EnqueuePushNotificationInput,

@@ -1,6 +1,5 @@
 import type { TokenLogoutRequest } from '@web-app-demo/contracts';
 
-import type { NotificationsApiPort } from '@/features/notifications';
 import type { AuthApiPort } from './api';
 
 type LogoutRequestInput = Omit<TokenLogoutRequest, 'refreshToken'> & {
@@ -9,17 +8,16 @@ type LogoutRequestInput = Omit<TokenLogoutRequest, 'refreshToken'> & {
 
 export type LogoutPushCleanupInput = {
   authApi: Pick<AuthApiPort, 'logout'>;
-  notificationsApi: Pick<NotificationsApiPort, 'unregisterExpoPushToken'>;
   clearPendingExpoPushTokenCleanup: () => Promise<void>;
   clearStoredExpoPushToken: () => Promise<void>;
   getKnownExpoPushTokens: () => Promise<string[]>;
   getStoredExpoPushToken: () => Promise<string | null>;
   getStoredRefreshToken: () => Promise<string | null>;
   setPendingExpoPushTokenCleanup: (expoPushToken: string) => Promise<void>;
-  unregisterStoredExpoPushToken: (
-    api: Pick<NotificationsApiPort, 'unregisterExpoPushToken'>,
-    options?: { clearStoredOnFailure?: boolean; retryOnUnauthorized?: boolean },
-  ) => Promise<void>;
+  unregisterStoredExpoPushToken: (options?: {
+    clearStoredOnFailure?: boolean;
+    retryOnUnauthorized?: boolean;
+  }) => Promise<void>;
 };
 
 export async function logoutWithPushCleanup(input: LogoutPushCleanupInput) {
@@ -30,7 +28,7 @@ export async function logoutWithPushCleanup(input: LogoutPushCleanupInput) {
   const refreshToken = await input.getStoredRefreshToken().catch(() => null);
 
   const accessCleanupSucceeded = await input
-    .unregisterStoredExpoPushToken(input.notificationsApi, {
+    .unregisterStoredExpoPushToken({
       clearStoredOnFailure: true,
       retryOnUnauthorized: false,
     })

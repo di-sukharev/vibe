@@ -17,7 +17,6 @@ type CreateAppOptions = {
   env: AppEnv
   appStoreIapVerifier?: AppStoreSubscriptionVerifier
   googlePlayIapVerifier?: GooglePlaySubscriptionVerifier
-  iapVerifier?: AppStoreSubscriptionVerifier
   prisma: DbClient
 }
 
@@ -25,11 +24,10 @@ export function createApp({
   appStoreIapVerifier,
   env,
   googlePlayIapVerifier,
-  iapVerifier,
   prisma,
 }: CreateAppOptions) {
   const billing = createBillingModule({
-    appStoreVerifier: appStoreIapVerifier ?? iapVerifier,
+    appStoreVerifier: appStoreIapVerifier,
     db: prisma,
     env,
     googlePlayVerifier: googlePlayIapVerifier,

@@ -33,6 +33,7 @@ export class ApiTransport {
   constructor(
     private readonly session: ApiSession,
     private readonly baseUrl = defaultApiBaseUrl,
+    private readonly credentials?: RequestCredentials,
   ) {}
 
   async request<TSchema extends z.ZodType>(
@@ -47,6 +48,7 @@ export class ApiTransport {
   async raw(path: string, options: ApiRequestOptions = {}): Promise<Response> {
     const response = await fetch(`${this.baseUrl}${path}`, {
       method: options.method ?? 'GET',
+      credentials: this.credentials,
       headers: this.headers(options),
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
     });

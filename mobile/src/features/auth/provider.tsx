@@ -47,7 +47,10 @@ export type AuthSessionPort = {
   setExpiredHandler: (handler: () => void | Promise<void>) => void;
 };
 
-export type AuthLogoutSupport = Omit<LogoutPushCleanupInput, 'authApi'> & {
+export type AuthLogoutSupport = Omit<
+  LogoutPushCleanupInput,
+  'authApi' | 'getStoredRefreshToken'
+> & {
   markStoredExpoPushTokenForCleanup: () => Promise<void>;
 };
 
@@ -70,7 +73,7 @@ export function AuthProvider({
     setAccessTokenState(nextAccessToken);
   }, [session]);
   const handleAuthExpired = useCallback(async () => {
-    await logoutSupport.unregisterStoredExpoPushToken(logoutSupport.notificationsApi, {
+    await logoutSupport.unregisterStoredExpoPushToken({
       clearStoredOnFailure: true,
       retryOnUnauthorized: false,
     }).catch(() => logoutSupport.markStoredExpoPushTokenForCleanup().catch(() => undefined));
@@ -86,12 +89,10 @@ export function AuthProvider({
   useEffect(() => {
     let isMounted = true;
 
-    refreshBootstrapSession(api, getStoredRefreshToken)
+    refreshBootstrapSession(api)
       .then(async (response) => {
         if (!isMounted || !response) return;
         setAccessToken(response.accessToken);
-
-        await setStoredRefreshToken(response.refreshToken);
       })
       .catch(async () => {
         if (!isMounted) return;
@@ -141,7 +142,7 @@ export function AuthProvider({
       const response = await api.register(input);
       setAccessToken(response.accessToken);
 
-      await setStoredRefreshToken(response.refreshToken);
+      if (response.refreshToken) await setStoredRefreshToken(response.refreshToken);
 
       queryClient.setQueryData(meQueryKey, { user: response.user });
     },
@@ -153,7 +154,7 @@ export function AuthProvider({
       const response = await api.login(input);
       setAccessToken(response.accessToken);
 
-      await setStoredRefreshToken(response.refreshToken);
+      if (response.refreshToken) await setStoredRefreshToken(response.refreshToken);
 
       queryClient.setQueryData(meQueryKey, { user: response.user });
     },
@@ -165,7 +166,7 @@ export function AuthProvider({
       const response = await api.socialAuth(provider, input);
       setAccessToken(response.accessToken);
 
-      await setStoredRefreshToken(response.refreshToken);
+      if (response.refreshToken) await setStoredRefreshToken(response.refreshToken);
 
       queryClient.setQueryData(meQueryKey, { user: response.user });
     },

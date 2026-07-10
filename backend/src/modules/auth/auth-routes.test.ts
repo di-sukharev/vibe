@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 
-import { createApp } from '../../../app'
-import type { DbClient } from '../../../db'
-import type { AppEnv } from '../../../env'
+import { createApp } from '../../app'
+import type { DbClient } from '../../db'
+import type { AppEnv } from '../../env'
 
 const env: AppEnv = {
   PORT: 3000,

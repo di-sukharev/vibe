@@ -14,6 +14,7 @@ import type { Context } from 'hono'
 
 import type { AuthenticatedPrincipal } from '../../auth'
 import type { BillingService } from '../application/billing-service'
+import { executeBilling } from './errors'
 
 type AuthenticateAccessToken = (
   accessToken: string | undefined,
@@ -258,18 +259,22 @@ export function createIapRoutes(input: {
 
   routes.openapi(entitlementRoute, async (c) => {
     const user = await requireUser(c, input.authenticateAccessToken)
-    return c.json({ subscription: await input.service.getSubscription(user.id) }, 200)
+    return c.json({
+      subscription: await executeBilling(() => input.service.getSubscription(user.id)),
+    }, 200)
   })
 
   routes.openapi(transactionRoute, async (c) => {
     const user = await requireUser(c, input.authenticateAccessToken)
     const payload = c.req.valid('json')
-    const subscription = await input.service.ingestAppStore({
-      userId: user.id,
-      signedTransactionInfo: payload.signedTransactionInfo,
-      signedRenewalInfo: payload.signedRenewalInfo,
-      offerCodeRedemptionToken: payload.offerCodeRedemptionToken,
-    })
+    const subscription = await executeBilling(() =>
+      input.service.ingestAppStore({
+        userId: user.id,
+        signedTransactionInfo: payload.signedTransactionInfo,
+        signedRenewalInfo: payload.signedRenewalInfo,
+        offerCodeRedemptionToken: payload.offerCodeRedemptionToken,
+      }),
+    )
 
     return c.json({ subscription }, 200)
   })
@@ -277,12 +282,14 @@ export function createIapRoutes(input: {
   routes.openapi(googlePlayTransactionRoute, async (c) => {
     const user = await requireUser(c, input.authenticateAccessToken)
     const payload = c.req.valid('json')
-    const subscription = await input.service.ingestGooglePlay({
-      basePlanId: payload.basePlanId,
-      productId: payload.productId,
-      purchaseToken: payload.purchaseToken,
-      userId: user.id,
-    })
+    const subscription = await executeBilling(() =>
+      input.service.ingestGooglePlay({
+        basePlanId: payload.basePlanId,
+        productId: payload.productId,
+        purchaseToken: payload.purchaseToken,
+        userId: user.id,
+      }),
+    )
 
     return c.json({ subscription }, 200)
   })
@@ -290,18 +297,20 @@ export function createIapRoutes(input: {
   routes.openapi(offerCodeRedemptionRoute, async (c) => {
     const user = await requireUser(c, input.authenticateAccessToken)
     return c.json({
-      token: await input.service.createOfferCodeRedemption(user.id),
+      token: await executeBilling(() => input.service.createOfferCodeRedemption(user.id)),
     }, 200)
   })
 
   routes.openapi(reconcileRoute, async (c) => {
     const user = await requireUser(c, input.authenticateAccessToken)
     const payload = c.req.valid('json')
-    const subscription = await input.service.reconcileAppStore({
-      userId: user.id,
-      signedTransactions: payload.signedTransactions,
-      originalTransactionIds: payload.originalTransactionIds,
-    })
+    const subscription = await executeBilling(() =>
+      input.service.reconcileAppStore({
+        userId: user.id,
+        signedTransactions: payload.signedTransactions,
+        originalTransactionIds: payload.originalTransactionIds,
+      }),
+    )
 
     return c.json({ subscription }, 200)
   })
@@ -309,10 +318,12 @@ export function createIapRoutes(input: {
   routes.openapi(googlePlayReconcileRoute, async (c) => {
     const user = await requireUser(c, input.authenticateAccessToken)
     const payload = c.req.valid('json')
-    const subscription = await input.service.reconcileGooglePlay({
-      purchases: payload.purchases,
-      userId: user.id,
-    })
+    const subscription = await executeBilling(() =>
+      input.service.reconcileGooglePlay({
+        purchases: payload.purchases,
+        userId: user.id,
+      }),
+    )
 
     return c.json({ subscription }, 200)
   })
@@ -325,7 +336,9 @@ export function createAppStoreWebhookRoutes(service: BillingService) {
 
   routes.openapi(webhookRoute, async (c) => {
     const payload = c.req.valid('json')
-    const result = await service.processAppStoreWebhook(payload.signedPayload)
+    const result = await executeBilling(() =>
+      service.processAppStoreWebhook(payload.signedPayload),
+    )
 
     return c.json({ ok: true, duplicate: result.duplicate }, 200)
   })

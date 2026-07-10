@@ -7,12 +7,12 @@ test('refreshBootstrapSession returns null without stored refresh token', async 
 
   const result = await refreshBootstrapSession(
     {
+      canRefresh: async () => false,
       refresh: async () => {
         refreshCalls += 1;
         return { accessToken: 'access-token' };
       },
     } as never,
-    async () => null,
   );
 
   expect(result).toBeNull();
@@ -22,6 +22,7 @@ test('refreshBootstrapSession returns null without stored refresh token', async 
 test('refreshBootstrapSession deduplicates concurrent refresh attempts and resets after failure', async () => {
   let refreshCalls = 0;
   const api = {
+    canRefresh: async () => true,
     refresh: async () => {
       refreshCalls += 1;
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -32,17 +33,23 @@ test('refreshBootstrapSession deduplicates concurrent refresh attempts and reset
     },
   } as never;
 
-  const first = refreshBootstrapSession(api, async () => 'r'.repeat(32));
-  const second = refreshBootstrapSession(api, async () => 'r'.repeat(32));
+  const first = refreshBootstrapSession(api);
+  const second = refreshBootstrapSession(api);
 
   await expect(first).rejects.toThrow('expired refresh');
   await expect(second).rejects.toThrow('expired refresh');
   expect(refreshCalls).toBe(1);
 
-  await expect(refreshBootstrapSession(api, async () => 'r'.repeat(32))).resolves.toEqual({
+  await expect(refreshBootstrapSession(api)).resolves.toEqual({
     accessToken: 'fresh-access-token',
   });
   expect(refreshCalls).toBe(2);
+});
+
+test('web token store never exposes refresh credentials to browser JavaScript storage', async () => {
+  const source = await Bun.file('src/features/auth/token-store.ts').text();
+  expect(source).not.toContain('localStorage');
+  expect(source).not.toContain('sessionStorage');
 });
 
 test('clearBootstrapAuthState clears access and refresh while preserving Expo push cleanup evidence', async () => {

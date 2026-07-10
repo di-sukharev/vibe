@@ -15,7 +15,7 @@ import {
   AuthSubmitButton,
   AuthTextField,
   type AuthMode,
-} from '@/components/auth-components';
+} from '../components/auth-components';
 import { PageHeader } from '@/components/page-header';
 import { Screen } from '@/components/screen';
 import { ScreenLoader } from '@/components/screen-states';

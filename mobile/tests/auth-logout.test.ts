@@ -14,11 +14,6 @@ test('logoutWithPushCleanup clears pending push cleanup when access unregister s
         return false;
       },
     },
-    notificationsApi: {
-      unregisterExpoPushToken: async (input, options) => {
-        calls.push(['unregister', input, options]);
-      },
-    },
     clearPendingExpoPushTokenCleanup: async () => {
       pendingCleared = true;
     },
@@ -31,8 +26,8 @@ test('logoutWithPushCleanup clears pending push cleanup when access unregister s
     setPendingExpoPushTokenCleanup: async () => {
       calls.push(['set-pending']);
     },
-    unregisterStoredExpoPushToken: async (api, options) => {
-      await api.unregisterExpoPushToken({ expoPushToken: 'ExponentPushToken[current-token]' }, options);
+    unregisterStoredExpoPushToken: async (options) => {
+      calls.push(['unregister', { expoPushToken: 'ExponentPushToken[current-token]' }, options]);
     },
   });
 
@@ -62,11 +57,6 @@ test('logoutWithPushCleanup preserves pending cleanup when access unregister and
 
   await logoutWithPushCleanup({
     authApi: { logout: async () => false },
-    notificationsApi: {
-      unregisterExpoPushToken: async () => {
-        throw new Error('unauthorized');
-      },
-    },
     clearPendingExpoPushTokenCleanup: async () => {
       pendingCleared = true;
     },
@@ -82,8 +72,8 @@ test('logoutWithPushCleanup preserves pending cleanup when access unregister and
     setPendingExpoPushTokenCleanup: async (token) => {
       pendingTokens.push(token);
     },
-    unregisterStoredExpoPushToken: async (api, options) => {
-      await api.unregisterExpoPushToken({ expoPushToken: 'ExponentPushToken[current-token]' }, options);
+    unregisterStoredExpoPushToken: async () => {
+      throw new Error('unauthorized');
     },
   });
 
@@ -106,11 +96,6 @@ test('logoutWithPushCleanup clears pending cleanup when refresh logout confirms 
         return true;
       },
     },
-    notificationsApi: {
-      unregisterExpoPushToken: async () => {
-        throw new Error('offline');
-      },
-    },
     clearPendingExpoPushTokenCleanup: async () => {
       pendingCleared = true;
     },
@@ -121,8 +106,8 @@ test('logoutWithPushCleanup clears pending cleanup when refresh logout confirms 
     setPendingExpoPushTokenCleanup: async (token) => {
       pendingTokens.push(token);
     },
-    unregisterStoredExpoPushToken: async (api, options) => {
-      await api.unregisterExpoPushToken({ expoPushToken: 'ExponentPushToken[current-token]' }, options);
+    unregisterStoredExpoPushToken: async () => {
+      throw new Error('offline');
     },
   });
 

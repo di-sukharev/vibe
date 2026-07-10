@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { PropsWithChildren } from 'react';
 import { useState } from 'react';
+import { Platform } from 'react-native';
 
 import {
   AuthProvider,
@@ -20,6 +21,7 @@ import {
   unregisterStoredExpoPushToken,
 } from '@/features/notifications';
 import { createMobileApis, SessionController } from './api';
+import { authTransportForPlatform } from './auth-transport';
 
 export function AppProviders({ children }: PropsWithChildren) {
   const [queryClient] = useState(
@@ -31,6 +33,7 @@ export function AppProviders({ children }: PropsWithChildren) {
   const [session] = useState(() => new SessionController());
   const [apis] = useState(() =>
     createMobileApis({
+      authTransport: authTransportForPlatform(Platform.OS),
       clearRefreshToken: clearStoredRefreshToken,
       getRefreshToken: getStoredRefreshToken,
       session,
@@ -47,11 +50,10 @@ export function AppProviders({ children }: PropsWithChildren) {
           clearStoredExpoPushToken,
           getKnownExpoPushTokens,
           getStoredExpoPushToken,
-          getStoredRefreshToken,
           markStoredExpoPushTokenForCleanup,
-          notificationsApi: apis.notifications,
           setPendingExpoPushTokenCleanup,
-          unregisterStoredExpoPushToken,
+          unregisterStoredExpoPushToken: (options) =>
+            unregisterStoredExpoPushToken(apis.notifications, options),
         }}
         session={session}
       >

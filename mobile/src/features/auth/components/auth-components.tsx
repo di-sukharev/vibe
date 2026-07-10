@@ -5,37 +5,49 @@ import { Button } from '@/components/ui/button';
 import { Field, FieldError, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Surface, UiPressable } from '@/components/ui/primitives';
-import { Typography } from '@/components/ui/typography';
 import { useUiTheme } from '@/components/ui/theme';
+import { Typography } from '@/components/ui/typography';
 
 export type AuthMode = 'register' | 'login';
 
-type AuthPanelProps = {
-  children: ReactNode;
-};
-
-export function AuthPanel({ children }: AuthPanelProps) {
+export function AuthPanel({ children }: { children: ReactNode }) {
   const theme = useUiTheme();
 
   return (
-    <Surface bordered rounded="xxl" tone="card" style={{ gap: theme.spacing.lg, padding: theme.spacing.lg }}>
+    <Surface
+      bordered
+      rounded="xxl"
+      tone="card"
+      style={{ gap: theme.spacing.lg, padding: theme.spacing.lg }}>
       {children}
     </Surface>
   );
 }
 
-type AuthModeTabsProps = {
+export function AuthModeTabs({
+  loginTestID,
+  mode,
+  onModeChange,
+  registerTestID,
+}: {
+  loginTestID: string;
   mode: AuthMode;
   onModeChange: (mode: AuthMode) => void;
-  loginTestID: string;
   registerTestID: string;
-};
-
-export function AuthModeTabs({ mode, onModeChange, loginTestID, registerTestID }: AuthModeTabsProps) {
+}) {
   const theme = useUiTheme();
 
   return (
-    <View style={[styles.tabs, { backgroundColor: theme.colors.muted, borderRadius: theme.radius.full, gap: theme.spacing.xs, padding: theme.spacing.xs }]}>
+    <View
+      style={[
+        styles.tabs,
+        {
+          backgroundColor: theme.colors.muted,
+          borderRadius: theme.radius.full,
+          gap: theme.spacing.xs,
+          padding: theme.spacing.xs,
+        },
+      ]}>
       <AuthModeTab
         active={mode === 'register'}
         label="Register"
@@ -87,7 +99,12 @@ function AuthModeTab({
   );
 }
 
-type AuthTextFieldProps = {
+export function AuthTextField({
+  errors,
+  label,
+  testID,
+  ...inputProps
+}: {
   errors: unknown[];
   label: string;
   testID: string;
@@ -97,9 +114,7 @@ type AuthTextFieldProps = {
 } & Pick<
   ComponentProps<typeof Input>,
   'autoCapitalize' | 'autoComplete' | 'keyboardType' | 'secureTextEntry'
->;
-
-export function AuthTextField({ errors, label, testID, ...inputProps }: AuthTextFieldProps) {
+>) {
   return (
     <Field>
       <FieldLabel>{label}</FieldLabel>
@@ -114,15 +129,6 @@ export function AuthTextField({ errors, label, testID, ...inputProps }: AuthText
   );
 }
 
-type AuthSubmitButtonProps = {
-  accessibilityLabel: string;
-  disabled: boolean;
-  label: string;
-  loading: boolean;
-  testID: string;
-  onPress: () => void;
-};
-
 export function AuthSubmitButton({
   accessibilityLabel,
   disabled,
@@ -130,7 +136,14 @@ export function AuthSubmitButton({
   loading,
   onPress,
   testID,
-}: AuthSubmitButtonProps) {
+}: {
+  accessibilityLabel: string;
+  disabled: boolean;
+  label: string;
+  loading: boolean;
+  testID: string;
+  onPress: () => void;
+}) {
   return (
     <Button
       accessibilityLabel={accessibilityLabel}

@@ -12,7 +12,7 @@ import {
 } from '@apple/app-store-server-library'
 
 import type { AppEnv } from '../../../env'
-import { AppError } from '../../../http/errors'
+import { BillingFailure } from '../domain/errors'
 
 export type AppStoreVerificationResult<T> = {
   environment: Environment
@@ -48,8 +48,7 @@ export function createAppStoreSubscriptionVerifier(env: AppEnv): AppStoreSubscri
 
   function requireBundleId() {
     if (!env.APPLE_IAP_BUNDLE_ID) {
-      throw new AppError(
-        503,
+      throw new BillingFailure(
         'IAP_NOT_CONFIGURED',
         'App Store IAP verification is not configured',
       )
@@ -70,16 +69,14 @@ export function createAppStoreSubscriptionVerifier(env: AppEnv): AppStoreSubscri
         .filter((fileName) => ['.cer', '.crt', '.der'].includes(extname(fileName).toLowerCase()))
         .sort()
     } catch {
-      throw new AppError(
-        503,
+      throw new BillingFailure(
         'IAP_NOT_CONFIGURED',
         'Apple root certificates are missing for App Store IAP verification',
       )
     }
 
     if (certFiles.length === 0) {
-      throw new AppError(
-        503,
+      throw new BillingFailure(
         'IAP_NOT_CONFIGURED',
         'Apple root certificates are missing for App Store IAP verification',
       )
@@ -114,8 +111,7 @@ export function createAppStoreSubscriptionVerifier(env: AppEnv): AppStoreSubscri
     if (cached) return cached
 
     if (!env.APPLE_IAP_ISSUER_ID || !env.APPLE_IAP_KEY_ID || !env.APPLE_IAP_PRIVATE_KEY_BASE64) {
-      throw new AppError(
-        503,
+      throw new BillingFailure(
         'IAP_NOT_CONFIGURED',
         'App Store Server API credentials are not configured',
       )
@@ -154,8 +150,7 @@ export function createAppStoreSubscriptionVerifier(env: AppEnv): AppStoreSubscri
       }
     }
 
-    throw new AppError(
-      400,
+    throw new BillingFailure(
       'IAP_INVALID_TRANSACTION',
       'App Store signed payload could not be verified',
     )
@@ -194,5 +189,5 @@ export function createAppStoreSubscriptionVerifier(env: AppEnv): AppStoreSubscri
 }
 
 function isIapConfigurationError(error: unknown) {
-  return error instanceof AppError && error.code === 'IAP_NOT_CONFIGURED'
+  return error instanceof BillingFailure && error.code === 'IAP_NOT_CONFIGURED'
 }

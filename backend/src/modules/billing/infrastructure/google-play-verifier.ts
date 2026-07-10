@@ -1,7 +1,7 @@
 import { GoogleAuth, type JWTInput } from 'google-auth-library'
 
 import type { AppEnv } from '../../../env'
-import { AppError } from '../../../http/errors'
+import { BillingFailure } from '../domain/errors'
 
 const androidPublisherScope = 'https://www.googleapis.com/auth/androidpublisher'
 const androidPublisherBaseUrl = 'https://androidpublisher.googleapis.com/androidpublisher/v3'
@@ -128,8 +128,7 @@ function createRequesterFactory(env: AppEnv) {
 
 function googlePlayPackageName(env: AppEnv) {
   if (!env.GOOGLE_PLAY_PACKAGE_NAME) {
-    throw new AppError(
-      503,
+    throw new BillingFailure(
       'IAP_NOT_CONFIGURED',
       'Google Play package name is not configured',
     )
@@ -140,8 +139,7 @@ function googlePlayPackageName(env: AppEnv) {
 
 function googlePlayServiceAccount(env: AppEnv): JWTInput {
   if (!env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64) {
-    throw new AppError(
-      503,
+    throw new BillingFailure(
       'IAP_NOT_CONFIGURED',
       'Google Play service account credentials are not configured',
     )
@@ -155,8 +153,7 @@ function googlePlayServiceAccount(env: AppEnv): JWTInput {
   try {
     return JSON.parse(decoded) as JWTInput
   } catch {
-    throw new AppError(
-      503,
+    throw new BillingFailure(
       'IAP_NOT_CONFIGURED',
       'Google Play service account credentials are not valid JSON',
     )
@@ -167,25 +164,22 @@ function mapGooglePlayApiError(error: unknown) {
   const status = googleApiStatus(error)
 
   if (status === 400 || status === 404) {
-    return new AppError(
-      400,
+    return new BillingFailure(
       'IAP_INVALID_TRANSACTION',
       'Google Play purchase could not be verified',
     )
   }
 
   if (status === 401 || status === 403) {
-    return new AppError(
-      503,
+    return new BillingFailure(
       'IAP_NOT_CONFIGURED',
       'Google Play API credentials are not authorized for subscription verification',
     )
   }
 
-  if (error instanceof AppError) return error
+  if (error instanceof BillingFailure) return error
 
-  return new AppError(
-    503,
+  return new BillingFailure(
     'IAP_NOT_CONFIGURED',
     'Google Play subscription verification is temporarily unavailable',
   )

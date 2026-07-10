@@ -12,23 +12,8 @@ const sourceRoots = [
 ]
 const sourceExtension = /\.(?:[cm]?[jt]sx?)$/
 const importPattern = /(?:^|\n)\s*(?:import|export)\s+(?:type\s+)?(?:[\s\S]*?\s+from\s+)?['"]([^'"]+)['"]/g
-const applicationForbiddenPackages = [
-  '@prisma/',
-  'hono',
-  '@aws-sdk/',
-  'expo-',
-  'react',
-  'react-native',
-  'jose',
-]
-const contractForbiddenPackages = [
-  '@prisma/',
-  'hono',
-  'react',
-  'react-native',
-  'expo-',
-  '@aws-sdk/',
-]
+const innerLayerAllowedPackages = ['@web-app-demo/contracts', 'zod']
+const contractAllowedPackages = ['zod']
 
 export function checkArchitectureSources(files) {
   const violations = []
@@ -53,6 +38,8 @@ export function checkArchitectureSources(files) {
       checkContracts(normalizedPath, imported.specifier, report)
     }
   }
+
+  checkClientFeatureCycles(files, violations)
 
   return violations.sort((left, right) =>
     left.path.localeCompare(right.path) || left.line - right.line || left.rule.localeCompare(right.rule),
@@ -85,13 +72,33 @@ async function main() {
 }
 
 function checkBackendLayers(filePath, specifier, report) {
-  const layer = filePath.match(/^backend\/src\/modules\/[^/]+\/(domain|application|transport)\//)?.[1]
+  const layer = filePath.match(
+    /^backend\/src\/modules\/[^/]+\/(domain|application|infrastructure|transport)\//,
+  )?.[1]
   if (!layer) return
 
-  const forbiddenPackage = applicationForbiddenPackages.find((name) => packageMatches(specifier, name))
-  const importsPrisma = specifier.includes('generated/prisma') || packageMatches(specifier, '@prisma/')
+  const target = resolveRepositoryImport(filePath, specifier)
+  const targetLayer = target?.match(
+    /^backend\/src\/modules\/[^/]+\/(domain|application|infrastructure|transport)(?:\/|$)/,
+  )?.[1]
+  const forbiddenPackage =
+    isPackageImport(specifier) &&
+    !packageAllowed(specifier, innerLayerAllowedPackages, filePath)
+  const importsPrisma =
+    specifier.includes('generated/prisma') ||
+    packageMatches(specifier, '@prisma/') ||
+    target?.startsWith('backend/src/generated/prisma')
+  const importsBackendRuntime =
+    target === 'backend/src/db' ||
+    target === 'backend/src/env' ||
+    target === 'backend/src/runtime' ||
+    target?.startsWith('backend/src/http/') ||
+    target?.startsWith('backend/src/generated/')
 
-  if ((layer === 'domain' || layer === 'application') && (forbiddenPackage || importsPrisma)) {
+  if (
+    (layer === 'domain' || layer === 'application') &&
+    (forbiddenPackage || importsPrisma || importsBackendRuntime)
+  ) {
     report(
       `backend-${layer}-dependencies`,
       `${layer} must not import framework, persistence, environment, or provider SDK code (${specifier}).`,
@@ -99,18 +106,96 @@ function checkBackendLayers(filePath, specifier, report) {
   }
 
   if (
-    (layer === 'domain' || layer === 'application') &&
-    (specifier.includes('/env') || specifier.endsWith('/env') || specifier.includes('/infrastructure/'))
+    ((layer === 'domain' && targetLayer && targetLayer !== 'domain') ||
+      (layer === 'application' &&
+        (targetLayer === 'infrastructure' || targetLayer === 'transport'))) &&
+    !importsBackendRuntime
   ) {
     report(
       `backend-${layer}-dependencies`,
-      `${layer} must depend on feature types and ports, not environment or infrastructure (${specifier}).`,
+      `${layer} must depend on domain types and application ports, not outer layers (${specifier}).`,
     )
   }
 
-  if (layer === 'transport' && importsPrisma) {
-    report('backend-transport-dependencies', `transport must not import Prisma (${specifier}).`)
+  if (
+    layer === 'transport' &&
+    (importsPrisma || target === 'backend/src/db' || targetLayer === 'infrastructure')
+  ) {
+    report(
+      'backend-transport-dependencies',
+      `transport must not import persistence or module infrastructure (${specifier}).`,
+    )
   }
+
+  if (
+    layer === 'infrastructure' &&
+    (target?.startsWith('backend/src/http/') || targetLayer === 'transport')
+  ) {
+    report(
+      'backend-infrastructure-dependencies',
+      `infrastructure must not depend on HTTP transport code (${specifier}).`,
+    )
+  }
+}
+
+function checkClientFeatureCycles(files, violations) {
+  for (const client of ['webapp', 'mobile']) {
+    const edges = []
+    const graph = new Map()
+
+    for (const file of files) {
+      const normalizedPath = normalizePath(file.path)
+      const sourceFeature = normalizedPath.match(
+        new RegExp(`^${client}/src/features/([^/]+)/`),
+      )?.[1]
+      if (!sourceFeature) continue
+
+      for (const imported of staticImports(file.source)) {
+        const target = resolveRepositoryImport(normalizedPath, imported.specifier)
+        const targetFeature = target?.match(
+          new RegExp(`^${client}/src/features/([^/]+)(?:/|$)`),
+        )?.[1]
+        if (!targetFeature || targetFeature === sourceFeature) continue
+
+        const edge = {
+          source: sourceFeature,
+          target: targetFeature,
+          path: normalizedPath,
+          line: imported.line,
+          specifier: imported.specifier,
+        }
+        edges.push(edge)
+        const targets = graph.get(sourceFeature) ?? new Set()
+        targets.add(targetFeature)
+        graph.set(sourceFeature, targets)
+      }
+    }
+
+    for (const edge of edges) {
+      if (!hasGraphPath(graph, edge.target, edge.source)) continue
+      violations.push({
+        path: edge.path,
+        line: edge.line,
+        rule: 'client-feature-cycle',
+        message: `feature dependency ${edge.source} -> ${edge.target} creates a cycle (${edge.specifier}). Move collaboration into composition or an owning port.`,
+      })
+    }
+  }
+}
+
+function hasGraphPath(graph, start, target) {
+  const pending = [start]
+  const visited = new Set()
+
+  while (pending.length > 0) {
+    const current = pending.pop()
+    if (!current || visited.has(current)) continue
+    if (current === target) return true
+    visited.add(current)
+    pending.push(...(graph.get(current) ?? []))
+  }
+
+  return false
 }
 
 function checkBackendModuleBoundary(filePath, specifier, report) {
@@ -161,7 +246,9 @@ function checkContracts(filePath, specifier, report) {
 
   const target = resolveRepositoryImport(filePath, specifier)
   const forbiddenTarget = target && /^(backend|webapp|website|mobile)\//.test(target)
-  const forbiddenPackage = contractForbiddenPackages.some((name) => packageMatches(specifier, name))
+  const forbiddenPackage =
+    isPackageImport(specifier) &&
+    !packageAllowed(specifier, contractAllowedPackages, filePath)
   if (forbiddenTarget || forbiddenPackage) {
     report(
       'contracts-dependency-direction',
@@ -227,6 +314,15 @@ function normalizePath(filePath) {
 function packageMatches(specifier, packagePrefix) {
   if (packagePrefix.endsWith('/')) return specifier.startsWith(packagePrefix)
   return specifier === packagePrefix || specifier.startsWith(`${packagePrefix}/`)
+}
+
+function isPackageImport(specifier) {
+  return !specifier.startsWith('.') && !specifier.startsWith('@/')
+}
+
+function packageAllowed(specifier, allowedPackages, filePath) {
+  if (/\.test\.[cm]?[jt]sx?$/.test(filePath) && specifier === 'bun:test') return true
+  return allowedPackages.some((allowed) => packageMatches(specifier, allowed))
 }
 
 if (import.meta.main) await main()

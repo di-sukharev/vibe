@@ -1,4 +1,4 @@
-import { AuthApi } from '@/features/auth';
+import { AuthApi, type AuthTransportKind } from '@/features/auth';
 import { BillingApi } from '@/features/billing';
 import { NotificationsApi } from '@/features/notifications';
 import { ApiTransport } from '@/platform/api';
@@ -18,19 +18,24 @@ export class SessionController {
 }
 
 export function createMobileApis(input: {
+  authTransport: AuthTransportKind;
   clearRefreshToken: () => Promise<void>;
   getRefreshToken: () => Promise<string | null>;
   session: SessionController;
   setRefreshToken: (refreshToken: string) => Promise<void>;
 }) {
   let auth!: AuthApi;
-  const transport = new ApiTransport({
-    expire: input.session.expire,
-    getAccessToken: input.session.getAccessToken,
-    refresh: () => auth.refresh(),
-    setAccessToken: input.session.setAccessToken,
-  });
-  auth = new AuthApi(transport, input);
+  const transport = new ApiTransport(
+    {
+      expire: input.session.expire,
+      getAccessToken: input.session.getAccessToken,
+      refresh: () => auth.refresh(),
+      setAccessToken: input.session.setAccessToken,
+    },
+    undefined,
+    input.authTransport === 'cookie' ? 'include' : undefined,
+  );
+  auth = new AuthApi(transport, input, input.authTransport);
 
   return {
     auth,

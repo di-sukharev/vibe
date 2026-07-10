@@ -2,7 +2,7 @@ import { SignJWT, jwtVerify } from 'jose'
 import { z } from 'zod'
 
 import type { AppEnv } from '../../../env'
-import { AppError } from '../../../http/errors'
+import { BillingFailure } from '../domain/errors'
 
 const offerCodeRedemptionScope = 'iap_offer_code_redemption'
 const offerCodeRedemptionTtlSeconds = 15 * 60
@@ -30,16 +30,14 @@ export async function verifyOfferCodeRedemptionToken(
   env: Pick<AppEnv, 'JWT_SECRET'>,
 ) {
   const { payload } = await jwtVerify(token, secretKey(env.JWT_SECRET)).catch(() => {
-    throw new AppError(
-      403,
+    throw new BillingFailure(
       'IAP_OWNERSHIP_MISMATCH',
       'Offer code redemption session is invalid or expired',
     )
   })
   const parsed = offerCodeRedemptionPayloadSchema.safeParse(payload)
   if (!parsed.success) {
-    throw new AppError(
-      403,
+    throw new BillingFailure(
       'IAP_OWNERSHIP_MISMATCH',
       'Offer code redemption session is invalid or expired',
     )

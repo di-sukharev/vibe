@@ -4,14 +4,9 @@ import { expect, mock, test } from 'bun:test'
 import type { DbClient } from '../../../db'
 import type { AppEnv } from '../../../env'
 import { SubscriptionState } from '../../../generated/prisma/enums'
+import { BillingService } from '../application/billing-service'
 import type { AppStoreSubscriptionVerifier } from './apple-verifier'
-import {
-  createOfferCodeRedemptionToken,
-  ingestGooglePlayTransaction,
-  ingestAppStoreTransaction,
-  reconcileAppStoreTransactions,
-  recordAndProcessAppStoreWebhook,
-} from './billing-operations'
+import { createBillingDependencies } from './billing-adapters'
 import type { GooglePlaySubscriptionVerifier } from './google-play-verifier'
 
 const env: AppEnv = {
@@ -77,12 +72,9 @@ test('releases webhook claims when final processed marker write fails', async ()
   } as unknown as DbClient
 
   await expect(
-    recordAndProcessAppStoreWebhook({
-      db,
-      env,
-      verifier: fakeVerifier(),
-      signedPayload: 'signed-webhook',
-    }),
+    billingService({ db, appStoreVerifier: fakeVerifier() }).processAppStoreWebhook(
+      'signed-webhook',
+    ),
   ).rejects.toThrow('final marker write failed')
 
   expect(deleteMany).toHaveBeenCalledWith({
@@ -101,17 +93,18 @@ test('uses the configured production App Store environment for original transact
     },
   } as unknown as DbClient
 
-  await reconcileAppStoreTransactions({
+  await billingService({
     db,
     env: {
       ...env,
       APPLE_IAP_APP_APPLE_ID: 123456789,
       APPLE_IAP_ENVIRONMENT: 'Production',
     },
-    verifier: {
+    appStoreVerifier: {
       ...fakeVerifier(),
       getSubscriptionStatuses,
     },
+  }).reconcileAppStore({
     userId: '018fd4f2-1f3a-7c88-bc49-333333333333',
     originalTransactionIds: ['original-1'],
   })
@@ -152,10 +145,10 @@ test('keeps billing grace period entitlements active until Apple grace expiratio
     $transaction: async (callback: (tx: unknown) => unknown) => callback(db),
   } as unknown as DbClient
 
-  const subscription = await reconcileAppStoreTransactions({
+  const subscription = await billingService({
     db,
     env,
-    verifier: {
+    appStoreVerifier: {
       async verifyTransaction() {
         return {
           environment: Environment.SANDBOX,
@@ -197,6 +190,7 @@ test('keeps billing grace period entitlements active until Apple grace expiratio
         ]
       },
     },
+  }).reconcileAppStore({
     userId,
     originalTransactionIds: ['original-grace'],
   })
@@ -241,10 +235,10 @@ test('status-only revoked transactions override future active entitlements for t
     $transaction: async (callback: (tx: unknown) => unknown) => callback(db),
   } as unknown as DbClient
 
-  const subscription = await reconcileAppStoreTransactions({
+  const subscription = await billingService({
     db,
     env,
-    verifier: {
+    appStoreVerifier: {
       async verifyTransaction() {
         return {
           environment: Environment.SANDBOX,
@@ -274,6 +268,7 @@ test('status-only revoked transactions override future active entitlements for t
         ]
       },
     },
+  }).reconcileAppStore({
     userId,
     originalTransactionIds: ['original-revoked'],
   })
@@ -288,7 +283,7 @@ test('status-only revoked transactions override future active entitlements for t
 
 test('allows tokenless first App Store claims only with a valid offer-code redemption token', async () => {
   const userId = '018fd4f2-1f3a-7c88-bc49-333333333333'
-  const token = await createOfferCodeRedemptionToken({ env, userId })
+  const token = await billingService({ db: {} as DbClient, env }).createOfferCodeRedemption(userId)
   const createDb = () => {
     const db = {
       appStoreTransaction: {
@@ -314,20 +309,18 @@ test('allows tokenless first App Store claims only with a valid offer-code redem
   let db = createDb()
 
   await expect(
-    ingestAppStoreTransaction({
-      db,
-      env,
-      verifier: tokenlessOfferCodeVerifier(),
+    billingService({ db, env, appStoreVerifier: tokenlessOfferCodeVerifier() }).ingestAppStore({
       userId,
       signedTransactionInfo: 'signed-offer-code',
     }),
   ).rejects.toMatchObject({ code: 'IAP_OWNERSHIP_MISMATCH' })
 
   db = createDb()
-  const invalidTokenError = await ingestAppStoreTransaction({
+  const invalidTokenError = await billingService({
     db,
     env,
-    verifier: tokenlessOfferCodeVerifier(),
+    appStoreVerifier: tokenlessOfferCodeVerifier(),
+  }).ingestAppStore({
     userId,
     signedTransactionInfo: 'signed-offer-code',
     offerCodeRedemptionToken: 'not-a-jwt',
@@ -344,10 +337,11 @@ test('allows tokenless first App Store claims only with a valid offer-code redem
   ] satisfies Array<[string, Partial<JWSTransactionDecodedPayload>]>) {
     db = createDb()
     await expect(
-      ingestAppStoreTransaction({
+      billingService({
         db,
         env,
-        verifier: tokenlessOfferCodeVerifier(overrides),
+        appStoreVerifier: tokenlessOfferCodeVerifier(overrides),
+      }).ingestAppStore({
         userId,
         signedTransactionInfo: `signed-offer-code-${label}`,
         offerCodeRedemptionToken: token,
@@ -357,10 +351,7 @@ test('allows tokenless first App Store claims only with a valid offer-code redem
 
   db = createDb()
   await expect(
-    ingestAppStoreTransaction({
-      db,
-      env,
-      verifier: tokenlessOfferCodeVerifier(),
+    billingService({ db, env, appStoreVerifier: tokenlessOfferCodeVerifier() }).ingestAppStore({
       userId,
       signedTransactionInfo: 'signed-offer-code',
       offerCodeRedemptionToken: token,
@@ -387,10 +378,7 @@ test('rejects verified App Store transactions that are not auto-renewable subscr
   } as unknown as DbClient
 
   await expect(
-    ingestAppStoreTransaction({
-      db,
-      env,
-      verifier: nonSubscriptionVerifier(),
+    billingService({ db, env, appStoreVerifier: nonSubscriptionVerifier() }).ingestAppStore({
       userId: '018fd4f2-1f3a-7c88-bc49-333333333333',
       signedTransactionInfo: 'signed-consumable',
     }),
@@ -422,14 +410,15 @@ test('ingests active Google Play purchases and acknowledges before returning ent
     googleUpsert,
   })
 
-  const subscription = await ingestGooglePlayTransaction({
+  const subscription = await billingService({
     db,
     env: googlePlayEnv,
-    verifier: googlePlayVerifier({
+    googlePlayVerifier: googlePlayVerifier({
       acknowledgementState: 'ACKNOWLEDGEMENT_STATE_PENDING',
       subscriptionState: 'SUBSCRIPTION_STATE_ACTIVE',
       acknowledgeSubscription,
     }),
+  }).ingestGooglePlay({
     userId,
     productId: 'premium',
     basePlanId: 'monthly',
@@ -473,13 +462,14 @@ test('rejects Google Play purchases linked to another app user', async () => {
   })
 
   await expect(
-    ingestGooglePlayTransaction({
+    billingService({
       db,
       env: googlePlayEnv,
-      verifier: googlePlayVerifier({
+      googlePlayVerifier: googlePlayVerifier({
         externalAccountId: '018fd4f2-1f3a-7c88-bc49-444444444444',
         subscriptionState: 'SUBSCRIPTION_STATE_ACTIVE',
       }),
+    }).ingestGooglePlay({
       userId: '018fd4f2-1f3a-7c88-bc49-333333333333',
       productId: 'premium',
       basePlanId: 'monthly',
@@ -502,13 +492,14 @@ test('rejects Google Play purchases when backend base plans are not allowlisted'
   })
 
   await expect(
-    ingestGooglePlayTransaction({
+    billingService({
       db,
       env: {
         ...googlePlayEnv,
         GOOGLE_PLAY_BASE_PLAN_IDS: [],
       },
-      verifier: googlePlayVerifier(),
+      googlePlayVerifier: googlePlayVerifier(),
+    }).ingestGooglePlay({
       userId: '018fd4f2-1f3a-7c88-bc49-333333333333',
       productId: 'premium',
       basePlanId: 'monthly',
@@ -536,13 +527,14 @@ test('does not grant pending Google Play purchases', async () => {
     googleUpsert: mock(async () => ({ id: 'google-row-1' })),
   })
 
-  const subscription = await ingestGooglePlayTransaction({
+  const subscription = await billingService({
     db,
     env: googlePlayEnv,
-    verifier: googlePlayVerifier({
+    googlePlayVerifier: googlePlayVerifier({
       expiryTime: null,
       subscriptionState: 'SUBSCRIPTION_STATE_PENDING',
     }),
+  }).ingestGooglePlay({
     userId: '018fd4f2-1f3a-7c88-bc49-333333333333',
     productId: 'premium',
     basePlanId: 'monthly',
@@ -577,13 +569,14 @@ test('does not let stale Google Play expiration overwrite a fresher active entit
     googleUpsert: mock(async () => ({ id: 'google-row-1' })),
   })
 
-  const subscription = await ingestGooglePlayTransaction({
+  const subscription = await billingService({
     db,
     env: googlePlayEnv,
-    verifier: googlePlayVerifier({
+    googlePlayVerifier: googlePlayVerifier({
       expiryTime: '2026-06-01T00:00:00.000Z',
       subscriptionState: 'SUBSCRIPTION_STATE_EXPIRED',
     }),
+  }).ingestGooglePlay({
     userId: '018fd4f2-1f3a-7c88-bc49-333333333333',
     productId: 'premium',
     basePlanId: 'monthly',
@@ -597,6 +590,27 @@ test('does not let stale Google Play expiration overwrite a fresher active entit
   })
   expect(entitlementUpsert).not.toHaveBeenCalled()
 })
+
+function billingService({
+  appStoreVerifier = fakeVerifier(),
+  db,
+  env: appEnv = env,
+  googlePlayVerifier: googleVerifier = googlePlayVerifier(),
+}: {
+  appStoreVerifier?: AppStoreSubscriptionVerifier
+  db: DbClient
+  env?: AppEnv
+  googlePlayVerifier?: GooglePlaySubscriptionVerifier
+}) {
+  return new BillingService(
+    createBillingDependencies({
+      appStoreVerifier,
+      db,
+      env: appEnv,
+      googlePlayVerifier: googleVerifier,
+    }),
+  )
+}
 
 function googlePlayVerifier({
   acknowledgementState = 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED',

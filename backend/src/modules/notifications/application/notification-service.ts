@@ -4,39 +4,50 @@ import type {
   UnregisterPushTokenRequest,
 } from '@web-app-demo/contracts'
 
-import type { NotificationOperations, TestPushInputBuilder } from './ports'
+import type {
+  NotificationServiceDependencies,
+  ProcessPushOutboxOptions,
+} from './ports'
 
 export class NotificationService {
-  constructor(
-    private readonly operations: NotificationOperations,
-    private readonly buildTestPushInput: TestPushInputBuilder,
-  ) {}
+  constructor(private readonly dependencies: NotificationServiceDependencies) {}
 
   registerToken(userId: string, input: RegisterPushTokenRequest) {
-    return this.operations.registerToken(userId, input)
+    return this.dependencies.tokens.register(userId, input)
   }
 
   unregisterToken(userId: string, input: UnregisterPushTokenRequest) {
-    return this.operations.unregisterToken(userId, input)
+    return this.dependencies.tokens.unregister(userId, input)
   }
 
   cleanupTokens(userId: string, expoPushTokens: string[]) {
-    return this.operations.cleanupTokens(userId, expoPushTokens)
+    return this.dependencies.tokens.cleanup(userId, expoPushTokens)
   }
 
   hasActiveToken(userId: string) {
-    return this.operations.hasActiveToken(userId)
+    return this.dependencies.tokens.hasActive(userId)
   }
 
-  sendTestPush(userId: string, payload: TestPushNotificationPayload) {
-    return this.operations.enqueueAndProcess(this.buildTestPushInput(userId, payload))
+  async sendTestPush(userId: string, payload: TestPushNotificationPayload) {
+    const queued = await this.dependencies.outbox.enqueue({
+      body: payload.body,
+      data: {
+        href: payload.href,
+        kind: 'test_push',
+      },
+      dedupeKey: `test-push:${userId}:${this.dependencies.createDedupeId()}`,
+      title: payload.title,
+      userId,
+    })
+    await this.dependencies.outbox.process({ maxLoops: 1, onlyIds: [queued.id] })
+    return queued
   }
 
-  processOutbox(options?: Parameters<NotificationOperations['processOutbox']>[0]) {
-    return this.operations.processOutbox(options)
+  processOutbox(options?: ProcessPushOutboxOptions) {
+    return this.dependencies.outbox.process(options)
   }
 
-  checkReceipts(options?: Parameters<NotificationOperations['checkReceipts']>[0]) {
-    return this.operations.checkReceipts(options)
+  checkReceipts(options?: { limit?: number; now?: Date }) {
+    return this.dependencies.receipts.check(options)
   }
 }

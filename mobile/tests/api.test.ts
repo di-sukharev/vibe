@@ -4,6 +4,7 @@ import { AuthApi } from '../src/features/auth/api';
 import { BillingApi } from '../src/features/billing/api';
 import { NotificationsApi } from '../src/features/notifications/api';
 import { ApiTransport } from '../src/platform/api';
+import { authTransportForPlatform } from '../src/composition/auth-transport';
 
 const originalFetch = globalThis.fetch;
 const refreshToken = 'r'.repeat(32);
@@ -25,7 +26,7 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-test('mobile ApiClient refreshes with the stored refresh token and retries authenticated requests', async () => {
+test('mobile auth API refreshes through the shared transport and retries authenticated requests', async () => {
   let accessToken: string | null = 'expired-access-token';
   let storedRefreshToken: string | null = refreshToken;
   const calls: Array<{ path: string; authorization: string | null; body: unknown }> = [];
@@ -91,7 +92,7 @@ test('mobile ApiClient refreshes with the stored refresh token and retries authe
   expect(calls[2]?.authorization).toBe('Bearer fresh-access-token');
 });
 
-test('mobile ApiClient shares one refresh request across concurrent 401 responses', async () => {
+test('mobile feature APIs share one refresh request across concurrent 401 responses', async () => {
   let accessToken: string | null = 'expired-access-token';
   let storedRefreshToken: string | null = refreshToken;
   const calls: Array<{ path: string; authorization: string | null }> = [];
@@ -153,7 +154,7 @@ test('mobile ApiClient shares one refresh request across concurrent 401 response
   expect(meCalls).toHaveLength(4);
 });
 
-test('mobile ApiClient clears token state when refresh fails', async () => {
+test('mobile API transport clears token state when refresh fails', async () => {
   let accessToken: string | null = 'expired-access-token';
   let storedRefreshToken: string | null = refreshToken;
   let clearRefreshTokenCalls = 0;
@@ -208,7 +209,7 @@ test('mobile ApiClient clears token state when refresh fails', async () => {
   expect(refreshTokenAtAuthExpired).toBe(refreshToken);
 });
 
-test('mobile ApiClient sends the stored refresh token when logging out', async () => {
+test('mobile auth API sends the stored refresh token when logging out', async () => {
   const calls: Array<{ path: string; body: unknown }> = [];
 
   globalThis.fetch = async (input, init) => {
@@ -249,7 +250,7 @@ test('mobile ApiClient sends the stored refresh token when logging out', async (
   ]);
 });
 
-test('mobile ApiClient can send all known Expo push tokens when logging out', async () => {
+test('mobile auth API can send all known Expo push tokens when logging out', async () => {
   const calls: Array<{ path: string; body: unknown }> = [];
 
   globalThis.fetch = async (input, init) => {
@@ -294,7 +295,7 @@ test('mobile ApiClient can send all known Expo push tokens when logging out', as
   ]);
 });
 
-test('mobile ApiClient exchanges social auth provider tokens', async () => {
+test('mobile auth API exchanges social auth provider tokens', async () => {
   const calls: Array<{ path: string; body: unknown }> = [];
 
   globalThis.fetch = async (input, init) => {
@@ -348,7 +349,7 @@ test('mobile ApiClient exchanges social auth provider tokens', async () => {
   ]);
 });
 
-test('mobile ApiClient calls IAP entitlement, ingest, and reconcile endpoints with auth', async () => {
+test('mobile billing API calls entitlement, ingest, and reconcile endpoints with auth', async () => {
   const calls: Array<{ path: string; authorization: string | null; body: unknown }> = [];
 
   globalThis.fetch = async (input, init) => {
@@ -449,7 +450,7 @@ test('mobile ApiClient calls IAP entitlement, ingest, and reconcile endpoints wi
   ]);
 });
 
-test('mobile ApiClient registers, unregisters, and sends test push notifications with auth', async () => {
+test('mobile notifications API registers, unregisters, and sends test pushes with auth', async () => {
   const calls: Array<{ path: string; authorization: string | null; body: unknown }> = [];
 
   globalThis.fetch = async (input, init) => {
@@ -526,7 +527,7 @@ test('mobile ApiClient registers, unregisters, and sends test push notifications
   ]);
 });
 
-test('mobile ApiClient can unregister push tokens without an auth refresh retry', async () => {
+test('mobile notifications API can unregister push tokens without an auth refresh retry', async () => {
   const calls: string[] = [];
 
   globalThis.fetch = async (input) => {
@@ -565,6 +566,80 @@ test('mobile ApiClient can unregister push tokens without an auth refresh retry'
   expect(calls).toEqual(['/api/notifications/push-token/unregister']);
 });
 
+test('Expo web auth uses cookie endpoints and never receives a refresh token', async () => {
+  const calls: Array<{
+    body: unknown;
+    credentials: RequestCredentials | undefined;
+    path: string;
+  }> = [];
+  let storedRefreshTokenWrites = 0;
+
+  globalThis.fetch = async (input, init) => {
+    const path = new URL(String(input)).pathname;
+    calls.push({
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      credentials: init?.credentials,
+      path,
+    });
+
+    if (path === '/api/auth/register') {
+      return json({
+        accessToken: 'web-access-token',
+        user: {
+          id: 'user_1',
+          email: 'web@example.com',
+          displayName: null,
+          createdAt: '2026-05-11T00:00:00.000Z',
+          subscription: inactiveSubscription,
+        },
+      }, 201);
+    }
+    if (path === '/api/auth/refresh') {
+      return json({ accessToken: 'web-refreshed-access-token' }, 200);
+    }
+    if (path === '/api/auth/logout') return new Response(null, { status: 204 });
+    return json({ error: { code: 'NOT_FOUND', message: 'Unexpected request' } }, 404);
+  };
+
+  const { auth } = createTestApis(
+    {
+      getAccessToken: () => null,
+      setAccessToken: () => undefined,
+      getRefreshToken: async () => null,
+      setRefreshToken: async () => {
+        storedRefreshTokenWrites += 1;
+      },
+      clearRefreshToken: async () => undefined,
+    },
+    'cookie',
+  );
+
+  await expect(
+    auth.register({ email: 'web@example.com', password: 'password123' }),
+  ).resolves.not.toHaveProperty('refreshToken');
+  await expect(auth.canRefresh()).resolves.toBe(true);
+  await expect(auth.refresh()).resolves.toEqual({ accessToken: 'web-refreshed-access-token' });
+  await expect(auth.logout()).resolves.toBe(true);
+
+  expect(storedRefreshTokenWrites).toBe(0);
+  expect(calls).toEqual([
+    {
+      body: { email: 'web@example.com', password: 'password123' },
+      credentials: 'include',
+      path: '/api/auth/register',
+    },
+    { body: {}, credentials: 'include', path: '/api/auth/refresh' },
+    { body: {}, credentials: 'include', path: '/api/auth/logout' },
+  ]);
+  expect(calls.some((call) => call.path.includes('/token/'))).toBe(false);
+});
+
+test('composition selects cookie auth only for the Expo web platform', () => {
+  expect(authTransportForPlatform('web')).toBe('cookie');
+  expect(authTransportForPlatform('ios')).toBe('token');
+  expect(authTransportForPlatform('android')).toBe('token');
+});
+
 function json(body: unknown, status: number) {
   return new Response(JSON.stringify(body), {
     status,
@@ -581,22 +656,26 @@ function createTestApis(options: {
   onAuthExpired?: () => void | Promise<void>;
   setAccessToken: (accessToken: string | null) => void;
   setRefreshToken: (refreshToken: string) => Promise<void>;
-}) {
+}, authTransport: 'cookie' | 'token' = 'token') {
   let auth!: AuthApi;
-  const transport = new ApiTransport({
-    expire: async () => {
-      try {
-        await options.onAuthExpired?.();
-      } finally {
-        options.setAccessToken(null);
-        await options.clearRefreshToken();
-      }
+  const transport = new ApiTransport(
+    {
+      expire: async () => {
+        try {
+          await options.onAuthExpired?.();
+        } finally {
+          options.setAccessToken(null);
+          await options.clearRefreshToken();
+        }
+      },
+      getAccessToken: options.getAccessToken,
+      refresh: () => auth.refresh(),
+      setAccessToken: options.setAccessToken,
     },
-    getAccessToken: options.getAccessToken,
-    refresh: () => auth.refresh(),
-    setAccessToken: options.setAccessToken,
-  });
-  auth = new AuthApi(transport, options);
+    undefined,
+    authTransport === 'cookie' ? 'include' : undefined,
+  );
+  auth = new AuthApi(transport, options, authTransport);
   return {
     auth,
     billing: new BillingApi(transport),

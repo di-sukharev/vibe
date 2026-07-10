@@ -6,7 +6,7 @@ import {
   createAppStoreSubscriptionVerifier,
   type AppStoreSubscriptionVerifier,
 } from './infrastructure/apple-verifier'
-import { createBillingOperations } from './infrastructure/billing-operations'
+import { createBillingDependencies } from './infrastructure/billing-adapters'
 import {
   createGooglePlaySubscriptionVerifier,
   type GooglePlaySubscriptionVerifier,
@@ -24,7 +24,7 @@ export function createBillingModule(input: {
   const googlePlayVerifier =
     input.googlePlayVerifier ?? createGooglePlaySubscriptionVerifier(input.env)
   const service = new BillingService(
-    createBillingOperations({
+    createBillingDependencies({
       appStoreVerifier,
       db: input.db,
       env: input.env,
