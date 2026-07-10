@@ -1,8 +1,8 @@
 import { SignJWT, jwtVerify } from 'jose'
 import { z } from 'zod'
 
-import type { AppEnv } from '../env'
-import { AppError } from '../http/errors'
+import type { AppEnv } from '../../../env'
+import { AppError } from '../../../http/errors'
 
 const offerCodeRedemptionScope = 'iap_offer_code_redemption'
 const offerCodeRedemptionTtlSeconds = 15 * 60

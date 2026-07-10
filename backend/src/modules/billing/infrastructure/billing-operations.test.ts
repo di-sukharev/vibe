@@ -1,9 +1,9 @@
 import { Environment, OfferType, Status, Type, type JWSTransactionDecodedPayload, type ResponseBodyV2DecodedPayload } from '@apple/app-store-server-library'
 import { expect, mock, test } from 'bun:test'
 
-import type { DbClient } from '../db'
-import type { AppEnv } from '../env'
-import { SubscriptionState } from '../generated/prisma/enums'
+import type { DbClient } from '../../../db'
+import type { AppEnv } from '../../../env'
+import { SubscriptionState } from '../../../generated/prisma/enums'
 import type { AppStoreSubscriptionVerifier } from './apple-verifier'
 import {
   createOfferCodeRedemptionToken,
@@ -11,7 +11,7 @@ import {
   ingestAppStoreTransaction,
   reconcileAppStoreTransactions,
   recordAndProcessAppStoreWebhook,
-} from './service'
+} from './billing-operations'
 import type { GooglePlaySubscriptionVerifier } from './google-play-verifier'
 
 const env: AppEnv = {

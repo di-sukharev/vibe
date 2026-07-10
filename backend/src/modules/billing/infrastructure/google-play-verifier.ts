@@ -1,7 +1,7 @@
 import { GoogleAuth, type JWTInput } from 'google-auth-library'
 
-import type { AppEnv } from '../env'
-import { AppError } from '../http/errors'
+import type { AppEnv } from '../../../env'
+import { AppError } from '../../../http/errors'
 
 const androidPublisherScope = 'https://www.googleapis.com/auth/androidpublisher'
 const androidPublisherBaseUrl = 'https://androidpublisher.googleapis.com/androidpublisher/v3'

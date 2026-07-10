@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 
-import type { AppEnv } from '../env'
+import type { AppEnv } from '../../../env'
 import { createGooglePlaySubscriptionVerifier } from './google-play-verifier'
 
 const baseEnv: AppEnv = {

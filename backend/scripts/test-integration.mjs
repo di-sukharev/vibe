@@ -74,7 +74,7 @@ run(
   [
     'test',
     'src/modules/auth/auth.integration.test.ts',
-    'src/iap/iap.integration.test.ts',
+    'src/modules/billing/billing.integration.test.ts',
     'src/notifications/notifications.integration.test.ts',
   ],
   { env },

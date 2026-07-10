@@ -3,11 +3,14 @@ import { randomUUID } from 'node:crypto'
 import { Environment, Status, Type, type JWSRenewalInfoDecodedPayload, type JWSTransactionDecodedPayload, type ResponseBodyV2DecodedPayload } from '@apple/app-store-server-library'
 import { beforeEach, afterAll, describe, expect, test } from 'bun:test'
 
-import { createApp } from '../app'
-import { createPrisma } from '../db'
-import type { AppEnv } from '../env'
-import { AppError } from '../http/errors'
-import type { AppStoreSubscriptionVerifier, AppStoreVerificationResult } from './apple-verifier'
+import { createApp } from '../../app'
+import { createPrisma } from '../../db'
+import type { AppEnv } from '../../env'
+import { AppError } from '../../http/errors'
+import type {
+  AppStoreSubscriptionVerifier,
+  AppStoreVerificationResult,
+} from './infrastructure/apple-verifier'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 const skippedDatabaseUrl = 'postgresql://skip:skip@localhost:5432/skip'

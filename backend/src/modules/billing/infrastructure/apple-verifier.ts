@@ -11,8 +11,8 @@ import {
   type Status,
 } from '@apple/app-store-server-library'
 
-import type { AppEnv } from '../env'
-import { AppError } from '../http/errors'
+import type { AppEnv } from '../../../env'
+import { AppError } from '../../../http/errors'
 
 export type AppStoreVerificationResult<T> = {
   environment: Environment

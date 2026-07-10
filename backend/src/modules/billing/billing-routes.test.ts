@@ -3,14 +3,15 @@ import { OpenAPIHono } from '@hono/zod-openapi'
 import { SignJWT } from 'jose'
 import { expect, mock, test } from 'bun:test'
 
-import type { AppBindings } from '../app'
-import type { DbClient } from '../db'
-import type { AppEnv } from '../env'
-import { SubscriptionState } from '../generated/prisma/enums'
-import { handleError } from '../http/errors'
-import { createIapRoutes } from './routes'
-import type { AppStoreSubscriptionVerifier } from './apple-verifier'
-import type { GooglePlaySubscriptionVerifier } from './google-play-verifier'
+import type { DbClient } from '../../db'
+import type { AppEnv } from '../../env'
+import { SubscriptionState } from '../../generated/prisma/enums'
+import { handleError } from '../../http/errors'
+import { BillingService } from './application/billing-service'
+import { createBillingOperations } from './infrastructure/billing-operations'
+import type { AppStoreSubscriptionVerifier } from './infrastructure/apple-verifier'
+import type { GooglePlaySubscriptionVerifier } from './infrastructure/google-play-verifier'
+import { createIapRoutes } from './transport/routes'
 
 const userId = '018fd4f2-1f3a-7c88-bc49-333333333333'
 const otherUserId = '018fd4f2-1f3a-7c88-bc49-444444444444'
@@ -165,20 +166,22 @@ function createTestIapApp(
     googleVerifier?: GooglePlaySubscriptionVerifier
   } = {},
 ) {
-  const app = new OpenAPIHono<AppBindings>()
-  app.use('*', async (c, next) => {
-    c.set(
-      'authenticateAccessToken',
-      (async (accessToken: string | undefined) => ({ id: accessToken })) as never,
-    )
-    c.set('env', options.env ?? env)
-    c.set('appStoreIapVerifier', fakeOfferCodeVerifier())
-    c.set('googlePlayIapVerifier', options.googleVerifier ?? fakeGooglePlayVerifier())
-    c.set('prisma', db)
-    c.set('storageService', null)
-    await next()
-  })
-  app.route('/api/iap', createIapRoutes())
+  const app = new OpenAPIHono()
+  const service = new BillingService(
+    createBillingOperations({
+      appStoreVerifier: fakeOfferCodeVerifier(),
+      db,
+      env: options.env ?? env,
+      googlePlayVerifier: options.googleVerifier ?? fakeGooglePlayVerifier(),
+    }),
+  )
+  app.route(
+    '/api/iap',
+    createIapRoutes({
+      authenticateAccessToken: async (accessToken) => ({ id: accessToken }) as never,
+      service,
+    }),
+  )
   app.onError(handleError)
   return app
 }

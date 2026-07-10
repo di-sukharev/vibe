@@ -12,16 +12,12 @@ import {
 import { createRoute, OpenAPIHono } from '@hono/zod-openapi'
 import type { Context } from 'hono'
 
-import type { AppBindings } from '../app'
-import {
-  createOfferCodeRedemptionToken,
-  getSubscriptionSnapshot,
-  ingestGooglePlayTransaction,
-  ingestAppStoreTransaction,
-  reconcileGooglePlayTransactions,
-  reconcileAppStoreTransactions,
-  recordAndProcessAppStoreWebhook,
-} from './service'
+import type { AuthenticatedPrincipal } from '../../auth'
+import type { BillingService } from '../application/billing-service'
+
+type AuthenticateAccessToken = (
+  accessToken: string | undefined,
+) => Promise<AuthenticatedPrincipal>
 
 const errorResponseContent = {
   'application/json': {
@@ -254,21 +250,21 @@ const webhookRoute = createRoute({
   },
 })
 
-export function createIapRoutes() {
-  const routes = new OpenAPIHono<AppBindings>()
+export function createIapRoutes(input: {
+  authenticateAccessToken: AuthenticateAccessToken
+  service: BillingService
+}) {
+  const routes = new OpenAPIHono()
 
   routes.openapi(entitlementRoute, async (c) => {
-    const { user } = await requireUser(c)
-    return c.json({ subscription: await getSubscriptionSnapshot(c.get('prisma'), user.id) }, 200)
+    const user = await requireUser(c, input.authenticateAccessToken)
+    return c.json({ subscription: await input.service.getSubscription(user.id) }, 200)
   })
 
   routes.openapi(transactionRoute, async (c) => {
-    const { user } = await requireUser(c)
+    const user = await requireUser(c, input.authenticateAccessToken)
     const payload = c.req.valid('json')
-    const subscription = await ingestAppStoreTransaction({
-      db: c.get('prisma'),
-      env: c.get('env'),
-      verifier: c.get('appStoreIapVerifier'),
+    const subscription = await input.service.ingestAppStore({
       userId: user.id,
       signedTransactionInfo: payload.signedTransactionInfo,
       signedRenewalInfo: payload.signedRenewalInfo,
@@ -279,38 +275,29 @@ export function createIapRoutes() {
   })
 
   routes.openapi(googlePlayTransactionRoute, async (c) => {
-    const { user } = await requireUser(c)
+    const user = await requireUser(c, input.authenticateAccessToken)
     const payload = c.req.valid('json')
-    const subscription = await ingestGooglePlayTransaction({
+    const subscription = await input.service.ingestGooglePlay({
       basePlanId: payload.basePlanId,
-      db: c.get('prisma'),
-      env: c.get('env'),
       productId: payload.productId,
       purchaseToken: payload.purchaseToken,
       userId: user.id,
-      verifier: c.get('googlePlayIapVerifier'),
     })
 
     return c.json({ subscription }, 200)
   })
 
   routes.openapi(offerCodeRedemptionRoute, async (c) => {
-    const { user } = await requireUser(c)
+    const user = await requireUser(c, input.authenticateAccessToken)
     return c.json({
-      token: await createOfferCodeRedemptionToken({
-        env: c.get('env'),
-        userId: user.id,
-      }),
+      token: await input.service.createOfferCodeRedemption(user.id),
     }, 200)
   })
 
   routes.openapi(reconcileRoute, async (c) => {
-    const { user } = await requireUser(c)
+    const user = await requireUser(c, input.authenticateAccessToken)
     const payload = c.req.valid('json')
-    const subscription = await reconcileAppStoreTransactions({
-      db: c.get('prisma'),
-      env: c.get('env'),
-      verifier: c.get('appStoreIapVerifier'),
+    const subscription = await input.service.reconcileAppStore({
       userId: user.id,
       signedTransactions: payload.signedTransactions,
       originalTransactionIds: payload.originalTransactionIds,
@@ -320,14 +307,11 @@ export function createIapRoutes() {
   })
 
   routes.openapi(googlePlayReconcileRoute, async (c) => {
-    const { user } = await requireUser(c)
+    const user = await requireUser(c, input.authenticateAccessToken)
     const payload = c.req.valid('json')
-    const subscription = await reconcileGooglePlayTransactions({
-      db: c.get('prisma'),
-      env: c.get('env'),
+    const subscription = await input.service.reconcileGooglePlay({
       purchases: payload.purchases,
       userId: user.id,
-      verifier: c.get('googlePlayIapVerifier'),
     })
 
     return c.json({ subscription }, 200)
@@ -336,17 +320,12 @@ export function createIapRoutes() {
   return routes
 }
 
-export function createAppStoreWebhookRoutes() {
-  const routes = new OpenAPIHono<AppBindings>()
+export function createAppStoreWebhookRoutes(service: BillingService) {
+  const routes = new OpenAPIHono()
 
   routes.openapi(webhookRoute, async (c) => {
     const payload = c.req.valid('json')
-    const result = await recordAndProcessAppStoreWebhook({
-      db: c.get('prisma'),
-      env: c.get('env'),
-      verifier: c.get('appStoreIapVerifier'),
-      signedPayload: payload.signedPayload,
-    })
+    const result = await service.processAppStoreWebhook(payload.signedPayload)
 
     return c.json({ ok: true, duplicate: result.duplicate }, 200)
   })
@@ -354,8 +333,8 @@ export function createAppStoreWebhookRoutes() {
   return routes
 }
 
-async function requireUser(c: Context<AppBindings>) {
+async function requireUser(c: Context, authenticateAccessToken: AuthenticateAccessToken) {
   const authorization = c.req.header('Authorization')
   const accessToken = authorization?.startsWith('Bearer ') ? authorization.slice('Bearer '.length) : undefined
-  return { user: await c.get('authenticateAccessToken')(accessToken) }
+  return authenticateAccessToken(accessToken)
 }

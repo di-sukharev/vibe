@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { expect, test } from 'bun:test'
 
-import type { AppEnv } from '../env'
+import type { AppEnv } from '../../../env'
 import { createAppStoreSubscriptionVerifier } from './apple-verifier'
 
 const baseEnv: AppEnv = {

@@ -3,11 +3,11 @@ import { createHash } from 'node:crypto'
 import { AutoRenewStatus, Environment, OfferType, Status, Type, type JWSRenewalInfoDecodedPayload, type JWSTransactionDecodedPayload } from '@apple/app-store-server-library'
 import type { SubscriptionSnapshot } from '@web-app-demo/contracts'
 
-import type { DbClient } from '../db'
-import type { AppEnv } from '../env'
-import { Prisma } from '../generated/prisma/client'
-import { SubscriptionState } from '../generated/prisma/enums'
-import { AppError } from '../http/errors'
+import type { DbClient } from '../../../db'
+import type { AppEnv } from '../../../env'
+import { Prisma } from '../../../generated/prisma/client'
+import { SubscriptionState } from '../../../generated/prisma/enums'
+import { AppError } from '../../../http/errors'
 import type {
   AppStoreStatusTransaction,
   AppStoreSubscriptionVerifier,
@@ -19,17 +19,16 @@ import type {
   GooglePlaySubscriptionVerifier,
 } from './google-play-verifier'
 import { signOfferCodeRedemptionToken, verifyOfferCodeRedemptionToken } from './offer-code-tokens'
-
-export type EntitlementRecord = {
-  platform: 'android' | 'ios' | null
-  state: SubscriptionState
-  productId: string | null
-  originalTransactionId: string | null
-  transactionId: string | null
-  expiresAt: Date | null
-  willAutoRenew: boolean | null
-  updatedAt: Date
-}
+import type { BillingOperations } from '../application/ports'
+import {
+  inactiveSubscriptionSnapshot,
+  resolveGooglePlaySubscriptionState,
+  resolveGooglePlayWillAutoRenew,
+  shouldAcknowledgeGooglePlayPurchase,
+  shouldUpdateEntitlement,
+  toSubscriptionSnapshot,
+  type EntitlementRecord,
+} from '../domain/subscription'
 
 type ApplyTransactionInput = {
   userId: string
@@ -57,18 +56,51 @@ type GooglePlayPurchaseReferenceInput = {
   purchaseToken: string
 }
 
-export function inactiveSubscriptionSnapshot(): SubscriptionSnapshot {
+export function createBillingOperations(input: {
+  appStoreVerifier: AppStoreSubscriptionVerifier
+  db: DbClient
+  env: AppEnv
+  googlePlayVerifier: GooglePlaySubscriptionVerifier
+}): BillingOperations {
   return {
-    entitlement: 'premium',
-    isActive: false,
-    state: 'inactive',
-    platform: null,
-    productId: null,
-    originalTransactionId: null,
-    transactionId: null,
-    expiresAt: null,
-    willAutoRenew: null,
-    updatedAt: null,
+    getSubscription: (userId) => getSubscriptionSnapshot(input.db, userId),
+    ingestAppStore: (request) =>
+      ingestAppStoreTransaction({
+        ...request,
+        db: input.db,
+        env: input.env,
+        verifier: input.appStoreVerifier,
+      }),
+    reconcileAppStore: (request) =>
+      reconcileAppStoreTransactions({
+        ...request,
+        db: input.db,
+        env: input.env,
+        verifier: input.appStoreVerifier,
+      }),
+    ingestGooglePlay: (request) =>
+      ingestGooglePlayTransaction({
+        ...request,
+        db: input.db,
+        env: input.env,
+        verifier: input.googlePlayVerifier,
+      }),
+    reconcileGooglePlay: (request) =>
+      reconcileGooglePlayTransactions({
+        ...request,
+        db: input.db,
+        env: input.env,
+        verifier: input.googlePlayVerifier,
+      }),
+    createOfferCodeRedemption: (userId) =>
+      createOfferCodeRedemptionToken({ env: input.env, userId }),
+    processAppStoreWebhook: (signedPayload) =>
+      recordAndProcessAppStoreWebhook({
+        db: input.db,
+        env: input.env,
+        signedPayload,
+        verifier: input.appStoreVerifier,
+      }),
   }
 }
 
@@ -77,7 +109,7 @@ export async function getSubscriptionSnapshot(db: DbClient, userId: string): Pro
     where: { userId },
   })
 
-  return entitlement ? toSubscriptionSnapshot(entitlement) : inactiveSubscriptionSnapshot()
+  return entitlement ? toSubscriptionSnapshot(entitlement, new Date()) : inactiveSubscriptionSnapshot()
 }
 
 export async function ingestAppStoreTransaction(input: {
@@ -433,6 +465,7 @@ async function applyVerifiedGooglePlayPurchase({
   verifiedPurchase: GooglePlaySubscriptionPurchase
 }): Promise<SubscriptionSnapshot> {
   const requestedProductId = normalizeRequiredString(input.productId)
+  const now = new Date()
   const requestedBasePlanId = normalizeString(input.basePlanId)
   const purchaseToken = normalizeRequiredString(input.purchaseToken)
   const purchaseTokenHash = hashToken(purchaseToken)
@@ -461,14 +494,21 @@ async function applyVerifiedGooglePlayPurchase({
   })
 
   const expiresAt = toDateFromIso(lineItem.expiryTime)
-  const state = resolveGooglePlaySubscriptionState(verifiedPurchase.subscriptionState, expiresAt)
+  const state = resolveGooglePlaySubscriptionState(
+    verifiedPurchase.subscriptionState,
+    expiresAt,
+    now,
+  )
   assertGooglePlaySubscriptionHasExpiration({
     expiresAt,
     state,
     subscriptionState: verifiedPurchase.subscriptionState,
   })
 
-  const willAutoRenew = resolveGooglePlayWillAutoRenew(verifiedPurchase.subscriptionState, lineItem)
+  const willAutoRenew = resolveGooglePlayWillAutoRenew(
+    verifiedPurchase.subscriptionState,
+    lineItem.autoRenewingPlan?.autoRenewEnabled,
+  )
   const latestOrderId = normalizeString(verifiedPurchase.latestOrderId)
   const acknowledgementState = normalizeString(verifiedPurchase.acknowledgementState)
   const shouldAcknowledge = shouldAcknowledgeGooglePlayPurchase({
@@ -476,7 +516,7 @@ async function applyVerifiedGooglePlayPurchase({
     subscriptionState: verifiedPurchase.subscriptionState,
     acknowledgementState,
   })
-  const acknowledgedAt = shouldAcknowledge ? new Date() : null
+  const acknowledgedAt = shouldAcknowledge ? now : null
 
   if (shouldAcknowledge) {
     await verifier.acknowledgeSubscription({
@@ -550,6 +590,7 @@ async function applyVerifiedGooglePlayPurchase({
           revokedAt: null,
           state,
         },
+        now,
       })
     ) {
       return existingEntitlement
@@ -584,7 +625,7 @@ async function applyVerifiedGooglePlayPurchase({
     })
   })
 
-  return toSubscriptionSnapshot(entitlement)
+  return toSubscriptionSnapshot(entitlement, now)
 }
 
 async function applyVerifiedAppStoreTransaction({
@@ -599,6 +640,7 @@ async function applyVerifiedAppStoreTransaction({
   input: ApplyTransactionInput
 }): Promise<SubscriptionSnapshot> {
   const transaction = input.verifiedTransaction.payload
+  const now = new Date()
   const renewal = input.verifiedRenewal?.payload ?? null
   const originalTransactionId = transaction.originalTransactionId ?? renewal?.originalTransactionId
   const transactionId = transaction.transactionId
@@ -644,7 +686,7 @@ async function applyVerifiedAppStoreTransaction({
       }),
   })
 
-  const state = resolveSubscriptionState(transaction, renewal, input.status)
+  const state = resolveSubscriptionState(transaction, renewal, input.status, now)
   const willAutoRenew =
     renewal?.autoRenewStatus == null ? null : renewal.autoRenewStatus === AutoRenewStatus.ON
   const environment = formatEnvironment(transaction.environment ?? renewal?.environment ?? input.verifiedTransaction.environment)
@@ -704,6 +746,7 @@ async function applyVerifiedAppStoreTransaction({
           revokedAt: toDate(transaction.revocationDate),
           state,
         },
+        now,
       })
     ) {
       return existingEntitlement
@@ -738,7 +781,7 @@ async function applyVerifiedAppStoreTransaction({
     })
   })
 
-  return toSubscriptionSnapshot(entitlement)
+  return toSubscriptionSnapshot(entitlement, now)
 }
 
 async function assertTransactionOwnership({
@@ -855,7 +898,7 @@ function assertSubscriptionHasExpiration(
   transaction: JWSTransactionDecodedPayload,
   renewal: JWSRenewalInfoDecodedPayload | null,
   expiresAt: Date | null,
-  status?: Status | number | null,
+  status: Status | number | null | undefined,
 ) {
   if (expiresAt || transaction.revocationDate || status === Status.REVOKED) return
 
@@ -947,112 +990,11 @@ function assertGooglePlaySubscriptionHasExpiration({
   )
 }
 
-function resolveGooglePlaySubscriptionState(
-  subscriptionState: string | null | undefined,
-  expiresAt: Date | null,
-): SubscriptionState {
-  switch (subscriptionState) {
-    case 'SUBSCRIPTION_STATE_ACTIVE':
-      return isFutureDate(expiresAt) ? SubscriptionState.active : SubscriptionState.expired
-    case 'SUBSCRIPTION_STATE_IN_GRACE_PERIOD':
-      return isFutureDate(expiresAt) ? SubscriptionState.billing_grace_period : SubscriptionState.expired
-    case 'SUBSCRIPTION_STATE_CANCELED':
-      return isFutureDate(expiresAt) ? SubscriptionState.active : SubscriptionState.expired
-    case 'SUBSCRIPTION_STATE_ON_HOLD':
-    case 'SUBSCRIPTION_STATE_PAUSED':
-      return SubscriptionState.billing_retry
-    case 'SUBSCRIPTION_STATE_EXPIRED':
-    case 'SUBSCRIPTION_STATE_PENDING_PURCHASE_CANCELED':
-      return SubscriptionState.expired
-    case 'SUBSCRIPTION_STATE_PENDING':
-    case 'SUBSCRIPTION_STATE_UNSPECIFIED':
-    default:
-      return SubscriptionState.pending
-  }
-}
-
-function resolveGooglePlayWillAutoRenew(
-  subscriptionState: string | null | undefined,
-  lineItem: GooglePlaySubscriptionLineItem,
-) {
-  if (subscriptionState === 'SUBSCRIPTION_STATE_CANCELED') return false
-  return lineItem.autoRenewingPlan?.autoRenewEnabled ?? null
-}
-
-function shouldAcknowledgeGooglePlayPurchase({
-  acknowledgementState,
-  state,
-  subscriptionState,
-}: {
-  acknowledgementState: string | null
-  state: SubscriptionState
-  subscriptionState: string | null | undefined
-}) {
-  if (acknowledgementState === 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED') return false
-  if (state === SubscriptionState.pending) return false
-  if (
-    state === SubscriptionState.expired ||
-    state === SubscriptionState.revoked ||
-    state === SubscriptionState.inactive
-  ) {
-    return false
-  }
-  return subscriptionState !== 'SUBSCRIPTION_STATE_PENDING_PURCHASE_CANCELED'
-}
-
 function compareGooglePlayLineItemsByExpiryDesc(
   left: GooglePlaySubscriptionLineItem,
   right: GooglePlaySubscriptionLineItem,
 ) {
   return (toDateFromIso(right.expiryTime)?.getTime() ?? 0) - (toDateFromIso(left.expiryTime)?.getTime() ?? 0)
-}
-
-function isActiveSubscriptionState(state: SubscriptionState, expiresAt: Date | null) {
-  if (state !== SubscriptionState.active && state !== SubscriptionState.billing_grace_period) return false
-  return !expiresAt || expiresAt.getTime() > Date.now()
-}
-
-function shouldUpdateEntitlement({
-  existing,
-  incoming,
-}: {
-  existing: EntitlementRecord & {
-    webOrderLineItemId?: string | null
-  }
-  incoming: {
-    platform: 'android' | 'ios'
-    transactionId: string | null
-    originalTransactionId: string | null
-    purchaseDate: Date | null
-    expiresAt: Date | null
-    revokedAt: Date | null
-    state: SubscriptionState
-  }
-}) {
-  if (!existing.transactionId) return true
-  if (incoming.transactionId && existing.transactionId === incoming.transactionId) return true
-
-  const sameOriginalTransaction =
-    Boolean(incoming.originalTransactionId) &&
-    existing.originalTransactionId === incoming.originalTransactionId
-
-  if ((incoming.revokedAt || incoming.state === SubscriptionState.revoked) && sameOriginalTransaction) {
-    return true
-  }
-
-  const existingActive = isActiveSubscriptionState(existing.state, existing.expiresAt)
-  const incomingActive = isActiveSubscriptionState(incoming.state, incoming.expiresAt)
-
-  if (!incomingActive && existingActive && !sameOriginalTransaction) return false
-  if (incomingActive && !existingActive) return true
-
-  const existingFreshness = existing.expiresAt?.getTime() ?? 0
-  const incomingFreshness = incoming.expiresAt?.getTime() ?? incoming.purchaseDate?.getTime() ?? 0
-
-  if (incomingFreshness > existingFreshness) return true
-  if (incomingFreshness < existingFreshness) return false
-
-  return incomingActive || sameOriginalTransaction || existing.platform === incoming.platform
 }
 
 async function recordReconcileAttempt(
@@ -1095,7 +1037,8 @@ async function resolveWebhookUserId({
 function resolveSubscriptionState(
   transaction: JWSTransactionDecodedPayload,
   renewal: JWSRenewalInfoDecodedPayload | null,
-  status?: Status | number | null,
+  status: Status | number | null | undefined,
+  now: Date,
 ): SubscriptionState {
   if (transaction.revocationDate) return SubscriptionState.revoked
 
@@ -1115,7 +1058,7 @@ function resolveSubscriptionState(
   if (renewal?.isInBillingRetryPeriod) return SubscriptionState.billing_retry
 
   const expiresAt = resolveSubscriptionExpiresAt(transaction, renewal, status)
-  if (!expiresAt || expiresAt.getTime() > Date.now()) return SubscriptionState.active
+  if (!expiresAt || expiresAt.getTime() > now.getTime()) return SubscriptionState.active
 
   return SubscriptionState.expired
 }
@@ -1139,39 +1082,6 @@ function resolveSubscriptionExpiresAt(
   return standardExpiresAt
 }
 
-export function toSubscriptionSnapshot(entitlement: EntitlementRecord): SubscriptionSnapshot {
-  const state = effectiveSubscriptionState(entitlement)
-  const isActive =
-    state === SubscriptionState.active ||
-    state === SubscriptionState.billing_grace_period
-
-  return {
-    entitlement: 'premium',
-    isActive,
-    state,
-    platform: entitlement.platform,
-    productId: entitlement.productId,
-    originalTransactionId: entitlement.originalTransactionId,
-    transactionId: entitlement.transactionId,
-    expiresAt: entitlement.expiresAt?.toISOString() ?? null,
-    willAutoRenew: entitlement.willAutoRenew,
-    updatedAt: entitlement.updatedAt.toISOString(),
-  }
-}
-
-function effectiveSubscriptionState(entitlement: EntitlementRecord): SubscriptionState {
-  if (
-    (entitlement.state === SubscriptionState.active ||
-      entitlement.state === SubscriptionState.billing_grace_period) &&
-    entitlement.expiresAt &&
-    entitlement.expiresAt.getTime() <= Date.now()
-  ) {
-    return SubscriptionState.expired
-  }
-
-  return entitlement.state
-}
-
 function toDate(value: number | null | undefined) {
   if (!value) return null
   return new Date(value)
@@ -1181,10 +1091,6 @@ function toDateFromIso(value: string | null | undefined) {
   if (!value) return null
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? null : date
-}
-
-function isFutureDate(value: Date | null) {
-  return Boolean(value && value.getTime() > Date.now())
 }
 
 function formatEnvironment(value: Environment | string | null | undefined) {
