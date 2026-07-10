@@ -2,6 +2,8 @@ const googleIosUrlScheme = process.env.EXPO_PUBLIC_GOOGLE_IOS_URL_SCHEME?.trim()
 
 const plugins = [
   'expo-router',
+  'expo-font',
+  'expo-image',
   [
     'expo-splash-screen',
     {

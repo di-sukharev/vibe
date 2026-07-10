@@ -37,6 +37,12 @@ jobs:
       - name: Webapp lint
         run: bun run --cwd webapp lint
 
+      - name: Mobile lint
+        run: bun run --cwd mobile lint
+
+      - name: Expo Doctor
+        run: bun run --cwd mobile doctor
+
       - name: Deployment and script tests
         run: bun run test:deploy
 
