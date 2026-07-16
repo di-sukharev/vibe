@@ -4,10 +4,11 @@ import type { z } from 'zod'
 const defaultApiBaseUrl = (import.meta.env?.VITE_API_URL ?? 'http://localhost:3000').replace(/\/$/, '')
 
 export type HttpRequestOptions = {
-  method?: 'GET' | 'POST'
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   body?: unknown
   headers?: HeadersInit
   credentials?: RequestCredentials
+  signal?: AbortSignal
 }
 
 export class ApiRequestError extends Error {
@@ -47,6 +48,7 @@ export class HttpClient {
       method: options.method ?? 'GET',
       credentials: options.credentials ?? 'include',
       headers,
+      signal: options.signal,
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
     })
 

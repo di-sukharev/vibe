@@ -20,6 +20,7 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 
 import type { AppEnv } from '../../../env'
 import { AppError, validationErrorHook } from '../../../http/errors'
+import { clientAddress } from '../../../http/security'
 import type { AuthService } from '../application/auth-service'
 import { userDtoFromPrincipal } from '../domain/user'
 import { executeAuth } from './errors'
@@ -63,6 +64,11 @@ const errorResponseContent = {
   },
 }
 
+const authWriteErrorResponses = {
+  413: { content: errorResponseContent, description: 'Request body is too large' },
+  429: { content: errorResponseContent, description: 'Too many authentication requests' },
+}
+
 const cookieRegisterRoute = createRoute({
   method: 'post',
   path: '/register',
@@ -76,11 +82,16 @@ const cookieRegisterRoute = createRoute({
     },
   },
   responses: {
+    ...authWriteErrorResponses,
     201: {
       content: cookieAuthResponseContent,
       description: 'Created user and browser session',
     },
     400: { content: errorResponseContent, description: 'Invalid payload' },
+    403: {
+      content: errorResponseContent,
+      description: 'Cookie auth request came from an untrusted browser origin',
+    },
     409: { content: errorResponseContent, description: 'Email already exists' },
   },
 })
@@ -98,6 +109,7 @@ const tokenRegisterRoute = createRoute({
     },
   },
   responses: {
+    ...authWriteErrorResponses,
     201: {
       content: tokenAuthResponseContent,
       description: 'Created user and explicit token session',
@@ -120,12 +132,17 @@ const cookieLoginRoute = createRoute({
     },
   },
   responses: {
+    ...authWriteErrorResponses,
     200: {
       content: cookieAuthResponseContent,
       description: 'Created browser session',
     },
     400: { content: errorResponseContent, description: 'Invalid payload' },
     401: { content: errorResponseContent, description: 'Invalid credentials' },
+    403: {
+      content: errorResponseContent,
+      description: 'Cookie auth request came from an untrusted browser origin',
+    },
   },
 })
 
@@ -142,6 +159,7 @@ const tokenLoginRoute = createRoute({
     },
   },
   responses: {
+    ...authWriteErrorResponses,
     200: {
       content: tokenAuthResponseContent,
       description: 'Created explicit token session',
@@ -165,6 +183,7 @@ const tokenSocialAuthRoute = createRoute({
     },
   },
   responses: {
+    ...authWriteErrorResponses,
     200: { content: tokenAuthResponseContent, description: 'Created social session' },
     201: { content: tokenAuthResponseContent, description: 'Created social user and session' },
     400: { content: errorResponseContent, description: 'Invalid payload' },
@@ -187,6 +206,7 @@ const cookieRefreshRoute = createRoute({
     },
   },
   responses: {
+    ...authWriteErrorResponses,
     200: {
       content: cookieRefreshResponseContent,
       description: 'Rotated browser session and returned a new access token',
@@ -213,6 +233,7 @@ const tokenRefreshRoute = createRoute({
     },
   },
   responses: {
+    ...authWriteErrorResponses,
     200: {
       content: tokenRefreshResponseContent,
       description: 'Rotated explicit token session',
@@ -244,6 +265,7 @@ const cookieLogoutRoute = createRoute({
     },
   },
   responses: {
+    ...authWriteErrorResponses,
     204: { description: 'Browser session revoked' },
     400: { content: errorResponseContent, description: 'Invalid payload' },
     403: {
@@ -266,6 +288,7 @@ const tokenLogoutRoute = createRoute({
     },
   },
   responses: {
+    ...authWriteErrorResponses,
     204: { description: 'Explicit token session revoked' },
     400: { content: errorResponseContent, description: 'Invalid payload' },
   },
@@ -284,24 +307,26 @@ export function createAuthRoutes({ env, requireAuth, service }: CreateAuthRoutes
   })
 
   routes.openapi(cookieRegisterRoute, async (c) => {
-    const result = await executeAuth(() => service.register(c.req.valid('json'), requestMetadata(c)))
+    assertTrustedCookieOrigin(c, env)
+    const result = await executeAuth(() => service.register(c.req.valid('json'), requestMetadata(c, env)))
     setRefreshCookie(c, result.refreshToken, env)
     return c.json(withoutRefreshToken(result), 201)
   })
 
   routes.openapi(tokenRegisterRoute, async (c) => {
-    const result = await executeAuth(() => service.register(c.req.valid('json'), requestMetadata(c)))
+    const result = await executeAuth(() => service.register(c.req.valid('json'), requestMetadata(c, env)))
     return c.json(result, 201)
   })
 
   routes.openapi(cookieLoginRoute, async (c) => {
-    const result = await executeAuth(() => service.login(c.req.valid('json'), requestMetadata(c)))
+    assertTrustedCookieOrigin(c, env)
+    const result = await executeAuth(() => service.login(c.req.valid('json'), requestMetadata(c, env)))
     setRefreshCookie(c, result.refreshToken, env)
     return c.json(withoutRefreshToken(result), 200)
   })
 
   routes.openapi(tokenLoginRoute, async (c) => {
-    const result = await executeAuth(() => service.login(c.req.valid('json'), requestMetadata(c)))
+    const result = await executeAuth(() => service.login(c.req.valid('json'), requestMetadata(c, env)))
     return c.json(result, 200)
   })
 
@@ -310,7 +335,7 @@ export function createAuthRoutes({ env, requireAuth, service }: CreateAuthRoutes
       service.socialAuth(
         c.req.valid('param').provider,
         c.req.valid('json'),
-        requestMetadata(c),
+        requestMetadata(c, env),
       ),
     )
     const { created, ...session } = result
@@ -319,15 +344,15 @@ export function createAuthRoutes({ env, requireAuth, service }: CreateAuthRoutes
 
   routes.openapi(cookieRefreshRoute, async (c) => {
     const cookieRefreshToken = getRefreshCookie(c)
-    assertTrustedCookieRequest(c, env, cookieRefreshToken)
-    const result = await executeAuth(() => service.refresh(cookieRefreshToken, requestMetadata(c)))
+    assertTrustedCookieOrigin(c, env)
+    const result = await executeAuth(() => service.refresh(cookieRefreshToken, requestMetadata(c, env)))
     setRefreshCookie(c, result.refreshToken, env)
     return c.json(withoutRefreshToken(result), 200)
   })
 
   routes.openapi(tokenRefreshRoute, async (c) => {
     const result = await executeAuth(() =>
-      service.refresh(c.req.valid('json').refreshToken, requestMetadata(c)),
+      service.refresh(c.req.valid('json').refreshToken, requestMetadata(c, env)),
     )
     return c.json(result, 200)
   })
@@ -340,7 +365,7 @@ export function createAuthRoutes({ env, requireAuth, service }: CreateAuthRoutes
 
   routes.openapi(cookieLogoutRoute, async (c) => {
     const cookieRefreshToken = getRefreshCookie(c)
-    assertTrustedCookieRequest(c, env, cookieRefreshToken)
+    assertTrustedCookieOrigin(c, env)
     await executeAuth(() => service.logout(cookieRefreshToken))
     deleteRefreshCookie(c, env)
     return c.body(null, 204)
@@ -371,11 +396,15 @@ function logoutExpoPushTokens(input: {
   ]
 }
 
-function requestMetadata(c: Context): { userAgent?: string; ipAddress?: string } {
-  const forwardedFor = c.req.header('x-forwarded-for')
+function requestMetadata(c: Context, env: AppEnv): { userAgent?: string; ipAddress?: string } {
+  const ipAddress = clientAddress(c, {
+    trustProxy: env.TRUST_PROXY,
+    trustedProxyClientIpHeader: env.TRUSTED_PROXY_CLIENT_IP_HEADER,
+    trustedProxyClientIpPosition: env.TRUSTED_PROXY_CLIENT_IP_POSITION,
+  })
   return {
     userAgent: c.req.header('user-agent'),
-    ipAddress: forwardedFor?.split(',')[0]?.trim(),
+    ipAddress: ipAddress === 'unknown' ? undefined : ipAddress,
   }
 }
 
@@ -383,8 +412,8 @@ function getRefreshCookie(c: Context) {
   return getCookie(c, refreshCookieName)
 }
 
-function assertTrustedCookieRequest(c: Context, env: AppEnv, cookieRefreshToken: string | undefined) {
-  if (!env.COOKIE_SECURE || !cookieRefreshToken) return
+function assertTrustedCookieOrigin(c: Context, env: AppEnv) {
+  if (!env.COOKIE_SECURE) return
 
   const origin = c.req.header('origin')
   if (origin && env.CORS_ORIGINS.includes(origin)) return

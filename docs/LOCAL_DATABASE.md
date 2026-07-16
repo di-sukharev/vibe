@@ -70,7 +70,7 @@ Copy-Item backend/.env.example backend/.env
 Then apply Prisma migrations:
 
 ```bash
-bun run --cwd backend prisma:migrate
+bun run --cwd backend prisma:deploy
 ```
 
 ## Optional Port Overrides

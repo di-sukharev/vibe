@@ -1,9 +1,10 @@
 import type { CookieRefreshResponse } from '@web-app-demo/contracts'
+import { ApiRequestError } from '@/platform/api'
 
 import type { AuthApi } from './api'
 
 type BootstrapAuthSessionOptions = {
-  api: Pick<AuthApi, 'expireSession' | 'refresh'>
+  api: Pick<AuthApi, 'clearSession' | 'refresh'>
   shouldApply: () => boolean
   setAccessToken: (accessToken: string | null) => void
 }
@@ -21,10 +22,15 @@ export async function bootstrapAuthSession({
     if (shouldApply()) {
       setAccessToken(response.accessToken)
     }
-  } catch {
-    if (shouldApply()) {
-      await api.expireSession()
+  } catch (error) {
+    if (error instanceof ApiRequestError && error.status === 401) {
+      if (shouldApply()) {
+        await api.clearSession()
+      }
+      return
     }
+
+    throw error
   }
 }
 

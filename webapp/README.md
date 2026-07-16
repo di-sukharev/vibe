@@ -53,7 +53,9 @@ Production deployment for the browser app uses DigitalOcean App Platform Static 
 
 ## Practice
 
-Use TanStack Query for server state, TanStack Mutation for API writes, TanStack Form for forms, and shared Zod schemas from `packages/contracts` for validation. The access token lives only in browser memory; refresh uses the HttpOnly cookie set by the backend. `src/features/auth` is the golden path: its public index exposes the provider, user context, and auth UI; its API adapter owns auth paths and refresh/retry; and its split register/login forms validate submissions with shared contracts without putting product logic in pages.
+Use TanStack Query for server state, TanStack Mutation for API writes, TanStack Form for forms, and shared Zod schemas from `packages/contracts` for validation. The access token lives only in browser memory; refresh uses the HttpOnly cookie set by the backend. One browser Web Lock serializes every cookie-changing auth transition across same-origin tabs. Versioned session events make login, registration, refresh expiry, and logout invalidate stale access tokens and session-scoped caches before another principal can be applied; refresh/retry also compares JWT subjects and never repeats an authenticated operation as a different user. `src/features/auth` is the golden path: its public index exposes the provider, user context, auth UI, and an authenticated transport capability for future product APIs; its API adapter owns auth paths and refresh/retry; and its split register/login forms validate submissions with shared contracts without putting product logic in pages.
+
+Put user-specific TanStack Query keys under the `['session', ...]` prefix. Login, registration, confirmed logout, and auth expiry remove and cancel stale session scope while preserving public caches. Successful account changes notify other same-origin tabs to bootstrap from the winning HttpOnly cookie; confirmed logout and auth expiry clear their in-memory session UI. A failed server logout leaves both the HttpOnly cookie and local authenticated state intact and shows a retryable error instead of pretending the user signed out.
 
 Keep raw fetch, base URL handling, and shared error parsing in the endpoint-agnostic `src/platform/api`. Each `src/features/<context>` owns its paths, schemas, queries, and provider. Pages import features only through public `index.ts`; features use platform and UI primitives; platform and `src/components/ui` never import product features. Run `bun run architecture:check` after changing boundaries.
 
@@ -75,7 +77,7 @@ Use the local `shadcn` devDependency pinned in `webapp/package.json` and `bun.lo
 
 ## E2E
 
-The Playwright smoke test lives in `e2e/specs/auth.spec.ts` and verifies client-side auth validation visibility, register/login mode switching, register, refresh after reload, protected UI, logout, invalid login error rendering, and a successful login after logout.
+The Playwright smoke tests live in `e2e/specs/auth.spec.ts` and verify client-side auth validation visibility, register/login mode switching, register, refresh after reload, protected UI, logout, invalid login error rendering, successful login after logout, concurrent session restoration, cross-tab logout/error recovery, and convergence after competing account changes in two tabs.
 
 The run starts Docker Compose `postgres_test`, applies migrations to `web_app_demo_test`, starts the backend with `TEST_DATABASE_URL` as its `DATABASE_URL`, starts Vite, and removes the test database volume after the run by default.
 

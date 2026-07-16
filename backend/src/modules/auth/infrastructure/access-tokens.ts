@@ -28,7 +28,9 @@ export function signAccessToken(payload: AccessTokenPayload, env: AppEnv) {
 }
 
 export async function verifyAccessToken(token: string, env: Pick<AppEnv, 'JWT_SECRET'>) {
-  const { payload } = await jwtVerify(token, secretKey(env.JWT_SECRET))
+  const { payload } = await jwtVerify(token, secretKey(env.JWT_SECRET), {
+    algorithms: ['HS256'],
+  })
   return accessTokenPayloadSchema.parse({
     sub: payload.sub,
     sessionId: payload.sessionId,

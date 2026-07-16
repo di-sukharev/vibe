@@ -14,6 +14,8 @@ describe('loadEnv', () => {
 
     expect(env.PORT).toBe(3000)
     expect(env.ACCESS_TOKEN_TTL_SECONDS).toBe(900)
+    expect(env.REFRESH_REUSE_GRACE_SECONDS).toBe(10)
+    expect(env.SESSION_ABSOLUTE_TTL_DAYS).toBe(90)
     expect(env.COOKIE_SECURE).toBe(false)
     expect(env.CORS_ORIGINS).toEqual(['http://localhost:5173', 'http://localhost:8081'])
     expect(env.SPACES_REGION).toBeUndefined()
@@ -113,6 +115,32 @@ describe('loadEnv', () => {
         CORS_ORIGINS: 'https://web.example.com',
       }),
     ).toThrow('JWT_SECRET')
+
+    expect(() =>
+      loadEnv({
+        DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
+        JWT_SECRET: 'a-memorable-human-secret-phrase-that-is-long-enough-to-pass',
+        COOKIE_SECURE: 'true',
+        CORS_ORIGINS: 'https://web.example.com',
+      }),
+    ).toThrow('JWT_SECRET')
+  })
+
+  test('requires generated secrets, secure cookies, and HTTPS origins in production', () => {
+    const productionBase = {
+      NODE_ENV: 'production',
+      DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
+      JWT_SECRET: '0123456789abcdef'.repeat(4),
+      COOKIE_SECURE: 'true',
+      CORS_ORIGINS: 'https://web.example.com',
+    }
+
+    expect(() => loadEnv(productionBase)).not.toThrow()
+    expect(() => loadEnv({ ...productionBase, JWT_SECRET: 'a-memorable-human-secret-phrase-that-is-long-enough-to-pass' }))
+      .toThrow('JWT_SECRET')
+    expect(() => loadEnv({ ...productionBase, COOKIE_SECURE: 'false' })).toThrow('COOKIE_SECURE')
+    expect(() => loadEnv({ ...productionBase, CORS_ORIGINS: 'http://web.example.com' }))
+      .toThrow('CORS_ORIGINS')
   })
 
   test('rejects unsafe production CORS origins', () => {
@@ -244,6 +272,43 @@ describe('loadEnv', () => {
 
     expect(env.GOOGLE_PLAY_PRODUCT_IDS).toEqual(['premium'])
     expect(env.GOOGLE_PLAY_BASE_PLAN_IDS).toEqual(['monthly', 'yearly'])
+  })
+
+  test('keeps absolute session lifetime at least as long as refresh lifetime', () => {
+    expect(() =>
+      loadEnv({
+        DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
+        JWT_SECRET: '12345678901234567890123456789012',
+        REFRESH_TOKEN_TTL_DAYS: '30',
+        SESSION_ABSOLUTE_TTL_DAYS: '29',
+      }),
+    ).toThrow('SESSION_ABSOLUTE_TTL_DAYS')
+  })
+
+  test('bounds refresh replay tolerance to a short window', () => {
+    expect(() =>
+      loadEnv({
+        DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
+        JWT_SECRET: '12345678901234567890123456789012',
+        REFRESH_REUSE_GRACE_SECONDS: '61',
+      }),
+    ).toThrow('REFRESH_REUSE_GRACE_SECONDS')
+  })
+
+  test('requires an explicit client IP header when a trusted proxy is enabled', () => {
+    const baseEnv = {
+      DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
+      JWT_SECRET: '12345678901234567890123456789012',
+      TRUST_PROXY: 'true',
+    }
+
+    expect(() => loadEnv(baseEnv)).toThrow('TRUSTED_PROXY_CLIENT_IP_HEADER')
+    expect(() =>
+      loadEnv({
+        ...baseEnv,
+        TRUSTED_PROXY_CLIENT_IP_HEADER: 'do-connecting-ip',
+      }),
+    ).not.toThrow()
   })
 })
 

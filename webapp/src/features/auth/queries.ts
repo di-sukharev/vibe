@@ -13,8 +13,12 @@ import type {
 
 import type { AuthApi } from './api'
 
+export const sessionQueryKeys = {
+  all: ['session'] as const,
+}
+
 export const authQueryKeys = {
-  all: ['auth'] as const,
+  all: [...sessionQueryKeys.all, 'auth'] as const,
   me: () => [...authQueryKeys.all, 'me'] as const,
 }
 
@@ -24,7 +28,7 @@ type CurrentUserQueryOptions = {
 }
 
 type AuthMutationOptions = {
-  api: Pick<AuthApi, 'login' | 'logout' | 'register'>
+  api: Pick<AuthApi, 'isSessionEpochCurrent' | 'login' | 'logout' | 'register'>
   setAccessToken: (accessToken: string | null) => void
 }
 
@@ -41,8 +45,9 @@ export function useRegisterMutation({ api, setAccessToken }: AuthMutationOptions
 
   return useMutation({
     mutationFn: (input: RegisterRequest) => api.register(input),
-    onSuccess: (response) => {
-      applyAuthenticatedSession(queryClient, setAccessToken, response)
+    onSuccess: (transition) => {
+      if (!api.isSessionEpochCurrent(transition.sessionEpoch)) return
+      applyAuthenticatedSession(queryClient, setAccessToken, transition.data)
     },
   })
 }
@@ -52,8 +57,9 @@ export function useLoginMutation({ api, setAccessToken }: AuthMutationOptions) {
 
   return useMutation({
     mutationFn: (input: LoginRequest) => api.login(input),
-    onSuccess: (response) => {
-      applyAuthenticatedSession(queryClient, setAccessToken, response)
+    onSuccess: (transition) => {
+      if (!api.isSessionEpochCurrent(transition.sessionEpoch)) return
+      applyAuthenticatedSession(queryClient, setAccessToken, transition.data)
     },
   })
 }
@@ -62,13 +68,22 @@ export function useLogoutMutation({ api, setAccessToken }: AuthMutationOptions) 
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async () => {
-      await api.logout().catch(() => undefined)
-    },
-    onSettled: () => {
-      clearAuthenticatedSession(queryClient, setAccessToken)
-    },
+    mutationFn: () => logoutAuthenticatedSession({ api, queryClient, setAccessToken }),
   })
+}
+
+export async function logoutAuthenticatedSession({
+  api,
+  queryClient,
+  setAccessToken,
+}: {
+  api: Pick<AuthApi, 'isSessionEpochCurrent' | 'logout'>
+  queryClient: QueryClient
+  setAccessToken: (accessToken: string | null) => void
+}) {
+  const transition = await api.logout()
+  if (!transition || !api.isSessionEpochCurrent(transition.sessionEpoch)) return
+  await clearAuthenticatedSession(queryClient, setAccessToken)
 }
 
 export function applyAuthenticatedSession(
@@ -76,14 +91,15 @@ export function applyAuthenticatedSession(
   setAccessToken: (accessToken: string | null) => void,
   response: CookieAuthResponse,
 ) {
+  queryClient.removeQueries({ queryKey: sessionQueryKeys.all })
   setAccessToken(response.accessToken)
   queryClient.setQueryData(authQueryKeys.me(), { user: response.user } satisfies MeResponse)
 }
 
-export function clearAuthenticatedSession(
+export async function clearAuthenticatedSession(
   queryClient: QueryClient,
   setAccessToken: (accessToken: string | null) => void,
 ) {
   setAccessToken(null)
-  queryClient.removeQueries({ queryKey: authQueryKeys.me() })
+  queryClient.removeQueries({ queryKey: sessionQueryKeys.all })
 }

@@ -6,6 +6,7 @@ alerts:
 databases:
   - name: REPLACE_WITH_DO_DB_COMPONENT_NAME
     engine: PG
+    version: "18"
     production: true
     cluster_name: REPLACE_WITH_DO_DB_CLUSTER_NAME
     db_name: REPLACE_WITH_DO_DB_NAME
@@ -22,14 +23,14 @@ services:
     instance_size_slug: REPLACE_WITH_DO_API_INSTANCE_SIZE_SLUG
     instance_count: REPLACE_WITH_DO_API_INSTANCE_COUNT
     health_check:
-      http_path: /health
+      http_path: /health/ready
       initial_delay_seconds: 10
       period_seconds: 10
       timeout_seconds: 5
       success_threshold: 1
       failure_threshold: 5
     liveness_health_check:
-      http_path: /health
+      http_path: /health/live
       initial_delay_seconds: 30
       period_seconds: 10
       timeout_seconds: 5
@@ -45,7 +46,7 @@ services:
         scope: RUN_TIME
         type: SECRET
       - key: JWT_SECRET
-        value: "REPLACE_WITH_AT_LEAST_32_RANDOM_CHARS"
+        value: "REPLACE_WITH_64_HEX_JWT_SECRET"
         scope: RUN_TIME
         type: SECRET
       - key: CORS_ORIGINS
@@ -60,11 +61,48 @@ services:
         value: "30"
         scope: RUN_TIME
         type: GENERAL
+      - key: REFRESH_REUSE_GRACE_SECONDS
+        value: "10"
+        scope: RUN_TIME
+        type: GENERAL
+      - key: SESSION_ABSOLUTE_TTL_DAYS
+        value: "90"
+        scope: RUN_TIME
+        type: GENERAL
+      - key: SESSION_RETENTION_DAYS
+        value: "7"
+        scope: RUN_TIME
+        type: GENERAL
+      - key: AUTH_BODY_LIMIT_BYTES
+        value: "65536"
+        scope: RUN_TIME
+        type: GENERAL
+      - key: AUTH_RATE_LIMIT_MAX
+        value: "60"
+        scope: RUN_TIME
+        type: GENERAL
+      - key: AUTH_RATE_LIMIT_WINDOW_SECONDS
+        value: "60"
+        scope: RUN_TIME
+        type: GENERAL
+      - key: SHUTDOWN_GRACE_SECONDS
+        value: "20"
+        scope: RUN_TIME
+        type: GENERAL
+      - key: TRUST_PROXY
+        value: "true"
+        scope: RUN_TIME
+        type: GENERAL
+      - key: TRUSTED_PROXY_CLIENT_IP_HEADER
+        value: "do-connecting-ip"
+        scope: RUN_TIME
+        type: GENERAL
       - key: COOKIE_SECURE
         value: "true"
         scope: RUN_TIME
         type: GENERAL
 REPLACE_WITH_OPTIONAL_EXPO_PUSH_ACCESS_TOKEN_ENV
+REPLACE_WITH_OPTIONAL_STORAGE_ENVS
 REPLACE_WITH_OPTIONAL_BACKEND_WORKERS
 jobs:
   - name: migrate

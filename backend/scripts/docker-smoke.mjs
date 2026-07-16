@@ -105,7 +105,7 @@ async function waitForComposePostgres() {
 }
 
 async function waitForHealth() {
-  const url = `http://127.0.0.1:${hostPort}/health`
+  const url = `http://127.0.0.1:${hostPort}/health/ready`
 
   for (let attempt = 1; attempt <= 30; attempt += 1) {
     try {
@@ -180,24 +180,23 @@ try {
 
   run('docker', [
     'run',
-    '--rm',
     '-d',
     '--name',
     containerName,
     '--network',
     networkName,
     '-p',
-    `${hostPort}:3000`,
+    `127.0.0.1:${hostPort}:3000`,
     '-e',
     'PORT=3000',
     '-e',
     `DATABASE_URL=${databaseUrlForContainer}`,
     '-e',
-    'JWT_SECRET=docker-smoke-secret-at-least-thirty-two-characters',
+    `JWT_SECRET=${'0123456789abcdef'.repeat(4)}`,
     '-e',
-    'CORS_ORIGINS=http://localhost:45174',
+    'CORS_ORIGINS=https://web.example.com',
     '-e',
-    'COOKIE_SECURE=false',
+    'COOKIE_SECURE=true',
     imageName,
   ])
 

@@ -54,6 +54,7 @@ If backend/API, full-stack, uploads, or any database-backed validation is active
   - whether real-time chat, presence, collaboration, live notifications, or WebSocket-style updates are needed now;
   - whether Expo/EAS builds, Expo Push notifications, and Maestro E2E validation are needed now when mobile is active;
   - whether deployment is needed now, and if yes, the production domains/URLs and release targets.
+- Rename the template deliberately rather than with an unreviewed global replacement. Use `rg -n "web_app_demo|web-app-demo|vibecoding-template"` to inventory package scopes, database names, cookie names, Docker/Compose isolation names, deploy image defaults, and architecture-check aliases; update each owning source, regenerate `bun.lock` with the repository's pinned Bun version, then run install, typecheck, architecture checks, backend integration, and web E2E for the active surfaces.
 - After the user answers, record durable project choices in the relevant README sections before feature work: project name/slug, active surfaces, deferred surfaces, validation scope, and what deployment/release work is in or out of scope. Once setup is complete, remove the marked `Bootstrap-Only Instructions` blocks from `AGENTS.md` and `CLAUDE.md`.
 - If only the webapp is active, keep mobile intact but deferred: do not run Expo/EAS/Maestro setup, do not add mobile features, and add or update a short deferred-surface note in `mobile/README.md`. When the user later asks for mobile, remove or rewrite that note, then set up and validate mobile normally.
 - If only the mobile app is active, keep webapp and website intact but deferred: do not add browser-only features or Playwright flows unless they support the active mobile/backend work, and add or update a short deferred-surface note in `webapp/README.md` or `website/README.md` as relevant. When the user later asks for webapp, remove or rewrite that note, then set up and validate webapp normally.
@@ -148,7 +149,7 @@ Copy-Item backend/.env.example backend/.env
 Then apply migrations:
 
 ```bash
-bun run --cwd backend prisma:migrate
+bun run --cwd backend prisma:deploy
 ```
 
 ### Run The Active Surfaces
@@ -162,7 +163,7 @@ bun run dev:website
 bun run dev:mobile
 ```
 
-Webapp-only or website-only setups can skip the backend/PostgreSQL block until backend/API becomes active.
+Website-only setups can skip backend/PostgreSQL. A webapp-only project can skip it only after replacing or removing the included auth golden path; the committed webapp's register/login/session journey intentionally requires the backend.
 
 Create `webapp/.env` when the browser client should use a non-default API URL:
 

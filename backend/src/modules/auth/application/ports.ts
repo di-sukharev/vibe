@@ -15,7 +15,15 @@ export type AccessTokenPayload = {
 
 export type AuthRepository = {
   findUserByEmail(email: string): Promise<AuthUserRecord | null>
-  createPasswordUser(input: RegisterPayload & { passwordHash: string }): Promise<AuthUserRecord>
+  createPasswordUserWithSession(input: {
+    user: RegisterPayload & { passwordHash: string }
+    session: {
+      refreshTokenHash: string
+      refreshTokenFamilyHash: string
+      expiresAt: Date
+      metadata: SessionMetadata
+    }
+  }): Promise<{ user: AuthUserRecord; session: { id: string } }>
   findUserByProviderSubject(
     provider: SocialAuthProvider,
     subject: string,
@@ -29,28 +37,46 @@ export type AuthRepository = {
   createSession(input: {
     userId: string
     refreshTokenHash: string
+    refreshTokenFamilyHash: string
     expiresAt: Date
     metadata: SessionMetadata
   }): Promise<{ id: string }>
   findActiveRefreshSession(input: {
     refreshTokenHash: string
+    refreshTokenFamilyHash: string
     now: Date
-  }): Promise<{ id: string; userId: string; user: AuthUserRecord } | null>
+    createdAfter: Date
+    reuseGraceAfter: Date
+  }): Promise<{
+    id: string
+    userId: string
+    user: AuthUserRecord
+    refreshTokenHash: string
+    credentialState: 'current' | 'previous_within_grace' | 'reused'
+  } | null>
   rotateRefreshSession(input: {
     currentSessionId: string
-    userId: string
+    currentRefreshTokenHash: string
     now: Date
     nextRefreshTokenHash: string
+    nextRefreshTokenFamilyHash: string
     nextExpiresAt: Date
     metadata: SessionMetadata
-  }): Promise<{ id: string } | null>
+  }): Promise<boolean>
+  revokeSessionById(input: { sessionId: string; now: Date }): Promise<boolean>
   findActiveAccessSession(input: {
     sessionId: string
     userId: string
     now: Date
+    createdAfter: Date
   }): Promise<{ id: string; user: AuthUserRecord } | null>
   revokeSession(
-    input: { expoPushTokens: string[]; refreshTokenHash: string; now: Date },
+    input: {
+      expoPushTokens: string[]
+      refreshTokenHash: string
+      refreshTokenFamilyHash: string
+      now: Date
+    },
     cleanup: LogoutCleanup,
   ): Promise<string | null>
 }
@@ -68,6 +94,8 @@ export type Passwords = {
 export type RefreshTokens = {
   create(): string
   hash(token: string): string
+  familyHash(token: string): string
+  rotate(token: string): string
 }
 
 export type Clock = {

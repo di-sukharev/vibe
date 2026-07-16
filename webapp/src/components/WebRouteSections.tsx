@@ -115,6 +115,24 @@ export function SessionLoadingSection() {
   )
 }
 
+export function SessionErrorSection({ retry }: { retry: () => Promise<void> }) {
+  return (
+    <PageSection>
+      <div className="grid max-w-2xl gap-4" role="alert">
+        <Typography variant="h2">Session check is temporarily unavailable</Typography>
+        <Typography tone="muted">
+          Your session was not cleared. Check the connection and try again.
+        </Typography>
+        <div className="justify-self-start">
+          <Button type="button" onClick={() => void retry()}>
+            Try again
+          </Button>
+        </div>
+      </div>
+    </PageSection>
+  )
+}
+
 function PageSection({ children, layout = 'stack' }: PageSectionProps) {
   return <section className={sectionLayoutClasses[layout]}>{children}</section>
 }

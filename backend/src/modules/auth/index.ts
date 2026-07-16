@@ -5,7 +5,12 @@ import type { Clock, LogoutCleanup, SubscriptionReader } from './application/por
 import { createPrismaAuthRepository } from './infrastructure/auth-repository'
 import { signAccessToken, verifyAccessToken } from './infrastructure/access-tokens'
 import { hashPassword, verifyPassword } from './infrastructure/passwords'
-import { createRefreshToken, hashRefreshToken } from './infrastructure/refresh-tokens'
+import {
+  createRefreshToken,
+  deriveRotatedRefreshToken,
+  hashRefreshToken,
+  hashRefreshTokenFamily,
+} from './infrastructure/refresh-tokens'
 import { verifySocialIdentity } from './infrastructure/social-providers'
 import { createRequireAuth, type AuthHttpEnv } from './transport/middleware'
 import { createAuthRoutes } from './transport/routes'
@@ -56,9 +61,13 @@ export function createAuthModule({
       verify: verifyPassword,
     },
     refreshTokenTtlDays: env.REFRESH_TOKEN_TTL_DAYS,
+    refreshReuseGraceSeconds: env.REFRESH_REUSE_GRACE_SECONDS,
+    sessionAbsoluteTtlDays: env.SESSION_ABSOLUTE_TTL_DAYS,
     refreshTokens: {
       create: createRefreshToken,
       hash: hashRefreshToken,
+      familyHash: (token) => hashRefreshTokenFamily(token, env.JWT_SECRET),
+      rotate: (token) => deriveRotatedRefreshToken(token, env.JWT_SECRET),
     },
     repository: createPrismaAuthRepository(db),
     socialIdentities: {

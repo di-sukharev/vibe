@@ -1,5 +1,10 @@
 ---
-
+const title = 'website'
+const description = 'Публичная SEO-поверхность проекта: лендинги, контент и индексируемые каталоги.'
+const publicWebsiteUrl = import.meta.env.PUBLIC_WEBSITE_URL
+const canonicalUrl = publicWebsiteUrl
+	? new URL(Astro.url.pathname, publicWebsiteUrl).toString()
+	: undefined
 ---
 
 <html lang="ru">
@@ -9,7 +14,14 @@
 		<link rel="icon" href="/favicon.ico" />
 		<meta name="viewport" content="width=device-width" />
 		<meta name="generator" content={Astro.generator} />
-		<title>website</title>
+		<title>{title}</title>
+		<meta name="description" content={description} />
+		{canonicalUrl && <link rel="canonical" href={canonicalUrl} />}
+		<meta property="og:type" content="website" />
+		<meta property="og:title" content={title} />
+		<meta property="og:description" content={description} />
+		{canonicalUrl && <meta property="og:url" content={canonicalUrl} />}
+		<meta name="twitter:card" content="summary" />
 	</head>
 	<body>
 		<main>

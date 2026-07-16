@@ -1,27 +1,17 @@
-import { Outlet } from '@tanstack/react-router'
-
-import { AppShell } from '@/components/AppShell'
 import {
   ActiveSessionSection,
   CurrentUserSection,
   GuestAuthSection,
   LoginRequiredSection,
+  SessionErrorSection,
   SessionLoadingSection,
 } from '@/components/WebRouteSections'
 import { useAuth } from '@/features/auth'
 
-export function RootLayout() {
-  const auth = useAuth()
-  return (
-    <AppShell isAuthenticated={auth.isAuthenticated} onLogout={() => void auth.logout()}>
-      <Outlet />
-    </AppShell>
-  )
-}
-
 export function HomePage() {
   const auth = useAuth()
   if (auth.isBootstrapping) return <SessionLoadingSection />
+  if (auth.sessionError && !auth.user) return <SessionErrorSection retry={auth.retrySession} />
   if (auth.user) return <ActiveSessionSection user={auth.user} />
   return <GuestAuthSection />
 }
@@ -29,6 +19,7 @@ export function HomePage() {
 export function AppPage() {
   const auth = useAuth()
   if (auth.isBootstrapping) return <SessionLoadingSection />
+  if (auth.sessionError && !auth.user) return <SessionErrorSection retry={auth.retrySession} />
   if (!auth.user) return <LoginRequiredSection />
   return <CurrentUserSection user={auth.user} />
 }

@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 import { execFileSync } from 'node:child_process'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { getDomain } from 'tldts'
 
 import { validateDigitalOceanCronSchedule } from './do-cron.mjs'
 
@@ -34,6 +35,7 @@ const defaultApiServiceInstanceSizeSlug = 'apps-s-1vcpu-1gb'
 const defaultApiServiceInstanceCount = 1
 const defaultBackendWorkerInstanceSizeSlug = defaultApiServiceInstanceSizeSlug
 const defaultBackendWorkerInstanceCount = 1
+const appPlatformComponentOwners = new Map()
 
 if (!targets.has(target)) {
   printUsage()
@@ -42,14 +44,33 @@ if (!targets.has(target)) {
 
 const packageJson = JSON.parse(await readFile(resolve(repoRoot, 'package.json'), 'utf8'))
 const projectSlug = doName(process.env.DO_PROJECT_SLUG ?? packageJson.name ?? 'app')
-const gitBranch = requiredBranch()
+assertProjectSlug(projectSlug)
+const includesBackend = ['backend-initial', 'backend-final', 'all'].includes(target)
+const gitBranch = validatedGitBranch(requiredBranch())
 const githubRepo = requiredGithubRepo()
 assertCleanReleaseGitState(gitBranch)
-const appRegion = process.env.DO_APP_REGION?.trim() || 'nyc'
-const dbComponentName = doName(process.env.DO_DB_COMPONENT_NAME ?? `${projectSlug}-db`, 32)
+const appRegion = deploymentIdentifier(
+  'DO_APP_REGION',
+  process.env.DO_APP_REGION?.trim() || 'nyc',
+  /^[a-z][a-z0-9-]{0,31}$/,
+)
+const dbComponentName = includesBackend
+  ? appPlatformComponentName(
+      'DO_DB_COMPONENT_NAME',
+      process.env.DO_DB_COMPONENT_NAME ?? `${projectSlug}-db`,
+    )
+  : doName(process.env.DO_DB_COMPONENT_NAME ?? `${projectSlug}-db`, 32)
 const dbClusterName = doName(process.env.DO_DB_CLUSTER_NAME ?? `${projectSlug}-pg`)
-const dbName = process.env.DO_DB_NAME?.trim() || 'defaultdb'
-const dbUser = process.env.DO_DB_USER?.trim() || 'doadmin'
+const dbName = deploymentIdentifier(
+  'DO_DB_NAME',
+  process.env.DO_DB_NAME?.trim() || 'defaultdb',
+  /^[A-Za-z_][A-Za-z0-9_]{0,62}$/,
+)
+const dbUser = deploymentIdentifier(
+  'DO_DB_USER',
+  process.env.DO_DB_USER?.trim() || 'doadmin',
+  /^[A-Za-z_][A-Za-z0-9_]{0,62}$/,
+)
 const apiServiceInstanceSizeSlug = optionalAppPlatformInstanceSizeSlugEnv(
   'DO_API_INSTANCE_SIZE_SLUG',
   defaultApiServiceInstanceSizeSlug,
@@ -59,19 +80,36 @@ const apiServiceInstanceCount = optionalPositiveIntegerEnv(
   defaultApiServiceInstanceCount,
 )
 
+const browserAuthSite = ['backend-final', 'webapp', 'all'].includes(target)
+  ? requiredBrowserAuthSite()
+  : undefined
+
 await mkdir(scratchDir, { recursive: true })
 
-if (target === 'backend-initial' || target === 'backend-final' || target === 'all') {
+let backendWebappUrl
+let backendCorsOrigins
+if (includesBackend) {
+  reserveAppPlatformComponentName('api', 'API service')
+  reserveAppPlatformComponentName(dbComponentName, 'database component')
+  reserveAppPlatformComponentName('migrate', 'migration job')
+
   const jwtSecret = requiredEnv('JWT_SECRET')
   assertStrongJwtSecret(jwtSecret)
-  const webappUrl = target === 'backend-initial' ? 'https://placeholder.invalid' : requiredUrlEnv('DO_WEBAPP_URL')
+  backendWebappUrl = target === 'backend-initial'
+    ? 'https://placeholder.invalid'
+    : browserAuthSite.webappUrl
+  backendCorsOrigins = buildBackendCorsOrigins(
+    backendWebappUrl,
+    browserAuthSite?.siteDomain,
+  )
 
   await writePreparedSpec('backend-app.yaml.example', 'backend-app.yaml', {
     ...commonReplacements(),
-    REPLACE_WITH_AT_LEAST_32_RANDOM_CHARS: jwtSecret,
-    'https://REPLACE_WITH_WEBAPP_DEFAULT_INGRESS': webappUrl,
+    REPLACE_WITH_64_HEX_JWT_SECRET: jwtSecret,
+    'https://REPLACE_WITH_WEBAPP_DEFAULT_INGRESS': backendCorsOrigins,
     REPLACE_WITH_OPTIONAL_BACKEND_WORKERS: optionalBackendWorkersBlock(),
     REPLACE_WITH_OPTIONAL_BACKEND_CRON_JOBS: optionalBackendCronJobsBlock(),
+    REPLACE_WITH_OPTIONAL_STORAGE_ENVS: optionalStorageEnvBlock(),
   })
 }
 
@@ -79,7 +117,7 @@ if (target === 'webapp' || target === 'all') {
   // The CSR webapp is deployed as a Static Site component; do not add service machine tiers here.
   await writePreparedSpec('webapp-static-app.yaml.example', 'webapp-static-app.yaml', {
     ...commonReplacements(),
-    'https://REPLACE_WITH_BACKEND_DEFAULT_INGRESS': requiredUrlEnv('DO_BACKEND_URL'),
+    'https://REPLACE_WITH_BACKEND_DEFAULT_INGRESS': browserAuthSite.backendUrl,
   })
 }
 
@@ -88,7 +126,6 @@ if (target === 'website' || target === 'all') {
   // server islands, or other runtime-rendered routes need a runtime service instead.
   await writePreparedSpec('website-static-app.yaml.example', 'website-static-app.yaml', {
     ...commonReplacements(),
-    'https://REPLACE_WITH_WEBAPP_DEFAULT_INGRESS': requiredUrlEnv('DO_WEBAPP_URL'),
   })
 }
 
@@ -99,11 +136,11 @@ function commonReplacements() {
     REPLACE_WITH_PROJECT_SLUG: projectSlug,
     REPLACE_WITH_DO_APP_REGION: appRegion,
     REPLACE_WITH_GITHUB_REPO: githubRepo,
-    REPLACE_WITH_GIT_BRANCH: gitBranch,
+    REPLACE_WITH_GIT_BRANCH: yamlString(gitBranch),
     REPLACE_WITH_DO_DB_COMPONENT_NAME: dbComponentName,
     REPLACE_WITH_DO_DB_CLUSTER_NAME: dbClusterName,
-    REPLACE_WITH_DO_DB_NAME: dbName,
-    REPLACE_WITH_DO_DB_USER: dbUser,
+    REPLACE_WITH_DO_DB_NAME: yamlString(dbName),
+    REPLACE_WITH_DO_DB_USER: yamlString(dbUser),
     REPLACE_WITH_DO_API_INSTANCE_SIZE_SLUG: apiServiceInstanceSizeSlug,
     REPLACE_WITH_DO_API_INSTANCE_COUNT: String(apiServiceInstanceCount),
     REPLACE_WITH_OPTIONAL_EXPO_PUSH_ACCESS_TOKEN_ENV: optionalExpoPushAccessTokenEnvBlock('      '),
@@ -122,7 +159,8 @@ async function writePreparedSpec(templateName, outputName, replacements) {
   assertNoPlaceholders(outputName, contents)
   assertNoEmptyYamlValues(outputName, contents)
   assertSafeProductionEnv(outputName, contents)
-  await writeFile(outputPath, contents)
+  await writeFile(outputPath, contents, { mode: 0o600 })
+  await chmod(outputPath, 0o600)
 }
 
 function printUsage() {
@@ -131,16 +169,18 @@ function printUsage() {
   console.error('Required env:')
   console.error('  all targets: DO_GITHUB_REPO, optional DO_PROJECT_SLUG, DO_GIT_BRANCH, DO_APP_REGION')
   console.error('  backend-initial: JWT_SECRET')
-  console.error('  backend-final: JWT_SECRET, DO_WEBAPP_URL')
-  console.error('  webapp: DO_BACKEND_URL')
-  console.error('  website: DO_WEBAPP_URL')
-  console.error('  all: JWT_SECRET, DO_BACKEND_URL, DO_WEBAPP_URL')
+  console.error('  backend-final: JWT_SECRET, DO_BACKEND_URL, DO_WEBAPP_URL, DO_AUTH_SITE_DOMAIN')
+  console.error('  webapp: DO_BACKEND_URL, DO_WEBAPP_URL, DO_AUTH_SITE_DOMAIN')
+  console.error('  website: no target-specific values')
+  console.error('  all: JWT_SECRET, DO_BACKEND_URL, DO_WEBAPP_URL, DO_AUTH_SITE_DOMAIN')
   console.error('')
   console.error('Optional deployment settings:')
   console.error('  API sizing: DO_API_INSTANCE_SIZE_SLUG, DO_API_INSTANCE_COUNT')
   console.error('  Expo Push security: EXPO_PUSH_ACCESS_TOKEN')
+  console.error('  browser API origins: DO_ADDITIONAL_CORS_ORIGINS')
   console.error('  worker: DO_BACKEND_WORKER_ENABLED=true, DO_BACKEND_WORKER_RUN_COMMAND')
   console.error('  cron: DO_BACKEND_CRON_NAME, DO_BACKEND_CRON_TASK, DO_BACKEND_CRON_SCHEDULE')
+  console.error('  storage: complete SPACES_* group from backend/.env.example')
 }
 
 function requiredEnv(name) {
@@ -155,6 +195,74 @@ function requiredEnv(name) {
 
 function requiredUrlEnv(name) {
   return normalizeHttpsUrl(name, requiredEnv(name))
+}
+
+function buildBackendCorsOrigins(webappUrl, authSiteDomain) {
+  const additional = (process.env.DO_ADDITIONAL_CORS_ORIGINS ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+    .map((origin) => normalizeHttpsUrl('DO_ADDITIONAL_CORS_ORIGINS', origin))
+
+  for (const origin of additional) {
+    if (origin !== new URL(origin).origin) {
+      throw new Error(`DO_ADDITIONAL_CORS_ORIGINS must contain origins only: ${origin}`)
+    }
+    if (authSiteDomain) {
+      assertUrlBelongsToAuthSite('DO_ADDITIONAL_CORS_ORIGINS', origin, authSiteDomain)
+    }
+  }
+
+  return [...new Set([webappUrl, ...additional])].join(',')
+}
+
+function requiredBrowserAuthSite() {
+  const backendUrl = requiredUrlEnv('DO_BACKEND_URL')
+  const webappUrl = requiredUrlEnv('DO_WEBAPP_URL')
+  const deploymentUrls = [backendUrl, webappUrl]
+
+  if (deploymentUrls.some((value) => new URL(value).hostname.endsWith('.ondigitalocean.app'))) {
+    throw new Error(
+      'Independent *.ondigitalocean.app domains are not supported for browser auth because refresh cookies may be blocked as third-party cookies. Configure API and webapp custom domains under one DO_AUTH_SITE_DOMAIN.',
+    )
+  }
+
+  const siteDomain = requiredAuthSiteDomain()
+
+  assertUrlBelongsToAuthSite('DO_BACKEND_URL', backendUrl, siteDomain)
+  assertUrlBelongsToAuthSite('DO_WEBAPP_URL', webappUrl, siteDomain)
+
+  return { backendUrl, siteDomain, webappUrl }
+}
+
+function requiredAuthSiteDomain() {
+  const value = requiredEnv('DO_AUTH_SITE_DOMAIN').toLowerCase().replace(/\.$/, '')
+
+  if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/.test(value)) {
+    throw new Error(
+      'DO_AUTH_SITE_DOMAIN must be a registrable domain such as example.com, without a scheme, port, path, or leading dot',
+    )
+  }
+
+  if (browserSiteForHostname(value) !== value) {
+    throw new Error(
+      'DO_AUTH_SITE_DOMAIN must be a registrable domain, not a public suffix or subdomain',
+    )
+  }
+
+  return value
+}
+
+function assertUrlBelongsToAuthSite(name, value, siteDomain) {
+  const hostname = new URL(value).hostname.toLowerCase().replace(/\.$/, '')
+
+  if (browserSiteForHostname(hostname) !== siteDomain) {
+    throw new Error(`${name} hostname must belong to DO_AUTH_SITE_DOMAIN (${siteDomain}): ${hostname}`)
+  }
+}
+
+function browserSiteForHostname(hostname) {
+  return getDomain(hostname, { allowPrivateDomains: true })
 }
 
 function normalizeHttpsUrl(name, value) {
@@ -192,6 +300,29 @@ function requiredBranch() {
   } catch {
     return 'main'
   }
+}
+
+function validatedGitBranch(value) {
+  assertSafeYamlString('DO_GIT_BRANCH', value)
+
+  try {
+    execFileSync('git', ['check-ref-format', '--branch', value], {
+      cwd: repoRoot,
+      stdio: 'ignore',
+    })
+  } catch {
+    throw new Error('DO_GIT_BRANCH must be a valid Git branch name')
+  }
+
+  return value
+}
+
+function deploymentIdentifier(name, value, pattern) {
+  assertSafeYamlString(name, value)
+  if (!pattern.test(value)) {
+    throw new Error(`${name} contains unsupported characters or exceeds its supported length`)
+  }
+  return value
 }
 
 function assertCleanReleaseGitState(gitBranch) {
@@ -254,15 +385,25 @@ function assertMinLength(name, value, minimum) {
 }
 
 function assertStrongJwtSecret(value) {
-  assertMinLength('JWT_SECRET', value, 32)
+  assertMinLength('JWT_SECRET', value, 64)
 
   const normalized = value.trim().toLowerCase()
   if (
     normalized.length === 0 ||
     knownWeakJwtSecrets.has(normalized) ||
-    new Set(normalized).size === 1
+    new Set(normalized).size === 1 ||
+    !/^[a-f0-9]{64,}$/.test(normalized)
   ) {
     throw new Error('JWT_SECRET must be a non-placeholder random secret')
+  }
+}
+
+function assertProjectSlug(value) {
+  const longestAppName = `${value}-website`
+  if (longestAppName.length > 32) {
+    throw new Error(
+      `DO_PROJECT_SLUG must be at most 24 characters so suffixed App Platform names stay within 32 characters`,
+    )
   }
 }
 
@@ -350,6 +491,51 @@ function assertBuildTimeHttpsUrl(outputName, key, value) {
   }
 }
 
+function optionalStorageEnvBlock() {
+  const requiredNames = [
+    'SPACES_REGION',
+    'SPACES_BUCKET',
+    'SPACES_ENDPOINT',
+    'SPACES_ACCESS_KEY_ID',
+    'SPACES_SECRET_ACCESS_KEY',
+  ]
+  const optionalNames = [
+    'SPACES_CDN_BASE_URL',
+    'SPACES_UPLOAD_MAX_BYTES',
+    'SPACES_UPLOAD_URL_TTL_SECONDS',
+    'SPACES_DOWNLOAD_URL_TTL_SECONDS',
+    'SPACES_PUBLIC_CACHE_CONTROL',
+  ]
+  const configured = [...requiredNames, ...optionalNames].some((name) => process.env[name]?.trim())
+  if (!configured) return ''
+
+  const values = {
+    SPACES_REGION: requiredEnv('SPACES_REGION'),
+    SPACES_BUCKET: requiredEnv('SPACES_BUCKET'),
+    SPACES_ENDPOINT: requiredUrlEnv('SPACES_ENDPOINT'),
+    SPACES_ACCESS_KEY_ID: requiredEnv('SPACES_ACCESS_KEY_ID'),
+    SPACES_SECRET_ACCESS_KEY: requiredEnv('SPACES_SECRET_ACCESS_KEY'),
+    SPACES_UPLOAD_MAX_BYTES: String(optionalPositiveIntegerEnv('SPACES_UPLOAD_MAX_BYTES', 10 * 1024 * 1024)),
+    SPACES_UPLOAD_URL_TTL_SECONDS: String(optionalPositiveIntegerEnv('SPACES_UPLOAD_URL_TTL_SECONDS', 900)),
+    SPACES_DOWNLOAD_URL_TTL_SECONDS: String(optionalPositiveIntegerEnv('SPACES_DOWNLOAD_URL_TTL_SECONDS', 300)),
+    SPACES_PUBLIC_CACHE_CONTROL:
+      process.env.SPACES_PUBLIC_CACHE_CONTROL?.trim() || 'public, max-age=31536000, immutable',
+  }
+  const cdnBaseUrl = process.env.SPACES_CDN_BASE_URL?.trim()
+  if (cdnBaseUrl) values.SPACES_CDN_BASE_URL = normalizeHttpsUrl('SPACES_CDN_BASE_URL', cdnBaseUrl)
+
+  for (const [name, value] of Object.entries(values)) assertSafeYamlString(name, value)
+
+  return Object.entries(values)
+    .map(([name, value]) => {
+      const type = name === 'SPACES_ACCESS_KEY_ID' || name === 'SPACES_SECRET_ACCESS_KEY'
+        ? 'SECRET'
+        : 'GENERAL'
+      return `      - key: ${name}\n        value: ${yamlString(value)}\n        scope: RUN_TIME\n        type: ${type}`
+    })
+    .join('\n')
+}
+
 function optionalBackendWorkersBlock() {
   const workerEnvNames = [
     'DO_BACKEND_WORKER_ENABLED',
@@ -374,7 +560,11 @@ function optionalBackendWorkersBlock() {
     return ''
   }
 
-  const workerName = doName(process.env.DO_BACKEND_WORKER_NAME ?? 'worker', 32)
+  const workerName = appPlatformComponentName(
+    'DO_BACKEND_WORKER_NAME',
+    process.env.DO_BACKEND_WORKER_NAME ?? 'worker',
+  )
+  reserveAppPlatformComponentName(workerName, 'backend worker')
   const runCommand = requiredWorkerRunCommand('DO_BACKEND_WORKER_RUN_COMMAND')
   const instanceSizeSlug = optionalAppPlatformInstanceSizeSlugEnv(
     'DO_BACKEND_WORKER_INSTANCE_SIZE_SLUG',
@@ -390,7 +580,7 @@ workers:
   - name: ${workerName}
     github:
       repo: ${githubRepo}
-      branch: ${gitBranch}
+      branch: ${yamlString(gitBranch)}
       deploy_on_push: true
     source_dir: /
     dockerfile_path: backend/Dockerfile
@@ -405,7 +595,17 @@ workers:
       - key: JWT_SECRET
         value: ${yamlString(requiredEnv('JWT_SECRET'))}
         scope: RUN_TIME
-        type: SECRET${optionalExpoPushAccessTokenEnvBlock('      ')}`
+        type: SECRET
+      - key: CORS_ORIGINS
+        value: ${yamlString(backendCorsOrigins)}
+        scope: RUN_TIME
+        type: GENERAL
+      - key: COOKIE_SECURE
+        value: "true"
+        scope: RUN_TIME
+        type: GENERAL
+${optionalStorageEnvBlock()}
+${optionalExpoPushAccessTokenEnvBlock('      ')}`
 }
 
 function requiredWorkerRunCommand(name) {
@@ -432,7 +632,11 @@ function optionalBackendCronJobsBlock() {
 
   if (!hasCronEnv) return ''
 
-  const name = doName(requiredEnv('DO_BACKEND_CRON_NAME'), 32)
+  const name = appPlatformComponentName(
+    'DO_BACKEND_CRON_NAME',
+    requiredEnv('DO_BACKEND_CRON_NAME'),
+  )
+  reserveAppPlatformComponentName(name, 'scheduled job')
   const task = requiredSafeTaskName('DO_BACKEND_CRON_TASK')
   const schedule = requiredCronSchedule('DO_BACKEND_CRON_SCHEDULE')
   const timeZone = process.env.DO_BACKEND_CRON_TIME_ZONE?.trim() || 'UTC'
@@ -444,7 +648,7 @@ function optionalBackendCronJobsBlock() {
     kind: SCHEDULED
     github:
       repo: ${githubRepo}
-      branch: ${gitBranch}
+      branch: ${yamlString(gitBranch)}
       deploy_on_push: true
     source_dir: /
     dockerfile_path: backend/Dockerfile
@@ -461,7 +665,17 @@ function optionalBackendCronJobsBlock() {
       - key: JWT_SECRET
         value: ${yamlString(requiredEnv('JWT_SECRET'))}
         scope: RUN_TIME
-        type: SECRET${optionalExpoPushAccessTokenEnvBlock('      ')}`
+        type: SECRET
+      - key: CORS_ORIGINS
+        value: ${yamlString(backendCorsOrigins)}
+        scope: RUN_TIME
+        type: GENERAL
+      - key: COOKIE_SECURE
+        value: "true"
+        scope: RUN_TIME
+        type: GENERAL
+${optionalStorageEnvBlock()}
+${optionalExpoPushAccessTokenEnvBlock('      ')}`
 }
 
 function optionalExpoPushAccessTokenEnvBlock(indent) {
@@ -544,6 +758,28 @@ function doName(value, maxLength = 63) {
   const withLetterStart = /^[a-z]/.test(normalized) ? normalized : `app-${normalized}`
   const fallback = withLetterStart === 'app-' ? 'app-template' : withLetterStart
   return fallback.slice(0, maxLength).replace(/-+$/g, '') || 'app-template'
+}
+
+function appPlatformComponentName(envName, value) {
+  const normalized = doName(value, 32)
+
+  if (!/^[a-z][a-z0-9-]{1,31}$/.test(normalized)) {
+    throw new Error(
+      `${envName} must normalize to an App Platform component name with 2 to 32 characters`,
+    )
+  }
+
+  return normalized
+}
+
+function reserveAppPlatformComponentName(name, owner) {
+  const existingOwner = appPlatformComponentOwners.get(name)
+
+  if (existingOwner) {
+    throw new Error(`${owner} component name "${name}" conflicts with ${existingOwner}`)
+  }
+
+  appPlatformComponentOwners.set(name, owner)
 }
 
 function unquoteYamlScalar(value) {

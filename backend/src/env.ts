@@ -36,6 +36,12 @@ const commaSeparatedStringArraySchema = z
       .filter(Boolean),
   )
 
+const optionalHttpHeaderNameSchema = z.preprocess((value) => {
+  if (typeof value !== 'string') return value
+  const trimmed = value.trim()
+  return trimmed === '' ? undefined : trimmed.toLowerCase()
+}, z.string().regex(/^[a-z0-9!#$%&'*+.^_`|~-]+$/).optional())
+
 const stringWithDefault = (defaultValue: string) =>
   z.preprocess((value) => {
     if (typeof value !== 'string') return value
@@ -59,6 +65,16 @@ const envSchema = z.object({
     ),
   ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(15 * 60),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(30),
+  REFRESH_REUSE_GRACE_SECONDS: z.coerce.number().int().nonnegative().max(60).default(10),
+  SESSION_ABSOLUTE_TTL_DAYS: z.coerce.number().int().positive().default(90),
+  SESSION_RETENTION_DAYS: z.coerce.number().int().nonnegative().default(7),
+  AUTH_BODY_LIMIT_BYTES: z.coerce.number().int().positive().max(1024 * 1024).default(64 * 1024),
+  AUTH_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(60),
+  AUTH_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
+  SHUTDOWN_GRACE_SECONDS: z.coerce.number().int().positive().max(60).default(20),
+  TRUST_PROXY: booleanStringSchema,
+  TRUSTED_PROXY_CLIENT_IP_HEADER: optionalHttpHeaderNameSchema,
+  TRUSTED_PROXY_CLIENT_IP_POSITION: z.enum(['first', 'last']).optional(),
   COOKIE_SECURE: booleanStringSchema,
   SPACES_REGION: optionalStringSchema,
   SPACES_BUCKET: optionalStringSchema,
@@ -102,7 +118,10 @@ const envSchema = z.object({
   PUSH_RECEIPT_CHECK_LIMIT: optionalPositiveIntegerSchema,
 }).superRefine((env, ctx) => {
   validateJwtSecret(env, ctx)
+  validateProductionRuntime(env, ctx)
   validateCorsOrigins(env, ctx)
+  validateSessionTtls(env, ctx)
+  validateTrustedProxy(env, ctx)
   validateStorageEnv(env, ctx)
   validateAppleIapEnv(env, ctx)
   validateGooglePlayIapEnv(env, ctx)
@@ -114,14 +133,55 @@ export function loadEnv(source: Record<string, string | undefined>) {
   return envSchema.parse(source)
 }
 
+function validateSessionTtls(env: z.infer<typeof envSchema>, ctx: z.RefinementCtx) {
+  if (env.SESSION_ABSOLUTE_TTL_DAYS < env.REFRESH_TOKEN_TTL_DAYS) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['SESSION_ABSOLUTE_TTL_DAYS'],
+      message: 'SESSION_ABSOLUTE_TTL_DAYS must be at least REFRESH_TOKEN_TTL_DAYS',
+    })
+  }
+}
+
+function validateTrustedProxy(env: z.infer<typeof envSchema>, ctx: z.RefinementCtx) {
+  if (env.TRUST_PROXY && !env.TRUSTED_PROXY_CLIENT_IP_HEADER) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['TRUSTED_PROXY_CLIENT_IP_HEADER'],
+      message: 'TRUSTED_PROXY_CLIENT_IP_HEADER is required when TRUST_PROXY=true',
+    })
+  }
+
+  if (env.TRUSTED_PROXY_CLIENT_IP_POSITION && !env.TRUSTED_PROXY_CLIENT_IP_HEADER) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['TRUSTED_PROXY_CLIENT_IP_POSITION'],
+      message: 'TRUSTED_PROXY_CLIENT_IP_POSITION requires TRUSTED_PROXY_CLIENT_IP_HEADER',
+    })
+  }
+}
+
 function validateJwtSecret(env: z.infer<typeof envSchema>, ctx: z.RefinementCtx) {
   if (!isProductionLikeRuntime(env)) return
 
-  if (isWeakJwtSecret(env.JWT_SECRET)) {
+  const invalidProductionFormat = !/^[a-fA-F0-9]{64,}$/.test(env.JWT_SECRET)
+  if (isWeakJwtSecret(env.JWT_SECRET) || invalidProductionFormat) {
     ctx.addIssue({
       code: 'custom',
       path: ['JWT_SECRET'],
       message: 'JWT_SECRET must be a non-placeholder random secret in production',
+    })
+  }
+}
+
+function validateProductionRuntime(env: z.infer<typeof envSchema>, ctx: z.RefinementCtx) {
+  if (env.NODE_ENV !== 'production') return
+
+  if (!env.COOKIE_SECURE) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['COOKIE_SECURE'],
+      message: 'COOKIE_SECURE must be true in production',
     })
   }
 }
@@ -187,7 +247,7 @@ function validateCorsOrigins(env: z.infer<typeof envSchema>, ctx: z.RefinementCt
       })
     }
 
-    if (env.COOKIE_SECURE && url.protocol !== 'https:') {
+    if ((env.COOKIE_SECURE || env.NODE_ENV === 'production') && url.protocol !== 'https:') {
       ctx.addIssue({
         code: 'custom',
         path: ['CORS_ORIGINS'],

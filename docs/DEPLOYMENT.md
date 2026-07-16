@@ -34,16 +34,27 @@ Do not store secrets in the repository. Minimum backend production env:
 
 ```bash
 DATABASE_URL=postgresql://...
-JWT_SECRET=<at-least-32-random-characters>
+JWT_SECRET=<64-or-more-hex-characters>
 CORS_ORIGINS=https://webapp.example.com,https://website.example.com
 ACCESS_TOKEN_TTL_SECONDS=900
 REFRESH_TOKEN_TTL_DAYS=30
+REFRESH_REUSE_GRACE_SECONDS=10
+SESSION_ABSOLUTE_TTL_DAYS=90
+SESSION_RETENTION_DAYS=7
+AUTH_BODY_LIMIT_BYTES=65536
+AUTH_RATE_LIMIT_MAX=60
+AUTH_RATE_LIMIT_WINDOW_SECONDS=60
+SHUTDOWN_GRACE_SECONDS=20
+TRUST_PROXY=true
+TRUSTED_PROXY_CLIENT_IP_HEADER=do-connecting-ip
 COOKIE_SECURE=true
 ```
 
 `CORS_ORIGINS` must include every browser origin that calls the API with credentials. Use exact origins only, for example `https://webapp.example.com`; do not use wildcards, empty values, or paths. Native mobile apps do not need CORS, but Expo web previews or browser-based mobile previews do.
 
 `JWT_SECRET` belongs in the production backend runtime env. Generate it with `openssl rand -hex 32`; that command creates 32 random bytes encoded as 64 hex characters. Do not use the placeholder from `.env.example`, repeated characters, or human phrases.
+
+DigitalOcean App Platform puts the real client address in `do-connecting-ip`; its `X-Forwarded-For` identifies the ingress server. Keep `TRUSTED_PROXY_CLIENT_IP_HEADER=do-connecting-ip` on this deployment path so auth rate limits and session metadata are scoped to the actual client.
 
 If storage is active, also configure:
 
@@ -59,6 +70,8 @@ SPACES_UPLOAD_URL_TTL_SECONDS=900
 SPACES_DOWNLOAD_URL_TTL_SECONDS=300
 SPACES_PUBLIC_CACHE_CONTROL="public, max-age=31536000, immutable"
 ```
+
+Export the complete group before `bun run deploy:do:specs backend-final`. The generator rejects partial storage configuration, writes access credentials as `SECRET`, and propagates the same group to explicitly enabled backend worker/cron components.
 
 ## DigitalOcean App Platform
 
@@ -76,7 +89,7 @@ doctl auth init
 5. DigitalOcean Managed PostgreSQL for production. Do not use App Platform dev databases for production data.
 6. DigitalOcean Spaces Standard Storage with Spaces CDN when uploads, images, media, exports, or downloads are in scope.
 7. DigitalOcean Managed Valkey only when horizontally scaled real-time features need Pub/Sub between backend instances.
-8. Production domains and DNS access when custom domains are in scope.
+8. Production domains and DNS access for the authenticated webapp and API. Browser auth requires both custom hosts under one registrable site, for example `app.example.com` and `api.example.com`.
 
 Prefer an App Platform app spec so the backend service, static sites, env, domains, and database attachment stay reviewable. Create or update with:
 
@@ -95,7 +108,7 @@ Keep committed spec templates under `.do/*.yaml.example`. Generate concrete spec
 bun run deploy:do:specs <backend-initial|backend-final|webapp|website|all>
 ```
 
-The generator rejects empty `value:` lines, unresolved `REPLACE_WITH_*` placeholders, wildcard/empty/path-bearing production CORS origins, short, placeholder, or obviously weak `JWT_SECRET`, and missing build-time static URLs. Do not replace secrets or URLs with manual `sed`, `perl`, or shell one-liners.
+The generator rejects empty `value:` lines, unresolved `REPLACE_WITH_*` placeholders, wildcard/empty/path-bearing production CORS origins, non-generated production `JWT_SECRET` values, missing build-time static URLs, duplicate/too-short App Platform component names, and browser-auth URLs outside the declared registrable site. It also rejects two independent `*.ondigitalocean.app` hosts as a production browser-auth topology. Do not replace secrets or URLs with manual `sed`, `perl`, or shell one-liners.
 
 The generator also refuses to run unless the current checkout is on the configured deployment branch, the branch tracks a pushed upstream, the branch is not ahead/behind/diverged, and the worktree has no uncommitted or untracked changes.
 
@@ -106,9 +119,14 @@ Minimum environment for spec generation:
 ```bash
 export DO_GITHUB_REPO=owner/repo
 export DO_PROJECT_SLUG=project-slug
-export DO_GIT_BRANCH=main
+export DO_GIT_BRANCH=master
 export DO_APP_REGION=fra
 export JWT_SECRET="$(openssl rand -hex 32)"
+export DO_AUTH_SITE_DOMAIN=example.com
+export DO_BACKEND_URL=https://api.example.com
+export DO_WEBAPP_URL=https://app.example.com
+# Optional when website/admin or another browser origin also calls the API:
+# export DO_ADDITIONAL_CORS_ORIGINS=https://website.example.com,https://admin.example.com
 ```
 
 Optional API sizing overrides for an installed project:
@@ -125,25 +143,30 @@ Typical first deploy order:
 ```bash
 # 1. Create backend with a temporary placeholder browser origin.
 bun run deploy:do:specs backend-initial
-doctl apps spec validate .scratch/deploy/backend-app.yaml
+doctl apps spec validate .scratch/deploy/backend-app.yaml >/dev/null
 doctl apps create --spec .scratch/deploy/backend-app.yaml
 
-# 2. After the backend URL exists, create the webapp static app.
-export DO_BACKEND_URL=https://<api-default-ingress>
+# 2. Attach api.example.com to the backend app and wait for DNS/TLS, then create
+#    the webapp with its final API and anticipated webapp custom origins.
+export DO_AUTH_SITE_DOMAIN=example.com
+export DO_BACKEND_URL=https://api.example.com
+export DO_WEBAPP_URL=https://app.example.com
 bun run deploy:do:specs webapp
-doctl apps spec validate .scratch/deploy/webapp-static-app.yaml
+doctl apps spec validate .scratch/deploy/webapp-static-app.yaml >/dev/null
 doctl apps create --spec .scratch/deploy/webapp-static-app.yaml
 
-# 3. After the webapp URL exists, update backend CORS and create website if active.
-export DO_WEBAPP_URL=https://<webapp-default-ingress>
+# 3. Attach app.example.com to the webapp app and wait for DNS/TLS. Update
+#    backend CORS only with those final custom origins, then create website if active.
 bun run deploy:do:specs backend-final
-doctl apps spec validate .scratch/deploy/backend-app.yaml
+doctl apps spec validate .scratch/deploy/backend-app.yaml >/dev/null
 doctl apps update <backend-app-id> --spec .scratch/deploy/backend-app.yaml
 
 bun run deploy:do:specs website
-doctl apps spec validate .scratch/deploy/website-static-app.yaml
+doctl apps spec validate .scratch/deploy/website-static-app.yaml >/dev/null
 doctl apps create --spec .scratch/deploy/website-static-app.yaml
 ```
+
+Generated specs are written with owner-only `0600` permissions because the backend spec contains `JWT_SECRET`. Keep validation output redirected, never attach the spec to logs or support tickets, and delete `.scratch/deploy/backend-app.yaml` after the create/update operation when it is no longer needed.
 
 Static Sites build from the connected Git branch, not from local `dist` folders. The branch must contain the full monorepo: root `package.json`, `bun.lock`, `backend`, `webapp`, `website`, `mobile`, and `packages/contracts`.
 
@@ -167,14 +190,15 @@ docker push registry.digitalocean.com/<registry>/<project>-backend:latest
 Backend service requirements:
 
 - Set both the service `http_port` and `PORT` env to `8080` unless the project has a reason to choose another port.
-- Use `instance_size_slug: apps-s-1vcpu-1gb` and `instance_count: 1` as the default production API starter shape. This is one shared 1 vCPU / 1 GiB App Platform container, which is the $12/month single-container option as of May 2026.
-- Configure health checks to hit `/health`.
+- Use `instance_size_slug: apps-s-1vcpu-1gb` and `instance_count: 1` as the default production API starter shape. This is one shared 1 vCPU / 1 GiB App Platform container; verify current provider pricing before deployment.
+- Configure readiness at `/health/ready` and liveness at `/health/live`.
 - Set `COOKIE_SECURE=true` for HTTPS production traffic.
 - Set `CORS_ORIGINS` to the exact deployed browser origins. Do not use `*`, empty values, or URLs with paths.
 - Attach DigitalOcean Managed PostgreSQL or provide its connection string as `DATABASE_URL`.
 - Add Spaces env only when the product uses storage. Leave Spaces env blank for projects without uploads.
+- Keep the built-in limiter only for the default single-instance API. Use a shared limiter or trusted edge/WAF policy before increasing `instance_count`.
 
-The default one-container shape is not a high-availability floor; it is the budget starter that keeps backend plus the smallest Managed PostgreSQL cluster around $27/month before taxes, traffic overages, storage, and optional add-ons. Raise `instance_count` to two or three when availability or traffic justifies the extra monthly cost. Use `apps-s-1vcpu-2gb` or larger shared containers when memory pressure is the primary limit. Move to dedicated CPU only after metrics show CPU-bound work, noisy shared-CPU performance, strict latency requirements, or a need for CPU-based autoscaling. `webapp` and fully prerendered `website` output are Static Site components and do not have App Platform runtime container sizes. A `website` route with SSR/on-demand rendering or server islands needs a runtime service.
+The default one-container shape is not a high-availability floor; it is the budget starter. Raise `instance_count` to two or three when availability or traffic justifies the extra monthly cost. Use `apps-s-1vcpu-2gb` or larger shared containers when memory pressure is the primary limit. Move to dedicated CPU only after metrics show CPU-bound work, noisy shared-CPU performance, strict latency requirements, or a need for CPU-based autoscaling. `webapp` and fully prerendered `website` output are Static Site components and do not have App Platform runtime container sizes. A `website` route with SSR/on-demand rendering or server islands needs a runtime service.
 
 Apply Prisma migrations from a protected one-off App Platform console/job with the same production env:
 
@@ -202,16 +226,16 @@ DigitalOcean App Platform supports non-routable worker components and scheduled 
 export DO_BACKEND_WORKER_ENABLED=true
 export DO_BACKEND_WORKER_RUN_COMMAND="bun run start:worker:notifications"
 
-# Optional scheduled recovery job for push outbox and receipts.
-export DO_BACKEND_CRON_NAME=notifications-process
-export DO_BACKEND_CRON_TASK=notifications:process
-export DO_BACKEND_CRON_SCHEDULE="*/15 * * * *"
+# Add the auth-session retention job for production.
+export DO_BACKEND_CRON_NAME=auth-session-cleanup
+export DO_BACKEND_CRON_TASK=auth:sessions:cleanup
+export DO_BACKEND_CRON_SCHEDULE="0 3 * * *"
 export DO_BACKEND_CRON_TIME_ZONE=UTC
 
 bun run deploy:do:specs backend-final
 ```
 
-Use worker components only after a real long-running handler exists. The notification worker is a real handler once the app sends push notifications; the generator still refuses the template placeholder `bun run start:worker`, because that placeholder exits immediately and should not be deployed as an App Platform worker. Use scheduled jobs only for concrete product tasks, and keep the schedule at DigitalOcean's supported cadence of at least 15 minutes. Both optional components use `backend/Dockerfile`, the repository-root build context, and the same managed PostgreSQL binding as the API. Add `EXPO_PUSH_ACCESS_TOKEN` to API, worker, and cron env only when Expo push security is enabled.
+Use worker components only after a real long-running handler exists. The notification worker is a real handler once the app sends push notifications; the generator still refuses the template placeholder `bun run start:worker`, because that placeholder exits immediately and should not be deployed as an App Platform worker. Production auth should schedule `auth:sessions:cleanup`; it removes revoked sessions and sessions past either sliding or absolute lifetime only after `SESSION_RETENTION_DAYS`. `notifications:process` remains available as a scheduled recovery task when a deployment config provides a separate scheduled job for it. Keep every schedule at DigitalOcean's supported cadence of at least 15 minutes. All optional components use `backend/Dockerfile`, the repository-root build context, and the same managed PostgreSQL binding as the API. Add `EXPO_PUSH_ACCESS_TOKEN`, Spaces, or other runtime secrets only when the specific background task needs them.
 
 ## Real-Time And Horizontal Scaling
 
@@ -260,15 +284,14 @@ Required component shape (static build):
 - Build command: `bun install --frozen-lockfile && bun run build:website`.
 - Output directory: `website/dist`.
 - Index document: `index.html`.
-- Build-time env only when the website intentionally needs public config, such as `PUBLIC_WEBAPP_URL=https://webapp.example.com`.
+- Required build-time canonical origin: `PUBLIC_WEBSITE_URL=${_self.PUBLIC_URL}` in the generated App Platform spec, or the concrete public origin on another provider.
+- Optional build-time public config only when the website intentionally needs it, such as `PUBLIC_WEBAPP_URL=https://webapp.example.com`.
 
-Keep website independent from authenticated browser-app flows unless the product explicitly needs shared API data.
-
-`PUBLIC_WEBAPP_URL` is also build-time public config. If website links point to the webapp, generate it as a concrete URL and redeploy website after it changes.
+Keep website independent from authenticated browser-app flows unless the product explicitly needs shared API data. The baseline website spec therefore does not require `PUBLIC_WEBAPP_URL`; add it as explicit build-time public config only when the product actually links to a separate webapp, then redeploy website after it changes.
 
 ## Managed PostgreSQL
 
-Use DigitalOcean Managed PostgreSQL for production data. For a new low-cost production launch, start with the Basic Regular 1 GiB / 1 vCPU cluster with no standby nodes; it is $15.15/month as of May 2026. When attaching the database inside App Platform, prefer bindable variables such as the database component's `DATABASE_URL`/`DATABASE_PRIVATE_URL` rather than copying raw credentials into the spec.
+Use DigitalOcean Managed PostgreSQL **18** for production data. Do not accept a provider default implicitly: the committed schema uses native `uuidv7()`, which requires PostgreSQL 18+, and the generated App Spec pins `version: "18"`. For a new low-cost production launch, start with the smallest supported shared-CPU single-node plan and verify current provider pricing before deployment. When attaching the database inside App Platform, prefer bindable variables such as the database component's `DATABASE_URL`/`DATABASE_PRIVATE_URL` rather than copying raw credentials into the spec.
 
 Operational defaults:
 
@@ -281,15 +304,17 @@ DigitalOcean Managed PostgreSQL uses TLS. The backend normalizes `sslmode=requir
 
 ## Production Auth And CORS
 
-Production browser auth runs cross-origin when backend and webapp use different `*.ondigitalocean.app` domains or custom domains. The required shape is:
+Production browser auth may be cross-origin, but it must remain same-site: use custom hosts under one registrable domain, such as `app.example.com` and `api.example.com`. Independent App Platform default hosts such as `app-abc.ondigitalocean.app` and `api-xyz.ondigitalocean.app` are different browser sites because `ondigitalocean.app` is a public suffix. A `SameSite=None` cookie can still be blocked by browser third-party-cookie policy, so default ingress hosts are supported only for initial provisioning and non-cookie health checks, not production browser auth.
+
+Set `DO_AUTH_SITE_DOMAIN` to the registrable site (`example.com` in the example), not to either host. The deploy generator verifies that `DO_BACKEND_URL`, `DO_WEBAPP_URL`, and any additional credentialed CORS origins belong to it. The required runtime shape is:
 
 - backend cookies: `HttpOnly`, `Secure`, `SameSite=None`, scoped to `/api/auth`;
 - backend CORS: exact HTTPS origins only, `credentials: true`, no wildcard fallback;
-- cookie-based `refresh` and `logout`: require an `Origin` header that exactly matches `CORS_ORIGINS`;
+- every cookie-based auth write (`register`, `login`, `refresh`, and `logout`): requires an `Origin` header that exactly matches `CORS_ORIGINS`;
 - webapp API client: `credentials: include`;
 - webapp static build: concrete `VITE_API_URL` pointing at the backend origin.
 
-The backend env validator rejects empty/wildcard/path-bearing `CORS_ORIGINS`, rejects HTTP origins when `COOKIE_SECURE=true`, and rejects placeholder or obviously weak `JWT_SECRET` values in production-like runtimes.
+The backend env validator rejects empty/wildcard/path-bearing `CORS_ORIGINS`, requires HTTPS origins and secure cookies in production, and requires a generated hexadecimal `JWT_SECRET` in production.
 
 ## Spaces Storage
 
@@ -367,7 +392,7 @@ For narrow deployment-only documentation or App Platform config work, run the su
 After deployment:
 
 - verify `doctl apps spec validate <generated-spec.yaml>` passes for every generated spec before create/update;
-- verify `/health` on the backend public URL;
+- verify `/health/live` and `/health/ready` on the backend public URL;
 - verify browser auth only from allowed `CORS_ORIGINS`;
 - verify `webapp` route refreshes hit the React catch-all instead of a static 404;
 - verify `website` loads static assets from the deployed domain;
@@ -378,13 +403,12 @@ After deployment:
 ## Failure Modes This Template Guards Against
 
 - `GitHub user not authenticated`: App Platform GitHub integration was not connected or did not have repository access before `doctl apps create`.
-- Empty secrets or URLs in generated specs: `JWT_SECRET`, `CORS_ORIGINS`, `VITE_API_URL`, and `PUBLIC_WEBAPP_URL` must be concrete before deployment.
+- Empty secrets or URLs in generated specs: `JWT_SECRET`, `CORS_ORIGINS`, and `VITE_API_URL` must be concrete before deployment.
 - Dirty or ambiguous release source: deployment tooling must stop when the worktree has uncommitted/untracked files, the checkout branch differs from `DO_GIT_BRANCH`, or the branch is not pushed and in sync.
-- Backend crash on startup: empty, placeholder, or obviously weak `JWT_SECRET` is rejected by env validation, so the spec generator must fail before App Platform deploys it.
+- Backend crash on startup: production requires a generated 64-or-more-character hexadecimal `JWT_SECRET`, so the spec generator must fail before App Platform deploys an unsafe value.
 - Broken browser auth CORS: production CORS must use exact HTTPS origins, not wildcard or empty values.
 - Webapp calling its own `/api/*`: missing `VITE_API_URL` at static build time makes the bundle use the wrong origin.
-- Empty website links: missing `PUBLIC_WEBAPP_URL` at build time can bake invalid public links into website output.
-- Stale remote build dependencies: static site build commands run `bun install --frozen-lockfile` before `bun run build:*`.
+- Stale remote build dependencies: `.bun-version` pins the Static Site build runtime and build commands run `bun install --frozen-lockfile` before `bun run build:*`.
 - Frozen backend install failures: `backend/Dockerfile` copies all workspace manifests before `bun install --frozen-lockfile`.
 - Wrong App Platform port: backend specs set both `http_port: 8080` and `PORT=8080`.
 - Managed PostgreSQL TLS errors: `sslmode=require` URLs are normalized with `uselibpqcompat=true` for the Prisma PostgreSQL adapter.

@@ -12,8 +12,10 @@ const sourceRoots = [
 ]
 const sourceExtension = /\.(?:[cm]?[jt]sx?)$/
 const importPattern = /(?:^|\n)\s*(?:import|export)\s+(?:type\s+)?(?:[\s\S]*?\s+from\s+)?['"]([^'"]+)['"]/g
+const runtimeModulePattern = /\b(?:import|require)\s*\(\s*['"]([^'"]+)['"]\s*\)/g
 const innerLayerAllowedPackages = ['@web-app-demo/contracts', 'zod']
 const contractAllowedPackages = ['zod']
+const transportForbiddenPackages = ['@prisma/', '@aws-sdk/', 'jose', 'pg']
 
 export function checkArchitectureSources(files) {
   const violations = []
@@ -105,12 +107,12 @@ function checkBackendLayers(filePath, specifier, report) {
     )
   }
 
-  if (
-    ((layer === 'domain' && targetLayer && targetLayer !== 'domain') ||
-      (layer === 'application' &&
-        (targetLayer === 'infrastructure' || targetLayer === 'transport'))) &&
-    !importsBackendRuntime
-  ) {
+  const invalidInnerTarget =
+    (layer === 'domain' && targetLayer && targetLayer !== 'domain') ||
+    (layer === 'application' &&
+      (targetLayer === 'infrastructure' || targetLayer === 'transport'))
+
+  if (invalidInnerTarget && !importsBackendRuntime) {
     report(
       `backend-${layer}-dependencies`,
       `${layer} must depend on domain types and application ports, not outer layers (${specifier}).`,
@@ -119,11 +121,16 @@ function checkBackendLayers(filePath, specifier, report) {
 
   if (
     layer === 'transport' &&
-    (importsPrisma || target === 'backend/src/db' || targetLayer === 'infrastructure')
+    (
+      importsPrisma ||
+      target === 'backend/src/db' ||
+      targetLayer === 'infrastructure' ||
+      transportForbiddenPackages.some((name) => packageMatches(specifier, name))
+    )
   ) {
     report(
       'backend-transport-dependencies',
-      `transport must not import persistence or module infrastructure (${specifier}).`,
+      `transport must not import persistence, module infrastructure, or provider SDK code (${specifier}).`,
     )
   }
 
@@ -205,9 +212,12 @@ function checkBackendModuleBoundary(filePath, specifier, report) {
   if (!match || match[1] === sourceModule) return
 
   if (match[2] && match[2] !== 'index' && match[2] !== 'index.ts') {
+    const boundaryMessage = sourceModule
+      ? `module ${sourceModule} must import module ${match[1]}`
+      : `code outside module ${match[1]} must import it`
     report(
       'backend-module-public-api',
-      `module ${sourceModule} must import module ${match[1]} through its public index (${specifier}).`,
+      `${boundaryMessage} through its public index (${specifier}).`,
     )
   }
 }
@@ -221,11 +231,12 @@ function checkClientBoundary(filePath, specifier, report) {
 
   const sourceFeature = filePath.match(new RegExp(`^${client}/src/features/([^/]+)/`))?.[1]
   const targetFeature = target.match(new RegExp(`^${client}/src/features/([^/]+)(?:/(.*))?$`))
-  if (targetFeature && targetFeature[1] !== sourceFeature) {
-    if (targetFeature[2] && targetFeature[2] !== 'index' && targetFeature[2] !== 'index.ts') {
+  if (targetFeature && targetFeature[2] && targetFeature[2] !== 'index' && targetFeature[2] !== 'index.ts') {
+    const crossesPublicBoundary = !sourceFeature || targetFeature[1] !== sourceFeature
+    if (crossesPublicBoundary) {
       report(
         'client-feature-public-api',
-        `feature ${sourceFeature} must import feature ${targetFeature[1]} through its public index (${specifier}).`,
+        `code outside feature ${targetFeature[1]} must import it through its public index (${specifier}).`,
       )
     }
   }
@@ -277,14 +288,16 @@ function resolveRepositoryImport(importer, specifier) {
 
 function staticImports(source) {
   const imports = []
-  for (const match of source.matchAll(importPattern)) {
-    const specifier = match[1]
-    if (!specifier) continue
-    const specifierOffset = (match.index ?? 0) + match[0].lastIndexOf(specifier)
-    imports.push({
-      specifier,
-      line: source.slice(0, specifierOffset).split('\n').length,
-    })
+  for (const pattern of [importPattern, runtimeModulePattern]) {
+    for (const match of source.matchAll(pattern)) {
+      const specifier = match[1]
+      if (!specifier) continue
+      const specifierOffset = (match.index ?? 0) + match[0].lastIndexOf(specifier)
+      imports.push({
+        specifier,
+        line: source.slice(0, specifierOffset).split('\n').length,
+      })
+    }
   }
   return imports
 }

@@ -28,16 +28,19 @@ model User {
 }
 
 model AuthSession {
-  id               String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  userId           String    @map("user_id") @db.Uuid
-  refreshTokenHash String    @unique(map: "auth_sessions_refresh_token_hash_key") @map("refresh_token_hash")
-  expiresAt        DateTime  @map("expires_at")
-  revokedAt        DateTime? @map("revoked_at")
-  userAgent        String?   @map("user_agent")
-  ipAddress        String?   @map("ip_address")
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
-  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade, map: "auth_sessions_user_id_fkey")
+  id                       String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  userId                   String    @map("user_id") @db.Uuid
+  refreshTokenHash         String    @unique(map: "auth_sessions_refresh_token_hash_key") @map("refresh_token_hash")
+  refreshTokenFamilyHash   String?   @unique(map: "auth_sessions_refresh_token_family_hash_key") @map("refresh_token_family_hash")
+  previousRefreshTokenHash String?   @unique(map: "auth_sessions_previous_refresh_token_hash_key") @map("previous_refresh_token_hash")
+  refreshRotatedAt         DateTime? @map("refresh_rotated_at")
+  expiresAt                DateTime  @map("expires_at")
+  revokedAt                DateTime? @map("revoked_at")
+  userAgent                String?   @map("user_agent")
+  ipAddress                String?   @map("ip_address")
+  createdAt                DateTime  @default(now()) @map("created_at")
+  updatedAt                DateTime  @updatedAt @map("updated_at")
+  user                     User      @relation(fields: [userId], references: [id], onDelete: Cascade, map: "auth_sessions_user_id_fkey")
 
   @@index([userId], map: "auth_sessions_user_id_idx")
   @@index([expiresAt], map: "auth_sessions_expires_at_idx")

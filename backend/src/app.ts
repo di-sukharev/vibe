@@ -5,7 +5,8 @@ import { secureHeaders } from 'hono/secure-headers'
 import type { DbClient } from './db'
 import type { AppEnv } from './env'
 import { errorResponse, handleError, validationErrorHook } from './http/errors'
-import { createAuthModule } from './modules/auth'
+import { createAuthSecurity } from './http/security'
+import { createAuthModule, type AuthHttpEnv } from './modules/auth'
 import {
   createBillingModule,
   type AppStoreSubscriptionVerifier,
@@ -39,7 +40,7 @@ export function createApp({
     logoutCleanup: notifications.logoutCleanup,
     subscriptionReader: billing.getSubscription,
   })
-  const app = new OpenAPIHono({ defaultHook: validationErrorHook })
+  const app = new OpenAPIHono<AuthHttpEnv>({ defaultHook: validationErrorHook })
 
   app.use(secureHeaders())
   app.use(
@@ -50,13 +51,48 @@ export function createApp({
         return env.CORS_ORIGINS.includes(origin) ? origin : null
       },
       allowHeaders: ['Content-Type', 'Authorization'],
-      allowMethods: ['GET', 'POST', 'OPTIONS'],
+      allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
       credentials: true,
       maxAge: 600,
     }),
   )
-  app.get('/', (c) => c.json({ name: 'web_app_demo backend', status: 'ok' }))
-  app.get('/health', (c) => c.json({ status: 'ok' }))
+  for (const middleware of createAuthSecurity({
+    bodyLimitBytes: env.AUTH_BODY_LIMIT_BYTES,
+    rateLimitMax: env.AUTH_RATE_LIMIT_MAX,
+    rateLimitWindowSeconds: env.AUTH_RATE_LIMIT_WINDOW_SECONDS,
+    trustProxy: env.TRUST_PROXY,
+    trustedProxyClientIpHeader: env.TRUSTED_PROXY_CLIENT_IP_HEADER,
+    trustedProxyClientIpPosition: env.TRUSTED_PROXY_CLIENT_IP_POSITION,
+  })) {
+    app.use('/api/auth/*', middleware)
+  }
+  app.get('/', (c) => {
+    return c.json({
+      name: 'web_app_demo backend',
+      status: 'ok',
+    })
+  })
+
+  app.get('/health', (c) => {
+    return c.json({
+      status: 'ok',
+    })
+  })
+
+  app.get('/health/live', (c) => {
+    return c.json({
+      status: 'ok',
+    })
+  })
+
+  app.get('/health/ready', async (c) => {
+    try {
+      await prisma.$queryRaw`SELECT 1`
+      return c.json({ status: 'ok' }, 200)
+    } catch {
+      return c.json({ status: 'unavailable' }, 503)
+    }
+  })
 
   app.route('/api/auth', auth.routes)
   app.route('/api/iap', billing.createRoutes(auth.authenticateAccessToken))

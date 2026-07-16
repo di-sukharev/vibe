@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: superuser
       POSTGRES_PASSWORD: superpassword
     ports:
-      - "${POSTGRES_PORT:-54329}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-54329}:5432"
     volumes:
       - postgres_18_data:/var/lib/postgresql
     healthcheck:
@@ -24,7 +24,7 @@ services:
       POSTGRES_USER: superuser
       POSTGRES_PASSWORD: superpassword
     ports:
-      - "${POSTGRES_TEST_PORT:-54330}:5432"
+      - "127.0.0.1:${POSTGRES_TEST_PORT:-54330}:5432"
     volumes:
       - postgres_18_test_data:/var/lib/postgresql
     healthcheck:

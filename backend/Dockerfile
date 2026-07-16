@@ -34,4 +34,6 @@ WORKDIR /app/backend
 
 ENV NODE_ENV=production
 
-CMD ["bun", "run", "start"]
+USER bun
+
+CMD ["bun", "src/index.ts"]

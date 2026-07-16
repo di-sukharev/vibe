@@ -1,5 +1,6 @@
 import { createApp } from './app'
 import { createBackendRuntime } from './runtime'
+import { stopServerGracefully } from './shutdown'
 
 const runtime = createBackendRuntime()
 const app = createApp({ env: runtime.env, prisma: runtime.prisma })
@@ -18,7 +19,7 @@ async function shutdown(signal: string) {
   shuttingDown = true
 
   console.log(`Backend received ${signal}; shutting down`)
-  await server.stop(true)
+  await stopServerGracefully(server, runtime.env.SHUTDOWN_GRACE_SECONDS * 1000)
   await runtime.close()
 }
 

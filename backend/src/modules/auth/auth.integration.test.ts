@@ -17,6 +17,14 @@ maybeDescribe('auth API integration', () => {
     CORS_ORIGINS: ['http://localhost:5173'],
     ACCESS_TOKEN_TTL_SECONDS: 60,
     REFRESH_TOKEN_TTL_DAYS: 30,
+    REFRESH_REUSE_GRACE_SECONDS: 10,
+    SESSION_ABSOLUTE_TTL_DAYS: 90,
+    SESSION_RETENTION_DAYS: 7,
+    AUTH_BODY_LIMIT_BYTES: 64 * 1024,
+    AUTH_RATE_LIMIT_MAX: 60,
+    AUTH_RATE_LIMIT_WINDOW_SECONDS: 60,
+    SHUTDOWN_GRACE_SECONDS: 20,
+    TRUST_PROXY: false,
     COOKIE_SECURE: false,
     SPACES_UPLOAD_MAX_BYTES: 10 * 1024 * 1024,
     SPACES_UPLOAD_URL_TTL_SECONDS: 900,
@@ -95,6 +103,22 @@ maybeDescribe('auth API integration', () => {
     expect(refreshBody.refreshToken).not.toBe(registerBody.refreshToken)
     expect(refresh.headers.get('set-cookie')).toBeNull()
 
+    const meWithPreRefreshAccessToken = await app.request('/api/auth/me', {
+      headers: {
+        Authorization: `Bearer ${registerBody.accessToken}`,
+      },
+    })
+    expect(meWithPreRefreshAccessToken.status).toBe(200)
+
+    const sessionsAfterRefresh = await prisma.authSession.count({
+      where: {
+        user: {
+          email: 'user@example.com',
+        },
+      },
+    })
+    expect(sessionsAfterRefresh).toBe(1)
+
     const staleRefresh = await app.request('/api/auth/token/refresh', {
       method: 'POST',
       headers: {
@@ -102,14 +126,16 @@ maybeDescribe('auth API integration', () => {
       },
       body: JSON.stringify({ refreshToken: registerBody.refreshToken }),
     })
-    expect(staleRefresh.status).toBe(401)
+    const staleRefreshBody = await staleRefresh.json()
+    expect(staleRefresh.status).toBe(200)
+    expect(staleRefreshBody.refreshToken).toBeString()
 
     const logout = await app.request('/api/auth/token/logout', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ refreshToken: refreshBody.refreshToken }),
+      body: JSON.stringify({ refreshToken: staleRefreshBody.refreshToken }),
     })
     expect(logout.status).toBe(204)
 
@@ -118,7 +144,7 @@ maybeDescribe('auth API integration', () => {
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ refreshToken: refreshBody.refreshToken }),
+      body: JSON.stringify({ refreshToken: staleRefreshBody.refreshToken }),
     })
     expect(revokedRefresh.status).toBe(401)
   })
@@ -228,7 +254,7 @@ maybeDescribe('auth API integration', () => {
     ).toBe(1)
   })
 
-  test('allows only one concurrent refresh rotation for the same token', async () => {
+  test('returns one durable successor across three concurrent refresh requests', async () => {
     const register = await app.request('/api/auth/token/register', {
       method: 'POST',
       headers: {
@@ -256,10 +282,20 @@ maybeDescribe('auth API integration', () => {
         },
         body: JSON.stringify({ refreshToken: registerBody.refreshToken }),
       }),
+      app.request('/api/auth/token/refresh', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ refreshToken: registerBody.refreshToken }),
+      }),
     ])
 
-    const statuses = refreshRequests.map((response) => response.status).sort((left, right) => left - right)
-    expect(statuses).toEqual([200, 401])
+    const statuses = refreshRequests.map((response) => response.status)
+    expect(statuses).toEqual([200, 200, 200])
+    const refreshBodies = await Promise.all(refreshRequests.map((response) => response.json()))
+    const returnedRefreshTokens = refreshBodies.map((body) => body.refreshToken)
+    expect(new Set(returnedRefreshTokens).size).toBe(1)
 
     const activeSessions = await prisma.authSession.count({
       where: {
@@ -270,6 +306,69 @@ maybeDescribe('auth API integration', () => {
       },
     })
     expect(activeSessions).toBe(1)
+
+    const totalSessions = await prisma.authSession.count({
+      where: {
+        user: {
+          email: 'race@example.com',
+        },
+      },
+    })
+    expect(totalSessions).toBe(1)
+
+    await prisma.authSession.updateMany({
+      where: { user: { email: 'race@example.com' } },
+      data: { refreshRotatedAt: new Date(Date.now() - 60_000) },
+    })
+
+    const delayedWinner = await app.request('/api/auth/token/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: returnedRefreshTokens.at(-1) }),
+    })
+    expect(delayedWinner.status).toBe(200)
+  })
+
+  test('revokes a session when any older refresh credential is reused after grace', async () => {
+    const register = await app.request('/api/auth/token/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'reuse@example.com', password: 'password123' }),
+    })
+    const registered = await register.json()
+    const refresh = await app.request('/api/auth/token/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: registered.refreshToken }),
+    })
+    const refreshed = await refresh.json()
+
+    const refreshAgain = await app.request('/api/auth/token/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: refreshed.refreshToken }),
+    })
+    const refreshedAgain = await refreshAgain.json()
+    expect(refreshAgain.status).toBe(200)
+
+    await prisma.authSession.updateMany({
+      where: { user: { email: 'reuse@example.com' } },
+      data: { refreshRotatedAt: new Date(Date.now() - 60_000) },
+    })
+
+    const replay = await app.request('/api/auth/token/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: registered.refreshToken }),
+    })
+    expect(replay.status).toBe(401)
+
+    const attackerCredential = await app.request('/api/auth/token/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: refreshedAgain.refreshToken }),
+    })
+    expect(attackerCredential.status).toBe(401)
   })
 
   test('web auth never exposes its HttpOnly refresh token when the client platform header is spoofed', async () => {
@@ -329,7 +428,7 @@ maybeDescribe('auth API integration', () => {
     expect(tokenWithCookieOnly.status).toBe(400)
   })
 
-  test('production web auth allows exact CORS origin and cross-site refresh cookie', async () => {
+  test('production web auth allows an exact same-site custom-domain origin', async () => {
     const productionApp = createApp({
       env: {
         ...env,
@@ -486,6 +585,52 @@ maybeDescribe('auth API integration', () => {
       },
     })
     expect(missingMe.status).toBe(401)
+  })
+
+  test('enforces absolute session lifetime in PostgreSQL for access and refresh credentials', async () => {
+    const absoluteExpired = await registerForMeGuard('absolute-expired@example.com')
+    await prisma.authSession.updateMany({
+      where: { userId: absoluteExpired.userId },
+      data: {
+        createdAt: new Date(
+          Date.now() - (env.SESSION_ABSOLUTE_TTL_DAYS * 24 * 60 * 60 + 60) * 1000,
+        ),
+      },
+    })
+
+    const expiredMe = await app.request('/api/auth/me', {
+      headers: { Authorization: `Bearer ${absoluteExpired.accessToken}` },
+    })
+    const expiredRefresh = await app.request('/api/auth/token/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: absoluteExpired.refreshToken }),
+    })
+
+    expect(expiredMe.status).toBe(401)
+    expect(expiredRefresh.status).toBe(401)
+
+    const nearCutoff = await registerForMeGuard('absolute-near-cutoff@example.com')
+    await prisma.authSession.updateMany({
+      where: { userId: nearCutoff.userId },
+      data: {
+        createdAt: new Date(
+          Date.now() - (env.SESSION_ABSOLUTE_TTL_DAYS * 24 * 60 * 60 - 60) * 1000,
+        ),
+      },
+    })
+
+    const activeMe = await app.request('/api/auth/me', {
+      headers: { Authorization: `Bearer ${nearCutoff.accessToken}` },
+    })
+    const activeRefresh = await app.request('/api/auth/token/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: nearCutoff.refreshToken }),
+    })
+
+    expect(activeMe.status).toBe(200)
+    expect(activeRefresh.status).toBe(200)
   })
 
   test('rejects duplicate email and invalid login', async () => {
@@ -862,6 +1007,7 @@ maybeDescribe('auth API integration', () => {
 
     return {
       accessToken: registerBody.accessToken as string,
+      refreshToken: registerBody.refreshToken as string,
       userId: user.id,
     }
   }

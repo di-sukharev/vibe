@@ -63,12 +63,12 @@ Auth v1 is custom JWT-based auth:
 
 - Passwords use `Bun.password.hash/verify` with Argon2id.
 - Access tokens are short-lived JWTs signed and verified with `jose`.
-- Refresh tokens are opaque random tokens; only their SHA-256 hash is stored in PostgreSQL.
+- Refresh tokens are opaque random credentials with a secret family locator; PostgreSQL stores only hashes of the family, current credential, and immediately previous credential.
 - Browser routes under `/api/auth/*` are used by the webapp and Expo Web. They keep the refresh token only in an HttpOnly cookie and never return it in JSON. Local HTTP uses `SameSite=Lax`; HTTPS production uses `Secure` and `SameSite=None` so browser auth works across separate client/API origins.
 - Native iOS and Android routes under `/api/auth/token/*` never read or set cookies and explicitly exchange refresh tokens in JSON/body payloads. Native mobile stores refresh tokens in `expo-secure-store` and keeps access tokens in memory.
 - Mobile social auth uses Apple/Google provider subjects as stable identity keys. Social auth does not auto-link to existing password accounts by email; products that need linking should add an explicit authenticated account-linking flow.
 
-Refresh-token rotation creates a new session and revokes the previous one. `/api/auth/me` checks both the JWT and the active database session.
+Refresh-token rotation updates the credential atomically inside one logical session, preserving already-issued access tokens for other tabs. The immediately previous credential is accepted only during a short race-tolerance window; presenting any older credential after that window revokes the token family as potentially compromised. `/api/auth/me` checks both the JWT and the active database session, including its absolute lifetime.
 
 ## Frontend
 

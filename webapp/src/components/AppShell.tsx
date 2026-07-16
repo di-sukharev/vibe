@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 
 type AppShellProps = PropsWithChildren<{
   isAuthenticated: boolean
+  logoutFailed: boolean
   onLogout: () => void
 }>
 
@@ -18,6 +19,7 @@ const navLinkClass = cn(
 export function AppShell({
   children,
   isAuthenticated,
+  logoutFailed,
   onLogout,
 }: AppShellProps) {
   return (
@@ -43,6 +45,11 @@ export function AppShell({
             <Button type="button" variant="outline" size="sm" onClick={onLogout}>
               Logout
             </Button>
+          )}
+          {logoutFailed && (
+            <Typography role="alert" variant="bodySm" tone="destructive">
+              Logout failed. Your session is still active; please try again.
+            </Typography>
           )}
         </div>
       </header>

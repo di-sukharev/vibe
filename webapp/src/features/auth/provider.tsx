@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react'
 
@@ -18,19 +19,47 @@ import {
 } from './queries'
 import { AuthContext, type AuthContextValue } from './context'
 import { bootstrapAuthSession } from './bootstrap'
+import { subscribeToBrowserSessionChanges } from './session-coordinator'
 
 export function AuthProvider({ children }: PropsWithChildren) {
   const queryClient = useQueryClient()
   const [accessToken, setAccessTokenState] = useState<string | null>(null)
   const [isBootstrapping, setIsBootstrapping] = useState(true)
+  const [bootstrapError, setBootstrapError] = useState<Error | null>(null)
+  const [bootstrapAttempt, setBootstrapAttempt] = useState(0)
+  const bootstrapGeneration = useRef(0)
 
   const setAccessToken = useCallback(
     (nextAccessToken: string | null) => setAccessTokenState(nextAccessToken),
     [],
   )
-  const handleAuthExpired = useCallback(() => {
-    clearAuthenticatedSession(queryClient, setAccessToken)
+  const clearLocalSession = useCallback(async () => {
+    await clearAuthenticatedSession(queryClient, setAccessToken)
   }, [queryClient, setAccessToken])
+  const handleAuthExpired = useCallback(async () => {
+    await clearLocalSession()
+  }, [clearLocalSession])
+
+  useEffect(
+    () =>
+      subscribeToBrowserSessionChanges((sessionEvent) => {
+        const generation = ++bootstrapGeneration.current
+        const shouldBootstrap = sessionEvent.state === 'authenticated'
+        setBootstrapError(null)
+        setIsBootstrapping(shouldBootstrap)
+        void clearLocalSession()
+          .catch(() => undefined)
+          .then(() => {
+            if (bootstrapGeneration.current !== generation) return
+            if (shouldBootstrap) {
+              setBootstrapAttempt((attempt) => attempt + 1)
+            } else {
+              setIsBootstrapping(false)
+            }
+          })
+      }),
+    [clearLocalSession],
+  )
 
   const api = useMemo(
     () =>
@@ -44,21 +73,26 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   useEffect(() => {
     let isMounted = true
+    const generation = ++bootstrapGeneration.current
+    const shouldApply = () => isMounted && bootstrapGeneration.current === generation
     const bootstrapApi = new AuthApi({
       getAccessToken: () => null,
       setAccessToken,
+      onAuthExpired: handleAuthExpired,
     })
 
     bootstrapAuthSession({
       api: bootstrapApi,
-      shouldApply: () => isMounted,
+      shouldApply,
       setAccessToken,
     })
-      .then(() => {
-        return undefined
+      .catch((error: unknown) => {
+        if (shouldApply()) {
+          setBootstrapError(toError(error))
+        }
       })
       .finally(() => {
-        if (isMounted) {
+        if (shouldApply()) {
           setIsBootstrapping(false)
         }
       })
@@ -66,7 +100,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     return () => {
       isMounted = false
     }
-  }, [setAccessToken])
+  }, [bootstrapAttempt, handleAuthExpired, setAccessToken])
 
   const meQuery = useCurrentUserQuery({
     api,
@@ -94,17 +128,47 @@ export function AuthProvider({ children }: PropsWithChildren) {
     await logoutAsync()
   }, [logoutAsync])
 
+  const retrySession = useCallback(async () => {
+    if (accessToken) {
+      await meQuery.refetch()
+      return
+    }
+
+    setIsBootstrapping(true)
+    setBootstrapError(null)
+    setBootstrapAttempt((attempt) => attempt + 1)
+  }, [accessToken, meQuery])
+
+  const sessionError = bootstrapError ?? (accessToken ? toOptionalError(meQuery.error) : null)
+  const transport = useMemo(
+    () => ({
+      request: api.requestAuthenticated.bind(api),
+    }),
+    [api],
+  )
+
   const value = useMemo<AuthContextValue>(
     () => ({
       user: meQuery.data?.user ?? null,
       isBootstrapping,
       isAuthenticated: Boolean(meQuery.data?.user),
+      sessionError,
+      retrySession,
+      transport,
       register,
       login,
       logout,
     }),
-    [isBootstrapping, login, logout, meQuery.data?.user, register],
+    [isBootstrapping, login, logout, meQuery.data?.user, register, retrySession, sessionError, transport],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+}
+
+function toOptionalError(error: unknown) {
+  return error === null || error === undefined ? null : toError(error)
+}
+
+function toError(error: unknown) {
+  return error instanceof Error ? error : new Error('Unknown session error')
 }
