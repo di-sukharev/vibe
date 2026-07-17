@@ -6,17 +6,20 @@ import type {
 
 import type { DbClient } from '../../../db'
 import type { AppEnv } from '../../../env'
+import { SubscriptionState } from '../../../generated/prisma/enums'
 import type { BillingServiceDependencies } from '../application/ports'
 import type { AppStoreVerificationResult, AppStoreSubscriptionVerifier } from './apple-verifier'
 import {
   applyVerifiedAppStoreTransaction,
   applyVerifiedGooglePlayPurchase,
   claimAppStoreWebhook,
+  claimVerifiedAppStoreWebhook,
   getSubscriptionSnapshot,
   markAppStoreWebhookProcessed,
   releaseFailedAppStoreWebhookClaim,
   resolveStatusLookupEnvironment,
   resolveWebhookUserId,
+  webhookClaimLostError,
 } from './billing-operations'
 import type {
   GooglePlaySubscriptionPurchase,
@@ -102,6 +105,76 @@ export function createBillingDependencies(input: {
         })
         return purchases
       },
+      findGooglePlayPurchasesDue: ({ before, limit }) =>
+        input.db.googlePlaySubscriptionPurchase.findMany({
+          where: {
+            state: {
+              in: [
+                SubscriptionState.pending,
+                SubscriptionState.active,
+                SubscriptionState.billing_grace_period,
+                SubscriptionState.billing_retry,
+              ],
+            },
+            OR: [
+              { reconcileAttemptedAt: null },
+              { reconcileAttemptedAt: { lt: before } },
+            ],
+          },
+          orderBy: [
+            { reconcileAttemptedAt: { sort: 'asc', nulls: 'first' } },
+            { id: 'asc' },
+          ],
+          take: limit,
+          select: {
+            id: true,
+            userId: true,
+            basePlanId: true,
+            productId: true,
+            purchaseToken: true,
+          },
+        }),
+      observeGooglePlayReconcileBacklog: async ({ before }) => {
+        const [observation] = await input.db.$queryRaw<
+          Array<{ dueCount: bigint; oldestDueAt: Date | null }>
+        >`
+          SELECT
+            COUNT(*)::bigint AS "dueCount",
+            MIN(COALESCE(reconcile_attempted_at, created_at)) AS "oldestDueAt"
+          FROM google_play_subscription_purchases
+          WHERE state IN ('pending', 'active', 'billing_grace_period', 'billing_retry')
+            AND (
+              reconcile_attempted_at IS NULL
+              OR reconcile_attempted_at < ${before}
+            )
+        `
+
+        return {
+          dueCount: Number(observation?.dueCount ?? 0),
+          oldestDueAt: observation?.oldestDueAt ?? null,
+        }
+      },
+      claimGooglePlayReconcileAttempt: async ({ attemptedAt, before, purchaseId }) => {
+        const claimed = await input.db.googlePlaySubscriptionPurchase.updateMany({
+          where: {
+            id: purchaseId,
+            state: {
+              in: [
+                SubscriptionState.pending,
+                SubscriptionState.active,
+                SubscriptionState.billing_grace_period,
+                SubscriptionState.billing_retry,
+              ],
+            },
+            OR: [
+              { reconcileAttemptedAt: null },
+              { reconcileAttemptedAt: { lt: before } },
+            ],
+          },
+          data: { reconcileAttemptedAt: attemptedAt },
+        })
+        return claimed.count === 1
+      },
       getAppStoreEnvironment: async (request) =>
         String(
           await resolveStatusLookupEnvironment({
@@ -111,25 +184,18 @@ export function createBillingDependencies(input: {
           }),
         ),
       getSubscription: (userId) => getSubscriptionSnapshot(input.db, userId),
-      markAppStoreWebhookProcessed: (id) => markAppStoreWebhookProcessed(input.db, id),
-      recordAppStoreWebhook: async ({ details, id, verifiedTransaction }) => {
-        const transaction = verifiedTransaction
-          ? (verifiedTransaction as AppStoreVerificationResult<JWSTransactionDecodedPayload>)
-              .payload
-          : null
-        await input.db.appStoreWebhook.update({
-          where: { id },
-          data: {
-            environment: details.environment,
-            notificationType: details.notificationType,
-            notificationUuid: details.notificationUuid,
-            originalTransactionId: transaction?.originalTransactionId ?? null,
-            subtype: details.subtype,
-            transactionId: transaction?.transactionId ?? null,
-          },
-        })
-      },
-      releaseAppStoreWebhookClaim: (id) => releaseFailedAppStoreWebhookClaim(input.db, id),
+      markAppStoreWebhookProcessed: (claim) => markAppStoreWebhookProcessed(input.db, claim),
+      claimVerifiedAppStoreWebhook: ({ claimToken, details, id, verifiedTransaction }) =>
+        claimVerifiedAppStoreWebhook(input.db, {
+          claimToken,
+          details,
+          id,
+          verifiedTransaction: verifiedTransaction
+            ? verifiedTransaction as AppStoreVerificationResult<JWSTransactionDecodedPayload>
+            : null,
+        }),
+      releaseAppStoreWebhookClaim: (claim) =>
+        releaseFailedAppStoreWebhookClaim(input.db, claim),
       resolveAppStoreWebhookUserId: (verifiedTransaction) =>
         resolveWebhookUserId({
           db: input.db,

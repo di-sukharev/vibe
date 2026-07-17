@@ -2,6 +2,7 @@ import { afterEach, expect, test } from 'bun:test'
 
 import { AuthApi } from '../src/features/auth/api'
 import { bootstrapAuthSession } from '../src/features/auth/bootstrap'
+import { createBrowserAuthCoordinator } from '../src/features/auth/browser-auth-coordinator'
 import { publishBrowserSessionState } from '../src/features/auth/session-coordinator'
 import { ApiRequestError } from '../src/platform/api'
 
@@ -23,6 +24,19 @@ afterEach(() => {
   globalThis.fetch = originalFetch
 })
 
+test('browser auth coordinator fails closed without cross-tab Web Locks', async () => {
+  let mutationRan = false
+  const coordinator = createBrowserAuthCoordinator(
+    () => undefined,
+    () => true,
+  )
+
+  await expect(coordinator(async () => {
+    mutationRan = true
+  })).rejects.toMatchObject({ code: 'AUTH_BROWSER_LOCK_UNAVAILABLE' })
+  expect(mutationRan).toBe(false)
+})
+
 test('AuthApi refreshes and retries authenticated requests with the new access token', async () => {
   const expiredAccessToken = accessTokenFor('user_1', 'expired')
   const freshAccessToken = accessTokenFor('user_1', 'fresh')
@@ -42,7 +56,9 @@ test('AuthApi refreshes and retries authenticated requests with the new access t
     }
 
     if (path === '/api/auth/refresh') {
-      return json({ accessToken: freshAccessToken }, 200)
+      return json({
+        accessToken: freshAccessToken,
+      }, 200)
     }
 
     if (path === '/api/auth/me') {
@@ -94,7 +110,9 @@ test('AuthApi shares one refresh across concurrent unauthorized requests', async
 
     if (path === '/api/auth/refresh') {
       await new Promise((resolve) => setTimeout(resolve, 0))
-      return json({ accessToken: freshAccessToken }, 200)
+      return json({
+        accessToken: freshAccessToken,
+      }, 200)
     }
 
     if (path === '/api/auth/me' && authorization === `Bearer ${freshAccessToken}`) {
@@ -336,7 +354,44 @@ test('AuthApi never retries an authenticated request as a different principal', 
     const path = new URL(String(input)).pathname
     calls.push(path)
     if (path === '/api/auth/refresh') {
-      return json({ accessToken: accountBAccessToken }, 200)
+      return json({
+        accessToken: accountBAccessToken,
+      }, 200)
+    }
+    return json({ error: { code: 'UNAUTHORIZED', message: 'Expired access token' } }, 401)
+  }
+
+  const client = new AuthApi({
+    getAccessToken: () => accessToken,
+    setAccessToken: (nextAccessToken) => {
+      accessToken = nextAccessToken
+    },
+    onAuthExpired: () => {
+      authExpiredCalls += 1
+    },
+  })
+
+  await expect(client.me()).rejects.toMatchObject({ status: 401 })
+  expect(calls).toEqual(['/api/auth/me', '/api/auth/refresh'])
+  expect(accessToken).toBeNull()
+  expect(authExpiredCalls).toBe(1)
+})
+
+test('AuthApi never retries an old request in another session of the same principal', async () => {
+  const sessionAAccessToken = accessTokenFor('same-account', 'expired', 'session-a')
+  const sessionBAccessToken = accessTokenFor('same-account', 'fresh', 'session-b')
+  let accessToken: string | null = sessionAAccessToken
+  let authExpiredCalls = 0
+  const calls: string[] = []
+  publishBrowserSessionState('authenticated')
+
+  globalThis.fetch = async (input) => {
+    const path = new URL(String(input)).pathname
+    calls.push(path)
+    if (path === '/api/auth/refresh') {
+      return json({
+        accessToken: sessionBAccessToken,
+      }, 200)
     }
     return json({ error: { code: 'UNAUTHORIZED', message: 'Expired access token' } }, 401)
   }
@@ -501,8 +556,8 @@ function json(body: unknown, status: number) {
   })
 }
 
-function accessTokenFor(subject: string, version: string) {
+function accessTokenFor(subject: string, version: string, sessionId = 'session_1') {
   const encode = (value: unknown) =>
     btoa(JSON.stringify(value)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_')
-  return `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode({ sub: subject, version })}.signature`
+  return `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode({ sub: subject, sessionId, version })}.signature`
 }

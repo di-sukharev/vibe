@@ -28,9 +28,13 @@ const env: AppEnv = {
   AUTH_BODY_LIMIT_BYTES: 64 * 1024,
   AUTH_RATE_LIMIT_MAX: 60,
   AUTH_RATE_LIMIT_WINDOW_SECONDS: 60,
+  IAP_BODY_LIMIT_BYTES: 64 * 1024,
+  IAP_RATE_LIMIT_MAX: 60,
+  IAP_RATE_LIMIT_WINDOW_SECONDS: 60,
   SHUTDOWN_GRACE_SECONDS: 20,
   TRUST_PROXY: false,
   COOKIE_SECURE: false,
+  ENABLE_TEST_PUSH: false,
   SPACES_UPLOAD_MAX_BYTES: 10 * 1024 * 1024,
   SPACES_UPLOAD_URL_TTL_SECONDS: 900,
   SPACES_DOWNLOAD_URL_TTL_SECONDS: 300,
@@ -211,6 +215,7 @@ function createFakeGoogleDb({
       findUnique: mock(async () => null),
       upsert: entitlementUpsert,
     },
+    $executeRaw: mock(async () => 1),
     $transaction: async (callback: (tx: unknown) => unknown) => callback(db),
   }
   return db as unknown as DbClient
@@ -225,12 +230,14 @@ function createFakeDb({
 }) {
   const db = {
     appStoreTransaction: {
+      findMany: mock(async () => []),
       upsert: transactionUpsert,
     },
     subscriptionEntitlement: {
       findUnique: mock(async () => null),
       upsert: entitlementUpsert,
     },
+    $executeRaw: mock(async () => 1),
     $transaction: async (callback: (tx: unknown) => unknown) => callback(db),
   }
   return db as unknown as DbClient

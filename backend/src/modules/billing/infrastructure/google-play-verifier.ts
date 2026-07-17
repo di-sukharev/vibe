@@ -5,6 +5,7 @@ import { BillingFailure } from '../domain/errors'
 
 const androidPublisherScope = 'https://www.googleapis.com/auth/androidpublisher'
 const androidPublisherBaseUrl = 'https://androidpublisher.googleapis.com/androidpublisher/v3'
+const googlePlayRequestTimeoutMs = 15_000
 
 export type GooglePlayAcknowledgementState =
   | 'ACKNOWLEDGEMENT_STATE_UNSPECIFIED'
@@ -65,6 +66,7 @@ type GooglePlayApiRequester = {
   request: <T>(input: {
     data?: unknown
     method: 'GET' | 'POST'
+    timeout?: number
     url: string
   }) => Promise<{ data: T }>
 }
@@ -84,6 +86,7 @@ export function createGooglePlaySubscriptionVerifier(
       try {
         const response = await getRequester().request<GooglePlaySubscriptionPurchase>({
           method: 'GET',
+          timeout: googlePlayRequestTimeoutMs,
           url,
         })
         return response.data
@@ -102,6 +105,7 @@ export function createGooglePlaySubscriptionVerifier(
         await getRequester().request<unknown>({
           data: {},
           method: 'POST',
+          timeout: googlePlayRequestTimeoutMs,
           url,
         })
       } catch (error) {

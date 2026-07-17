@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test'
 
 import { createApp } from '../../app'
@@ -23,9 +25,13 @@ maybeDescribe('auth API integration', () => {
     AUTH_BODY_LIMIT_BYTES: 64 * 1024,
     AUTH_RATE_LIMIT_MAX: 60,
     AUTH_RATE_LIMIT_WINDOW_SECONDS: 60,
+    IAP_BODY_LIMIT_BYTES: 64 * 1024,
+    IAP_RATE_LIMIT_MAX: 60,
+    IAP_RATE_LIMIT_WINDOW_SECONDS: 60,
     SHUTDOWN_GRACE_SECONDS: 20,
     TRUST_PROXY: false,
     COOKIE_SECURE: false,
+    ENABLE_TEST_PUSH: false,
     SPACES_UPLOAD_MAX_BYTES: 10 * 1024 * 1024,
     SPACES_UPLOAD_URL_TTL_SECONDS: 900,
     SPACES_DOWNLOAD_URL_TTL_SECONDS: 300,
@@ -101,6 +107,7 @@ maybeDescribe('auth API integration', () => {
     expect(refreshBody.accessToken).toBeString()
     expect(refreshBody.refreshToken).toBeString()
     expect(refreshBody.refreshToken).not.toBe(registerBody.refreshToken)
+    expect(refreshBody.session).toBeUndefined()
     expect(refresh.headers.get('set-cookie')).toBeNull()
 
     const meWithPreRefreshAccessToken = await app.request('/api/auth/me', {
@@ -351,6 +358,24 @@ maybeDescribe('auth API integration', () => {
     const refreshedAgain = await refreshAgain.json()
     expect(refreshAgain.status).toBe(200)
 
+    const pushToken = 'ExponentPushToken[reused-session-token]'
+    const pushRegistration = await app.request('/api/notifications/push-token', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${registered.accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        expoPushToken: pushToken,
+        generation: 1,
+        installationId: randomUUID(),
+        installationSecret: randomUUID(),
+      }),
+    })
+    expect(pushRegistration.status).toBe(200)
+    expect(await prisma.pushToken.findUnique({ where: { expoPushToken: pushToken } }))
+      .not.toBeNull()
+
     await prisma.authSession.updateMany({
       where: { user: { email: 'reuse@example.com' } },
       data: { refreshRotatedAt: new Date(Date.now() - 60_000) },
@@ -362,6 +387,8 @@ maybeDescribe('auth API integration', () => {
       body: JSON.stringify({ refreshToken: registered.refreshToken }),
     })
     expect(replay.status).toBe(401)
+    expect(await prisma.pushToken.findUnique({ where: { expoPushToken: pushToken } }))
+      .toBeNull()
 
     const attackerCredential = await app.request('/api/auth/token/refresh', {
       method: 'POST',
@@ -405,6 +432,7 @@ maybeDescribe('auth API integration', () => {
 
     expect(refresh.status).toBe(200)
     expect(refreshBody.accessToken).toBeString()
+    expect(refreshBody.session).toBeUndefined()
     expect(refreshBody.refreshToken).toBeUndefined()
   })
 

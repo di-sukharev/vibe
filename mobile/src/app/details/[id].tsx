@@ -7,6 +7,10 @@ import { ScreenLoader } from '@/components/screen-states';
 import { TEST_IDS } from '@/constants/testIds';
 import { useAuth } from '@/features/auth';
 
+export function generateStaticParams() {
+  return [{ id: 'components' }];
+}
+
 export default function DetailsScreen() {
   const auth = useAuth();
   const params = useLocalSearchParams<{ id?: string | string[] }>();

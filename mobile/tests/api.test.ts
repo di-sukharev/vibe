@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 
 import { AuthApi } from '../src/features/auth/api';
+import { createBrowserAuthCoordinator } from '../src/features/auth/browser-auth-coordinator';
 import { BillingApi } from '../src/features/billing/api';
 import { NotificationsApi } from '../src/features/notifications/api';
 import { ApiTransport } from '../src/platform/api';
@@ -57,7 +58,10 @@ test('mobile auth API refreshes through the shared transport and retries authent
     }
 
     if (path === '/api/auth/token/refresh') {
-      return json({ accessToken: 'fresh-access-token', refreshToken: rotatedRefreshToken }, 200);
+      return json({
+        accessToken: 'fresh-access-token',
+        refreshToken: rotatedRefreshToken,
+      }, 200);
     }
 
     return json({ error: { code: 'NOT_FOUND', message: 'Unexpected request' } }, 404);
@@ -105,7 +109,10 @@ test('mobile feature APIs share one refresh request across concurrent 401 respon
 
     if (path === '/api/auth/token/refresh') {
       await new Promise((resolve) => setTimeout(resolve, 0));
-      return json({ accessToken: 'fresh-access-token', refreshToken: rotatedRefreshToken }, 200);
+      return json({
+        accessToken: 'fresh-access-token',
+        refreshToken: rotatedRefreshToken,
+      }, 200);
     }
 
     if (path === '/api/auth/me' && authorization === 'Bearer fresh-access-token') {
@@ -207,6 +214,104 @@ test('mobile API transport clears token state when refresh fails', async () => {
   expect(authExpiredCalls).toBe(1);
   expect(accessTokenAtAuthExpired).toBe('expired-access-token');
   expect(refreshTokenAtAuthExpired).toBe(refreshToken);
+});
+
+test('mobile API transport expires the session when the retried request stays unauthorized', async () => {
+  let accessToken: string | null = 'expired-access-token';
+  let storedRefreshToken: string | null = refreshToken;
+  let authExpiredCalls = 0;
+  const paths: string[] = [];
+
+  globalThis.fetch = async (input) => {
+    const path = new URL(String(input)).pathname;
+    paths.push(path);
+
+    if (path === '/api/auth/me') {
+      return json({ error: { code: 'UNAUTHORIZED', message: 'Session was revoked' } }, 401);
+    }
+
+    if (path === '/api/auth/token/refresh') {
+      return json({
+        accessToken: 'fresh-access-token',
+        refreshToken: rotatedRefreshToken,
+      }, 200);
+    }
+
+    return json({ error: { code: 'NOT_FOUND', message: 'Unexpected request' } }, 404);
+  };
+
+  const { auth: client } = createTestApis({
+    getAccessToken: () => accessToken,
+    setAccessToken: (nextAccessToken) => {
+      accessToken = nextAccessToken;
+    },
+    getRefreshToken: async () => storedRefreshToken,
+    setRefreshToken: async (nextRefreshToken) => {
+      storedRefreshToken = nextRefreshToken;
+    },
+    clearRefreshToken: async () => {
+      storedRefreshToken = null;
+    },
+    onAuthExpired: () => {
+      authExpiredCalls += 1;
+    },
+  });
+
+  await expect(client.me()).rejects.toMatchObject({ status: 401, code: 'UNAUTHORIZED' });
+
+  expect(paths).toEqual(['/api/auth/me', '/api/auth/token/refresh', '/api/auth/me']);
+  expect(authExpiredCalls).toBe(1);
+  expect(accessToken).toBeNull();
+  expect(storedRefreshToken).toBeNull();
+});
+
+test('mobile API transport preserves refresh credentials when refresh is temporarily unavailable', async () => {
+  let accessToken: string | null = 'expired-access-token';
+  let storedRefreshToken: string | null = refreshToken;
+  let clearRefreshTokenCalls = 0;
+  let authExpiredCalls = 0;
+
+  globalThis.fetch = async (input) => {
+    const path = new URL(String(input)).pathname;
+
+    if (path === '/api/auth/me') {
+      return json({ error: { code: 'UNAUTHORIZED', message: 'Expired access token' } }, 401);
+    }
+
+    if (path === '/api/auth/token/refresh') {
+      return json({ error: { code: 'INTERNAL_ERROR', message: 'Temporarily unavailable' } }, 503);
+    }
+
+    return json({ error: { code: 'NOT_FOUND', message: 'Unexpected request' } }, 404);
+  };
+
+  const { auth: client } = createTestApis({
+    getAccessToken: () => accessToken,
+    setAccessToken: (nextAccessToken) => {
+      accessToken = nextAccessToken;
+    },
+    getRefreshToken: async () => storedRefreshToken,
+    setRefreshToken: async (nextRefreshToken) => {
+      storedRefreshToken = nextRefreshToken;
+    },
+    clearRefreshToken: async () => {
+      clearRefreshTokenCalls += 1;
+      storedRefreshToken = null;
+    },
+    onAuthExpired: () => {
+      authExpiredCalls += 1;
+    },
+  });
+
+  await expect(client.me()).rejects.toMatchObject({
+    status: 503,
+    code: 'INTERNAL_ERROR',
+  });
+
+  expect(accessToken).toBe('expired-access-token');
+  expect(storedRefreshToken).toBe(refreshToken);
+  expect(clearRefreshTokenCalls).toBe(0);
+  expect(authExpiredCalls).toBe(0);
 });
 
 test('mobile auth API sends the stored refresh token when logging out', async () => {
@@ -452,6 +557,8 @@ test('mobile billing API calls entitlement, ingest, and reconcile endpoints with
 
 test('mobile notifications API registers, unregisters, and sends test pushes with auth', async () => {
   const calls: Array<{ path: string; authorization: string | null; body: unknown }> = [];
+  const installationId = '018fd4f2-1f3a-7c88-bc49-333333333333';
+  const installationSecret = '118fd4f2-1f3a-4c88-bc49-333333333333';
 
   globalThis.fetch = async (input, init) => {
     const path = new URL(String(input)).pathname;
@@ -460,11 +567,11 @@ test('mobile notifications API registers, unregisters, and sends test pushes wit
     calls.push({ path, authorization: headers.get('Authorization'), body });
 
     if (path === '/api/notifications/push-token') {
-      return json({ ok: true }, 200);
+      return json({ applied: true, ok: true }, 200);
     }
 
     if (path === '/api/notifications/push-token/unregister') {
-      return json({ ok: true }, 200);
+      return json({ applied: true, ok: true }, 200);
     }
 
     if (path === '/api/notifications/test-push') {
@@ -485,12 +592,21 @@ test('mobile notifications API registers, unregisters, and sends test pushes wit
   await expect(
     client.registerExpoPushToken({
       expoPushToken: 'ExponentPushToken[token]',
+      generation: 1,
+      installationId,
+      installationSecret,
       platform: 'ios',
+      previousExpoPushTokens: [],
     }),
-  ).resolves.toEqual({ ok: true });
+  ).resolves.toEqual({ applied: true, ok: true });
   await expect(
-    client.unregisterExpoPushToken({ expoPushToken: 'ExponentPushToken[token]' }),
-  ).resolves.toEqual({ ok: true });
+    client.unregisterExpoPushToken({
+      expoPushTokens: ['ExponentPushToken[token]'],
+      generation: 2,
+      installationId,
+      installationSecret,
+    }),
+  ).resolves.toEqual({ applied: true, ok: true });
   await expect(
     client.sendTestPushNotification({
       body: 'Ready',
@@ -505,14 +621,21 @@ test('mobile notifications API registers, unregisters, and sends test pushes wit
       authorization: 'Bearer access-token',
       body: {
         expoPushToken: 'ExponentPushToken[token]',
+        generation: 1,
+        installationId,
+        installationSecret,
         platform: 'ios',
+        previousExpoPushTokens: [],
       },
     },
     {
       path: '/api/notifications/push-token/unregister',
       authorization: 'Bearer access-token',
       body: {
-        expoPushToken: 'ExponentPushToken[token]',
+        expoPushTokens: ['ExponentPushToken[token]'],
+        generation: 2,
+        installationId,
+        installationSecret,
       },
     },
     {
@@ -539,7 +662,10 @@ test('mobile notifications API can unregister push tokens without an auth refres
     }
 
     if (path === '/api/auth/token/refresh') {
-      return json({ accessToken: 'fresh-access-token', refreshToken: rotatedRefreshToken }, 200);
+      return json({
+        accessToken: 'fresh-access-token',
+        refreshToken: rotatedRefreshToken,
+      }, 200);
     }
 
     return json({ error: { code: 'NOT_FOUND', message: 'Unexpected request' } }, 404);
@@ -555,7 +681,12 @@ test('mobile notifications API can unregister push tokens without an auth refres
 
   await expect(
     client.unregisterExpoPushToken(
-      { expoPushToken: 'ExponentPushToken[token]' },
+      {
+        expoPushTokens: ['ExponentPushToken[token]'],
+        generation: 1,
+        installationId: '018fd4f2-1f3a-7c88-bc49-333333333333',
+        installationSecret: '118fd4f2-1f3a-4c88-bc49-333333333333',
+      },
       { retryOnUnauthorized: false },
     ),
   ).rejects.toMatchObject({
@@ -595,7 +726,9 @@ test('Expo web auth uses cookie endpoints and never receives a refresh token', a
       }, 201);
     }
     if (path === '/api/auth/refresh') {
-      return json({ accessToken: 'web-refreshed-access-token' }, 200);
+      return json({
+        accessToken: 'web-refreshed-access-token',
+      }, 200);
     }
     if (path === '/api/auth/logout') return new Response(null, { status: 204 });
     return json({ error: { code: 'NOT_FOUND', message: 'Unexpected request' } }, 404);
@@ -618,7 +751,9 @@ test('Expo web auth uses cookie endpoints and never receives a refresh token', a
     auth.register({ email: 'web@example.com', password: 'password123' }),
   ).resolves.not.toHaveProperty('refreshToken');
   await expect(auth.canRefresh()).resolves.toBe(true);
-  await expect(auth.refresh()).resolves.toEqual({ accessToken: 'web-refreshed-access-token' });
+  await expect(auth.refresh()).resolves.toEqual({
+    accessToken: 'web-refreshed-access-token',
+  });
   await expect(auth.logout()).resolves.toBe(true);
 
   expect(storedRefreshTokenWrites).toBe(0);
@@ -658,6 +793,7 @@ function createTestApis(options: {
   setRefreshToken: (refreshToken: string) => Promise<void>;
 }, authTransport: 'cookie' | 'token' = 'token') {
   let auth!: AuthApi;
+  const generation = 0;
   const transport = new ApiTransport(
     {
       expire: async () => {
@@ -669,13 +805,27 @@ function createTestApis(options: {
         }
       },
       getAccessToken: options.getAccessToken,
-      refresh: () => auth.refresh(),
-      setAccessToken: options.setAccessToken,
+      getGeneration: () => generation,
+      isGenerationCurrent: (candidate) => candidate === generation,
+      refresh: (candidate) => auth.refresh(candidate),
+      setAccessToken: (accessToken, candidate) => {
+        if (candidate !== generation) return false;
+        options.setAccessToken(accessToken);
+        return true;
+      },
     },
     undefined,
     authTransport === 'cookie' ? 'include' : undefined,
   );
-  auth = new AuthApi(transport, options, authTransport);
+  auth = new AuthApi(transport, {
+    ...options,
+    browserAuthCoordinator: authTransport === 'cookie'
+      ? createBrowserAuthCoordinator(() => undefined, () => false)
+      : undefined,
+    getAccessToken: options.getAccessToken,
+    getGeneration: () => generation,
+    isGenerationCurrent: (candidate) => candidate === generation,
+  }, authTransport);
   return {
     auth,
     billing: new BillingApi(transport),

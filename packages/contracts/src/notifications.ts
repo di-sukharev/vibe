@@ -12,6 +12,17 @@ export const expoPushTokenSchema = z
 
 export const pushTokenPlatformSchema = z.enum(['android', 'ios']).nullable().optional()
 
+export const pushInstallationIdSchema = z.uuid()
+export const pushInstallationSecretSchema = z.uuid()
+
+export const pushInstallationGenerationSchema = z
+  .number()
+  .int()
+  .positive()
+  .max(2_147_483_647)
+
+const expoPushTokenListSchema = z.array(expoPushTokenSchema).max(12)
+
 export const internalNotificationHrefSchema = z
   .string()
   .trim()
@@ -26,17 +37,45 @@ export const internalNotificationHrefSchema = z
     'Notification href must be an internal app path',
   )
 
-export const registerPushTokenRequestSchema = z.object({
+const modernRegisterPushTokenRequestSchema = z.object({
+  expoPushToken: expoPushTokenSchema,
+  deviceId: z.string().trim().min(1).max(200).optional(),
+  generation: pushInstallationGenerationSchema,
+  installationId: pushInstallationIdSchema,
+  installationSecret: pushInstallationSecretSchema,
+  platform: pushTokenPlatformSchema,
+  previousExpoPushTokens: expoPushTokenListSchema.optional(),
+})
+
+const legacyRegisterPushTokenRequestSchema = z.object({
   expoPushToken: expoPushTokenSchema,
   deviceId: z.string().trim().min(1).max(200).optional(),
   platform: pushTokenPlatformSchema,
+}).strict()
+
+export const registerPushTokenRequestSchema = z.union([
+  modernRegisterPushTokenRequestSchema,
+  legacyRegisterPushTokenRequestSchema,
+])
+
+const modernUnregisterPushTokenRequestSchema = z.object({
+  expoPushTokens: expoPushTokenListSchema.optional(),
+  generation: pushInstallationGenerationSchema,
+  installationId: pushInstallationIdSchema,
+  installationSecret: pushInstallationSecretSchema,
 })
 
-export const unregisterPushTokenRequestSchema = z.object({
+const legacyUnregisterPushTokenRequestSchema = z.object({
   expoPushToken: expoPushTokenSchema.optional(),
-})
+}).strict()
+
+export const unregisterPushTokenRequestSchema = z.union([
+  modernUnregisterPushTokenRequestSchema,
+  legacyUnregisterPushTokenRequestSchema,
+])
 
 export const pushMutationResponseSchema = z.object({
+  applied: z.boolean().default(true),
   ok: z.literal(true),
 })
 
@@ -56,6 +95,8 @@ export const testPushNotificationResponseSchema = z.object({
 
 export type RegisterPushTokenRequest = z.infer<typeof registerPushTokenRequestSchema>
 export type UnregisterPushTokenRequest = z.infer<typeof unregisterPushTokenRequestSchema>
+export type LegacyRegisterPushTokenRequest = z.infer<typeof legacyRegisterPushTokenRequestSchema>
+export type LegacyUnregisterPushTokenRequest = z.infer<typeof legacyUnregisterPushTokenRequestSchema>
 export type PushMutationResponse = z.infer<typeof pushMutationResponseSchema>
 export type TestPushNotificationRequest = z.input<typeof testPushNotificationRequestSchema>
 export type TestPushNotificationPayload = z.output<typeof testPushNotificationRequestSchema>

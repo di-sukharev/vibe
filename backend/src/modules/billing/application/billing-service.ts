@@ -5,11 +5,14 @@ import type {
   BillingServiceDependencies,
   GooglePlayPurchaseReference,
 } from './ports'
+import { BillingFailure } from '../domain/errors'
 
 type ReconcileAttemptState = {
   firstError: unknown
   latestSnapshot: SubscriptionSnapshot | null
 }
+
+const minimumGooglePlayReconcileAttemptBudgetMs = 31_000
 
 export class BillingService {
   constructor(private readonly dependencies: BillingServiceDependencies) {}
@@ -115,13 +118,77 @@ export class BillingService {
     )
   }
 
+  async reconcileGooglePlayBatch(input: {
+    before: Date
+    deadline: Date
+    limit: number
+    now?: () => Date
+  }) {
+    const [backlog, purchases] = await Promise.all([
+      this.dependencies.repository.observeGooglePlayReconcileBacklog({
+        before: input.before,
+      }),
+      this.dependencies.repository.findGooglePlayPurchasesDue({
+        before: input.before,
+        limit: input.limit,
+      }),
+    ])
+    const now = input.now ?? (() => new Date())
+    let attempted = 0
+    let failed = 0
+    let succeeded = 0
+
+    for (const purchase of purchases) {
+      const attemptedAt = now()
+      if (
+        input.deadline.getTime() - attemptedAt.getTime() <
+        minimumGooglePlayReconcileAttemptBudgetMs
+      ) {
+        break
+      }
+      const claimed = await this.dependencies.repository.claimGooglePlayReconcileAttempt({
+        attemptedAt,
+        before: input.before,
+        purchaseId: purchase.id,
+      })
+      if (!claimed) continue
+      attempted += 1
+
+      try {
+        const { id: _purchaseId, ...reference } = purchase
+        await this.ingestGooglePlay(reference)
+        succeeded += 1
+      } catch {
+        failed += 1
+      }
+    }
+
+    return {
+      attempted,
+      backlogDue: backlog.dueCount,
+      backlogOldestDueAt: backlog.oldestDueAt,
+      deferred: purchases.length - attempted,
+      failed,
+      selected: purchases.length,
+      succeeded,
+    }
+  }
+
   createOfferCodeRedemption(userId: string) {
     return this.dependencies.offerCodeTokens.create(userId)
   }
 
   async processAppStoreWebhook(signedPayload: string) {
     const webhook = await this.dependencies.repository.claimAppStoreWebhook(signedPayload)
-    if (!webhook) return { duplicate: true, subscription: null }
+    if (webhook.status === 'processed') return { duplicate: true, subscription: null }
+    if (webhook.status === 'in_progress') {
+      throw new BillingFailure(
+        'IAP_WEBHOOK_IN_PROGRESS',
+        'App Store webhook is already being processed; retry later',
+      )
+    }
+
+    let claim = { claimToken: webhook.claimToken, id: webhook.id }
 
     try {
       const verifiedNotification = await this.dependencies.appStore.verifyNotification(signedPayload)
@@ -133,14 +200,28 @@ export class BillingService {
         ? await this.dependencies.appStore.verifyRenewalInfo(details.signedRenewalInfo)
         : null
 
-      await this.dependencies.repository.recordAppStoreWebhook({
+      const verifiedWebhook = await this.dependencies.repository.claimVerifiedAppStoreWebhook({
+        claimToken: claim.claimToken,
         details,
-        id: webhook.id,
+        id: claim.id,
         verifiedTransaction,
       })
+      if (verifiedWebhook.status === 'processed') {
+        return { duplicate: true, subscription: null }
+      }
+      if (verifiedWebhook.status === 'in_progress') {
+        throw new BillingFailure(
+          'IAP_WEBHOOK_IN_PROGRESS',
+          'App Store webhook is already being processed; retry later',
+        )
+      }
+      claim = {
+        claimToken: verifiedWebhook.claimToken,
+        id: verifiedWebhook.id,
+      }
 
       if (!details.signedTransactionInfo || !verifiedTransaction) {
-        await this.dependencies.repository.markAppStoreWebhookProcessed(webhook.id)
+        await this.dependencies.repository.markAppStoreWebhookProcessed(claim)
         return { duplicate: false, subscription: null }
       }
 
@@ -148,7 +229,7 @@ export class BillingService {
         verifiedTransaction,
       )
       if (!userId) {
-        await this.dependencies.repository.markAppStoreWebhookProcessed(webhook.id)
+        await this.dependencies.repository.markAppStoreWebhookProcessed(claim)
         return { duplicate: false, subscription: null }
       }
 
@@ -160,10 +241,10 @@ export class BillingService {
         verifiedRenewal,
         verifiedTransaction,
       })
-      await this.dependencies.repository.markAppStoreWebhookProcessed(webhook.id)
+      await this.dependencies.repository.markAppStoreWebhookProcessed(claim)
       return { duplicate: false, subscription }
     } catch (error) {
-      await this.dependencies.repository.releaseAppStoreWebhookClaim(webhook.id)
+      await this.dependencies.repository.releaseAppStoreWebhookClaim(claim)
       throw error
     }
   }

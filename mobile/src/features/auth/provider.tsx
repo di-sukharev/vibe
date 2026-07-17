@@ -17,25 +17,42 @@ import {
   useState,
 } from 'react';
 
-import type { AuthApiPort } from './api';
-import { clearBootstrapAuthState, refreshBootstrapSession } from './bootstrap';
-import { logoutWithPushCleanup, type LogoutPushCleanupInput } from './logout';
+import type { AuthApiPort, AuthSessionResponse } from './api';
 import {
-  clearStoredRefreshToken,
-  getStoredRefreshToken,
-  setStoredRefreshToken,
-} from './token-store';
+  clearBootstrapAuthState,
+  PendingLogoutRetryableError,
+  restoreBootstrapAuthState,
+} from './bootstrap';
+import { browserSessionCoordinator } from './browser-session-coordinator';
+import {
+  createLogoutOperationCoordinator,
+  logoutWithPushCleanup,
+  preserveExpiredSessionPushEvidence,
+  type LogoutPushCleanupInput,
+} from './logout';
+import { isTerminalAuthFailure } from '@/platform/api';
+
+export type AuthAccountScope = {
+  generation: number;
+  userId: string;
+};
 
 type AuthContextValue = {
+  accountScope: AuthAccountScope | null;
   user: UserDto | null;
   isBootstrapping: boolean;
   isAuthenticated: boolean;
+  isTransitioning: boolean;
+  sessionGeneration: number;
+  sessionError: string | null;
   refreshUser: () => Promise<void>;
+  retrySession: () => Promise<void>;
   register: (input: RegisterRequest) => Promise<void>;
   login: (input: LoginRequest) => Promise<void>;
   socialAuth: (provider: SocialAuthProvider, input: SocialAuthRequest) => Promise<void>;
   logout: () => Promise<void>;
-  setSubscription: (subscription: SubscriptionSnapshot) => void;
+  isAccountScopeCurrent: (scope: AuthAccountScope) => boolean;
+  setSubscription: (subscription: SubscriptionSnapshot, scope: AuthAccountScope) => boolean;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -43,15 +60,37 @@ const meQueryKey = ['auth', 'me'] as const;
 type MeQueryData = { user: UserDto };
 
 export type AuthSessionPort = {
-  setAccessToken: (accessToken: string | null) => void;
-  setExpiredHandler: (handler: () => void | Promise<void>) => void;
+  beginTransition: () => number;
+  clearRefreshToken: (generation?: number) => Promise<void>;
+  completePendingLogout: (
+    generation?: number,
+    browserSessionEpoch?: number,
+  ) => Promise<void>;
+  getGeneration: () => number;
+  getPendingLogout: () => Promise<boolean>;
+  getRefreshToken: () => Promise<string | null>;
+  isGenerationCurrent: (generation: number) => boolean;
+  markPendingLogout: (
+    generation?: number,
+    browserSessionEpoch?: number,
+  ) => Promise<void>;
+  setAccessToken: (accessToken: string | null, generation?: number) => boolean;
+  setExpiredHandler: (handler: (generation: number) => void | Promise<void>) => void;
+  setRefreshToken: (refreshToken: string, generation?: number) => Promise<void>;
 };
 
 export type AuthLogoutSupport = Omit<
   LogoutPushCleanupInput,
-  'authApi' | 'getStoredRefreshToken'
+  | 'authApi'
+  | 'clearLocalSession'
+  | 'completePendingLogout'
+  | 'getStoredRefreshToken'
+  | 'markPendingLogout'
+  | 'sessionGeneration'
 > & {
-  markStoredExpoPushTokenForCleanup: () => Promise<void>;
+  markStoredExpoPushTokenForCleanup: (options?: {
+    isCancelled?: () => boolean;
+  }) => Promise<void>;
 };
 
 export function AuthProvider({
@@ -66,46 +105,134 @@ export function AuthProvider({
 }>) {
   const queryClient = useQueryClient();
   const [accessToken, setAccessTokenState] = useState<string | null>(null);
+  const [bootstrapAttempt, setBootstrapAttempt] = useState(0);
   const [isBootstrapping, setIsBootstrapping] = useState(true);
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const [sessionError, setSessionError] = useState<string | null>(null);
+  const [sessionGeneration, setSessionGeneration] = useState(session.getGeneration());
+  const logoutOperationCoordinator = useMemo(createLogoutOperationCoordinator, []);
 
-  const setAccessToken = useCallback((nextAccessToken: string | null) => {
-    session.setAccessToken(nextAccessToken);
+  const setAccessToken = useCallback((nextAccessToken: string | null, generation: number) => {
+    if (!session.setAccessToken(nextAccessToken, generation)) return false;
     setAccessTokenState(nextAccessToken);
+    return true;
   }, [session]);
-  const handleAuthExpired = useCallback(async () => {
-    await logoutSupport.unregisterStoredExpoPushToken({
-      clearStoredOnFailure: true,
-      retryOnUnauthorized: false,
-    }).catch(() => logoutSupport.markStoredExpoPushTokenForCleanup().catch(() => undefined));
-    setAccessToken(null);
-    await clearStoredRefreshToken();
+
+  const beginSessionTransition = useCallback(() => {
+    const generation = session.beginTransition();
+    setSessionGeneration(generation);
+    setSessionError(null);
+    setIsTransitioning(true);
+    return generation;
+  }, [session]);
+
+  const finishSessionTransition = useCallback((generation: number) => {
+    if (session.isGenerationCurrent(generation)) {
+      setIsTransitioning(false);
+    }
+  }, [session]);
+
+  const handleAuthExpired = useCallback(async (expiredGeneration: number) => {
+    if (!session.isGenerationCurrent(expiredGeneration)) return;
+    const generation = beginSessionTransition();
+    setAccessToken(null, generation);
     queryClient.removeQueries({ queryKey: meQueryKey });
-  }, [logoutSupport, queryClient, setAccessToken]);
+    try {
+      await session.clearRefreshToken(generation).catch(() => undefined);
+      await preserveExpiredSessionPushEvidence({
+        drainPushRegistrations: logoutSupport.drainPushRegistrations,
+        isCancelled: () => !session.isGenerationCurrent(generation),
+        markStoredExpoPushTokenForCleanup: logoutSupport.markStoredExpoPushTokenForCleanup,
+      });
+    } finally {
+      finishSessionTransition(generation);
+    }
+  }, [beginSessionTransition, finishSessionTransition, logoutSupport, queryClient, session, setAccessToken]);
 
   useEffect(() => {
     session.setExpiredHandler(handleAuthExpired);
   }, [handleAuthExpired, session]);
 
+  useEffect(
+    () =>
+      browserSessionCoordinator.subscribe((event) => {
+        const generation = beginSessionTransition();
+        setAccessToken(null, generation);
+        queryClient.removeQueries({ queryKey: meQueryKey });
+        setIsBootstrapping(event.state === 'authenticated');
+
+        void session.clearRefreshToken(generation)
+          .catch(() => undefined)
+          .finally(() => {
+            if (!session.isGenerationCurrent(generation)) return;
+            if (event.state === 'authenticated') {
+              setBootstrapAttempt((attempt) => attempt + 1);
+            } else {
+              setIsBootstrapping(false);
+            }
+            finishSessionTransition(generation);
+          });
+      }),
+    [
+      beginSessionTransition,
+      finishSessionTransition,
+      queryClient,
+      session,
+      setAccessToken,
+    ],
+  );
+
+  const performLogout = useCallback(
+    (generation: number) =>
+      logoutWithPushCleanup({
+        authApi: api,
+        ...logoutSupport,
+        clearLocalSession: async () => {
+          setAccessToken(null, generation);
+          queryClient.removeQueries({ queryKey: meQueryKey });
+        },
+        completePendingLogout: (browserSessionEpoch) =>
+          session.completePendingLogout(generation, browserSessionEpoch),
+        getStoredRefreshToken: session.getRefreshToken,
+        markPendingLogout: (browserSessionEpoch) =>
+          session.markPendingLogout(generation, browserSessionEpoch),
+        sessionGeneration: generation,
+      }),
+    [api, logoutSupport, queryClient, session, setAccessToken],
+  );
+
   useEffect(() => {
     let isMounted = true;
+    const generation = session.getGeneration();
+    setIsBootstrapping(true);
+    setSessionError(null);
 
-    refreshBootstrapSession(api)
-      .then(async (response) => {
-        if (!isMounted || !response) return;
-        setAccessToken(response.accessToken);
+    restoreBootstrapAuthState(api, {
+      clear: () => clearBootstrapAuthState({
+        clearStoredExpoPushToken: logoutSupport.clearStoredExpoPushToken,
+        clearStoredRefreshToken: () => session.clearRefreshToken(generation),
+        markStoredExpoPushTokenForCleanup: logoutSupport.markStoredExpoPushTokenForCleanup,
+        setAccessToken: (nextAccessToken) => {
+          setAccessToken(nextAccessToken, generation);
+        },
+      }),
+      getPendingLogout: session.getPendingLogout,
+      resumePendingLogout: () => performLogout(generation),
+    })
+      .then((result) => {
+        if (!isMounted || !session.isGenerationCurrent(generation)) return;
+        if (result.status === 'authenticated') {
+          setAccessToken(result.response.accessToken, generation);
+        } else if (result.status === 'retryable-error') {
+          setSessionError(authRecoveryMessage(result.error));
+        }
       })
-      .catch(async () => {
-        if (!isMounted) return;
-        await clearBootstrapAuthState({
-          clearStoredExpoPushToken: logoutSupport.clearStoredExpoPushToken,
-          clearStoredRefreshToken,
-          markStoredExpoPushTokenForCleanup:
-            logoutSupport.markStoredExpoPushTokenForCleanup,
-          setAccessToken,
-        });
+      .catch((error) => {
+        if (!isMounted || !session.isGenerationCurrent(generation)) return;
+        setSessionError(authRecoveryMessage(error));
       })
       .finally(() => {
-        if (isMounted) {
+        if (isMounted && session.isGenerationCurrent(generation)) {
           setIsBootstrapping(false);
         }
       });
@@ -113,90 +240,167 @@ export function AuthProvider({
     return () => {
       isMounted = false;
     };
-  }, [api, logoutSupport, setAccessToken]);
+  }, [api, bootstrapAttempt, logoutSupport, performLogout, session, setAccessToken]);
 
   const meQuery = useQuery({
     queryKey: meQueryKey,
-    enabled: !isBootstrapping && Boolean(accessToken),
+    enabled: !isBootstrapping && !sessionError && Boolean(accessToken),
     queryFn: () => api.me(),
   });
+
+  useEffect(() => {
+    if (!accessToken || !meQuery.error || isTerminalAuthFailure(meQuery.error)) return;
+    setSessionError(authRecoveryMessage(meQuery.error));
+  }, [accessToken, meQuery.error]);
+
   const user = meQuery.data?.user ?? null;
-  const isResolvingUser = !isBootstrapping && Boolean(accessToken) && !user && meQuery.isPending;
+  const isResolvingUser = !sessionError && !isBootstrapping && Boolean(accessToken) && !user && meQuery.isPending;
   const isAuthBootstrapping = isBootstrapping || isResolvingUser;
+  const accountScope = useMemo<AuthAccountScope | null>(
+    () => user ? { generation: sessionGeneration, userId: user.id } : null,
+    [sessionGeneration, user],
+  );
 
   const refreshUser = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: meQueryKey });
   }, [queryClient]);
 
+  const retrySession = useCallback(async () => {
+    setSessionError(null);
+    if (accessToken) {
+      const result = await meQuery.refetch();
+      if (result.error && !isTerminalAuthFailure(result.error)) {
+        setSessionError(authRecoveryMessage(result.error));
+      }
+      return;
+    }
+    setBootstrapAttempt((attempt) => attempt + 1);
+  }, [accessToken, meQuery]);
+
+  const isAccountScopeCurrent = useCallback((scope: AuthAccountScope) => {
+    if (!session.isGenerationCurrent(scope.generation)) return false;
+    return queryClient.getQueryData<MeQueryData>(meQueryKey)?.user.id === scope.userId;
+  }, [queryClient, session]);
+
   const setSubscription = useCallback(
-    (subscription: SubscriptionSnapshot) => {
+    (subscription: SubscriptionSnapshot, scope: AuthAccountScope) => {
+      if (!isAccountScopeCurrent(scope)) return false;
+      let updated = false;
       queryClient.setQueryData<MeQueryData | undefined>(meQueryKey, (current) =>
-        updateCachedSubscription(current, subscription),
+        {
+          if (
+            !current?.user ||
+            current.user.id !== scope.userId ||
+            !session.isGenerationCurrent(scope.generation)
+          ) {
+            return current;
+          }
+          updated = true;
+          return updateCachedSubscription(current, subscription);
+        },
       );
+      return updated;
     },
-    [queryClient],
+    [isAccountScopeCurrent, queryClient, session],
   );
 
-  const register = useCallback(
-    async (input: RegisterRequest) => {
-      const response = await api.register(input);
-      setAccessToken(response.accessToken);
+  const establishSession = useCallback(async (
+    request: (generation: number) => Promise<AuthSessionResponse>,
+  ) => {
+    if (await session.getPendingLogout()) {
+      const error = new PendingLogoutRetryableError();
+      setSessionError(authRecoveryMessage(error));
+      throw error;
+    }
 
-      if (response.refreshToken) await setStoredRefreshToken(response.refreshToken);
-
+    const generation = beginSessionTransition();
+    let response: AuthSessionResponse | null = null;
+    try {
+      response = await request(generation);
+      if (!session.isGenerationCurrent(generation)) {
+        if (response.refreshToken) {
+          await api.logout({ refreshToken: response.refreshToken }).catch(() => undefined);
+        }
+        return;
+      }
+      if (response.refreshToken) {
+        await session.setRefreshToken(response.refreshToken, generation);
+      }
+      if (!session.isGenerationCurrent(generation)) return;
+      setAccessToken(response.accessToken, generation);
       queryClient.setQueryData(meQueryKey, { user: response.user });
-    },
-    [api, queryClient, setAccessToken],
+    } catch (error) {
+      if (response?.refreshToken) {
+        await api.logout({ refreshToken: response.refreshToken }).catch(() => undefined);
+      }
+      if (session.isGenerationCurrent(generation)) {
+        setAccessToken(null, generation);
+        await session.clearRefreshToken(generation).catch(() => undefined);
+        queryClient.removeQueries({ queryKey: meQueryKey });
+      }
+      throw error;
+    } finally {
+      finishSessionTransition(generation);
+    }
+  }, [api, beginSessionTransition, finishSessionTransition, queryClient, session, setAccessToken]);
+
+  const register = useCallback(
+    (input: RegisterRequest) =>
+      establishSession((generation) => api.register(input, generation)),
+    [api, establishSession],
   );
 
   const login = useCallback(
-    async (input: LoginRequest) => {
-      const response = await api.login(input);
-      setAccessToken(response.accessToken);
-
-      if (response.refreshToken) await setStoredRefreshToken(response.refreshToken);
-
-      queryClient.setQueryData(meQueryKey, { user: response.user });
-    },
-    [api, queryClient, setAccessToken],
+    (input: LoginRequest) =>
+      establishSession((generation) => api.login(input, generation)),
+    [api, establishSession],
   );
 
   const socialAuth = useCallback(
-    async (provider: SocialAuthProvider, input: SocialAuthRequest) => {
-      const response = await api.socialAuth(provider, input);
-      setAccessToken(response.accessToken);
-
-      if (response.refreshToken) await setStoredRefreshToken(response.refreshToken);
-
-      queryClient.setQueryData(meQueryKey, { user: response.user });
-    },
-    [api, queryClient, setAccessToken],
+    (provider: SocialAuthProvider, input: SocialAuthRequest) =>
+      establishSession((generation) => api.socialAuth(provider, input, generation)),
+    [api, establishSession],
   );
 
-  const logout = useCallback(async () => {
-    await logoutWithPushCleanup({
-      authApi: api,
-      ...logoutSupport,
-      getStoredRefreshToken,
-    });
-    setAccessToken(null);
-    await clearStoredRefreshToken();
-    queryClient.removeQueries({ queryKey: meQueryKey });
-  }, [api, logoutSupport, queryClient, setAccessToken]);
+  const logout = useCallback(
+    () => logoutOperationCoordinator.run(async () => {
+      const generation = beginSessionTransition();
+      try {
+        const result = await performLogout(generation);
+        if (result.status === 'retryable' && session.isGenerationCurrent(generation)) {
+          setSessionError(authRecoveryMessage(new PendingLogoutRetryableError()));
+        }
+      } catch (error) {
+        if (session.isGenerationCurrent(generation)) {
+          setSessionError(authRecoveryMessage(new PendingLogoutRetryableError()));
+        }
+        throw error;
+      } finally {
+        finishSessionTransition(generation);
+      }
+    }),
+    [beginSessionTransition, finishSessionTransition, logoutOperationCoordinator, performLogout, session],
+  );
 
   const value = useMemo<AuthContextValue>(
     () => ({
+      accountScope,
       user,
       isBootstrapping: isAuthBootstrapping,
       isAuthenticated: Boolean(user),
+      isTransitioning,
+      sessionGeneration,
+      sessionError,
       refreshUser,
+      retrySession,
       register,
       login,
       socialAuth,
       logout,
+      isAccountScopeCurrent,
       setSubscription,
     }),
-    [isAuthBootstrapping, login, logout, refreshUser, register, setSubscription, socialAuth, user],
+    [accountScope, isAccountScopeCurrent, isAuthBootstrapping, isTransitioning, login, logout, refreshUser, register, retrySession, sessionError, sessionGeneration, setSubscription, socialAuth, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -209,6 +413,13 @@ export function useAuth() {
   }
 
   return context;
+}
+
+function authRecoveryMessage(error: unknown) {
+  if (error instanceof PendingLogoutRetryableError) {
+    return 'We could not finish signing you out. Check your connection and try again.';
+  }
+  return 'We could not restore your session. Check your connection and try again.';
 }
 
 function updateCachedSubscription(

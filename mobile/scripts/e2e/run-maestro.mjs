@@ -19,12 +19,12 @@ const appConfigPath = resolve(mobileRoot, 'app.config.js')
 const maestroMinimumVersion = process.env.MAESTRO_MIN_VERSION ?? '2.4.0'
 
 const testIds = {
-  COMPONENTS_CATALOG_ID: 'components.catalog',
   DASHBOARD_ID: 'auth.dashboard',
   EMAIL_INPUT_ID: 'auth.email-input',
   LOGOUT_BUTTON_ID: 'auth.logout-button',
   NAME_INPUT_ID: 'auth.name-input',
   PASSWORD_INPUT_ID: 'auth.password-input',
+  PAYWALL_SCREEN_ID: 'paywall.screen',
   SUBMIT_BUTTON_ID: 'auth.submit-button',
 }
 

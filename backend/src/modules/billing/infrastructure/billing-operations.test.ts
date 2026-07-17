@@ -22,9 +22,13 @@ const env: AppEnv = {
   AUTH_BODY_LIMIT_BYTES: 64 * 1024,
   AUTH_RATE_LIMIT_MAX: 60,
   AUTH_RATE_LIMIT_WINDOW_SECONDS: 60,
+  IAP_BODY_LIMIT_BYTES: 64 * 1024,
+  IAP_RATE_LIMIT_MAX: 60,
+  IAP_RATE_LIMIT_WINDOW_SECONDS: 60,
   SHUTDOWN_GRACE_SECONDS: 20,
   TRUST_PROXY: false,
   COOKIE_SECURE: false,
+  ENABLE_TEST_PUSH: false,
   SPACES_UPLOAD_MAX_BYTES: 10 * 1024 * 1024,
   SPACES_UPLOAD_URL_TTL_SECONDS: 900,
   SPACES_DOWNLOAD_URL_TTL_SECONDS: 300,
@@ -46,16 +50,17 @@ const googlePlayEnv: AppEnv = {
 
 test('releases webhook claims when final processed marker write fails', async () => {
   const deleteMany = mock(async () => ({ count: 1 }))
+  const updateMany = mock(async (args: { data: { processedAt?: Date } }) => {
+    if (args.data.processedAt) {
+      throw new Error('final marker write failed')
+    }
+    return { count: 1 }
+  })
   const db = {
     appStoreWebhook: {
       create: mock(async () => ({ id: 'webhook-1' })),
-      update: mock(async (args: { data: { processedAt?: Date } }) => {
-        if (args.data.processedAt) {
-          throw new Error('final marker write failed')
-        }
-        return { id: 'webhook-1' }
-      }),
       deleteMany,
+      updateMany,
     },
     appStoreTransaction: {
       upsert: mock(async () => ({ id: 'transaction-row-1' })),
@@ -76,6 +81,7 @@ test('releases webhook claims when final processed marker write fails', async ()
     user: {
       findUnique: mock(async () => ({ id: '018fd4f2-1f3a-7c88-bc49-333333333333' })),
     },
+    $executeRaw: mock(async () => 1),
     $transaction: async (callback: (tx: unknown) => unknown) => callback(db),
   } as unknown as DbClient
 
@@ -87,6 +93,7 @@ test('releases webhook claims when final processed marker write fails', async ()
 
   expect(deleteMany).toHaveBeenCalledWith({
     where: {
+      claimToken: expect.any(String),
       id: 'webhook-1',
       processedAt: null,
     },
@@ -98,6 +105,46 @@ test('uses the configured production App Store environment for original transact
   const db = {
     subscriptionEntitlement: {
       findUnique: mock(async () => null),
+    },
+  } as unknown as DbClient
+
+  await billingService({
+    db,
+    env: {
+      ...env,
+      APPLE_IAP_APP_APPLE_ID: 123456789,
+      APPLE_IAP_ENVIRONMENT: 'Production',
+    },
+    appStoreVerifier: {
+      ...fakeVerifier(),
+      getSubscriptionStatuses,
+    },
+  }).reconcileAppStore({
+    userId: '018fd4f2-1f3a-7c88-bc49-333333333333',
+    originalTransactionIds: ['original-1'],
+  })
+
+  expect(getSubscriptionStatuses).toHaveBeenCalledWith({
+    transactionId: 'original-1',
+    environment: Environment.PRODUCTION,
+  })
+})
+
+test('does not reuse a stored sandbox environment for production App Store reconcile', async () => {
+  const getSubscriptionStatuses = mock(async () => [])
+  const db = {
+    subscriptionEntitlement: {
+      findUnique: mock(async () => ({
+        environment: 'sandbox',
+        expiresAt: null,
+        originalTransactionId: 'original-1',
+        platform: null,
+        productId: null,
+        state: SubscriptionState.inactive,
+        transactionId: null,
+        updatedAt: new Date('2026-06-01T00:00:00.000Z'),
+        willAutoRenew: null,
+      })),
     },
   } as unknown as DbClient
 
@@ -150,6 +197,7 @@ test('keeps billing grace period entitlements active until Apple grace expiratio
         }
       }),
     },
+    $executeRaw: mock(async () => 1),
     $transaction: async (callback: (tx: unknown) => unknown) => callback(db),
   } as unknown as DbClient
 
@@ -240,6 +288,7 @@ test('status-only revoked transactions override future active entitlements for t
       })),
       upsert: entitlementUpsert,
     },
+    $executeRaw: mock(async () => 1),
     $transaction: async (callback: (tx: unknown) => unknown) => callback(db),
   } as unknown as DbClient
 
@@ -295,6 +344,7 @@ test('allows tokenless first App Store claims only with a valid offer-code redem
   const createDb = () => {
     const db = {
       appStoreTransaction: {
+        findMany: mock(async () => []),
         upsert: mock(async () => ({ id: 'transaction-row-1' })),
       },
       subscriptionEntitlement: {
@@ -310,6 +360,7 @@ test('allows tokenless first App Store claims only with a valid offer-code redem
           updatedAt: new Date(),
         })),
       },
+      $executeRaw: mock(async () => 1),
       $transaction: async (callback: (tx: unknown) => unknown) => callback(db),
     } as unknown as DbClient
     return db
@@ -382,6 +433,7 @@ test('rejects verified App Store transactions that are not auto-renewable subscr
         throw new Error('unexpected entitlement write')
       }),
     },
+    $executeRaw: mock(async () => 1),
     $transaction: async (callback: (tx: unknown) => unknown) => callback(db),
   } as unknown as DbClient
 
@@ -396,10 +448,54 @@ test('rejects verified App Store transactions that are not auto-renewable subscr
   })
 })
 
+test('rejects sandbox App Store transactions in a production billing environment', async () => {
+  const transactionUpsert = mock(async () => {
+    throw new Error('unexpected App Store transaction write')
+  })
+  const db = {
+    appStoreTransaction: { upsert: transactionUpsert },
+    subscriptionEntitlement: {
+      findUnique: mock(async () => null),
+      upsert: mock(async () => {
+        throw new Error('unexpected entitlement write')
+      }),
+    },
+    $executeRaw: mock(async () => 1),
+    $transaction: async (callback: (tx: unknown) => unknown) => callback(db),
+  } as unknown as DbClient
+
+  await expect(
+    billingService({
+      db,
+      env: {
+        ...env,
+        APPLE_IAP_APP_APPLE_ID: 123456789,
+        APPLE_IAP_ENVIRONMENT: 'Production',
+      },
+      appStoreVerifier: fakeVerifier(),
+    }).ingestAppStore({
+      userId: '018fd4f2-1f3a-7c88-bc49-333333333333',
+      signedTransactionInfo: 'signed-sandbox-transaction',
+    }),
+  ).rejects.toMatchObject({
+    code: 'IAP_INVALID_TRANSACTION',
+    message: 'App Store transaction environment does not match the configured environment',
+  })
+  expect(transactionUpsert).not.toHaveBeenCalled()
+})
+
 test('ingests active Google Play purchases and acknowledges before returning entitlement', async () => {
   const userId = '018fd4f2-1f3a-7c88-bc49-333333333333'
+  const transactionEvents: string[] = []
   const acknowledgeSubscription = mock(async () => undefined)
-  const googleUpsert = mock(async () => ({ id: 'google-row-1' }))
+  const executeRaw = mock(async () => {
+    transactionEvents.push('lock')
+    return 1
+  })
+  const googleUpsert = mock(async () => {
+    transactionEvents.push('purchase')
+    return { id: 'google-row-1' }
+  })
   const entitlementUpsert = mock(async (args: { create: { platform: string; state: SubscriptionState } }) => ({
     platform: args.create.platform,
     state: args.create.state,
@@ -416,6 +512,7 @@ test('ingests active Google Play purchases and acknowledges before returning ent
     googleFindFirst: mock(async () => null),
     googleFindMany: mock(async () => []),
     googleUpsert,
+    executeRaw,
   })
 
   const subscription = await billingService({
@@ -445,6 +542,7 @@ test('ingests active Google Play purchases and acknowledges before returning ent
     productId: 'premium',
     purchaseToken: 'purchase-token',
   })
+  expect(transactionEvents).toEqual(['lock', 'lock', 'purchase'])
   expect(googleUpsert).toHaveBeenCalledWith(
     expect.objectContaining({
       create: expect.objectContaining({
@@ -452,8 +550,45 @@ test('ingests active Google Play purchases and acknowledges before returning ent
         basePlanId: 'monthly',
         productId: 'premium',
       }),
+      update: expect.not.objectContaining({
+        userId: expect.anything(),
+      }),
     }),
   )
+})
+
+test('rejects Google Play test purchases in production before acknowledgement or persistence', async () => {
+  const acknowledgeSubscription = mock(async () => undefined)
+  const googleUpsert = mock(async () => {
+    throw new Error('unexpected Google Play purchase write')
+  })
+  const db = googlePlayDb({
+    entitlementFindUnique: mock(async () => null),
+    entitlementUpsert: mock(async () => {
+      throw new Error('unexpected entitlement write')
+    }),
+    googleFindFirst: mock(async () => null),
+    googleFindMany: mock(async () => []),
+    googleUpsert,
+  })
+
+  await expect(
+    billingService({
+      db,
+      env: { ...googlePlayEnv, NODE_ENV: 'production' },
+      googlePlayVerifier: googlePlayVerifier({ acknowledgeSubscription }),
+    }).ingestGooglePlay({
+      userId: '018fd4f2-1f3a-7c88-bc49-333333333333',
+      productId: 'premium',
+      basePlanId: 'monthly',
+      purchaseToken: 'purchase-token',
+    }),
+  ).rejects.toMatchObject({
+    code: 'IAP_INVALID_TRANSACTION',
+    message: 'Google Play test purchases are not accepted in production',
+  })
+  expect(acknowledgeSubscription).not.toHaveBeenCalled()
+  expect(googleUpsert).not.toHaveBeenCalled()
 })
 
 test('rejects Google Play purchases linked to another app user', async () => {
@@ -572,8 +707,8 @@ test('does not let stale Google Play expiration overwrite a fresher active entit
   const db = googlePlayDb({
     entitlementFindUnique: mock(async () => existingEntitlement),
     entitlementUpsert,
-    googleFindFirst: mock(async () => ({ userId: '018fd4f2-1f3a-7c88-bc49-333333333333' })),
-    googleFindMany: mock(async () => []),
+    googleFindFirst: mock(async () => null),
+    googleFindMany: mock(async () => [{ userId: '018fd4f2-1f3a-7c88-bc49-333333333333' }]),
     googleUpsert: mock(async () => ({ id: 'google-row-1' })),
   })
 
@@ -666,12 +801,14 @@ function googlePlayDb({
   googleFindFirst,
   googleFindMany,
   googleUpsert,
+  executeRaw = mock(async () => 1),
 }: {
   entitlementFindUnique: ReturnType<typeof mock>
   entitlementUpsert: ReturnType<typeof mock>
   googleFindFirst: ReturnType<typeof mock>
   googleFindMany: ReturnType<typeof mock>
   googleUpsert: ReturnType<typeof mock>
+  executeRaw?: ReturnType<typeof mock>
 }) {
   const db = {
     googlePlaySubscriptionPurchase: {
@@ -683,6 +820,7 @@ function googlePlayDb({
       findUnique: entitlementFindUnique,
       upsert: entitlementUpsert,
     },
+    $executeRaw: executeRaw,
     $transaction: async (callback: (tx: unknown) => unknown) => callback(db),
   }
   return db as unknown as DbClient

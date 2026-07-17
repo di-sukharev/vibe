@@ -5,7 +5,7 @@ import { secureHeaders } from 'hono/secure-headers'
 import type { DbClient } from './db'
 import type { AppEnv } from './env'
 import { errorResponse, handleError, validationErrorHook } from './http/errors'
-import { createAuthSecurity } from './http/security'
+import { createIngressSecurity } from './http/security'
 import { createAuthModule, type AuthHttpEnv } from './modules/auth'
 import {
   createBillingModule,
@@ -20,6 +20,10 @@ type CreateAppOptions = {
   googlePlayIapVerifier?: GooglePlaySubscriptionVerifier
   prisma: DbClient
 }
+
+const defaultWebhookBodyLimitBytes = 256 * 1024
+const defaultWebhookRateLimitMax = 600
+const defaultWebhookRateLimitWindowSeconds = 60
 
 export function createApp({
   appStoreIapVerifier,
@@ -56,15 +60,33 @@ export function createApp({
       maxAge: 600,
     }),
   )
-  for (const middleware of createAuthSecurity({
+  const publicWriteSecurity = {
     bodyLimitBytes: env.AUTH_BODY_LIMIT_BYTES,
     rateLimitMax: env.AUTH_RATE_LIMIT_MAX,
     rateLimitWindowSeconds: env.AUTH_RATE_LIMIT_WINDOW_SECONDS,
     trustProxy: env.TRUST_PROXY,
     trustedProxyClientIpHeader: env.TRUSTED_PROXY_CLIENT_IP_HEADER,
     trustedProxyClientIpPosition: env.TRUSTED_PROXY_CLIENT_IP_POSITION,
-  })) {
+  }
+  for (const middleware of createIngressSecurity(publicWriteSecurity)) {
     app.use('/api/auth/*', middleware)
+  }
+  for (const middleware of createIngressSecurity({
+    ...publicWriteSecurity,
+    bodyLimitBytes: env.IAP_BODY_LIMIT_BYTES,
+    rateLimitMax: env.IAP_RATE_LIMIT_MAX,
+    rateLimitWindowSeconds: env.IAP_RATE_LIMIT_WINDOW_SECONDS,
+  })) {
+    app.use('/api/iap/*', middleware)
+  }
+  for (const middleware of createIngressSecurity({
+    ...publicWriteSecurity,
+    bodyLimitBytes: env.WEBHOOK_BODY_LIMIT_BYTES ?? defaultWebhookBodyLimitBytes,
+    rateLimitMax: env.WEBHOOK_RATE_LIMIT_MAX ?? defaultWebhookRateLimitMax,
+    rateLimitWindowSeconds:
+      env.WEBHOOK_RATE_LIMIT_WINDOW_SECONDS ?? defaultWebhookRateLimitWindowSeconds,
+  })) {
+    app.use('/api/webhooks/*', middleware)
   }
   app.get('/', (c) => {
     return c.json({

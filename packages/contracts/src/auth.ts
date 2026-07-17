@@ -64,7 +64,18 @@ export const tokenAuthResponseSchema = cookieAuthResponseSchema.extend({
   refreshToken: z.string(),
 })
 
-export const cookieRefreshResponseSchema = z.object({ accessToken: z.string() }).strict()
+export const authSessionIdentitySchema = z
+  .object({
+    userId: z.string().min(1),
+    sessionId: z.string().min(1),
+  })
+  .strict()
+
+export const cookieRefreshResponseSchema = z
+  .object({
+    accessToken: z.string(),
+  })
+  .strict()
 export const tokenRefreshResponseSchema = cookieRefreshResponseSchema.extend({
   refreshToken: z.string(),
 })
@@ -84,6 +95,7 @@ export type TokenRefreshRequest = z.infer<typeof tokenRefreshRequestSchema>
 export type TokenLogoutRequest = z.infer<typeof tokenLogoutRequestSchema>
 export type CookieAuthResponse = z.infer<typeof cookieAuthResponseSchema>
 export type TokenAuthResponse = z.infer<typeof tokenAuthResponseSchema>
+export type AuthSessionIdentity = z.infer<typeof authSessionIdentitySchema>
 export type CookieRefreshResponse = z.infer<typeof cookieRefreshResponseSchema>
 export type TokenRefreshResponse = z.infer<typeof tokenRefreshResponseSchema>
 export type MeResponse = z.infer<typeof meResponseSchema>

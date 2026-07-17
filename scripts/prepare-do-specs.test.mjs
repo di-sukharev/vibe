@@ -76,6 +76,25 @@ describe('prepare-do-specs', () => {
     expect(`${result.stdout}\n${result.stderr}`).toContain('day-of-month field');
   });
 
+  test('rejects incomplete and invalid notification recovery cron settings', () => {
+    const incomplete = runPrepareSpecs({
+      DO_BACKEND_NOTIFICATION_CRON_NAME: 'notification-recovery',
+    });
+    expect(incomplete.status).not.toBe(0);
+    expect(`${incomplete.stdout}\n${incomplete.stderr}`).toContain(
+      'DO_BACKEND_NOTIFICATION_CRON_SCHEDULE is required',
+    );
+
+    const invalid = runPrepareSpecs({
+      DO_BACKEND_NOTIFICATION_CRON_NAME: 'notification-recovery',
+      DO_BACKEND_NOTIFICATION_CRON_SCHEDULE: '* * * * *',
+    });
+    expect(invalid.status).not.toBe(0);
+    expect(`${invalid.stdout}\n${invalid.stderr}`).toContain(
+      'must not run more often than every 15 minutes',
+    );
+  });
+
   test('rejects unsupported App Platform instance size slugs', () => {
     const result = runPrepareSpecs({
       DO_API_INSTANCE_SIZE_SLUG: 'expensive-surprise',
@@ -126,10 +145,11 @@ describe('prepare-do-specs', () => {
     expect(spec).toContain(`      - key: TRUSTED_PROXY_CLIENT_IP_HEADER
         value: "do-connecting-ip"`);
     expect(spec).toContain('    version: "18"');
+    expect(spec).not.toContain('key: ENABLE_TEST_PUSH');
     expect(spec).not.toContain('REPLACE_WITH_');
   });
 
-  test('propagates Expo Push access token to backend API, worker, and cron env', () => {
+  test('propagates Expo Push access token only to notification consumers', () => {
     const result = runPrepareSpecs({
       EXPO_PUSH_ACCESS_TOKEN: 'expo-push-secret',
       DO_BACKEND_WORKER_ENABLED: 'true',
@@ -144,8 +164,159 @@ describe('prepare-do-specs', () => {
     expect(result.status).toBe(0);
 
     const spec = readFileSync(backendSpecPath, 'utf8');
-    expect(spec.match(/key: EXPO_PUSH_ACCESS_TOKEN/g)).toHaveLength(3);
-    expect(spec.match(/value: "expo-push-secret"/g)).toHaveLength(3);
+    expect(spec.match(/key: EXPO_PUSH_ACCESS_TOKEN/g)).toHaveLength(2);
+    expect(spec.match(/value: "expo-push-secret"/g)).toHaveLength(2);
+
+    const apiBlock = serviceBlock(spec, 'api');
+    const workerBlock = workerBlockByName(spec, 'notifications');
+    const cronBlock = scheduledJobBlock(spec, 'notifications-process');
+    expect(apiBlock).not.toContain('key: EXPO_PUSH_ACCESS_TOKEN');
+    expect(workerBlock).toContain('key: EXPO_PUSH_ACCESS_TOKEN');
+    expect(workerBlock).not.toContain('key: JWT_SECRET');
+    expect(cronBlock).toContain('key: EXPO_PUSH_ACCESS_TOKEN');
+  });
+
+  test('generates maintenance and notification recovery as separate scheduled jobs', () => {
+    const result = runPrepareSpecs({
+      EXPO_PUSH_ACCESS_TOKEN: 'expo-push-secret',
+      GOOGLE_PLAY_PACKAGE_NAME: 'com.example.app',
+      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64: 'google-secret',
+      GOOGLE_PLAY_PRODUCT_IDS: 'com.example.app.premium',
+      GOOGLE_PLAY_BASE_PLAN_IDS: 'monthly,yearly',
+      DO_BACKEND_CRON_NAME: 'maintenance',
+      DO_BACKEND_CRON_TASK: 'maintenance:process',
+      DO_BACKEND_CRON_SCHEDULE: '*/15 * * * *',
+      DO_BACKEND_NOTIFICATION_CRON_NAME: 'notification-recovery',
+      DO_BACKEND_NOTIFICATION_CRON_SCHEDULE: '*/15 * * * *',
+      DO_BACKEND_NOTIFICATION_CRON_TIME_ZONE: 'Europe/Moscow',
+    });
+
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+
+    const spec = readFileSync(backendSpecPath, 'utf8');
+    const maintenance = scheduledJobBlock(spec, 'maintenance');
+    const notificationRecovery = scheduledJobBlock(spec, 'notification-recovery');
+    expect(maintenance).toContain('run_command: "bun run start:cron -- maintenance:process"');
+    expect(maintenance).toContain('key: GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64');
+    expect(maintenance).not.toContain('key: EXPO_PUSH_ACCESS_TOKEN');
+    expect(notificationRecovery).toContain(
+      'run_command: "bun run start:cron -- notifications:process"',
+    );
+    expect(notificationRecovery).toContain('time_zone: "Europe/Moscow"');
+    expect(notificationRecovery).toContain('key: EXPO_PUSH_ACCESS_TOKEN');
+    expect(notificationRecovery).not.toContain('key: GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64');
+    expect(notificationRecovery).not.toContain('key: JWT_SECRET');
+  });
+
+  test('rejects scheduled job name and task collisions for notification recovery', () => {
+    const nameCollision = runPrepareSpecs({
+      DO_BACKEND_CRON_NAME: 'maintenance',
+      DO_BACKEND_CRON_TASK: 'maintenance:process',
+      DO_BACKEND_CRON_SCHEDULE: '*/15 * * * *',
+      DO_BACKEND_NOTIFICATION_CRON_NAME: 'Maintenance',
+      DO_BACKEND_NOTIFICATION_CRON_SCHEDULE: '*/15 * * * *',
+    });
+    expect(nameCollision.status).not.toBe(0);
+    expect(`${nameCollision.stdout}\n${nameCollision.stderr}`).toContain(
+      'component name "maintenance" conflicts with scheduled job',
+    );
+
+    const duplicateTask = runPrepareSpecs({
+      DO_BACKEND_CRON_NAME: 'notifications-primary',
+      DO_BACKEND_CRON_TASK: 'notifications:process',
+      DO_BACKEND_CRON_SCHEDULE: '*/15 * * * *',
+      DO_BACKEND_NOTIFICATION_CRON_NAME: 'notifications-recovery',
+      DO_BACKEND_NOTIFICATION_CRON_SCHEDULE: '*/15 * * * *',
+    });
+    expect(duplicateTask.status).not.toBe(0);
+    expect(`${duplicateTask.stdout}\n${duplicateTask.stderr}`).toContain(
+      'already configures notifications:process',
+    );
+  });
+
+  test('keeps optional runtime env scoped to the components that consume it', () => {
+    const result = runPrepareSpecs({
+      ENABLE_TEST_PUSH: 'true',
+      EXPO_PUSH_ACCESS_TOKEN: 'expo-push-secret',
+      SPACES_REGION: 'nyc3',
+      SPACES_BUCKET: 'uploads',
+      SPACES_ENDPOINT: 'https://nyc3.digitaloceanspaces.com',
+      SPACES_ACCESS_KEY_ID: 'access-key',
+      SPACES_SECRET_ACCESS_KEY: 'storage-secret',
+      GOOGLE_PLAY_PACKAGE_NAME: 'com.example.app',
+      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64: 'google-secret',
+      GOOGLE_PLAY_PRODUCT_IDS: 'com.example.app.premium',
+      GOOGLE_PLAY_BASE_PLAN_IDS: 'monthly,yearly',
+      DO_BACKEND_WORKER_ENABLED: 'true',
+      DO_BACKEND_WORKER_NAME: 'notifications',
+      DO_BACKEND_WORKER_RUN_COMMAND: 'bun run start:worker:notifications',
+      DO_BACKEND_CRON_NAME: 'maintenance',
+      DO_BACKEND_CRON_TASK: 'maintenance:process',
+      DO_BACKEND_CRON_SCHEDULE: '*/15 * * * *',
+    });
+
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+
+    const spec = readFileSync(backendSpecPath, 'utf8');
+    const apiBlock = serviceBlock(spec, 'api');
+    const workerBlock = workerBlockByName(spec, 'notifications');
+    const cronBlock = scheduledJobBlock(spec, 'maintenance');
+
+    expect(apiBlock).toContain(`- key: ENABLE_TEST_PUSH
+        value: "true"
+        scope: RUN_TIME
+        type: GENERAL`);
+    expect(apiBlock).not.toContain('key: EXPO_PUSH_ACCESS_TOKEN');
+    expect(apiBlock).toContain('key: SPACES_SECRET_ACCESS_KEY');
+    expect(apiBlock).toContain('key: GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64');
+
+    expect(workerBlock).toContain('key: EXPO_PUSH_ACCESS_TOKEN');
+    expect(workerBlock).not.toContain('key: ENABLE_TEST_PUSH');
+    expect(workerBlock).not.toContain('key: SPACES_SECRET_ACCESS_KEY');
+    expect(workerBlock).not.toContain('key: GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64');
+
+    expect(cronBlock).toContain('key: GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64');
+    expect(cronBlock).not.toContain('key: JWT_SECRET');
+    expect(cronBlock).not.toContain('key: ENABLE_TEST_PUSH');
+    expect(cronBlock).not.toContain('key: EXPO_PUSH_ACCESS_TOKEN');
+    expect(cronBlock).not.toContain('key: SPACES_SECRET_ACCESS_KEY');
+
+    expect(spec.match(/key: ENABLE_TEST_PUSH/g)).toHaveLength(1);
+    expect(spec.match(/key: EXPO_PUSH_ACCESS_TOKEN/g)).toHaveLength(1);
+    expect(spec.match(/key: SPACES_SECRET_ACCESS_KEY/g)).toHaveLength(1);
+    expect(spec.match(/key: GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64/g)).toHaveLength(2);
+  });
+
+  test('does not expose Expo Push access tokens to unrelated background components', () => {
+    const result = runPrepareSpecs({
+      EXPO_PUSH_ACCESS_TOKEN: 'expo-push-secret',
+      DO_BACKEND_WORKER_ENABLED: 'true',
+      DO_BACKEND_WORKER_NAME: 'exports',
+      DO_BACKEND_WORKER_RUN_COMMAND: 'bun run start:worker:exports',
+      DO_BACKEND_CRON_NAME: 'database-ping',
+      DO_BACKEND_CRON_TASK: 'db:ping',
+      DO_BACKEND_CRON_SCHEDULE: '*/15 * * * *',
+    });
+
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+
+    const spec = readFileSync(backendSpecPath, 'utf8');
+    expect(serviceBlock(spec, 'api')).not.toContain('key: EXPO_PUSH_ACCESS_TOKEN');
+    expect(workerBlockByName(spec, 'exports')).not.toContain('key: EXPO_PUSH_ACCESS_TOKEN');
+    expect(scheduledJobBlock(spec, 'database-ping')).not.toContain('key: EXPO_PUSH_ACCESS_TOKEN');
+    expect(spec).not.toContain('key: EXPO_PUSH_ACCESS_TOKEN');
+  });
+
+  test('rejects invalid ENABLE_TEST_PUSH values before writing deploy specs', () => {
+    const result = runPrepareSpecs({ ENABLE_TEST_PUSH: 'yes' });
+
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).toContain(
+      'ENABLE_TEST_PUSH must be true or false',
+    );
   });
 
   test('generates explicit backend API instance sizing overrides', () => {
@@ -281,6 +452,131 @@ describe('prepare-do-specs', () => {
     expect(spec).toContain('key: SPACES_SECRET_ACCESS_KEY');
     expect(spec.match(/type: SECRET/g)?.length).toBeGreaterThanOrEqual(3);
   });
+
+  test('requires complete production App Store settings and marks its private key as secret', () => {
+    const incomplete = runPrepareSpecs({ APPLE_IAP_BUNDLE_ID: 'com.example.app' });
+    expect(incomplete.status).not.toBe(0);
+    expect(`${incomplete.stdout}\n${incomplete.stderr}`).toContain('APPLE_IAP_APP_APPLE_ID');
+
+    const sandbox = runPrepareSpecs({
+      APPLE_IAP_BUNDLE_ID: 'com.example.app',
+      APPLE_IAP_APP_APPLE_ID: '1234567890',
+      APPLE_IAP_ENVIRONMENT: 'Sandbox',
+      APPLE_IAP_ISSUER_ID: 'issuer-id',
+      APPLE_IAP_KEY_ID: 'key-id',
+      APPLE_IAP_PRIVATE_KEY_BASE64: 'private-key',
+      APPLE_IAP_PRODUCT_IDS: 'com.example.app.premium.monthly',
+    });
+    expect(sandbox.status).not.toBe(0);
+    expect(`${sandbox.stdout}\n${sandbox.stderr}`).toContain(
+      'APPLE_IAP_ENVIRONMENT must be Production',
+    );
+
+    const complete = runPrepareSpecs({
+      APPLE_IAP_BUNDLE_ID: 'com.example.app',
+      APPLE_IAP_APP_APPLE_ID: '1234567890',
+      APPLE_IAP_ENVIRONMENT: 'Production',
+      APPLE_IAP_ISSUER_ID: 'issuer-id',
+      APPLE_IAP_KEY_ID: 'key-id',
+      APPLE_IAP_PRIVATE_KEY_BASE64: 'private-key',
+      APPLE_IAP_PRODUCT_IDS: 'com.example.app.premium.monthly',
+    });
+    expect(complete.status).toBe(0);
+
+    const spec = readFileSync(backendSpecPath, 'utf8');
+    expect(spec).toContain('key: APPLE_IAP_ENVIRONMENT');
+    expect(spec).toContain('value: "Production"');
+    expect(spec).toContain('key: APPLE_IAP_ROOT_CERTS_DIR');
+    expect(spec).toContain('value: "/app/backend/src/modules/billing/certs/apple"');
+    expect(spec).toContain(`key: APPLE_IAP_PRIVATE_KEY_BASE64
+        value: "private-key"
+        scope: RUN_TIME
+        type: SECRET`);
+  });
+
+  test('requires complete Google Play settings and marks the service account as secret', () => {
+    const incomplete = runPrepareSpecs({ GOOGLE_PLAY_PACKAGE_NAME: 'com.example.app' });
+    expect(incomplete.status).not.toBe(0);
+    expect(`${incomplete.stdout}\n${incomplete.stderr}`).toContain(
+      'GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64',
+    );
+
+    const complete = runPrepareSpecs({
+      GOOGLE_PLAY_PACKAGE_NAME: 'com.example.app',
+      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64: 'service-account-json',
+      GOOGLE_PLAY_PRODUCT_IDS: 'com.example.app.premium',
+      GOOGLE_PLAY_BASE_PLAN_IDS: 'monthly,yearly',
+    });
+    expect(complete.status).toBe(0);
+
+    const spec = readFileSync(backendSpecPath, 'utf8');
+    expect(spec).toContain(`key: GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64
+        value: "service-account-json"
+        scope: RUN_TIME
+        type: SECRET`);
+    expect(spec).toContain('key: GOOGLE_PLAY_BASE_PLAN_IDS');
+  });
+
+  test('requires Google Play credentials for its reconcile cron and scopes them to API and cron', () => {
+    const missing = runPrepareSpecs({
+      DO_BACKEND_CRON_NAME: 'google-play-reconcile',
+      DO_BACKEND_CRON_TASK: 'billing:google-play:reconcile',
+      DO_BACKEND_CRON_SCHEDULE: '*/15 * * * *',
+    });
+    expect(missing.status).not.toBe(0);
+    expect(`${missing.stdout}\n${missing.stderr}`).toContain(
+      'Google Play IAP settings are required',
+    );
+
+    const complete = runPrepareSpecs({
+      DO_BACKEND_WORKER_ENABLED: 'true',
+      DO_BACKEND_WORKER_NAME: 'notifications',
+      DO_BACKEND_WORKER_RUN_COMMAND: 'bun run start:worker:notifications',
+      DO_BACKEND_CRON_NAME: 'google-play-reconcile',
+      DO_BACKEND_CRON_TASK: 'billing:google-play:reconcile',
+      DO_BACKEND_CRON_SCHEDULE: '*/15 * * * *',
+      GOOGLE_PLAY_PACKAGE_NAME: 'com.example.app',
+      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64: 'service-account-json',
+      GOOGLE_PLAY_PRODUCT_IDS: 'com.example.app.premium',
+      GOOGLE_PLAY_BASE_PLAN_IDS: 'monthly,yearly',
+    });
+    expect(complete.status).toBe(0);
+
+    const spec = readFileSync(backendSpecPath, 'utf8');
+    expect(spec.match(/key: GOOGLE_PLAY_PACKAGE_NAME/g)).toHaveLength(2);
+    expect(spec.match(/key: GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64/g)).toHaveLength(2);
+
+    const workerBlock = spec.slice(spec.indexOf('workers:'), spec.indexOf('jobs:'));
+    expect(workerBlock).not.toContain('GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64');
+  });
+
+  test('keeps maintenance usable without billing and injects Google Play credentials when enabled', () => {
+    const withoutBilling = runPrepareSpecs({
+      DO_BACKEND_CRON_NAME: 'maintenance',
+      DO_BACKEND_CRON_TASK: 'maintenance:process',
+      DO_BACKEND_CRON_SCHEDULE: '*/15 * * * *',
+    });
+    expect(withoutBilling.status).toBe(0);
+    expect(readFileSync(backendSpecPath, 'utf8')).not.toContain(
+      'GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64',
+    );
+
+    const withBilling = runPrepareSpecs({
+      DO_BACKEND_CRON_NAME: 'maintenance',
+      DO_BACKEND_CRON_TASK: 'maintenance:process',
+      DO_BACKEND_CRON_SCHEDULE: '*/15 * * * *',
+      GOOGLE_PLAY_PACKAGE_NAME: 'com.example.app',
+      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64: 'service-account-json',
+      GOOGLE_PLAY_PRODUCT_IDS: 'com.example.app.premium',
+      GOOGLE_PLAY_BASE_PLAN_IDS: 'monthly,yearly',
+    });
+    expect(withBilling.status).toBe(0);
+    expect(
+      readFileSync(backendSpecPath, 'utf8').match(
+        /key: GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64/g,
+      ),
+    ).toHaveLength(2);
+  });
 });
 
 function runPrepareSpecs(extraEnv = {}, { skipReleaseGitCheck = true, target = 'backend-final' } = {}) {
@@ -308,4 +604,31 @@ function runPrepareSpecs(extraEnv = {}, { skipReleaseGitCheck = true, target = '
       ...extraEnv,
     },
   });
+}
+
+function serviceBlock(spec, name) {
+  return componentBlock(spec, `  - name: ${name}\n`, ['\nworkers:', '\njobs:']);
+}
+
+function workerBlockByName(spec, name) {
+  return componentBlock(spec, `  - name: ${name}\n`, ['\njobs:']);
+}
+
+function scheduledJobBlock(spec, name) {
+  return componentBlock(
+    spec,
+    `  - name: ${name}\n    kind: SCHEDULED\n`,
+    ['\n  - name: '],
+  );
+}
+
+function componentBlock(spec, marker, endMarkers) {
+  const start = spec.indexOf(marker);
+  expect(start).toBeGreaterThanOrEqual(0);
+
+  const ends = endMarkers
+    .map((endMarker) => spec.indexOf(endMarker, start + marker.length))
+    .filter((end) => end >= 0);
+  const end = ends.length > 0 ? Math.min(...ends) : spec.length;
+  return spec.slice(start, end);
 }

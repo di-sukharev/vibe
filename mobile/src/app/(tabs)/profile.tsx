@@ -2,7 +2,7 @@ import { KeyValueCard } from '@/components/key-value-card';
 import { PageHeader } from '@/components/page-header';
 import { Screen } from '@/components/screen';
 import { Button } from '@/components/ui/button';
-import { useAuth } from '@/features/auth';
+import { AuthSessionErrorNotice, useAuth } from '@/features/auth';
 import { useSubscriptionIap } from '@/features/billing';
 
 export default function ProfileScreen() {
@@ -19,6 +19,8 @@ export default function ProfileScreen() {
         description={auth.user.email}
       />
 
+      <AuthSessionErrorNotice />
+
       <KeyValueCard label="User ID" value={auth.user.id} />
       <KeyValueCard label="Subscription" value={subscriptionLabel(auth.user.subscription.state)} />
 
@@ -32,7 +34,11 @@ export default function ProfileScreen() {
         </Button>
       ) : null}
 
-      <Button variant="outline" onPress={() => void auth.logout()}>
+      <Button
+        disabled={auth.isTransitioning}
+        loading={auth.isTransitioning}
+        variant="outline"
+        onPress={() => void auth.logout().catch(() => undefined)}>
         Logout
       </Button>
     </Screen>

@@ -44,6 +44,12 @@ SESSION_RETENTION_DAYS=7
 AUTH_BODY_LIMIT_BYTES=65536
 AUTH_RATE_LIMIT_MAX=60
 AUTH_RATE_LIMIT_WINDOW_SECONDS=60
+IAP_BODY_LIMIT_BYTES=65536
+IAP_RATE_LIMIT_MAX=60
+IAP_RATE_LIMIT_WINDOW_SECONDS=60
+WEBHOOK_BODY_LIMIT_BYTES=262144
+WEBHOOK_RATE_LIMIT_MAX=600
+WEBHOOK_RATE_LIMIT_WINDOW_SECONDS=60
 SHUTDOWN_GRACE_SECONDS=20
 TRUST_PROXY=true
 TRUSTED_PROXY_CLIENT_IP_HEADER=do-connecting-ip
@@ -54,7 +60,7 @@ COOKIE_SECURE=true
 
 `JWT_SECRET` belongs in the production backend runtime env. Generate it with `openssl rand -hex 32`; that command creates 32 random bytes encoded as 64 hex characters. Do not use the placeholder from `.env.example`, repeated characters, or human phrases.
 
-DigitalOcean App Platform puts the real client address in `do-connecting-ip`; its `X-Forwarded-For` identifies the ingress server. Keep `TRUSTED_PROXY_CLIENT_IP_HEADER=do-connecting-ip` on this deployment path so auth rate limits and session metadata are scoped to the actual client.
+DigitalOcean App Platform puts the real client address in `do-connecting-ip`; its `X-Forwarded-For` identifies the ingress server. Keep `TRUSTED_PROXY_CLIENT_IP_HEADER=do-connecting-ip` on this deployment path so auth/webhook ingress limits and session metadata are scoped to the actual client.
 
 If storage is active, also configure:
 
@@ -71,7 +77,32 @@ SPACES_DOWNLOAD_URL_TTL_SECONDS=300
 SPACES_PUBLIC_CACHE_CONTROL="public, max-age=31536000, immutable"
 ```
 
-Export the complete group before `bun run deploy:do:specs backend-final`. The generator rejects partial storage configuration, writes access credentials as `SECRET`, and propagates the same group to explicitly enabled backend worker/cron components.
+Export the complete group before `bun run deploy:do:specs backend-final`. The generator rejects partial storage configuration, writes access credentials as `SECRET`, and gives the group to the API service only. Current notification, billing, and maintenance background commands do not consume Spaces, so their worker/cron components do not receive storage credentials. Add an explicit command-to-env mapping and tests before a future storage-consuming background command is deployed.
+
+If native subscriptions are active, export the complete group for each enabled store before generating
+the production backend spec:
+
+```bash
+APPLE_IAP_BUNDLE_ID=com.example.app
+APPLE_IAP_APP_APPLE_ID=1234567890
+APPLE_IAP_ENVIRONMENT=Production
+APPLE_IAP_ISSUER_ID=<issuer-id>
+APPLE_IAP_KEY_ID=<key-id>
+APPLE_IAP_PRIVATE_KEY_BASE64=<base64-p8-private-key>
+APPLE_IAP_PRODUCT_IDS=com.example.app.premium.monthly,com.example.app.premium.yearly
+
+GOOGLE_PLAY_PACKAGE_NAME=com.example.app
+GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64=<base64-service-account-json>
+GOOGLE_PLAY_PRODUCT_IDS=com.example.app.premium
+GOOGLE_PLAY_BASE_PLAN_IDS=monthly,yearly
+```
+
+The generator treats each store as an atomic configuration group, rejects App Store Sandbox in a
+production spec, marks credential payloads as `SECRET`, and points Apple verification at the public
+root certificates bundled in the backend image. App Store credentials stay on the API. Google Play
+credentials also go to `billing:google-play:reconcile` and to `maintenance:process` when Google Play
+is configured, but never to workers, unrelated cron jobs, static sites, or any `EXPO_PUBLIC_*`
+variable.
 
 ## DigitalOcean App Platform
 
@@ -196,6 +227,7 @@ Backend service requirements:
 - Set `CORS_ORIGINS` to the exact deployed browser origins. Do not use `*`, empty values, or URLs with paths.
 - Attach DigitalOcean Managed PostgreSQL or provide its connection string as `DATABASE_URL`.
 - Add Spaces env only when the product uses storage. Leave Spaces env blank for projects without uploads.
+- Add a complete App Store and/or Google Play IAP group only when native subscriptions are active; partial groups fail spec generation.
 - Keep the built-in limiter only for the default single-instance API. Use a shared limiter or trusted edge/WAF policy before increasing `instance_count`.
 
 The default one-container shape is not a high-availability floor; it is the budget starter. Raise `instance_count` to two or three when availability or traffic justifies the extra monthly cost. Use `apps-s-1vcpu-2gb` or larger shared containers when memory pressure is the primary limit. Move to dedicated CPU only after metrics show CPU-bound work, noisy shared-CPU performance, strict latency requirements, or a need for CPU-based autoscaling. `webapp` and fully prerendered `website` output are Static Site components and do not have App Platform runtime container sizes. A `website` route with SSR/on-demand rendering or server islands needs a runtime service.
@@ -226,16 +258,41 @@ DigitalOcean App Platform supports non-routable worker components and scheduled 
 export DO_BACKEND_WORKER_ENABLED=true
 export DO_BACKEND_WORKER_RUN_COMMAND="bun run start:worker:notifications"
 
-# Add the auth-session retention job for production.
-export DO_BACKEND_CRON_NAME=auth-session-cleanup
-export DO_BACKEND_CRON_TASK=auth:sessions:cleanup
-export DO_BACKEND_CRON_SCHEDULE="0 3 * * *"
+# Add the combined maintenance job for production. With Google Play configured,
+# it also refreshes stale stored purchases; otherwise it only cleans auth sessions.
+export DO_BACKEND_CRON_NAME=maintenance
+export DO_BACKEND_CRON_TASK=maintenance:process
+export DO_BACKEND_CRON_SCHEDULE="*/15 * * * *"
 export DO_BACKEND_CRON_TIME_ZONE=UTC
+
+# If notifications use scheduled processing instead of the persistent worker,
+# add the independent notification recovery job alongside maintenance.
+export DO_BACKEND_NOTIFICATION_CRON_NAME=notification-recovery
+export DO_BACKEND_NOTIFICATION_CRON_SCHEDULE="*/15 * * * *"
+export DO_BACKEND_NOTIFICATION_CRON_TIME_ZONE=UTC
 
 bun run deploy:do:specs backend-final
 ```
 
-Use worker components only after a real long-running handler exists. The notification worker is a real handler once the app sends push notifications; the generator still refuses the template placeholder `bun run start:worker`, because that placeholder exits immediately and should not be deployed as an App Platform worker. Production auth should schedule `auth:sessions:cleanup`; it removes revoked sessions and sessions past either sliding or absolute lifetime only after `SESSION_RETENTION_DAYS`. `notifications:process` remains available as a scheduled recovery task when a deployment config provides a separate scheduled job for it. Keep every schedule at DigitalOcean's supported cadence of at least 15 minutes. All optional components use `backend/Dockerfile`, the repository-root build context, and the same managed PostgreSQL binding as the API. Add `EXPO_PUSH_ACCESS_TOKEN`, Spaces, or other runtime secrets only when the specific background task needs them.
+Use worker components only after a real long-running handler exists. The notification worker is a real handler once the app sends push notifications; the generator still refuses the template placeholder `bun run start:worker`, because that placeholder exits immediately and should not be deployed as an App Platform worker. Production should normally schedule `maintenance:process`; it removes stale auth sessions, redacts legacy terminal notification content, and, when the complete Google Play group is configured, reconciles stale stored purchase tokens in bounded batches. `auth:sessions:cleanup` and `billing:google-play:reconcile` remain available as dedicated tasks; the dedicated billing task fails spec generation without complete Google credentials.
+
+Choose one notification-processing topology explicitly:
+
+- Preferred for timely delivery: deploy `bun run start:worker:notifications`. The independent notification scheduled job may still be used as a recovery pass.
+- Budget topology without a persistent notification worker: configure both the primary `maintenance:process` job and `DO_BACKEND_NOTIFICATION_CRON_*`. The second job is fixed to `notifications:process`, so maintenance and push processing cannot silently replace one another.
+
+The generator rejects incomplete notification-job settings, schedules faster than DigitalOcean's supported 15-minute cadence, duplicate `notifications:process` cron definitions, and component-name collisions after normalization. All optional components use `backend/Dockerfile`, the repository-root build context, and the same managed PostgreSQL binding as the API. The generator gives Google Play credentials only to the API and a billing-capable scheduled task, while the notification worker and dedicated notification job receive only a configured `EXPO_PUSH_ACCESS_TOKEN`. Add Spaces or other runtime secrets only when the specific background task needs them.
+
+The generator enforces the current optional-env ownership explicitly:
+
+- API service: configured App Store, Google Play, Spaces, and temporary `ENABLE_TEST_PUSH` values.
+- `bun run start:worker:notifications` and `notifications:process`: configured `EXPO_PUSH_ACCESS_TOKEN`, because these components call Expo's delivery API.
+- `billing:google-play:reconcile` and Google-enabled `maintenance:process`: the complete Google Play group.
+- Other worker/cron commands: none of the Expo, store, Spaces, or test-route env above.
+
+Worker and cron components receive neither `JWT_SECRET` nor cookie/CORS settings. Their background runtime loader uses a public non-signing compatibility value internally for shared module typing, so compromise of a background component cannot disclose the API key used to mint access or offer-code tokens.
+
+`ENABLE_TEST_PUSH` accepts only `true` or `false` during spec generation and is always API-only; delivery still belongs to the notification worker or cron. Current background commands do not consume Spaces, so the generator never copies Spaces credentials to them merely because storage is configured.
 
 ## Real-Time And Horizontal Scaling
 
@@ -364,6 +421,8 @@ Production build:
 bunx eas-cli build --profile production --platform all
 ```
 
+Installed mobile clients and the backend deploy independently. Keep the auth refresh response backward-compatible, and deploy notification contract changes with the repository's legacy token-only request bridge intact. That bridge binds an old request to its authenticated session but cannot replace a newer installation-scoped registration. Remove it only after release telemetry or an enforced minimum app version proves that no supported client depends on it.
+
 ### Expo Push deployment checklist
 
 The repository includes mobile token registration, backend token storage, durable outbox delivery, Expo ticket/receipt tracking, retries, and dead-token cleanup. Deployment still needs project-specific Expo credentials:
@@ -371,9 +430,11 @@ The repository includes mobile token registration, backend token storage, durabl
 1. In the installed project, set `expo.owner`, production app identifiers, and EAS `extra.eas.projectId`; do not commit those template-wide before a real Expo owner/project is chosen.
 2. Configure APNs and FCM credentials in Expo/EAS. Keep native credential files and service-account JSON out of git and deployment logs.
 3. Set the production mobile API URL with `EXPO_PUBLIC_API_URL` so the installed build can register tokens against the deployed backend.
-4. If Expo Push Security is enabled, set the same `EXPO_PUSH_ACCESS_TOKEN` on the backend API, notification worker, and scheduled notification cron. Do not expose it through any `EXPO_PUBLIC_*` variable.
+4. If Expo Push Security is enabled, configure `EXPO_PUSH_ACCESS_TOKEN`; the generator gives it only to the notification worker and/or scheduled notification cron that call Expo's delivery API. The API route only enqueues notifications and does not receive this provider secret. Do not expose it through any `EXPO_PUBLIC_*` variable.
 5. Deploy `bun run start:worker:notifications` as a backend worker for continuous push delivery, or schedule `bun run start:cron -- notifications:process` as the recovery/fallback path after the product starts sending notifications.
-6. Install the development or production build on a physical device, sign in, and call authenticated `POST /api/notifications/test-push` to verify token registration, outbox processing, Expo ticket/receipt polling, and dead-token cleanup.
+6. For a bounded verification window, export `ENABLE_TEST_PUSH=true` before generating the backend spec. The generator validates the value and writes it only to the API component. Install the development or production build on a physical device, sign in, and call authenticated `POST /api/notifications/test-push`. The route only enqueues and is durably limited to one test message per user per minute; the worker/cron performs delivery and receipt polling. Remove the variable or set it to `false`, regenerate the spec, and redeploy after verification.
+
+Expo delivery is at-least-once across the narrow provider boundary: the provider can accept a push and the process can stop before its ticket is persisted. A retry may therefore produce a duplicate notification. Keep notification payload effects idempotent: deep links must safely open the same destination more than once, and receiving the same payload must not repeat purchases, writes, or other irreversible business actions.
 
 Apple App Store release work requires Apple Developer Program access. Google Play release work requires a Google Play Developer account.
 

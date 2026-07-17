@@ -35,6 +35,8 @@ const defaultApiServiceInstanceSizeSlug = 'apps-s-1vcpu-1gb'
 const defaultApiServiceInstanceCount = 1
 const defaultBackendWorkerInstanceSizeSlug = defaultApiServiceInstanceSizeSlug
 const defaultBackendWorkerInstanceCount = 1
+const notificationWorkerRunCommand = 'bun run start:worker:notifications'
+const notificationCronTask = 'notifications:process'
 const appPlatformComponentOwners = new Map()
 
 if (!targets.has(target)) {
@@ -109,6 +111,11 @@ if (includesBackend) {
     'https://REPLACE_WITH_WEBAPP_DEFAULT_INGRESS': backendCorsOrigins,
     REPLACE_WITH_OPTIONAL_BACKEND_WORKERS: optionalBackendWorkersBlock(),
     REPLACE_WITH_OPTIONAL_BACKEND_CRON_JOBS: optionalBackendCronJobsBlock(),
+    REPLACE_WITH_OPTIONAL_ENABLE_TEST_PUSH_ENV: optionalRuntimeBooleanEnvBlock(
+      'ENABLE_TEST_PUSH',
+      '      ',
+    ),
+    REPLACE_WITH_OPTIONAL_IAP_ENVS: optionalIapEnvBlock('      '),
     REPLACE_WITH_OPTIONAL_STORAGE_ENVS: optionalStorageEnvBlock(),
   })
 }
@@ -143,7 +150,6 @@ function commonReplacements() {
     REPLACE_WITH_DO_DB_USER: yamlString(dbUser),
     REPLACE_WITH_DO_API_INSTANCE_SIZE_SLUG: apiServiceInstanceSizeSlug,
     REPLACE_WITH_DO_API_INSTANCE_COUNT: String(apiServiceInstanceCount),
-    REPLACE_WITH_OPTIONAL_EXPO_PUSH_ACCESS_TOKEN_ENV: optionalExpoPushAccessTokenEnvBlock('      '),
   }
 }
 
@@ -177,9 +183,13 @@ function printUsage() {
   console.error('Optional deployment settings:')
   console.error('  API sizing: DO_API_INSTANCE_SIZE_SLUG, DO_API_INSTANCE_COUNT')
   console.error('  Expo Push security: EXPO_PUSH_ACCESS_TOKEN')
+  console.error('  test push API route: ENABLE_TEST_PUSH=true (temporary verification only)')
+  console.error('  App Store IAP: complete APPLE_IAP_* group (Production only)')
+  console.error('  Google Play IAP: complete GOOGLE_PLAY_* group')
   console.error('  browser API origins: DO_ADDITIONAL_CORS_ORIGINS')
   console.error('  worker: DO_BACKEND_WORKER_ENABLED=true, DO_BACKEND_WORKER_RUN_COMMAND')
   console.error('  cron: DO_BACKEND_CRON_NAME, DO_BACKEND_CRON_TASK, DO_BACKEND_CRON_SCHEDULE')
+  console.error('  notification recovery cron: DO_BACKEND_NOTIFICATION_CRON_NAME, DO_BACKEND_NOTIFICATION_CRON_SCHEDULE')
   console.error('  storage: complete SPACES_* group from backend/.env.example')
 }
 
@@ -491,6 +501,90 @@ function assertBuildTimeHttpsUrl(outputName, key, value) {
   }
 }
 
+function optionalIapEnvBlock(indent, options = {}) {
+  const includeApple = options.includeApple ?? true
+  const includeGoogle = options.includeGoogle ?? true
+  const appleNames = [
+    'APPLE_IAP_BUNDLE_ID',
+    'APPLE_IAP_APP_APPLE_ID',
+    'APPLE_IAP_ENVIRONMENT',
+    'APPLE_IAP_ISSUER_ID',
+    'APPLE_IAP_KEY_ID',
+    'APPLE_IAP_PRIVATE_KEY_BASE64',
+    'APPLE_IAP_PRODUCT_IDS',
+  ]
+  const googleNames = [
+    'GOOGLE_PLAY_PACKAGE_NAME',
+    'GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64',
+    'GOOGLE_PLAY_PRODUCT_IDS',
+    'GOOGLE_PLAY_BASE_PLAN_IDS',
+  ]
+  const appleConfigured = includeApple && appleNames.some((name) => process.env[name]?.trim())
+  const googleConfigured = includeGoogle && googleNames.some((name) => process.env[name]?.trim())
+  const values = {}
+  const secretNames = new Set()
+
+  if (options.requireGoogle && !googleConfigured) {
+    throw new Error(
+      'Google Play IAP settings are required for billing:google-play:reconcile',
+    )
+  }
+
+  if (appleConfigured) {
+    values.APPLE_IAP_BUNDLE_ID = requiredEnv('APPLE_IAP_BUNDLE_ID')
+    values.APPLE_IAP_APP_APPLE_ID = requiredPositiveIntegerString('APPLE_IAP_APP_APPLE_ID')
+    values.APPLE_IAP_ENVIRONMENT = requiredEnv('APPLE_IAP_ENVIRONMENT')
+    if (values.APPLE_IAP_ENVIRONMENT !== 'Production') {
+      throw new Error('APPLE_IAP_ENVIRONMENT must be Production in generated production specs')
+    }
+    values.APPLE_IAP_ISSUER_ID = requiredEnv('APPLE_IAP_ISSUER_ID')
+    values.APPLE_IAP_KEY_ID = requiredEnv('APPLE_IAP_KEY_ID')
+    values.APPLE_IAP_PRIVATE_KEY_BASE64 = requiredEnv('APPLE_IAP_PRIVATE_KEY_BASE64')
+    values.APPLE_IAP_ROOT_CERTS_DIR = '/app/backend/src/modules/billing/certs/apple'
+    values.APPLE_IAP_PRODUCT_IDS = requiredCommaSeparatedValues('APPLE_IAP_PRODUCT_IDS')
+    secretNames.add('APPLE_IAP_PRIVATE_KEY_BASE64')
+  }
+
+  if (googleConfigured) {
+    values.GOOGLE_PLAY_PACKAGE_NAME = requiredEnv('GOOGLE_PLAY_PACKAGE_NAME')
+    values.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64 = requiredEnv(
+      'GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64',
+    )
+    values.GOOGLE_PLAY_PRODUCT_IDS = requiredCommaSeparatedValues('GOOGLE_PLAY_PRODUCT_IDS')
+    values.GOOGLE_PLAY_BASE_PLAN_IDS = requiredCommaSeparatedValues('GOOGLE_PLAY_BASE_PLAN_IDS')
+    secretNames.add('GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64')
+  }
+
+  return Object.entries(values)
+    .map(([name, value]) => {
+      assertSafeYamlString(name, value)
+      const type = secretNames.has(name) ? 'SECRET' : 'GENERAL'
+      return `${indent}- key: ${name}\n${indent}  value: ${yamlString(value)}\n${indent}  scope: RUN_TIME\n${indent}  type: ${type}`
+    })
+    .join('\n')
+}
+
+function requiredPositiveIntegerString(name) {
+  const value = requiredEnv(name)
+  if (!/^[1-9][0-9]*$/.test(value)) {
+    throw new Error(`${name} must be a positive integer`)
+  }
+  return value
+}
+
+function requiredCommaSeparatedValues(name) {
+  const values = requiredEnv(name)
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean)
+
+  if (values.length === 0) {
+    throw new Error(`${name} must contain at least one value`)
+  }
+
+  return [...new Set(values)].join(',')
+}
+
 function optionalStorageEnvBlock() {
   const requiredNames = [
     'SPACES_REGION',
@@ -592,20 +686,11 @@ workers:
         value: "\${${dbComponentName}.DATABASE_URL}"
         scope: RUN_TIME
         type: SECRET
-      - key: JWT_SECRET
-        value: ${yamlString(requiredEnv('JWT_SECRET'))}
-        scope: RUN_TIME
-        type: SECRET
-      - key: CORS_ORIGINS
-        value: ${yamlString(backendCorsOrigins)}
-        scope: RUN_TIME
-        type: GENERAL
-      - key: COOKIE_SECURE
-        value: "true"
-        scope: RUN_TIME
-        type: GENERAL
-${optionalStorageEnvBlock()}
-${optionalExpoPushAccessTokenEnvBlock('      ')}`
+${
+  runCommand === notificationWorkerRunCommand
+    ? optionalExpoPushAccessTokenEnvBlock('      ')
+    : ''
+}`
 }
 
 function requiredWorkerRunCommand(name) {
@@ -622,6 +707,12 @@ function requiredWorkerRunCommand(name) {
 }
 
 function optionalBackendCronJobsBlock() {
+  const primaryCron = optionalPrimaryBackendCronJobBlock()
+  const notificationCron = optionalNotificationBackendCronJobBlock()
+  return `${primaryCron}${notificationCron}`
+}
+
+function optionalPrimaryBackendCronJobBlock() {
   const cronEnvNames = [
     'DO_BACKEND_CRON_NAME',
     'DO_BACKEND_CRON_TASK',
@@ -643,6 +734,52 @@ function optionalBackendCronJobsBlock() {
 
   assertSafeYamlString('DO_BACKEND_CRON_TIME_ZONE', timeZone)
 
+  const providerEnv =
+    task === 'billing:google-play:reconcile'
+      ? optionalIapEnvBlock('      ', { includeApple: false, requireGoogle: true })
+      : task === 'maintenance:process'
+        ? optionalIapEnvBlock('      ', { includeApple: false })
+        : task === notificationCronTask
+          ? optionalExpoPushAccessTokenEnvBlock('      ')
+          : ''
+
+  return backendScheduledJobBlock({ name, providerEnv, schedule, task, timeZone })
+}
+
+function optionalNotificationBackendCronJobBlock() {
+  const cronEnvNames = [
+    'DO_BACKEND_NOTIFICATION_CRON_NAME',
+    'DO_BACKEND_NOTIFICATION_CRON_SCHEDULE',
+    'DO_BACKEND_NOTIFICATION_CRON_TIME_ZONE',
+  ]
+  const hasCronEnv = cronEnvNames.some((name) => process.env[name]?.trim())
+  if (!hasCronEnv) return ''
+
+  if (process.env.DO_BACKEND_CRON_TASK?.trim() === notificationCronTask) {
+    throw new Error(
+      'DO_BACKEND_CRON_TASK already configures notifications:process; use the dedicated notification cron settings only when the primary cron owns a different task.',
+    )
+  }
+
+  const name = appPlatformComponentName(
+    'DO_BACKEND_NOTIFICATION_CRON_NAME',
+    requiredEnv('DO_BACKEND_NOTIFICATION_CRON_NAME'),
+  )
+  reserveAppPlatformComponentName(name, 'notification scheduled job')
+  const schedule = requiredCronSchedule('DO_BACKEND_NOTIFICATION_CRON_SCHEDULE')
+  const timeZone = process.env.DO_BACKEND_NOTIFICATION_CRON_TIME_ZONE?.trim() || 'UTC'
+  assertSafeYamlString('DO_BACKEND_NOTIFICATION_CRON_TIME_ZONE', timeZone)
+
+  return backendScheduledJobBlock({
+    name,
+    providerEnv: optionalExpoPushAccessTokenEnvBlock('      '),
+    schedule,
+    task: notificationCronTask,
+    timeZone,
+  })
+}
+
+function backendScheduledJobBlock({ name, providerEnv, schedule, task, timeZone }) {
   return `
   - name: ${name}
     kind: SCHEDULED
@@ -662,20 +799,7 @@ function optionalBackendCronJobsBlock() {
         value: "\${${dbComponentName}.DATABASE_URL}"
         scope: RUN_TIME
         type: SECRET
-      - key: JWT_SECRET
-        value: ${yamlString(requiredEnv('JWT_SECRET'))}
-        scope: RUN_TIME
-        type: SECRET
-      - key: CORS_ORIGINS
-        value: ${yamlString(backendCorsOrigins)}
-        scope: RUN_TIME
-        type: GENERAL
-      - key: COOKIE_SECURE
-        value: "true"
-        scope: RUN_TIME
-        type: GENERAL
-${optionalStorageEnvBlock()}
-${optionalExpoPushAccessTokenEnvBlock('      ')}`
+${providerEnv}`
 }
 
 function optionalExpoPushAccessTokenEnvBlock(indent) {
@@ -688,6 +812,20 @@ ${indent}- key: EXPO_PUSH_ACCESS_TOKEN
 ${indent}  value: ${yamlString(accessToken)}
 ${indent}  scope: RUN_TIME
 ${indent}  type: SECRET`
+}
+
+function optionalRuntimeBooleanEnvBlock(name, indent) {
+  const value = process.env[name]?.trim()
+  if (!value) return ''
+
+  if (value !== 'true' && value !== 'false') {
+    throw new Error(`${name} must be true or false`)
+  }
+
+  return `${indent}- key: ${name}
+${indent}  value: ${yamlString(value)}
+${indent}  scope: RUN_TIME
+${indent}  type: GENERAL`
 }
 
 function optionalBooleanEnv(name) {

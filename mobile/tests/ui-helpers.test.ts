@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import React from 'react';
 
+import { buttonAccessibilityLabel } from '../src/components/ui/button-utils';
+
 import {
   addMonths,
   buildCalendarMonth,
@@ -69,6 +71,22 @@ test('minimum touch target follows mobile accessibility baseline', () => {
   expect(createMinTouchTargetStyle()).toEqual({ minHeight: 44, minWidth: 44 });
   expect(createMinTouchTargetStyle('height')).toEqual({ minHeight: 44 });
   expect(createMinTouchTargetStyle('width')).toEqual({ minWidth: 44 });
+});
+
+test('loading buttons preserve a readable accessibility label', () => {
+  expect(buttonAccessibilityLabel('Save changes')).toBe('Save changes');
+  expect(buttonAccessibilityLabel(42)).toBe('42');
+  expect(buttonAccessibilityLabel(React.createElement('Icon'))).toBeUndefined();
+
+  const source = readFileSync(resolve(import.meta.dir, '../src/components/ui/button.tsx'), 'utf8');
+  expect(source).toContain('busy: Boolean(loading)');
+});
+
+test('overlay primitives expose modal escape semantics without an accessible backdrop control', () => {
+  const source = readFileSync(resolve(import.meta.dir, '../src/components/ui/primitives.tsx'), 'utf8');
+  expect(source).toContain('accessibilityViewIsModal');
+  expect(source).toContain('onAccessibilityEscape={onRequestClose}');
+  expect(source).toContain('importantForAccessibility="no"');
 });
 
 test('interactive primitives use the shared touch target constant', () => {

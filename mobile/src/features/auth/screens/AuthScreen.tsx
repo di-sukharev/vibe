@@ -19,6 +19,7 @@ import {
 import { PageHeader } from '@/components/page-header';
 import { Screen } from '@/components/screen';
 import { ScreenLoader } from '@/components/screen-states';
+import { Button } from '@/components/ui/button';
 import { SocialAuthButtons } from '../components/social-auth-buttons';
 import { useAuth } from '../provider';
 import { TEST_IDS } from '@/constants/testIds';
@@ -67,6 +68,26 @@ export function AuthScreen() {
     return <ScreenLoader />;
   }
 
+  if (auth.sessionError && !auth.user) {
+    return (
+      <Screen centered>
+        <PageHeader
+          eyebrow="Session recovery"
+          title="Your session is still safe."
+          description="The server could not be reached, so the app preserved the authority needed to recover safely."
+        />
+        <AuthError message={auth.sessionError} />
+        <Button
+          accessibilityLabel="Retry session recovery"
+          disabled={auth.isTransitioning}
+          loading={auth.isTransitioning}
+          onPress={() => void auth.retrySession()}>
+          Try again
+        </Button>
+      </Screen>
+    );
+  }
+
   if (auth.user) {
     return <Redirect href={(auth.user.subscription.isActive ? '/components' : '/paywall') as Href} />;
   }
@@ -89,6 +110,7 @@ export function AuthScreen() {
 
       <AuthPanel>
         <AuthModeTabs
+          disabled={auth.isTransitioning}
           mode={mode}
           loginTestID={TEST_IDS.auth.loginTab}
           registerTestID={TEST_IDS.auth.registerTab}
@@ -148,7 +170,7 @@ export function AuthScreen() {
           {([canSubmit, isSubmitting]) => (
             <AuthSubmitButton
               accessibilityLabel={isRegister ? 'Create account' : 'Login'}
-              disabled={!canSubmit || isSubmitting}
+              disabled={!canSubmit || isSubmitting || auth.isTransitioning}
               label={isSubmitting ? 'Working...' : isRegister ? 'Create account' : 'Login'}
               loading={isSubmitting}
               testID={TEST_IDS.auth.submitButton}
@@ -158,6 +180,7 @@ export function AuthScreen() {
         </form.Subscribe>
 
         <SocialAuthButtons
+          disabled={auth.isTransitioning}
           getDisplayName={() => (isRegister ? form.getFieldValue('displayName') : undefined)}
           onAuthenticate={auth.socialAuth}
           onError={setError}

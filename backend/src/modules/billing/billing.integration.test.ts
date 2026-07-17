@@ -1,16 +1,23 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 
-import { Environment, Status, Type, type JWSRenewalInfoDecodedPayload, type JWSTransactionDecodedPayload, type ResponseBodyV2DecodedPayload } from '@apple/app-store-server-library'
+import { Environment, OfferType, Status, Type, type JWSRenewalInfoDecodedPayload, type JWSTransactionDecodedPayload, type ResponseBodyV2DecodedPayload } from '@apple/app-store-server-library'
 import { beforeEach, afterAll, describe, expect, test } from 'bun:test'
 
 import { createApp } from '../../app'
 import { createPrisma } from '../../db'
+import type { DbClient } from '../../db'
 import type { AppEnv } from '../../env'
+import { BillingService } from './application/billing-service'
 import { BillingFailure } from './domain/errors'
 import type {
   AppStoreSubscriptionVerifier,
   AppStoreVerificationResult,
 } from './infrastructure/apple-verifier'
+import { createBillingDependencies } from './infrastructure/billing-adapters'
+import type {
+  GooglePlaySubscriptionPurchase,
+  GooglePlaySubscriptionVerifier,
+} from './infrastructure/google-play-verifier'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 const skippedDatabaseUrl = 'postgresql://skip:skip@localhost:5432/skip'
@@ -30,9 +37,13 @@ maybeDescribe('iap API integration', () => {
     AUTH_BODY_LIMIT_BYTES: 64 * 1024,
     AUTH_RATE_LIMIT_MAX: 60,
     AUTH_RATE_LIMIT_WINDOW_SECONDS: 60,
+    IAP_BODY_LIMIT_BYTES: 64 * 1024,
+    IAP_RATE_LIMIT_MAX: 60,
+    IAP_RATE_LIMIT_WINDOW_SECONDS: 60,
     SHUTDOWN_GRACE_SECONDS: 20,
     TRUST_PROXY: false,
     COOKIE_SECURE: false,
+    ENABLE_TEST_PUSH: false,
     SPACES_UPLOAD_MAX_BYTES: 10 * 1024 * 1024,
     SPACES_UPLOAD_URL_TTL_SECONDS: 900,
     SPACES_DOWNLOAD_URL_TTL_SECONDS: 300,
@@ -53,6 +64,7 @@ maybeDescribe('iap API integration', () => {
     app = createApp({ env, prisma, appStoreIapVerifier: verifier })
     await prisma.appStoreWebhook.deleteMany()
     await prisma.appStoreTransaction.deleteMany()
+    await prisma.googlePlaySubscriptionPurchase.deleteMany()
     await prisma.subscriptionEntitlement.deleteMany()
     await prisma.authSession.deleteMany()
     await prisma.user.deleteMany()
@@ -187,6 +199,124 @@ maybeDescribe('iap API integration', () => {
     expect(await prisma.appStoreTransaction.count()).toBe(0)
   })
 
+  test('serializes tokenless offer-code ownership after concurrent stale reads', async () => {
+    const firstUser = await registerAndAuthorize('offer-race-first@example.com')
+    const secondUser = await registerAndAuthorize('offer-race-second@example.com')
+    const originalTransactionId = 'original-offer-race'
+    const transactionId = 'transaction-offer-race'
+    const purchaseDate = Date.now()
+    const transaction = {
+      ...activeTransaction(firstUser.user.id),
+      appAccountToken: undefined,
+      expiresDate: purchaseDate + 30 * 24 * 60 * 60 * 1000,
+      offerIdentifier: 'WINBACK2026',
+      offerType: OfferType.OFFER_CODE,
+      originalTransactionId,
+      purchaseDate,
+      transactionId,
+      webOrderLineItemId: 'web-order-offer-race',
+    }
+    verifier.setTransaction('signed-offer-race-first', transaction)
+    verifier.setTransaction('signed-offer-race-second', transaction)
+
+    await prisma.subscriptionEntitlement.create({
+      data: {
+        userId: secondUser.user.id,
+        entitlementKey: 'premium',
+        platform: 'ios',
+        state: 'active',
+        productId: 'premium_yearly',
+        originalTransactionId: 'original-offer-race-fresher',
+        transactionId: 'transaction-offer-race-fresher',
+        expiresAt: new Date(purchaseDate + 365 * 24 * 60 * 60 * 1000),
+        willAutoRenew: true,
+        environment: 'sandbox',
+      },
+    })
+
+    const firstOwnershipRead = deferred()
+    const secondOwnershipRead = deferred()
+    const releaseFirstRead = deferred()
+    const releaseSecondRead = deferred()
+    let ownershipReadCount = 0
+    type FindEntitlementArgs = Parameters<typeof prisma.subscriptionEntitlement.findUnique>[0]
+    const gatedDb = {
+      appStoreTransaction: {
+        findMany: (args: Parameters<typeof prisma.appStoreTransaction.findMany>[0]) =>
+          prisma.appStoreTransaction.findMany(args),
+      },
+      subscriptionEntitlement: {
+        findUnique: async (args: FindEntitlementArgs) => {
+          const result = await prisma.subscriptionEntitlement.findUnique(args)
+          if (args.where.originalTransactionId !== originalTransactionId) return result
+
+          ownershipReadCount += 1
+          if (ownershipReadCount === 1) {
+            firstOwnershipRead.resolve()
+            await releaseFirstRead.promise
+          } else if (ownershipReadCount === 2) {
+            secondOwnershipRead.resolve()
+            await releaseSecondRead.promise
+          }
+          return result
+        },
+      },
+      $transaction: (
+        callback: Parameters<DbClient['$transaction']>[0],
+        options?: Parameters<DbClient['$transaction']>[1],
+      ) => prisma.$transaction(callback, options),
+    } as unknown as DbClient
+    const billing = new BillingService(createBillingDependencies({
+      appStoreVerifier: verifier,
+      db: gatedDb,
+      env,
+      googlePlayVerifier: {
+        acknowledgeSubscription: async () => {
+          throw new Error('unexpected Google Play acknowledgement')
+        },
+        getSubscriptionPurchase: async () => {
+          throw new Error('unexpected Google Play verification')
+        },
+      } satisfies GooglePlaySubscriptionVerifier,
+    }))
+    const firstToken = await billing.createOfferCodeRedemption(firstUser.user.id)
+    const secondToken = await billing.createOfferCodeRedemption(secondUser.user.id)
+
+    const firstClaim = billing.ingestAppStore({
+      userId: firstUser.user.id,
+      signedTransactionInfo: 'signed-offer-race-first',
+      offerCodeRedemptionToken: firstToken,
+    })
+    await firstOwnershipRead.promise
+    const secondClaim = billing.ingestAppStore({
+      userId: secondUser.user.id,
+      signedTransactionInfo: 'signed-offer-race-second',
+      offerCodeRedemptionToken: secondToken,
+    }).then(
+      (value) => ({ status: 'fulfilled' as const, value }),
+      (reason: unknown) => ({ status: 'rejected' as const, reason }),
+    )
+    await secondOwnershipRead.promise
+
+    releaseFirstRead.resolve()
+    await expect(firstClaim).resolves.toMatchObject({ transactionId })
+    releaseSecondRead.resolve()
+    const secondOutcome = await secondClaim
+
+    expect(secondOutcome).toMatchObject({
+      status: 'rejected',
+      reason: { code: 'IAP_OWNERSHIP_MISMATCH' },
+    })
+    const storedTransaction = await prisma.appStoreTransaction.findUniqueOrThrow({
+      where: { transactionId },
+    })
+    const storedEntitlement = await prisma.subscriptionEntitlement.findUniqueOrThrow({
+      where: { originalTransactionId },
+    })
+    expect(storedTransaction.userId).toBe(firstUser.user.id)
+    expect(storedEntitlement.userId).toBe(firstUser.user.id)
+  })
+
   test('accepts app-account-less renewals for an already linked original transaction', async () => {
     const session = await registerAndAuthorize('renewal-no-token@example.com')
     verifier.setTransaction('signed-initial', activeTransaction(session.user.id))
@@ -220,6 +350,96 @@ maybeDescribe('iap API integration', () => {
       isActive: true,
       transactionId: 'transaction-renewal-no-token',
     })
+  })
+
+  test('rejects conflicting Google Play account and profile ownership evidence', async () => {
+    const firstUser = await registerAndAuthorize('google-conflict-first@example.com')
+    const secondUser = await registerAndAuthorize('google-conflict-second@example.com')
+    const billing = googlePlayBillingService(
+      prisma,
+      googlePlayPurchase(firstUser.user.id, secondUser.user.id),
+    )
+
+    await expect(billing.ingestGooglePlay({
+      basePlanId: 'monthly',
+      productId: 'premium',
+      purchaseToken: 'google-conflicting-identity-token',
+      userId: firstUser.user.id,
+    })).rejects.toMatchObject({ code: 'IAP_OWNERSHIP_MISMATCH' })
+    expect(await prisma.googlePlaySubscriptionPurchase.count()).toBe(0)
+    expect(await prisma.subscriptionEntitlement.count()).toBe(0)
+  })
+
+  test('serializes concurrent first ownership claims for one Google Play purchase token', async () => {
+    const firstUser = await registerAndAuthorize('google-race-first@example.com')
+    const secondUser = await registerAndAuthorize('google-race-second@example.com')
+    const firstOwnershipRead = deferred()
+    const secondOwnershipRead = deferred()
+    const releaseOwnershipReads = deferred()
+    let ownershipReadCount = 0
+    const gateOwnershipRead = async <T>(read: Promise<T>) => {
+      const result = await read
+      ownershipReadCount += 1
+      if (ownershipReadCount === 1) firstOwnershipRead.resolve()
+      if (ownershipReadCount === 2) secondOwnershipRead.resolve()
+      await releaseOwnershipReads.promise
+      return result
+    }
+    const gatedDb = {
+      googlePlaySubscriptionPurchase: {
+        findFirst: (args: Parameters<typeof prisma.googlePlaySubscriptionPurchase.findFirst>[0]) =>
+          gateOwnershipRead(prisma.googlePlaySubscriptionPurchase.findFirst(args)),
+        findMany: (args: Parameters<typeof prisma.googlePlaySubscriptionPurchase.findMany>[0]) =>
+          gateOwnershipRead(prisma.googlePlaySubscriptionPurchase.findMany(args)),
+      },
+      $transaction: (
+        callback: Parameters<DbClient['$transaction']>[0],
+        options?: Parameters<DbClient['$transaction']>[1],
+      ) => prisma.$transaction(callback, options),
+    } as unknown as DbClient
+    const purchaseToken = 'google-concurrent-owner-token'
+    const firstClaim = googlePlayBillingService(
+      gatedDb,
+      googlePlayPurchase(firstUser.user.id),
+    ).ingestGooglePlay({
+      basePlanId: 'monthly',
+      productId: 'premium',
+      purchaseToken,
+      userId: firstUser.user.id,
+    }).then(
+      (value) => ({ status: 'fulfilled' as const, userId: firstUser.user.id, value }),
+      (reason: unknown) => ({ status: 'rejected' as const, userId: firstUser.user.id, reason }),
+    )
+    const secondClaim = googlePlayBillingService(
+      gatedDb,
+      googlePlayPurchase(secondUser.user.id),
+    ).ingestGooglePlay({
+      basePlanId: 'monthly',
+      productId: 'premium',
+      purchaseToken,
+      userId: secondUser.user.id,
+    }).then(
+      (value) => ({ status: 'fulfilled' as const, userId: secondUser.user.id, value }),
+      (reason: unknown) => ({ status: 'rejected' as const, userId: secondUser.user.id, reason }),
+    )
+
+    await firstOwnershipRead.promise
+    await secondOwnershipRead.promise
+    releaseOwnershipReads.resolve()
+    const outcomes = await Promise.all([firstClaim, secondClaim])
+    const fulfilled = outcomes.filter((outcome) => outcome.status === 'fulfilled')
+    const rejected = outcomes.filter((outcome) => outcome.status === 'rejected')
+
+    expect(fulfilled).toHaveLength(1)
+    expect(rejected).toHaveLength(1)
+    expect(rejected[0]).toMatchObject({ reason: { code: 'IAP_OWNERSHIP_MISMATCH' } })
+    expect(await prisma.subscriptionEntitlement.findMany({
+      select: { userId: true },
+    })).toEqual([{ userId: fulfilled[0]!.userId }])
+    expect(await prisma.googlePlaySubscriptionPurchase.findUniqueOrThrow({
+      where: { purchaseTokenHash: sha256(purchaseToken) },
+      select: { userId: true },
+    })).toEqual({ userId: fulfilled[0]!.userId })
   })
 
   test('continues original transaction reconciliation when one cached signed transaction is invalid', async () => {
@@ -404,6 +624,115 @@ maybeDescribe('iap API integration', () => {
     })
   })
 
+  test('rotates stale non-terminal Google Play purchases after every reconcile attempt', async () => {
+    const users = await Promise.all([
+      registerAndAuthorize('google-due-active@example.com'),
+      registerAndAuthorize('google-due-grace@example.com'),
+      registerAndAuthorize('google-terminal@example.com'),
+      registerAndAuthorize('google-fresh@example.com'),
+    ])
+    const records = [
+      {
+        userId: users[0].user.id,
+        purchaseToken: 'active-token',
+        reconcileAttemptedAt: new Date('2026-07-17T09:30:00.000Z'),
+        state: 'active' as const,
+        updatedAt: new Date('2026-07-17T09:30:00.000Z'),
+      },
+      {
+        userId: users[1].user.id,
+        purchaseToken: 'grace-token',
+        reconcileAttemptedAt: new Date('2026-07-17T09:00:00.000Z'),
+        state: 'billing_grace_period' as const,
+        updatedAt: new Date('2026-07-17T09:00:00.000Z'),
+      },
+      {
+        userId: users[2].user.id,
+        purchaseToken: 'expired-token',
+        reconcileAttemptedAt: new Date('2026-07-17T08:00:00.000Z'),
+        state: 'expired' as const,
+        updatedAt: new Date('2026-07-17T08:00:00.000Z'),
+      },
+      {
+        userId: users[3].user.id,
+        purchaseToken: 'fresh-token',
+        reconcileAttemptedAt: new Date('2026-07-17T09:59:00.000Z'),
+        state: 'active' as const,
+        updatedAt: new Date('2026-07-17T09:59:00.000Z'),
+      },
+    ]
+
+    for (const record of records) {
+      await prisma.googlePlaySubscriptionPurchase.create({
+        data: {
+          ...record,
+          basePlanId: 'monthly',
+          productId: 'premium',
+          purchaseTokenHash: sha256(record.purchaseToken),
+        },
+      })
+    }
+
+    const repository = createBillingDependencies({
+      appStoreVerifier: verifier,
+      db: prisma,
+      env,
+      googlePlayVerifier: {
+        acknowledgeSubscription: async () => undefined,
+        getSubscriptionPurchase: async () => {
+          throw new Error('scheduled selection must not call Google Play')
+        },
+      },
+    }).repository
+
+    const due = await repository.findGooglePlayPurchasesDue({
+      before: new Date('2026-07-17T09:45:00.000Z'),
+      limit: 1,
+    })
+    const backlog = await repository.observeGooglePlayReconcileBacklog({
+      before: new Date('2026-07-17T09:45:00.000Z'),
+    })
+
+    expect(due.map((purchase) => purchase.purchaseToken)).toEqual(['grace-token'])
+    expect(backlog).toEqual({
+      dueCount: 2,
+      oldestDueAt: new Date('2026-07-17T09:00:00.000Z'),
+    })
+
+    await expect(repository.claimGooglePlayReconcileAttempt({
+      attemptedAt: new Date('2026-07-17T10:00:00.000Z'),
+      before: new Date('2026-07-17T09:45:00.000Z'),
+      purchaseId: due[0]!.id,
+    })).resolves.toBe(true)
+    const nextDue = await repository.findGooglePlayPurchasesDue({
+      before: new Date('2026-07-17T09:45:00.000Z'),
+      limit: 1,
+    })
+    const nextBacklog = await repository.observeGooglePlayReconcileBacklog({
+      before: new Date('2026-07-17T09:45:00.000Z'),
+    })
+
+    expect(nextDue.map((purchase) => purchase.purchaseToken)).toEqual(['active-token'])
+    expect(nextBacklog).toEqual({
+      dueCount: 1,
+      oldestDueAt: new Date('2026-07-17T09:30:00.000Z'),
+    })
+
+    const concurrentClaims = await Promise.all([
+      repository.claimGooglePlayReconcileAttempt({
+        attemptedAt: new Date('2026-07-17T10:00:01.000Z'),
+        before: new Date('2026-07-17T09:45:00.000Z'),
+        purchaseId: nextDue[0]!.id,
+      }),
+      repository.claimGooglePlayReconcileAttempt({
+        attemptedAt: new Date('2026-07-17T10:00:02.000Z'),
+        before: new Date('2026-07-17T09:45:00.000Z'),
+        purchaseId: nextDue[0]!.id,
+      }),
+    ])
+    expect(concurrentClaims.sort()).toEqual([false, true])
+  })
+
   test('records duplicate App Store webhooks once and processes the first payload', async () => {
     const session = await registerAndAuthorize('webhook@example.com')
     verifier.setTransaction('signed-webhook-active', {
@@ -441,6 +770,214 @@ maybeDescribe('iap API integration', () => {
     expect(await prisma.appStoreTransaction.count()).toBe(1)
   })
 
+  test('deduplicates re-signed App Store webhooks by verified notification UUID', async () => {
+    const session = await registerAndAuthorize('webhook-resigned@example.com')
+    verifier.setTransaction('signed-webhook-resigned-active', {
+      ...activeTransaction(session.user.id),
+      transactionId: 'transaction-webhook-resigned',
+    })
+    const notification = {
+      notificationUUID: 'notification-resigned-1',
+      notificationType: 'DID_RENEW' as const,
+      data: {
+        environment: Environment.SANDBOX,
+        signedTransactionInfo: 'signed-webhook-resigned-active',
+        status: Status.ACTIVE,
+      },
+    }
+    verifier.setNotification('signed-webhook-resigned-a', notification)
+    verifier.setNotification('signed-webhook-resigned-b', notification)
+
+    const first = await app.request('/api/webhooks/app-store', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ signedPayload: 'signed-webhook-resigned-a' }),
+    })
+    const second = await app.request('/api/webhooks/app-store', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ signedPayload: 'signed-webhook-resigned-b' }),
+    })
+
+    expect(first.status).toBe(200)
+    expect(await first.json()).toMatchObject({ duplicate: false })
+    expect(second.status).toBe(200)
+    expect(await second.json()).toMatchObject({ duplicate: true })
+    expect(await prisma.appStoreWebhook.count()).toBe(1)
+    expect(await prisma.appStoreTransaction.count()).toBe(1)
+  })
+
+  test('returns retryable in-progress for a re-signed App Store UUID with a fresh lease', async () => {
+    verifier.setNotification('signed-webhook-resigned-in-progress', {
+      notificationUUID: 'notification-resigned-in-progress-1',
+      notificationType: 'DID_RENEW',
+      data: { environment: Environment.SANDBOX },
+    })
+    await prisma.appStoreWebhook.create({
+      data: {
+        claimToken: randomUUID(),
+        claimedAt: new Date(),
+        notificationUuid: 'notification-resigned-in-progress-1',
+        signedPayloadHash: sha256('signed-webhook-resigned-original'),
+      },
+    })
+
+    const response = await app.request('/api/webhooks/app-store', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ signedPayload: 'signed-webhook-resigned-in-progress' }),
+    })
+    const body = await response.json()
+
+    expect(response.status).toBe(503)
+    expect(body.error.code).toBe('IAP_WEBHOOK_IN_PROGRESS')
+    expect(await prisma.appStoreWebhook.count()).toBe(1)
+  })
+
+  test('reclaims a stale App Store UUID lease through a re-signed payload', async () => {
+    verifier.setNotification('signed-webhook-resigned-reclaim', {
+      notificationUUID: 'notification-resigned-reclaim-1',
+      notificationType: 'DID_RENEW',
+      data: { environment: Environment.SANDBOX },
+    })
+    const existing = await prisma.appStoreWebhook.create({
+      data: {
+        claimToken: randomUUID(),
+        claimedAt: new Date(Date.now() - 10 * 60 * 1000),
+        notificationUuid: 'notification-resigned-reclaim-1',
+        signedPayloadHash: sha256('signed-webhook-resigned-reclaim-original'),
+      },
+    })
+
+    const response = await app.request('/api/webhooks/app-store', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ signedPayload: 'signed-webhook-resigned-reclaim' }),
+    })
+    const stored = await prisma.appStoreWebhook.findUniqueOrThrow({
+      where: { id: existing.id },
+    })
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ duplicate: false })
+    expect(stored.processedAt).not.toBeNull()
+    expect(stored.claimToken).toBeNull()
+    expect(await prisma.appStoreWebhook.count()).toBe(1)
+  })
+
+  test('deduplicates concurrent re-signed App Store deliveries by notification UUID', async () => {
+    const session = await registerAndAuthorize('webhook-resigned-concurrent@example.com')
+    verifier.setTransaction('signed-webhook-resigned-concurrent-active', {
+      ...activeTransaction(session.user.id),
+      transactionId: 'transaction-webhook-resigned-concurrent',
+    })
+    const notification = {
+      notificationUUID: 'notification-resigned-concurrent-1',
+      notificationType: 'DID_RENEW' as const,
+      data: {
+        environment: Environment.SANDBOX,
+        signedTransactionInfo: 'signed-webhook-resigned-concurrent-active',
+        status: Status.ACTIVE,
+      },
+    }
+    verifier.setNotification('signed-webhook-resigned-concurrent-a', notification)
+    verifier.setNotification('signed-webhook-resigned-concurrent-b', notification)
+
+    const [first, second] = await Promise.all([
+      app.request('/api/webhooks/app-store', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ signedPayload: 'signed-webhook-resigned-concurrent-a' }),
+      }),
+      app.request('/api/webhooks/app-store', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ signedPayload: 'signed-webhook-resigned-concurrent-b' }),
+      }),
+    ])
+    const bodies = [await first.json(), await second.json()]
+
+    expect([first.status, second.status]).toContain(200)
+    expect([first.status, second.status].every((status) => status === 200 || status === 503)).toBe(true)
+    expect(bodies.some((body) => body.duplicate === false)).toBe(true)
+    expect(
+      bodies.some(
+        (body) => body.duplicate === true || body.error?.code === 'IAP_WEBHOOK_IN_PROGRESS',
+      ),
+    ).toBe(true)
+    expect(await prisma.appStoreWebhook.count()).toBe(1)
+    expect(await prisma.appStoreTransaction.count()).toBe(1)
+  })
+
+  test('does not retain unverified App Store webhook payloads', async () => {
+    const response = await app.request('/api/webhooks/app-store', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ signedPayload: 'attacker-controlled-invalid-payload' }),
+    })
+
+    expect(response.status).toBe(400)
+    expect(await prisma.appStoreWebhook.count()).toBe(0)
+  })
+
+  test('returns 503 without verification while an App Store webhook claim lease is fresh', async () => {
+    await prisma.appStoreWebhook.create({
+      data: {
+        claimToken: randomUUID(),
+        claimedAt: new Date(),
+        signedPayloadHash: sha256('signed-webhook-in-progress'),
+      },
+    })
+
+    const response = await app.request('/api/webhooks/app-store', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ signedPayload: 'signed-webhook-in-progress' }),
+    })
+    const body = await response.json()
+
+    expect(response.status).toBe(503)
+    expect(body.error.code).toBe('IAP_WEBHOOK_IN_PROGRESS')
+    expect(verifier.notificationVerificationCount('signed-webhook-in-progress')).toBe(0)
+  })
+
+  test('reclaims a stale App Store webhook lease and fences the completed claim', async () => {
+    const session = await registerAndAuthorize('webhook-reclaim@example.com')
+    verifier.setTransaction('signed-webhook-reclaim-active', {
+      ...activeTransaction(session.user.id),
+      transactionId: 'transaction-webhook-reclaim',
+    })
+    verifier.setNotification('signed-webhook-reclaim', {
+      notificationUUID: 'notification-reclaim-1',
+      notificationType: 'DID_RENEW',
+      data: {
+        environment: Environment.SANDBOX,
+        signedTransactionInfo: 'signed-webhook-reclaim-active',
+        status: Status.ACTIVE,
+      },
+    })
+    const webhook = await prisma.appStoreWebhook.create({
+      data: {
+        claimToken: randomUUID(),
+        claimedAt: new Date(Date.now() - 10 * 60 * 1000),
+        signedPayloadHash: sha256('signed-webhook-reclaim'),
+      },
+    })
+
+    const response = await app.request('/api/webhooks/app-store', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ signedPayload: 'signed-webhook-reclaim' }),
+    })
+    const stored = await prisma.appStoreWebhook.findUniqueOrThrow({ where: { id: webhook.id } })
+
+    expect(response.status).toBe(200)
+    expect(stored.processedAt).not.toBeNull()
+    expect(stored.claimToken).toBeNull()
+    expect(stored.claimedAt).toBeNull()
+    expect(verifier.notificationVerificationCount('signed-webhook-reclaim')).toBe(1)
+  })
+
   test('deduplicates concurrent App Store webhook deliveries before verification side effects', async () => {
     const session = await registerAndAuthorize('webhook-concurrent@example.com')
     verifier.setTransaction('signed-webhook-concurrent-active', {
@@ -471,9 +1008,14 @@ maybeDescribe('iap API integration', () => {
     ])
     const bodies = [await first.json(), await second.json()]
 
-    expect(first.status).toBe(200)
-    expect(second.status).toBe(200)
-    expect(bodies.map((body) => body.duplicate).sort()).toEqual([false, true])
+    expect([first.status, second.status]).toContain(200)
+    expect([first.status, second.status].every((status) => status === 200 || status === 503)).toBe(true)
+    expect(bodies.some((body) => body.duplicate === false)).toBe(true)
+    expect(
+      bodies.some(
+        (body) => body.duplicate === true || body.error?.code === 'IAP_WEBHOOK_IN_PROGRESS',
+      ),
+    ).toBe(true)
     expect(verifier.notificationVerificationCount('signed-webhook-concurrent')).toBe(1)
     expect(await prisma.appStoreWebhook.count()).toBe(1)
     expect(await prisma.appStoreTransaction.count()).toBe(1)
@@ -601,4 +1143,88 @@ function activeRenewal(): JWSRenewalInfoDecodedPayload {
     productId: 'premium_monthly',
     renewalDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
   }
+}
+
+function googlePlayBillingService(
+  db: DbClient,
+  purchase: GooglePlaySubscriptionPurchase,
+) {
+  return new BillingService(createBillingDependencies({
+    appStoreVerifier: new FakeAppStoreVerifier(),
+    db,
+    env: {
+      ...envForGooglePlay,
+    },
+    googlePlayVerifier: {
+      acknowledgeSubscription: async () => undefined,
+      getSubscriptionPurchase: async () => purchase,
+    },
+  }))
+}
+
+const envForGooglePlay: AppEnv = {
+  PORT: 3000,
+  DATABASE_URL: databaseUrl ?? skippedDatabaseUrl,
+  JWT_SECRET: '12345678901234567890123456789012',
+  CORS_ORIGINS: ['http://localhost:5173'],
+  ACCESS_TOKEN_TTL_SECONDS: 60,
+  REFRESH_TOKEN_TTL_DAYS: 30,
+  REFRESH_REUSE_GRACE_SECONDS: 10,
+  SESSION_ABSOLUTE_TTL_DAYS: 90,
+  SESSION_RETENTION_DAYS: 7,
+  AUTH_BODY_LIMIT_BYTES: 64 * 1024,
+  AUTH_RATE_LIMIT_MAX: 60,
+  AUTH_RATE_LIMIT_WINDOW_SECONDS: 60,
+  IAP_BODY_LIMIT_BYTES: 64 * 1024,
+  IAP_RATE_LIMIT_MAX: 60,
+  IAP_RATE_LIMIT_WINDOW_SECONDS: 60,
+  SHUTDOWN_GRACE_SECONDS: 20,
+  TRUST_PROXY: false,
+  COOKIE_SECURE: false,
+  ENABLE_TEST_PUSH: false,
+  SPACES_UPLOAD_MAX_BYTES: 10 * 1024 * 1024,
+  SPACES_UPLOAD_URL_TTL_SECONDS: 900,
+  SPACES_DOWNLOAD_URL_TTL_SECONDS: 300,
+  SPACES_PUBLIC_CACHE_CONTROL: 'public, max-age=31536000, immutable',
+  APPLE_IAP_ENVIRONMENT: 'Sandbox',
+  APPLE_IAP_PRODUCT_IDS: [],
+  APPLE_AUTH_JWKS_TIMEOUT_MS: 5000,
+  GOOGLE_AUTH_CLIENT_IDS: [],
+  GOOGLE_PLAY_PRODUCT_IDS: ['premium'],
+  GOOGLE_PLAY_BASE_PLAN_IDS: ['monthly'],
+}
+
+function googlePlayPurchase(
+  accountId: string,
+  profileId = accountId,
+): GooglePlaySubscriptionPurchase {
+  return {
+    acknowledgementState: 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED',
+    externalAccountIdentifiers: {
+      obfuscatedExternalAccountId: accountId,
+      obfuscatedExternalProfileId: profileId,
+    },
+    latestOrderId: 'GPA.1234-5678-9012-34567',
+    lineItems: [{
+      autoRenewingPlan: { autoRenewEnabled: true },
+      expiryTime: '2099-07-01T00:00:00.000Z',
+      offerDetails: { basePlanId: 'monthly' },
+      productId: 'premium',
+    }],
+    startTime: '2026-07-17T00:00:00.000Z',
+    subscriptionState: 'SUBSCRIPTION_STATE_ACTIVE',
+    testPurchase: {},
+  }
+}
+
+function sha256(value: string) {
+  return createHash('sha256').update(value).digest('hex')
+}
+
+function deferred() {
+  let resolve!: () => void
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
 }

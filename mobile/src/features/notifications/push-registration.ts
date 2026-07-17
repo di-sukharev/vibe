@@ -1,44 +1,103 @@
 import type { RegisterPushTokenRequest } from '@web-app-demo/contracts';
 
+export type PushInstallationMutation = {
+  generation: number;
+  installationId: string;
+  installationSecret: string;
+};
+
+export type PushInstallationRegistration = PushInstallationMutation & {
+  registeredUserId: string | null;
+};
+
 export type PushRegistrationApi = {
   registerExpoPushToken: (input: RegisterPushTokenRequest) => Promise<unknown>;
-  unregisterExpoPushToken: (input?: { expoPushToken?: string }) => Promise<unknown>;
 };
 
 type SyncExpoPushTokenRegistrationInput = {
   api: PushRegistrationApi;
-  clearPendingExpoPushTokenCleanup?: (expoPushToken?: string) => Promise<void>;
+  beginInstallationMutation: () => Promise<PushInstallationMutation>;
+  completeInstallationRegistration: (
+    mutation: PushInstallationMutation,
+    userId: string,
+    expoPushToken: string,
+  ) => Promise<boolean>;
   expoPushToken: string;
-  getPendingExpoPushTokenCleanup?: () => Promise<string | null>;
-  getPendingExpoPushTokenCleanupTokens?: () => Promise<string[]>;
+  forceRevalidation?: boolean;
+  getInstallationRegistration: () => Promise<PushInstallationRegistration | null>;
+  getPendingExpoPushTokenCleanupTokens: () => Promise<string[]>;
   getStoredExpoPushToken: () => Promise<string | null>;
+  isCancelled?: () => boolean;
   platform: RegisterPushTokenRequest['platform'];
-  setPendingExpoPushTokenCleanup?: (expoPushToken: string) => Promise<void>;
-  setStoredExpoPushToken: (expoPushToken: string) => Promise<void>;
+  setPendingExpoPushTokenCleanup: (expoPushToken: string) => Promise<void>;
+  userId: string;
 };
 
 export async function syncExpoPushTokenRegistration(input: SyncExpoPushTokenRegistrationInput) {
-  await flushPendingExpoPushTokenCleanup(input);
+  if (isRegistrationCancelled(input)) return;
+  const [installation, pendingTokens, storedToken] = await Promise.all([
+    input.getInstallationRegistration(),
+    input.getPendingExpoPushTokenCleanupTokens(),
+    input.getStoredExpoPushToken(),
+  ]);
+  if (isRegistrationCancelled(input)) return;
 
-  const storedToken = await input.getStoredExpoPushToken();
-  if (storedToken === input.expoPushToken) {
+  if (
+    installation?.registeredUserId === input.userId &&
+    storedToken === input.expoPushToken &&
+    pendingTokens.length === 0 &&
+    !input.forceRevalidation
+  ) {
     return {
       changed: false,
       previousToken: storedToken,
     };
   }
 
-  await input.api.registerExpoPushToken({
-    expoPushToken: input.expoPushToken,
-    platform: input.platform,
-  });
-
-  if (storedToken) {
-    await input.setPendingExpoPushTokenCleanup?.(storedToken);
-    await unregisterPendingExpoPushTokenCleanup(input, storedToken).catch(() => undefined);
+  const mutation = await input.beginInstallationMutation();
+  if (isRegistrationCancelled(input)) {
+    return {
+      changed: false,
+      previousToken: storedToken,
+    };
   }
 
-  await input.setStoredExpoPushToken(input.expoPushToken);
+  const knownTokens = uniqueExpoPushTokens([
+    storedToken,
+    ...pendingTokens,
+    input.expoPushToken,
+  ]);
+  for (const token of knownTokens) {
+    await input.setPendingExpoPushTokenCleanup(token);
+    if (isRegistrationCancelled(input)) {
+      return {
+        changed: false,
+        previousToken: storedToken,
+      };
+    }
+  }
+
+  await input.api.registerExpoPushToken({
+    expoPushToken: input.expoPushToken,
+    generation: mutation.generation,
+    installationId: mutation.installationId,
+    installationSecret: mutation.installationSecret,
+    platform: input.platform,
+    previousExpoPushTokens: knownTokens.filter((token) => token !== input.expoPushToken),
+  });
+
+  if (isRegistrationCancelled(input)) {
+    return {
+      changed: true,
+      previousToken: storedToken,
+    };
+  }
+
+  await input.completeInstallationRegistration(
+    mutation,
+    input.userId,
+    input.expoPushToken,
+  );
 
   return {
     changed: true,
@@ -46,33 +105,18 @@ export async function syncExpoPushTokenRegistration(input: SyncExpoPushTokenRegi
   };
 }
 
-async function flushPendingExpoPushTokenCleanup(input: SyncExpoPushTokenRegistrationInput) {
-  const pendingTokens = input.getPendingExpoPushTokenCleanupTokens
-    ? await input.getPendingExpoPushTokenCleanupTokens()
-    : [await input.getPendingExpoPushTokenCleanup?.()].filter(
-        (token): token is string => Boolean(token),
-      );
-
-  for (const pendingToken of pendingTokens) {
-    if (pendingToken === input.expoPushToken) {
-      await input.clearPendingExpoPushTokenCleanup?.(pendingToken);
-      continue;
-    }
-
-    await unregisterPendingExpoPushTokenCleanup(input, pendingToken).catch(() => undefined);
-  }
+function isRegistrationCancelled(input: Pick<SyncExpoPushTokenRegistrationInput, 'isCancelled'>) {
+  return input.isCancelled?.() ?? false;
 }
 
-async function unregisterPendingExpoPushTokenCleanup(
-  input: SyncExpoPushTokenRegistrationInput,
-  expoPushToken: string,
-) {
-  await input.api.unregisterExpoPushToken({ expoPushToken });
-  await input.clearPendingExpoPushTokenCleanup?.(expoPushToken);
+function uniqueExpoPushTokens(tokens: (string | null | undefined)[]) {
+  return [...new Set(tokens.filter((token): token is string => Boolean(token)))];
 }
 
 export async function cleanupExpoPushRegistrationAfterPermissionDenied(input: {
+  isCancelled?: () => boolean;
   unregisterStoredExpoPushToken: () => Promise<unknown>;
 }) {
+  if (input.isCancelled?.()) return;
   await input.unregisterStoredExpoPushToken().catch(() => undefined);
 }

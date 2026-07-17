@@ -39,6 +39,11 @@ export function createBillingModule(input: {
       ) => Promise<AuthenticatedPrincipal>,
     ) => createIapRoutes({ authenticateAccessToken, service }),
     getSubscription: (userId: string) => service.getSubscription(userId),
+    reconcileGooglePlayBatch: (request: {
+      before: Date
+      deadline: Date
+      limit: number
+    }) => service.reconcileGooglePlayBatch(request),
     webhookRoutes: createAppStoreWebhookRoutes(service),
   }
 }

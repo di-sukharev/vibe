@@ -218,7 +218,8 @@ export function OverlayFrame({
     <Modal animationType="fade" transparent visible={visible} onRequestClose={onRequestClose}>
       <SafeAreaView style={styles.modalSafeArea}>
         <Pressable
-          accessibilityRole="button"
+          accessible={false}
+          importantForAccessibility="no"
           style={[styles.modalOverlay, { backgroundColor: withAlpha('#000000', 0.42) }]}
           onPress={onRequestClose}
         />
@@ -230,6 +231,8 @@ export function OverlayFrame({
             position === 'top' && styles.modalTop,
           ]}>
           <Surface
+            accessibilityViewIsModal
+            onAccessibilityEscape={onRequestClose}
             tone="popover"
             bordered
             rounded={position === 'center' ? 'xxl' : 'xl'}

@@ -75,7 +75,7 @@ The webapp E2E flow:
 - starts the backend on `E2E_BACKEND_PORT`, which defaults to a repository-derived port;
 - starts Vite on `E2E_WEB_PORT`, which defaults to a repository-derived port;
 - stops its `postgres_test` compose project and removes the test volume after the run unless `E2E_KEEP_DOCKER=1` is set;
-- runs the auth smoke path: client validation visibility -> register/login mode switching -> register -> cookie refresh after reload -> protected route -> logout -> invalid login error -> successful login;
+- runs the web auth smoke path: client validation visibility -> register/login mode switching -> register -> cookie refresh after reload -> protected route -> logout -> invalid login error -> successful login;
 - restores one logical browser session concurrently in two tabs, propagates confirmed logout and bootstrap-error recovery, and converges both tabs on the winning session after competing account changes.
 
 Useful env:
@@ -180,7 +180,7 @@ MAESTRO_SKIP_E2E_ENV_PREFLIGHT=1
 MAESTRO_DRY_RUN=1
 ```
 
-Mobile E2E uses `testID` selectors from `mobile/src/constants/testIds.ts`. New flows should add stable selectors in UI instead of relying on fragile coordinates. Text selectors are acceptable for final user-visible messages. The auth smoke checks register, session restore after app relaunch, and logout. Any product-specific flow that depends on fixture data, such as an order flow that needs an available catalog item, should perform a preflight through the backend API before Maestro starts. Fail with a clear setup error when required test data is missing instead of falling over midway through the UI.
+Mobile E2E uses `testID` selectors from `mobile/src/constants/testIds.ts`. New flows should add stable selectors in UI instead of relying on fragile coordinates. Text selectors are acceptable for final user-visible messages. The mobile auth smoke checks register, the inactive-subscriber paywall, session restore after app relaunch, and logout. Any product-specific flow that depends on fixture data, such as an order flow that needs an available catalog item, should perform a preflight through the backend API before Maestro starts. Fail with a clear setup error when required test data is missing instead of falling over midway through the UI.
 
 Before changing Maestro startup, selectors, or E2E-only app behavior, run:
 

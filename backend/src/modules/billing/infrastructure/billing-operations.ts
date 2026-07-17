@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 
 import { AutoRenewStatus, Environment, OfferType, Status, Type, type JWSRenewalInfoDecodedPayload, type JWSTransactionDecodedPayload } from '@apple/app-store-server-library'
 import type { SubscriptionSnapshot } from '@web-app-demo/contracts'
@@ -9,8 +9,10 @@ import { Prisma } from '../../../generated/prisma/client'
 import { SubscriptionState } from '../../../generated/prisma/enums'
 import { BillingFailure } from '../domain/errors'
 import type {
-  AppStoreVerificationResult,
-} from './apple-verifier'
+  AppStoreNotificationDetails,
+  AppStoreWebhookClaim,
+} from '../application/ports'
+import type { AppStoreVerificationResult } from './apple-verifier'
 import type {
   GooglePlaySubscriptionLineItem,
   GooglePlaySubscriptionPurchase,
@@ -47,6 +49,8 @@ export type GooglePlayPurchaseReferenceInput = {
   purchaseToken: string
 }
 
+const APP_STORE_WEBHOOK_CLAIM_LEASE_MS = 5 * 60 * 1000
+
 export async function getSubscriptionSnapshot(db: DbClient, userId: string): Promise<SubscriptionSnapshot> {
   const entitlement = await db.subscriptionEntitlement.findUnique({
     where: { userId },
@@ -56,54 +60,180 @@ export async function getSubscriptionSnapshot(db: DbClient, userId: string): Pro
 }
 
 export async function resolveStatusLookupEnvironment({
-  db,
   env,
-  userId,
-  originalTransactionId,
 }: {
   db: DbClient
   env: AppEnv
   userId: string
   originalTransactionId: string
 }) {
-  const entitlement = await db.subscriptionEntitlement.findUnique({
-    where: { userId },
-    select: { environment: true, originalTransactionId: true },
-  })
-
-  if (entitlement?.originalTransactionId === originalTransactionId) {
-    return toAppStoreEnvironment(entitlement.environment ?? env.APPLE_IAP_ENVIRONMENT)
-  }
-
   return toAppStoreEnvironment(env.APPLE_IAP_ENVIRONMENT)
 }
 
 export async function claimAppStoreWebhook(db: DbClient, signedPayload: string) {
   const signedPayloadHash = hashToken(signedPayload)
+  const claimToken = randomUUID()
+  const claimedAt = new Date()
   try {
-    return await db.appStoreWebhook.create({
-      data: { signedPayloadHash },
+    const webhook = await db.appStoreWebhook.create({
+      data: { claimToken, claimedAt, signedPayloadHash },
     })
+    return { status: 'claimed' as const, claimToken, id: webhook.id }
   } catch (error) {
-    if (isUniqueConstraintError(error)) return null
-    throw error
+    if (!isUniqueConstraintError(error)) throw error
   }
-}
 
-export async function markAppStoreWebhookProcessed(db: DbClient, id: string) {
-  await db.appStoreWebhook.update({
-    where: { id },
-    data: { processedAt: new Date() },
+  const webhook = await db.appStoreWebhook.findUnique({
+    where: { signedPayloadHash },
+    select: { id: true, processedAt: true },
   })
+  if (!webhook) {
+    throw new BillingFailure(
+      'IAP_WEBHOOK_IN_PROGRESS',
+      'App Store webhook claim changed concurrently; retry later',
+    )
+  }
+  if (webhook.processedAt) return { status: 'processed' as const }
+
+  const reclaimed = await db.appStoreWebhook.updateMany({
+    where: {
+      signedPayloadHash,
+      processedAt: null,
+      OR: [
+        { claimedAt: null },
+        { claimedAt: { lt: new Date(claimedAt.getTime() - APP_STORE_WEBHOOK_CLAIM_LEASE_MS) } },
+      ],
+    },
+    data: { claimToken, claimedAt },
+  })
+
+  if (reclaimed.count === 0) return { status: 'in_progress' as const }
+  return { status: 'claimed' as const, claimToken, id: webhook.id }
 }
 
-export async function releaseFailedAppStoreWebhookClaim(db: DbClient, id: string) {
-  await db.appStoreWebhook.deleteMany({
+export async function claimVerifiedAppStoreWebhook(
+  db: DbClient,
+  input: {
+    claimToken: string
+    details: AppStoreNotificationDetails
+    id: string
+    verifiedTransaction?: AppStoreVerificationResult<JWSTransactionDecodedPayload> | null
+  },
+): Promise<AppStoreWebhookClaim> {
+  const claimedAt = new Date()
+  const transaction = input.verifiedTransaction?.payload ?? null
+  const verifiedData = {
+    environment: input.details.environment,
+    notificationType: input.details.notificationType,
+    notificationUuid: input.details.notificationUuid,
+    originalTransactionId: transaction?.originalTransactionId ?? null,
+    subtype: input.details.subtype,
+    transactionId: transaction?.transactionId ?? null,
+  }
+
+  try {
+    const result = await db.appStoreWebhook.updateMany({
+      where: {
+        claimToken: input.claimToken,
+        id: input.id,
+        processedAt: null,
+      },
+      data: { ...verifiedData, claimedAt },
+    })
+    if (result.count === 0) throw webhookClaimLostError()
+    return {
+      status: 'claimed',
+      claimToken: input.claimToken,
+      id: input.id,
+    }
+  } catch (error) {
+    if (!input.details.notificationUuid || !isUniqueConstraintError(error)) throw error
+  }
+
+  const existing = await db.appStoreWebhook.findUnique({
+    where: { notificationUuid: input.details.notificationUuid },
+    select: { id: true, processedAt: true },
+  })
+  if (!existing) {
+    throw new BillingFailure(
+      'IAP_WEBHOOK_IN_PROGRESS',
+      'App Store webhook identity changed concurrently; retry later',
+    )
+  }
+
+  const provisionalReleased = await db.appStoreWebhook.deleteMany({
     where: {
-      id,
+      claimToken: input.claimToken,
+      id: input.id,
+      notificationUuid: null,
       processedAt: null,
     },
   })
+  if (provisionalReleased.count === 0) throw webhookClaimLostError()
+  if (existing.processedAt) return { status: 'processed' }
+
+  const reclaimed = await db.appStoreWebhook.updateMany({
+    where: {
+      id: existing.id,
+      processedAt: null,
+      OR: [
+        { claimedAt: null },
+        { claimedAt: { lt: new Date(claimedAt.getTime() - APP_STORE_WEBHOOK_CLAIM_LEASE_MS) } },
+      ],
+    },
+    data: {
+      ...verifiedData,
+      claimToken: input.claimToken,
+      claimedAt,
+    },
+  })
+  if (reclaimed.count === 1) {
+    return {
+      status: 'claimed',
+      claimToken: input.claimToken,
+      id: existing.id,
+    }
+  }
+
+  const latest = await db.appStoreWebhook.findUnique({
+    where: { id: existing.id },
+    select: { processedAt: true },
+  })
+  return latest?.processedAt
+    ? { status: 'processed' }
+    : { status: 'in_progress' }
+}
+
+export async function markAppStoreWebhookProcessed(
+  db: DbClient,
+  claim: { claimToken: string; id: string },
+) {
+  const result = await db.appStoreWebhook.updateMany({
+    where: { id: claim.id, claimToken: claim.claimToken, processedAt: null },
+    data: { claimToken: null, claimedAt: null, processedAt: new Date() },
+  })
+
+  if (result.count === 0) throw webhookClaimLostError()
+}
+
+export async function releaseFailedAppStoreWebhookClaim(
+  db: DbClient,
+  claim: { claimToken: string; id: string },
+) {
+  await db.appStoreWebhook.deleteMany({
+    where: {
+      id: claim.id,
+      claimToken: claim.claimToken,
+      processedAt: null,
+    },
+  })
+}
+
+export function webhookClaimLostError() {
+  return new BillingFailure(
+    'IAP_WEBHOOK_IN_PROGRESS',
+    'App Store webhook claim is no longer owned by this worker; retry later',
+  )
 }
 
 export async function applyVerifiedGooglePlayPurchase({
@@ -128,8 +258,18 @@ export async function applyVerifiedGooglePlayPurchase({
   const purchaseTokenHash = hashToken(purchaseToken)
   const linkedPurchaseToken = normalizeString(verifiedPurchase.linkedPurchaseToken)
   const linkedPurchaseTokenHash = linkedPurchaseToken ? hashToken(linkedPurchaseToken) : null
+  const externalAccountId = normalizeString(verifiedPurchase.externalAccountIdentifiers?.obfuscatedExternalAccountId) ??
+    normalizeString(verifiedPurchase.externalAccountIdentifiers?.externalAccountId)
+  const externalProfileId = normalizeString(verifiedPurchase.externalAccountIdentifiers?.obfuscatedExternalProfileId)
 
   assertGooglePlayProductConfigured(env, requestedProductId)
+
+  if (env.NODE_ENV === 'production' && verifiedPurchase.testPurchase != null) {
+    throw new BillingFailure(
+      'IAP_INVALID_TRANSACTION',
+      'Google Play test purchases are not accepted in production',
+    )
+  }
 
   const lineItem = selectGooglePlayLineItem({
     env,
@@ -140,11 +280,11 @@ export async function applyVerifiedGooglePlayPurchase({
   const productId = normalizeRequiredString(lineItem.productId)
   const basePlanId = normalizeString(lineItem.offerDetails?.basePlanId)
 
+  assertGooglePlayExternalIdentityConsistent({ externalAccountId, externalProfileId })
   await assertGooglePlayPurchaseOwnership({
     db,
-    externalAccountId: normalizeString(verifiedPurchase.externalAccountIdentifiers?.obfuscatedExternalAccountId) ??
-      normalizeString(verifiedPurchase.externalAccountIdentifiers?.externalAccountId),
-    externalProfileId: normalizeString(verifiedPurchase.externalAccountIdentifiers?.obfuscatedExternalProfileId),
+    externalAccountId,
+    externalProfileId,
     linkedPurchaseTokenHash,
     purchaseTokenHash,
     userId,
@@ -185,12 +325,20 @@ export async function applyVerifiedGooglePlayPurchase({
   const storedAcknowledgementState = shouldAcknowledge
     ? 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED'
     : acknowledgementState
-  const environment = verifiedPurchase.testPurchase ? 'sandbox' : 'production'
-  const externalAccountId = normalizeString(verifiedPurchase.externalAccountIdentifiers?.obfuscatedExternalAccountId) ??
-    normalizeString(verifiedPurchase.externalAccountIdentifiers?.externalAccountId)
-  const externalProfileId = normalizeString(verifiedPurchase.externalAccountIdentifiers?.obfuscatedExternalProfileId)
+  const environment = verifiedPurchase.testPurchase != null ? 'sandbox' : 'production'
 
   const entitlement = await db.$transaction(async (tx) => {
+    await acquireGooglePlayPurchaseLocks(tx, [purchaseTokenHash, linkedPurchaseTokenHash])
+    await acquireEntitlementLock(tx, userId)
+    await assertGooglePlayPurchaseOwnership({
+      db: tx,
+      externalAccountId,
+      externalProfileId,
+      linkedPurchaseTokenHash,
+      purchaseTokenHash,
+      userId,
+    })
+
     await tx.googlePlaySubscriptionPurchase.upsert({
       where: { purchaseTokenHash },
       create: {
@@ -210,9 +358,9 @@ export async function applyVerifiedGooglePlayPurchase({
         expiresAt,
         willAutoRenew,
         acknowledgedAt,
+        reconcileAttemptedAt: now,
       },
       update: {
-        userId,
         purchaseToken,
         linkedPurchaseToken,
         linkedPurchaseTokenHash,
@@ -227,6 +375,7 @@ export async function applyVerifiedGooglePlayPurchase({
         expiresAt,
         willAutoRenew,
         ...(acknowledgedAt ? { acknowledgedAt } : {}),
+        reconcileAttemptedAt: now,
       },
     })
 
@@ -325,20 +474,29 @@ export async function applyVerifiedAppStoreTransaction({
     )
   }
 
+  assertAppStoreEnvironmentMatchesConfiguration({
+    configuredEnvironment: env.APPLE_IAP_ENVIRONMENT,
+    renewalEnvironment: renewal?.environment,
+    transactionEnvironment: transaction.environment,
+    verifiedEnvironment: input.verifiedTransaction.environment,
+  })
+
   const expiresAt = resolveSubscriptionExpiresAt(transaction, renewal, input.status)
   assertSubscriptionHasExpiration(transaction, renewal, expiresAt, input.status)
+  const allowTokenlessFirstClaim =
+    input.allowTokenlessFirstClaim ||
+    isValidOfferCodeTokenlessFirstClaim({
+      offerCodeRedemption,
+      transaction,
+      userId: input.userId,
+    })
   await assertTransactionOwnership({
     db,
     userId: input.userId,
     originalTransactionId,
+    transactionId,
     appAccountToken: transaction.appAccountToken,
-    allowTokenlessFirstClaim:
-      input.allowTokenlessFirstClaim ||
-      isValidOfferCodeTokenlessFirstClaim({
-        offerCodeRedemption,
-        transaction,
-        userId: input.userId,
-      }),
+    allowTokenlessFirstClaim,
   })
 
   const state = resolveSubscriptionState(transaction, renewal, input.status, now)
@@ -349,6 +507,17 @@ export async function applyVerifiedAppStoreTransaction({
   const signedRenewalHash = input.signedRenewalInfo ? hashToken(input.signedRenewalInfo) : null
 
   const entitlement = await db.$transaction(async (tx) => {
+    await acquireAppStoreTransactionLocks(tx, originalTransactionId, transactionId)
+    await acquireEntitlementLock(tx, input.userId)
+    await assertTransactionOwnership({
+      db: tx,
+      userId: input.userId,
+      originalTransactionId,
+      transactionId,
+      appAccountToken: transaction.appAccountToken,
+      allowTokenlessFirstClaim,
+    })
+
     await tx.appStoreTransaction.upsert({
       where: { transactionId },
       create: {
@@ -368,8 +537,6 @@ export async function applyVerifiedAppStoreTransaction({
         signedRenewalHash,
       },
       update: {
-        userId: input.userId,
-        originalTransactionId,
         webOrderLineItemId: transaction.webOrderLineItemId ?? null,
         productId,
         state,
@@ -439,17 +606,79 @@ export async function applyVerifiedAppStoreTransaction({
   return toSubscriptionSnapshot(entitlement, now)
 }
 
+async function acquireAppStoreTransactionLocks(
+  db: Pick<DbClient, '$executeRaw'>,
+  originalTransactionId: string,
+  transactionId: string,
+) {
+  await db.$executeRaw(
+    Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`billing-app-store-original:${originalTransactionId}`}, 0))`,
+  )
+  await db.$executeRaw(
+    Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`billing-app-store-transaction:${transactionId}`}, 0))`,
+  )
+}
+
+async function acquireEntitlementLock(
+  db: Pick<DbClient, '$executeRaw'>,
+  userId: string,
+) {
+  await db.$executeRaw(
+    Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`billing-entitlement:${userId}`}, 0))`,
+  )
+}
+
+async function acquireGooglePlayPurchaseLocks(
+  db: Pick<DbClient, '$executeRaw'>,
+  purchaseTokenHashes: Array<string | null>,
+) {
+  const uniqueHashes = [...new Set(purchaseTokenHashes.filter((hash): hash is string => hash != null))]
+    .sort()
+
+  for (const purchaseTokenHash of uniqueHashes) {
+    await db.$executeRaw(
+      Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`billing-google-play-purchase:${purchaseTokenHash}`}, 0))`,
+    )
+  }
+}
+
+function assertAppStoreEnvironmentMatchesConfiguration({
+  configuredEnvironment,
+  renewalEnvironment,
+  transactionEnvironment,
+  verifiedEnvironment,
+}: {
+  configuredEnvironment: AppEnv['APPLE_IAP_ENVIRONMENT']
+  renewalEnvironment?: Environment | string | null
+  transactionEnvironment?: Environment | string | null
+  verifiedEnvironment: Environment
+}) {
+  const configured = toAppStoreEnvironment(configuredEnvironment)
+  const observed = [verifiedEnvironment, transactionEnvironment, renewalEnvironment]
+    .filter((value): value is Environment | string => value != null)
+    .map(toAppStoreEnvironment)
+
+  if (observed.some((environment) => environment !== configured)) {
+    throw new BillingFailure(
+      'IAP_INVALID_TRANSACTION',
+      'App Store transaction environment does not match the configured environment',
+    )
+  }
+}
+
 async function assertTransactionOwnership({
   allowTokenlessFirstClaim,
   appAccountToken,
   db,
   originalTransactionId,
+  transactionId,
   userId,
 }: {
   allowTokenlessFirstClaim?: boolean
   appAccountToken: string | null | undefined
-  db: DbClient
+  db: Pick<DbClient, 'appStoreTransaction' | 'subscriptionEntitlement'>
   originalTransactionId: string
+  transactionId: string
   userId: string
 }) {
   if (appAccountToken) {
@@ -457,13 +686,40 @@ async function assertTransactionOwnership({
     throw ownershipMismatchError()
   }
 
-  const existingEntitlement = await db.subscriptionEntitlement.findUnique({
-    where: { originalTransactionId },
-    select: { userId: true },
-  })
+  const [existingEntitlement, existingTransactions] = await Promise.all([
+    db.subscriptionEntitlement.findUnique({
+      where: { originalTransactionId },
+      select: { userId: true },
+    }),
+    db.appStoreTransaction.findMany({
+      where: {
+        OR: [{ originalTransactionId }, { transactionId }],
+      },
+      select: {
+        originalTransactionId: true,
+        transactionId: true,
+        userId: true,
+      },
+    }),
+  ])
+  const transactionIdentityMismatch = existingTransactions.some(
+    (stored) =>
+      stored.transactionId === transactionId &&
+      (stored.originalTransactionId !== originalTransactionId || stored.userId !== userId),
+  )
+  const originalTransactionOwnerMismatch = existingTransactions.some(
+    (stored) =>
+      stored.originalTransactionId === originalTransactionId && stored.userId !== userId,
+  )
+
+  if (transactionIdentityMismatch || originalTransactionOwnerMismatch) {
+    throw ownershipMismatchError()
+  }
 
   if (existingEntitlement?.userId === userId) return
-  if (!existingEntitlement && allowTokenlessFirstClaim) return
+  if (existingEntitlement) throw ownershipMismatchError()
+  if (existingTransactions.some((stored) => stored.userId === userId)) return
+  if (allowTokenlessFirstClaim) return
 
   throw ownershipMismatchError()
 }
@@ -476,7 +732,7 @@ async function assertGooglePlayPurchaseOwnership({
   purchaseTokenHash,
   userId,
 }: {
-  db: DbClient
+  db: Pick<DbClient, 'googlePlaySubscriptionPurchase'>
   externalAccountId: string | null
   externalProfileId: string | null
   linkedPurchaseTokenHash: string | null
@@ -493,13 +749,13 @@ async function assertGooglePlayPurchaseOwnership({
         ]
       : []),
   ]
-  const existingPurchase = await db.googlePlaySubscriptionPurchase.findFirst({
+  const existingPurchases = await db.googlePlaySubscriptionPurchase.findMany({
     where: { OR: tokenMatches },
     select: { userId: true },
   })
 
-  if (existingPurchase) {
-    if (existingPurchase.userId === userId) return
+  if (existingPurchases.length > 0) {
+    if (existingPurchases.every((purchase) => purchase.userId === userId)) return
     throw googlePlayOwnershipMismatchError()
   }
 
@@ -510,6 +766,18 @@ async function assertGooglePlayPurchaseOwnership({
   }
 
   throw googlePlayOwnershipMismatchError()
+}
+
+function assertGooglePlayExternalIdentityConsistent({
+  externalAccountId,
+  externalProfileId,
+}: {
+  externalAccountId: string | null
+  externalProfileId: string | null
+}) {
+  if (externalAccountId && externalProfileId && externalAccountId !== externalProfileId) {
+    throw googlePlayOwnershipMismatchError()
+  }
 }
 
 function googlePlayOwnershipMismatchError() {

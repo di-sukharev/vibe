@@ -5,6 +5,11 @@ const booleanStringSchema = z
   .default('false')
   .transform((value) => value === 'true')
 
+const optionalBooleanStringSchema = z.preprocess(
+  (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+  z.enum(['true', 'false']).optional(),
+).transform((value) => value === 'true')
+
 const knownWeakJwtSecrets = new Set(['replace-with-at-least-32-random-characters'])
 
 const optionalStringSchema = z.preprocess((value) => {
@@ -71,6 +76,12 @@ const envSchema = z.object({
   AUTH_BODY_LIMIT_BYTES: z.coerce.number().int().positive().max(1024 * 1024).default(64 * 1024),
   AUTH_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(60),
   AUTH_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
+  IAP_BODY_LIMIT_BYTES: z.coerce.number().int().positive().max(1024 * 1024).default(64 * 1024),
+  IAP_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(60),
+  IAP_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
+  WEBHOOK_BODY_LIMIT_BYTES: optionalPositiveIntegerSchema,
+  WEBHOOK_RATE_LIMIT_MAX: optionalPositiveIntegerSchema,
+  WEBHOOK_RATE_LIMIT_WINDOW_SECONDS: optionalPositiveIntegerSchema,
   SHUTDOWN_GRACE_SECONDS: z.coerce.number().int().positive().max(60).default(20),
   TRUST_PROXY: booleanStringSchema,
   TRUSTED_PROXY_CLIENT_IP_HEADER: optionalHttpHeaderNameSchema,
@@ -111,6 +122,8 @@ const envSchema = z.object({
         .filter(Boolean),
     ),
   EXPO_PUSH_ACCESS_TOKEN: optionalStringSchema,
+  ENABLE_TEST_PUSH: optionalBooleanStringSchema,
+  PUSH_TOKEN_MAX_PER_USER: optionalPositiveIntegerSchema,
   PUSH_OUTBOX_PROCESS_LIMIT: optionalPositiveIntegerSchema,
   PUSH_OUTBOX_PROCESS_MAX_LOOPS: optionalPositiveIntegerSchema,
   PUSH_OUTBOX_PROCESS_MAX_RUNTIME_MS: optionalPositiveIntegerSchema,
@@ -131,6 +144,17 @@ export type AppEnv = z.infer<typeof envSchema>
 
 export function loadEnv(source: Record<string, string | undefined>) {
   return envSchema.parse(source)
+}
+
+const backgroundNonSigningJwtPlaceholder = '0123456789abcdef'.repeat(4)
+
+export function loadBackgroundEnv(source: Record<string, string | undefined>) {
+  return loadEnv({
+    ...source,
+    CORS_ORIGINS: 'https://background.invalid',
+    COOKIE_SECURE: 'true',
+    JWT_SECRET: backgroundNonSigningJwtPlaceholder,
+  })
 }
 
 function validateSessionTtls(env: z.infer<typeof envSchema>, ctx: z.RefinementCtx) {

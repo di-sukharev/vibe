@@ -41,9 +41,87 @@ export type AppStoreSubscriptionVerifier = {
   }) => Promise<AppStoreStatusTransaction[]>
 }
 
-export function createAppStoreSubscriptionVerifier(env: AppEnv): AppStoreSubscriptionVerifier {
+type AppStoreStatusApiClient = {
+  abortPendingRequests?: () => void
+  getAllSubscriptionStatuses(transactionId: string): Promise<{
+    data?: Array<{
+      lastTransactions?: AppStoreStatusTransaction[]
+    }>
+  }>
+}
+
+type AppStoreFetch = (
+  input: string | URL | Request,
+  init?: RequestInit,
+) => Promise<Response>
+
+type AppStoreSubscriptionVerifierOptions = {
+  apiClientFactory?: (input: {
+    bundleId: string
+    environment: Environment
+    issuerId: string
+    keyId: string
+    privateKey: string
+  }) => AppStoreStatusApiClient
+  fetchImpl?: AppStoreFetch
+  statusLookupTimeoutMs?: number
+}
+
+const appStoreStatusLookupTimeoutMs = 15_000
+const appStoreServerBaseUrls = {
+  [Environment.PRODUCTION]: 'https://api.storekit.itunes.apple.com',
+  [Environment.SANDBOX]: 'https://api.storekit-sandbox.itunes.apple.com',
+} as const
+
+class AbortableAppStoreServerAPIClient extends AppStoreServerAPIClient {
+  private readonly controllers = new Set<AbortController>()
+
+  constructor(
+    signingKey: string,
+    keyId: string,
+    issuerId: string,
+    bundleId: string,
+    private readonly environment: Environment.PRODUCTION | Environment.SANDBOX,
+    private readonly fetchImpl: AppStoreFetch = fetch,
+  ) {
+    super(signingKey, keyId, issuerId, bundleId, environment)
+  }
+
+  abortPendingRequests() {
+    for (const controller of this.controllers) controller.abort()
+    this.controllers.clear()
+  }
+
+  protected override makeFetchRequest(
+    path: string,
+    parsedQueryParameters: URLSearchParams,
+    method: string,
+    requestBody: string | Buffer | undefined,
+    headers: Record<string, string>,
+  ): Promise<import('node-fetch').Response> {
+    const controller = new AbortController()
+    this.controllers.add(controller)
+    const query = parsedQueryParameters.toString()
+    const request = this.fetchImpl(
+      `${appStoreServerBaseUrls[this.environment]}${path}${query ? `?${query}` : ''}`,
+      {
+        body: requestBody as BodyInit | undefined,
+        headers,
+        method,
+        signal: controller.signal,
+      },
+    ).finally(() => {
+      this.controllers.delete(controller)
+    })
+    return request as unknown as Promise<import('node-fetch').Response>
+  }
+}
+
+export function createAppStoreSubscriptionVerifier(
+  env: AppEnv,
+  options: AppStoreSubscriptionVerifierOptions = {},
+): AppStoreSubscriptionVerifier {
   const verifierCache = new Map<Environment, SignedDataVerifier>()
-  const apiClientCache = new Map<Environment, AppStoreServerAPIClient>()
   let rootCertificatesCache: Buffer[] | null = null
 
   function requireBundleId() {
@@ -61,12 +139,14 @@ export function createAppStoreSubscriptionVerifier(env: AppEnv): AppStoreSubscri
     if (rootCertificatesCache) return rootCertificatesCache
 
     const certsDir =
-      env.APPLE_IAP_ROOT_CERTS_DIR ?? resolve(import.meta.dir, '../../certs/apple')
+      env.APPLE_IAP_ROOT_CERTS_DIR ?? resolve(import.meta.dir, '../certs/apple')
     let certFiles: string[]
 
     try {
       certFiles = readdirSync(certsDir)
-        .filter((fileName) => ['.cer', '.crt', '.der'].includes(extname(fileName).toLowerCase()))
+        .filter((fileName) =>
+          ['.cer', '.crt', '.der', '.pem'].includes(extname(fileName).toLowerCase()),
+        )
         .sort()
     } catch {
       throw new BillingFailure(
@@ -90,13 +170,22 @@ export function createAppStoreSubscriptionVerifier(env: AppEnv): AppStoreSubscri
     const cached = verifierCache.get(environment)
     if (cached) return cached
 
-    const verifier = new SignedDataVerifier(
-      readRootCertificates(),
-      false,
-      environment,
-      requireBundleId(),
-      environment === Environment.PRODUCTION ? env.APPLE_IAP_APP_APPLE_ID : undefined,
-    )
+    let verifier: SignedDataVerifier
+    try {
+      verifier = new SignedDataVerifier(
+        readRootCertificates(),
+        false,
+        environment,
+        requireBundleId(),
+        environment === Environment.PRODUCTION ? env.APPLE_IAP_APP_APPLE_ID : undefined,
+      )
+    } catch (error) {
+      if (isIapConfigurationError(error)) throw error
+      throw new BillingFailure(
+        'IAP_NOT_CONFIGURED',
+        'Apple root certificates or verifier identifiers are invalid',
+      )
+    }
 
     verifierCache.set(environment, verifier)
     return verifier
@@ -107,9 +196,6 @@ export function createAppStoreSubscriptionVerifier(env: AppEnv): AppStoreSubscri
   }
 
   function getApiClient(environment: Environment) {
-    const cached = apiClientCache.get(environment)
-    if (cached) return cached
-
     if (!env.APPLE_IAP_ISSUER_ID || !env.APPLE_IAP_KEY_ID || !env.APPLE_IAP_PRIVATE_KEY_BASE64) {
       throw new BillingFailure(
         'IAP_NOT_CONFIGURED',
@@ -117,23 +203,28 @@ export function createAppStoreSubscriptionVerifier(env: AppEnv): AppStoreSubscri
       )
     }
 
-    const client = new AppStoreServerAPIClient(
-      decodePrivateKey(env.APPLE_IAP_PRIVATE_KEY_BASE64),
-      env.APPLE_IAP_KEY_ID,
-      env.APPLE_IAP_ISSUER_ID,
-      requireBundleId(),
+    const input = {
+      bundleId: requireBundleId(),
       environment,
-    )
-    apiClientCache.set(environment, client)
+      issuerId: env.APPLE_IAP_ISSUER_ID,
+      keyId: env.APPLE_IAP_KEY_ID,
+      privateKey: decodePrivateKey(env.APPLE_IAP_PRIVATE_KEY_BASE64),
+    }
+    const client = options.apiClientFactory
+      ? options.apiClientFactory(input)
+      : new AbortableAppStoreServerAPIClient(
+          input.privateKey,
+          input.keyId,
+          input.issuerId,
+          input.bundleId,
+          input.environment as Environment.PRODUCTION | Environment.SANDBOX,
+          options.fetchImpl,
+        )
     return client
   }
 
   function verificationEnvironments() {
-    if (env.APPLE_IAP_ENVIRONMENT === 'Production') {
-      return [Environment.PRODUCTION, Environment.SANDBOX]
-    }
-
-    return [Environment.SANDBOX, Environment.PRODUCTION]
+    return [normalizeEnvironment(env.APPLE_IAP_ENVIRONMENT)]
   }
 
   async function verifyWithFallback<T>(
@@ -164,6 +255,10 @@ export function createAppStoreSubscriptionVerifier(env: AppEnv): AppStoreSubscri
     return Environment.SANDBOX
   }
 
+  if (env.APPLE_IAP_BUNDLE_ID) {
+    getVerifier(normalizeEnvironment(env.APPLE_IAP_ENVIRONMENT))
+  }
+
   return {
     verifyTransaction: (signedTransactionInfo) =>
       verifyWithFallback((verifier) => verifier.verifyAndDecodeTransaction(signedTransactionInfo)),
@@ -173,7 +268,13 @@ export function createAppStoreSubscriptionVerifier(env: AppEnv): AppStoreSubscri
       verifyWithFallback((verifier) => verifier.verifyAndDecodeNotification(signedPayload)),
     getSubscriptionStatuses: async ({ transactionId, environment }) => {
       const client = getApiClient(normalizeEnvironment(environment))
-      const response = await client.getAllSubscriptionStatuses(transactionId)
+      const timeoutMs = options.statusLookupTimeoutMs ?? appStoreStatusLookupTimeoutMs
+      const response = await withApplicationDeadline(
+        client.getAllSubscriptionStatuses(transactionId),
+        timeoutMs,
+        `App Store subscription status lookup exceeded ${timeoutMs}ms`,
+        () => client.abortPendingRequests?.(),
+      )
 
       return (
         response.data?.flatMap((group) =>
@@ -190,4 +291,28 @@ export function createAppStoreSubscriptionVerifier(env: AppEnv): AppStoreSubscri
 
 function isIapConfigurationError(error: unknown) {
   return error instanceof BillingFailure && error.code === 'IAP_NOT_CONFIGURED'
+}
+
+function withApplicationDeadline<T>(
+  operation: Promise<T>,
+  timeoutMs: number,
+  message: string,
+  onTimeout?: () => void,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error(message))
+      onTimeout?.()
+    }, timeoutMs)
+    operation.then(
+      (value) => {
+        clearTimeout(timeout)
+        resolve(value)
+      },
+      (error) => {
+        clearTimeout(timeout)
+        reject(error)
+      },
+    )
+  })
 }

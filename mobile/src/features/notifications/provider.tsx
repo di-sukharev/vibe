@@ -8,20 +8,22 @@ import { Platform } from 'react-native';
 import { useAuth } from '@/features/auth';
 import type { NotificationsApiPort } from './api';
 import {
-  clearPendingExpoPushTokenCleanup,
-  getPendingExpoPushTokenCleanup,
+  beginPushInstallationMutation,
+  commitPushInstallationRegistration,
   getPendingExpoPushTokenCleanupTokens,
+  getPushInstallationRegistration,
   getStoredExpoPushToken,
   setPendingExpoPushTokenCleanup,
-  setStoredExpoPushToken,
   unregisterStoredExpoPushToken,
 } from './push-token-store';
 import { shouldEnablePushNotifications } from './push-notification-settings';
 import { resolveNotificationHref } from './push-navigation';
+import { consumeInitialNotificationResponse } from './notification-response';
 import {
   cleanupExpoPushRegistrationAfterPermissionDenied,
   syncExpoPushTokenRegistration,
 } from './push-registration';
+import type { PushRegistrationCoordinator } from './registration-coordinator';
 
 type PushNotificationsContextValue = {
   error: string | null;
@@ -34,14 +36,21 @@ const PushNotificationsContext = createContext<PushNotificationsContextValue | n
 export function PushNotificationsProvider({
   api,
   children,
-}: PropsWithChildren<{ api: NotificationsApiPort }>) {
+  registrationCoordinator,
+}: PropsWithChildren<{
+  api: NotificationsApiPort;
+  registrationCoordinator: PushRegistrationCoordinator;
+}>) {
   const auth = useAuth();
+  const accountScope = auth.accountScope;
+  const isAccountScopeCurrent = auth.isAccountScopeCurrent;
   const router = useRouter();
   const [expoPushToken, setExpoPushToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const notificationsRef = useRef<typeof Notifications | null>(null);
   const hasConfiguredHandler = useRef(false);
   const lastHandledResponseId = useRef<string | null>(null);
+  const launchValidatedAccountScopes = useRef(new Set<string>());
   const projectId = getExpoProjectId();
   const isEnabled = shouldEnablePushNotifications({
     disablePushNotifications: process.env.EXPO_PUBLIC_DISABLE_PUSH_NOTIFICATIONS,
@@ -94,72 +103,108 @@ export function PushNotificationsProvider({
   }, [auth.user, isEnabled]);
 
   useEffect(() => {
-    if (!auth.user || !isEnabled || !projectId) return;
+    if (!accountScope || auth.isTransitioning || !isEnabled || !projectId) return;
 
     let isCancelled = false;
+    const registrationUserId = accountScope.userId;
+    const accountScopeKey = `${accountScope.generation}:${registrationUserId}`;
+    const isRegistrationCancelled = () =>
+      isCancelled || !isAccountScopeCurrent(accountScope);
 
     async function register() {
       const easProjectId = projectId;
-      if (!easProjectId) return;
+      if (!easProjectId || isRegistrationCancelled()) return;
 
       setError(null);
 
       try {
         const notifications = await loadNotifications();
+        if (isRegistrationCancelled()) return;
         const existingPermissions = await notifications.getPermissionsAsync();
+        if (isRegistrationCancelled()) return;
         const finalStatus =
           existingPermissions.status === 'granted'
             ? existingPermissions.status
             : (await notifications.requestPermissionsAsync()).status;
+        if (isRegistrationCancelled()) return;
 
         if (finalStatus !== 'granted') {
+          if (isRegistrationCancelled()) return;
           setError('Push notification permission was not granted');
+          if (isRegistrationCancelled()) return;
           setExpoPushToken(null);
+          if (isRegistrationCancelled()) return;
           await cleanupExpoPushRegistrationAfterPermissionDenied({
+            isCancelled: isRegistrationCancelled,
             unregisterStoredExpoPushToken: () =>
-              unregisterStoredExpoPushToken(api, { clearStoredOnFailure: true }),
+              unregisterStoredExpoPushToken(api, {
+                clearStoredOnFailure: true,
+                isCancelled: isRegistrationCancelled,
+              }),
           });
           return;
         }
 
         if (Platform.OS === 'android') {
+          if (isRegistrationCancelled()) return;
           await notifications.setNotificationChannelAsync('default', {
             importance: notifications.AndroidImportance.MAX,
             lightColor: '#208AEF',
             name: 'Default',
             vibrationPattern: [0, 250, 250, 250],
           });
+          if (isRegistrationCancelled()) return;
         }
 
+        if (isRegistrationCancelled()) return;
         const tokenResponse = await notifications.getExpoPushTokenAsync({ projectId: easProjectId });
-        if (isCancelled) return;
+        if (isRegistrationCancelled()) return;
 
         const nextToken = tokenResponse.data;
-        await syncExpoPushTokenRegistration({
+        const registration = await syncExpoPushTokenRegistration({
           api,
-          clearPendingExpoPushTokenCleanup,
+          beginInstallationMutation: beginPushInstallationMutation,
+          completeInstallationRegistration: commitPushInstallationRegistration,
           expoPushToken: nextToken,
-          getPendingExpoPushTokenCleanup,
+          forceRevalidation: !launchValidatedAccountScopes.current.has(accountScopeKey),
+          getInstallationRegistration: getPushInstallationRegistration,
           getPendingExpoPushTokenCleanupTokens,
           getStoredExpoPushToken,
+          isCancelled: isRegistrationCancelled,
           platform: Platform.OS === 'android' || Platform.OS === 'ios' ? Platform.OS : null,
-          setPendingExpoPushTokenCleanup,
-          setStoredExpoPushToken,
+          setPendingExpoPushTokenCleanup: (expoPushToken) =>
+            setPendingExpoPushTokenCleanup(expoPushToken, {
+              isCancelled: isRegistrationCancelled,
+            }),
+          userId: registrationUserId,
         });
 
+        if (isRegistrationCancelled()) return;
+        if (registration) {
+          launchValidatedAccountScopes.current.add(accountScopeKey);
+        }
         setExpoPushToken(nextToken);
       } catch (registrationError) {
-        if (isCancelled) return;
+        if (isRegistrationCancelled()) return;
         setError(registrationError instanceof Error ? registrationError.message : 'Push registration failed');
       }
     }
 
-    void register();
+    void registrationCoordinator.run(register);
 
     return () => {
       isCancelled = true;
     };
-  }, [api, auth.user, isEnabled, loadNotifications, projectId]);
+  }, [
+    api,
+    accountScope,
+    auth.isTransitioning,
+    isEnabled,
+    isAccountScopeCurrent,
+    loadNotifications,
+    projectId,
+    registrationCoordinator,
+  ]);
 
   useEffect(() => {
     if (!isEnabled) return;
@@ -175,13 +220,19 @@ export function PushNotificationsProvider({
       notificationSubscription = notifications.addNotificationReceivedListener(() => undefined);
       responseSubscription = notifications.addNotificationResponseReceivedListener(handleNotificationResponse);
 
-      const initialResponse = await notifications.getLastNotificationResponseAsync();
-      if (initialResponse && !isCancelled) {
-        handleNotificationResponse(initialResponse);
-      }
+      await consumeInitialNotificationResponse({
+        clear: notifications.clearLastNotificationResponseAsync,
+        get: notifications.getLastNotificationResponseAsync,
+        handle: handleNotificationResponse,
+        isCancelled: () => isCancelled,
+      });
     }
 
-    void listen();
+    void listen().catch(() => {
+      if (!isCancelled) {
+        setError('Push notification listener could not start. Please restart the app.');
+      }
+    });
 
     return () => {
       isCancelled = true;

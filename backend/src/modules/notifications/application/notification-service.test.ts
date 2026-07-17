@@ -6,7 +6,7 @@ import { NotificationService } from './notification-service'
 const createDependencies = () => {
   const calls: Array<{ name: string; value: unknown }> = []
   const dependencies: NotificationServiceDependencies = {
-    createDedupeId: () => 'dedupe-id',
+    now: () => new Date('2026-07-17T03:14:30.000Z'),
     outbox: {
       enqueue: async (input) => {
         calls.push({ name: 'enqueue', value: input })
@@ -25,6 +25,10 @@ const createDependencies = () => {
           transientFailed: 0,
         }
       },
+      redactTerminalData: async (options) => {
+        calls.push({ name: 'redact-terminal-data', value: options })
+        return 2
+      },
     },
     receipts: {
       check: async () => ({
@@ -37,8 +41,8 @@ const createDependencies = () => {
     tokens: {
       cleanup: async () => undefined,
       hasActive: async () => true,
-      register: async () => undefined,
-      unregister: async () => undefined,
+      register: async () => 'applied',
+      unregister: async () => 'applied',
     },
   }
 
@@ -46,7 +50,7 @@ const createDependencies = () => {
 }
 
 describe('NotificationService', () => {
-  test('owns test-push enqueue and immediate processing orchestration', async () => {
+  test('queues test push once per durable minute bucket without running a worker in the API', async () => {
     const { calls, dependencies } = createDependencies()
     const service = new NotificationService(dependencies)
 
@@ -66,15 +70,21 @@ describe('NotificationService', () => {
             href: '/components',
             kind: 'test_push',
           },
-          dedupeKey: 'test-push:user-id:dedupe-id',
+          dedupeKey: 'test-push:29737634',
           title: 'Test notification',
           userId: 'user-id',
         },
       },
-      {
-        name: 'process',
-        value: { maxLoops: 1, onlyIds: ['outbox-id'] },
-      },
+    ])
+  })
+
+  test('forwards bounded terminal-data repair to the outbox owner', async () => {
+    const { calls, dependencies } = createDependencies()
+    const service = new NotificationService(dependencies)
+
+    expect(await service.redactTerminalData({ limit: 25 })).toBe(2)
+    expect(calls).toEqual([
+      { name: 'redact-terminal-data', value: { limit: 25 } },
     ])
   })
 })

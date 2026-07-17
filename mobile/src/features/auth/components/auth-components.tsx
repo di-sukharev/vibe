@@ -25,11 +25,13 @@ export function AuthPanel({ children }: { children: ReactNode }) {
 }
 
 export function AuthModeTabs({
+  disabled,
   loginTestID,
   mode,
   onModeChange,
   registerTestID,
 }: {
+  disabled?: boolean;
   loginTestID: string;
   mode: AuthMode;
   onModeChange: (mode: AuthMode) => void;
@@ -50,12 +52,14 @@ export function AuthModeTabs({
       ]}>
       <AuthModeTab
         active={mode === 'register'}
+        disabled={disabled}
         label="Register"
         testID={registerTestID}
         onPress={() => onModeChange('register')}
       />
       <AuthModeTab
         active={mode === 'login'}
+        disabled={disabled}
         label="Login"
         testID={loginTestID}
         onPress={() => onModeChange('login')}
@@ -66,11 +70,13 @@ export function AuthModeTabs({
 
 function AuthModeTab({
   active,
+  disabled,
   label,
   onPress,
   testID,
 }: {
   active: boolean;
+  disabled?: boolean;
   label: string;
   onPress: () => void;
   testID: string;
@@ -81,7 +87,8 @@ function AuthModeTab({
     <UiPressable
       accessibilityLabel={label}
       accessibilityRole="button"
-      accessibilityState={{ selected: active }}
+      accessibilityState={{ disabled, selected: active }}
+      disabled={disabled}
       style={[
         styles.tab,
         {

@@ -1,7 +1,7 @@
 import 'dotenv/config'
 
 import { createPrisma, type DbClient } from './db'
-import { loadEnv, type AppEnv } from './env'
+import { loadBackgroundEnv, loadEnv, type AppEnv } from './env'
 
 export type BackendRuntime = {
   env: AppEnv
@@ -10,7 +10,16 @@ export type BackendRuntime = {
 }
 
 export function createBackendRuntime(source: Record<string, string | undefined> = Bun.env): BackendRuntime {
-  const env = loadEnv(source)
+  return createRuntime(loadEnv(source))
+}
+
+export function createBackgroundRuntime(
+  source: Record<string, string | undefined> = Bun.env,
+): BackendRuntime {
+  return createRuntime(loadBackgroundEnv(source))
+}
+
+function createRuntime(env: AppEnv): BackendRuntime {
   const prisma = createPrisma(env.DATABASE_URL)
   let closed = false
 

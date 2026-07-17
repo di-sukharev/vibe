@@ -16,9 +16,13 @@ const baseEnv: AppEnv = {
   AUTH_BODY_LIMIT_BYTES: 64 * 1024,
   AUTH_RATE_LIMIT_MAX: 60,
   AUTH_RATE_LIMIT_WINDOW_SECONDS: 60,
+  IAP_BODY_LIMIT_BYTES: 64 * 1024,
+  IAP_RATE_LIMIT_MAX: 60,
+  IAP_RATE_LIMIT_WINDOW_SECONDS: 60,
   SHUTDOWN_GRACE_SECONDS: 20,
   TRUST_PROXY: false,
   COOKIE_SECURE: false,
+  ENABLE_TEST_PUSH: false,
   SPACES_UPLOAD_MAX_BYTES: 10 * 1024 * 1024,
   SPACES_UPLOAD_URL_TTL_SECONDS: 900,
   SPACES_DOWNLOAD_URL_TTL_SECONDS: 300,
@@ -36,6 +40,7 @@ const baseEnv: AppEnv = {
 type RequestInput = {
   data?: unknown
   method: 'GET' | 'POST'
+  timeout?: number
   url: string
 }
 
@@ -66,11 +71,13 @@ test('Google Play verifier calls subscriptionsv2 get and subscription acknowledg
   expect(calls).toEqual([
     {
       method: 'GET',
+      timeout: 15_000,
       url: 'https://androidpublisher.googleapis.com/androidpublisher/v3/applications/com.example.app/purchases/subscriptionsv2/tokens/purchase%20token%2Fwith%2Fslash',
     },
     {
       data: {},
       method: 'POST',
+      timeout: 15_000,
       url: 'https://androidpublisher.googleapis.com/androidpublisher/v3/applications/com.example.app/purchases/subscriptions/premium.subscription/tokens/purchase%20token%2Fwith%2Fslash:acknowledge',
     },
   ])

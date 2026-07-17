@@ -20,6 +20,7 @@ model User {
   subscriptionEntitlement SubscriptionEntitlement?
   appStoreTransactions    AppStoreTransaction[]
   googlePlaySubscriptions GooglePlaySubscriptionPurchase[]
+  pushInstallations       PushInstallation[]
   pushTokens              PushToken[]
   pushNotificationOutbox  PushNotificationOutbox[]
   pushDeliveries          PushDelivery[]
@@ -123,12 +124,15 @@ model AppStoreWebhook {
   environment           String?
   originalTransactionId String?   @map("original_transaction_id")
   transactionId         String?   @map("transaction_id")
+  claimToken             String?   @map("claim_token") @db.Uuid
+  claimedAt              DateTime? @map("claimed_at")
   processedAt           DateTime? @map("processed_at")
   createdAt             DateTime  @default(now()) @map("created_at")
   updatedAt             DateTime  @updatedAt @map("updated_at")
 
   @@index([originalTransactionId], map: "app_store_webhooks_original_transaction_id_idx")
   @@index([processedAt], map: "app_store_webhooks_processed_at_idx")
+  @@index([processedAt, claimedAt], map: "app_store_webhooks_claim_lease_idx")
   @@map("app_store_webhooks")
 }
 
@@ -150,6 +154,7 @@ model GooglePlaySubscriptionPurchase {
   expiresAt               DateTime?         @map("expires_at")
   willAutoRenew           Boolean?          @map("will_auto_renew")
   acknowledgedAt          DateTime?         @map("acknowledged_at")
+  reconcileAttemptedAt    DateTime?         @map("reconcile_attempted_at")
   createdAt               DateTime          @default(now()) @map("created_at")
   updatedAt               DateTime          @updatedAt @map("updated_at")
   user                    User              @relation(fields: [userId], references: [id], onDelete: Cascade, map: "google_play_subscription_purchases_user_id_fkey")
@@ -158,6 +163,7 @@ model GooglePlaySubscriptionPurchase {
   @@index([linkedPurchaseTokenHash], map: "google_play_subs_linked_token_hash_idx")
   @@index([productId], map: "google_play_subs_product_id_idx")
   @@index([state], map: "google_play_subs_state_idx")
+  @@index([state, reconcileAttemptedAt], map: "google_play_subs_state_reconcile_attempted_at_idx")
   @@index([expiresAt], map: "google_play_subs_expires_at_idx")
   @@index([latestOrderId], map: "google_play_subs_latest_order_id_idx")
   @@map("google_play_subscription_purchases")
@@ -191,18 +197,37 @@ enum PushDeliveryStatus {
 }
 
 model PushToken {
-  id            String             @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  userId        String             @map("user_id") @db.Uuid
-  expoPushToken String             @unique @map("expo_push_token")
-  platform      PushTokenPlatform?
-  deviceId      String?            @map("device_id")
-  disabledAt    DateTime?          @map("disabled_at")
-  createdAt     DateTime           @default(now()) @map("created_at")
-  updatedAt     DateTime           @updatedAt @map("updated_at")
-  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade, map: "push_tokens_user_id_fkey")
+  id                    String             @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  userId                String             @map("user_id") @db.Uuid
+  installationId        String?            @unique(map: "push_tokens_installation_id_key") @map("installation_id") @db.Uuid
+  registrationSessionId String?            @map("registration_session_id") @db.Uuid
+  expoPushToken         String             @unique @map("expo_push_token")
+  platform              PushTokenPlatform?
+  deviceId              String?            @map("device_id")
+  disabledAt            DateTime?          @map("disabled_at")
+  createdAt             DateTime           @default(now()) @map("created_at")
+  updatedAt             DateTime           @updatedAt @map("updated_at")
+  user                  User               @relation(fields: [userId], references: [id], onDelete: Cascade, map: "push_tokens_user_id_fkey")
+  installation          PushInstallation?  @relation(fields: [installationId], references: [id], onDelete: Cascade, map: "push_tokens_installation_id_fkey")
 
   @@index([userId, disabledAt], map: "push_tokens_user_id_disabled_at_idx")
+  @@index([registrationSessionId], map: "push_tokens_registration_session_id_idx")
   @@map("push_tokens")
+}
+
+model PushInstallation {
+  id                  String      @id @db.Uuid
+  ownerUserId         String      @map("owner_user_id") @db.Uuid
+  authoritySecretHash String?     @map("authority_secret_hash")
+  generation          Int
+  active              Boolean     @default(false)
+  createdAt           DateTime    @default(now()) @map("created_at")
+  updatedAt           DateTime    @updatedAt @map("updated_at")
+  owner               User        @relation(fields: [ownerUserId], references: [id], onDelete: Cascade, map: "push_installations_owner_user_id_fkey")
+  pushToken           PushToken?
+
+  @@index([ownerUserId], map: "push_installations_owner_user_id_idx")
+  @@map("push_installations")
 }
 
 model PushNotificationOutbox {
@@ -216,6 +241,7 @@ model PushNotificationOutbox {
   scheduledFor DateTime                     @default(now()) @map("scheduled_for")
   attempts     Int                          @default(0)
   lastError    String?                      @map("last_error")
+  processingToken String?                   @map("processing_token") @db.Uuid
   processedAt  DateTime?                    @map("processed_at")
   createdAt    DateTime                     @default(now()) @map("created_at")
   updatedAt    DateTime                     @updatedAt @map("updated_at")
@@ -234,6 +260,9 @@ model PushDelivery {
   userId               String                 @map("user_id") @db.Uuid
   pushTokenId          String?                @map("push_token_id") @db.Uuid
   expoPushToken        String?                @map("expo_push_token")
+  registrationInstallationId String?          @map("registration_installation_id") @db.Uuid
+  registrationGeneration     Int?             @map("registration_generation")
+  registrationSessionId      String?          @map("registration_session_id") @db.Uuid
   status               PushDeliveryStatus     @default(pending)
   ticketId             String?                @map("ticket_id")
   providerStatus       String?                @map("provider_status")
@@ -241,6 +270,8 @@ model PushDelivery {
   errorMessage         String?                @map("error_message")
   receiptCheckAttempts Int                    @default(0) @map("receipt_check_attempts")
   receiptNextCheckAt   DateTime?              @map("receipt_next_check_at")
+  receiptClaimToken    String?                @map("receipt_claim_token") @db.Uuid
+  receiptClaimedAt     DateTime?              @map("receipt_claimed_at")
   receiptCheckedAt     DateTime?              @map("receipt_checked_at")
   createdAt            DateTime               @default(now()) @map("created_at")
   updatedAt            DateTime               @updatedAt @map("updated_at")

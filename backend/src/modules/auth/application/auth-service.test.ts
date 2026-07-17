@@ -76,7 +76,7 @@ test('refresh keeps the logical session id stable while rotating its credential'
     repository,
   })
 
-  await service.refresh('current-refresh-token', {})
+  const refreshed = await service.refresh('current-refresh-token', {})
 
   expect(signedSessionIds).toEqual(['session-stable'])
   expect(refreshCutoffs).toEqual([new Date('2025-10-03T00:00:00.000Z')])

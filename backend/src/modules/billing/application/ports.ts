@@ -24,10 +24,20 @@ export type GooglePlayPurchaseReference = {
   purchaseToken: string
 }
 
+export type StoredGooglePlayPurchaseReference = GooglePlayPurchaseReference & {
+  id: string
+  userId: string
+}
+
 export type OfferCodeRedemptionProof = {
   issuedAt: Date
   userId: string
 }
+
+export type AppStoreWebhookClaim =
+  | { status: 'claimed'; claimToken: string; id: string }
+  | { status: 'in_progress' }
+  | { status: 'processed' }
 
 export type AppStoreProvider = {
   describeNotification(value: VerifiedProviderValue): AppStoreNotificationDetails
@@ -65,20 +75,36 @@ export type BillingRepository = {
     userId: string
     verifiedPurchase: VerifiedProviderValue
   }): Promise<SubscriptionSnapshot>
-  claimAppStoreWebhook(signedPayload: string): Promise<{ id: string } | null>
+  claimAppStoreWebhook(signedPayload: string): Promise<AppStoreWebhookClaim>
+  claimVerifiedAppStoreWebhook(input: {
+    claimToken: string
+    details: AppStoreNotificationDetails
+    id: string
+    verifiedTransaction?: VerifiedProviderValue | null
+  }): Promise<AppStoreWebhookClaim>
   findGooglePlayPurchases(userId: string): Promise<GooglePlayPurchaseReference[]>
+  findGooglePlayPurchasesDue(input: {
+    before: Date
+    limit: number
+  }): Promise<StoredGooglePlayPurchaseReference[]>
+  observeGooglePlayReconcileBacklog(input: {
+    before: Date
+  }): Promise<{
+    dueCount: number
+    oldestDueAt: Date | null
+  }>
+  claimGooglePlayReconcileAttempt(input: {
+    attemptedAt: Date
+    before: Date
+    purchaseId: string
+  }): Promise<boolean>
   getAppStoreEnvironment(input: {
     originalTransactionId: string
     userId: string
   }): Promise<string>
   getSubscription(userId: string): Promise<SubscriptionSnapshot>
-  markAppStoreWebhookProcessed(id: string): Promise<void>
-  recordAppStoreWebhook(input: {
-    details: AppStoreNotificationDetails
-    id: string
-    verifiedTransaction?: VerifiedProviderValue | null
-  }): Promise<void>
-  releaseAppStoreWebhookClaim(id: string): Promise<void>
+  markAppStoreWebhookProcessed(claim: { claimToken: string; id: string }): Promise<void>
+  releaseAppStoreWebhookClaim(claim: { claimToken: string; id: string }): Promise<void>
   resolveAppStoreWebhookUserId(
     verifiedTransaction: VerifiedProviderValue,
   ): Promise<string | null>

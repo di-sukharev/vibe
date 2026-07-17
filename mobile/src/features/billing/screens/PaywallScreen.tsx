@@ -12,14 +12,14 @@ import { Typography } from '@/components/ui/typography';
 import { TEST_IDS } from '@/constants/testIds';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { useAuth } from '@/features/auth';
+import { AuthSessionErrorNotice, useAuth } from '@/features/auth';
 import { useSubscriptionIap } from '../provider';
-import { introOfferLabel } from '../purchase-controller';
 
 type PaywallPlan = {
   displayName: string;
   displayPrice: string;
   id: string;
+  introOfferLabel: string | null;
   product: ProductSubscription;
   productId: string;
 };
@@ -54,7 +54,12 @@ export function PaywallScreen() {
           <Button testID={TEST_IDS.paywall.profileButton} onPress={() => router.push('/profile')} variant="outline">
             Profile
           </Button>
-          <Button testID={TEST_IDS.auth.logoutButton} onPress={() => void auth.logout()} variant="outline">
+          <Button
+            disabled={auth.isTransitioning}
+            loading={auth.isTransitioning}
+            testID={TEST_IDS.auth.logoutButton}
+            onPress={() => void auth.logout().catch(() => undefined)}
+            variant="outline">
             Logout
           </Button>
         </View>
@@ -80,12 +85,14 @@ export function PaywallScreen() {
         description={`Subscribe through ${storeName}. The backend verifies every transaction before premium access is granted.`}
       />
 
+      <AuthSessionErrorNotice />
+
       <Card>
         <CardHeader>
           <CardTitle>Choose a plan</CardTitle>
           <CardDescription>Monthly and yearly plans are managed by the store and can be restored any time.</CardDescription>
         </CardHeader>
-        <CardContent style={styles.cardContent}>
+        <CardContent accessibilityRole="radiogroup" style={styles.cardContent}>
           {iap.isLoadingProducts && iap.products.length === 0 ? (
             <View style={styles.loadingRow} testID={TEST_IDS.paywall.loading}>
               <Spinner />
@@ -173,7 +180,12 @@ export function PaywallScreen() {
         <Button onPress={() => router.push('/profile')} variant="ghost">
           Profile
         </Button>
-        <Button onPress={() => void auth.logout()} variant="ghost">
+        <Button
+          disabled={auth.isTransitioning}
+          loading={auth.isTransitioning}
+          testID={TEST_IDS.auth.logoutButton}
+          onPress={() => void auth.logout().catch(() => undefined)}
+          variant="ghost">
           Logout
         </Button>
       </View>
@@ -194,8 +206,9 @@ function PlanOption({
 
   return (
     <Pressable
-      accessibilityRole="button"
-      accessibilityState={{ selected }}
+      accessibilityLabel={`${plan.displayName}, ${plan.displayPrice}`}
+      accessibilityRole="radio"
+      accessibilityState={{ checked: selected }}
       onPress={onPress}
       style={[
         styles.plan,
@@ -208,7 +221,7 @@ function PlanOption({
       <View style={styles.planText}>
         <Typography weight="600">{plan.displayName}</Typography>
         <Typography muted>{plan.product.description || plan.productId}</Typography>
-        {introOfferLabel(plan.product) ? <Typography muted>{introOfferLabel(plan.product)}</Typography> : null}
+        {plan.introOfferLabel ? <Typography muted>{plan.introOfferLabel}</Typography> : null}
       </View>
       <Typography weight="700">{plan.displayPrice}</Typography>
     </Pressable>

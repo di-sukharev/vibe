@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { z } from 'zod'
 
 import {
   apiErrorSchema,
@@ -124,6 +125,44 @@ describe('auth contracts', () => {
     expect(meResponseSchema.parse({ user: validUser })).toEqual({ user: validUser })
   })
 
+  test('keeps refresh and push contracts compatible across a phased client rollout', () => {
+    const legacyCookieRefreshResponseSchema = z.object({ accessToken: z.string() }).strict()
+    const legacyTokenRefreshResponseSchema = legacyCookieRefreshResponseSchema.extend({
+      refreshToken: z.string(),
+    })
+    const currentCookieResponse = cookieRefreshResponseSchema.parse({
+      accessToken: 'access-token',
+    })
+    const currentTokenResponse = tokenRefreshResponseSchema.parse({
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+    })
+
+    expect(legacyCookieRefreshResponseSchema.parse(currentCookieResponse)).toEqual({
+      accessToken: 'access-token',
+    })
+    expect(legacyTokenRefreshResponseSchema.parse(currentTokenResponse)).toEqual({
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+    })
+    expect(registerPushTokenRequestSchema.parse({
+      expoPushToken: 'ExponentPushToken[legacy-rollout]',
+      platform: 'ios',
+    })).toEqual({
+      expoPushToken: 'ExponentPushToken[legacy-rollout]',
+      platform: 'ios',
+    })
+    expect(unregisterPushTokenRequestSchema.parse({
+      expoPushToken: 'ExponentPushToken[legacy-rollout]',
+    })).toEqual({
+      expoPushToken: 'ExponentPushToken[legacy-rollout]',
+    })
+    expect(pushMutationResponseSchema.parse({ ok: true })).toEqual({
+      applied: true,
+      ok: true,
+    })
+  })
+
   test('validates stable API error response shape', () => {
     expect(
       apiErrorSchema.parse({
@@ -153,19 +192,44 @@ describe('auth contracts', () => {
   })
 
   test('validates Expo push notification contracts', () => {
+    const installationId = '018fd4f2-1f3a-7c88-bc49-333333333333'
+    const installationSecret = '118fd4f2-1f3a-4c88-bc49-333333333333'
     expect(
       registerPushTokenRequestSchema.parse({
         expoPushToken: ' ExponentPushToken[test-token] ',
         deviceId: 'device-1',
+        installationId,
+        installationSecret,
+        generation: 7,
         platform: 'ios',
+        previousExpoPushTokens: ['ExponentPushToken[previous-token]'],
       }),
     ).toEqual({
       expoPushToken: 'ExponentPushToken[test-token]',
       deviceId: 'device-1',
+      installationId,
+      installationSecret,
+      generation: 7,
       platform: 'ios',
+      previousExpoPushTokens: ['ExponentPushToken[previous-token]'],
     })
-    expect(unregisterPushTokenRequestSchema.parse({})).toEqual({})
-    expect(pushMutationResponseSchema.parse({ ok: true })).toEqual({ ok: true })
+    expect(
+      unregisterPushTokenRequestSchema.parse({
+        expoPushTokens: ['ExponentPushToken[test-token]'],
+        generation: 8,
+        installationId,
+        installationSecret,
+      }),
+    ).toEqual({
+      expoPushTokens: ['ExponentPushToken[test-token]'],
+      generation: 8,
+      installationId,
+      installationSecret,
+    })
+    expect(pushMutationResponseSchema.parse({ applied: true, ok: true })).toEqual({
+      applied: true,
+      ok: true,
+    })
     expect(
       testPushNotificationRequestSchema.parse({
         title: ' Hello ',
@@ -185,6 +249,23 @@ describe('auth contracts', () => {
       }),
     ).toMatchObject({ ok: true })
     expect(() => registerPushTokenRequestSchema.parse({ expoPushToken: 'not-a-token' })).toThrow()
+    expect(() =>
+      registerPushTokenRequestSchema.parse({
+        expoPushToken: 'ExponentPushToken[test-token]',
+        generation: 0,
+        installationId,
+      }),
+    ).toThrow()
+    expect(() =>
+      unregisterPushTokenRequestSchema.parse({
+        expoPushTokens: Array.from(
+          { length: 13 },
+          (_, index) => `ExponentPushToken[token-${index}]`,
+        ),
+        generation: 8,
+        installationId,
+      }),
+    ).toThrow()
     expect(() => internalNotificationHrefSchema.parse('https://example.com')).toThrow()
     expect(() => internalNotificationHrefSchema.parse('//example.com')).toThrow()
   })

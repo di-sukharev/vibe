@@ -11,6 +11,7 @@ const {
   iapErrorMessage,
   ingestAndFinishPurchase,
   introOfferLabel,
+  introOfferLabelForOffer,
   isNetworkIapError,
   isRecoverableIapError,
   isRetryableIapError,
@@ -100,7 +101,7 @@ test('builds Google Play reconcile payloads from available purchases', () => {
   expect(
     buildGooglePlayReconcilePayloadFromPurchases(
       [
-        { productId: 'premium', purchaseState: 'purchased', purchaseToken: 'token-1', store: 'google' },
+        { currentPlanId: 'yearly', productId: 'premium', purchaseState: 'purchased', purchaseToken: 'token-1', store: 'google' },
         { productId: 'premium', purchaseState: 'purchased', purchaseToken: 'token-1', store: 'google' },
         { productId: 'premium', purchaseState: 'pending', purchaseToken: 'token-2', store: 'google' },
         { productId: 'premium', purchaseState: 'purchased', purchaseToken: 'signed-apple', store: 'apple' },
@@ -110,7 +111,7 @@ test('builds Google Play reconcile payloads from available purchases', () => {
   ).toEqual({
     purchases: [
       {
-        basePlanId: 'monthly',
+        basePlanId: 'yearly',
         productId: 'premium',
         purchaseToken: 'token-1',
       },
@@ -376,6 +377,7 @@ test('validates App Store purchases before backend ingest', () => {
 test('validates Google Play purchases before backend ingest', () => {
   expect(
     validateGooglePlayPurchaseForIngest({
+      currentPlanId: 'monthly',
       productId: 'premium',
       purchaseState: 'purchased',
       purchaseToken: 'purchase-token',
@@ -383,6 +385,7 @@ test('validates Google Play purchases before backend ingest', () => {
       transactionId: 'GPA.1234',
     } as never),
   ).toEqual({
+    basePlanId: 'monthly',
     ok: true,
     productId: 'premium',
     purchaseToken: 'purchase-token',
@@ -416,6 +419,15 @@ test('validates Google Play purchases before backend ingest', () => {
 });
 
 test('selects Google Play subscription offers by configured base plan', () => {
+  const yearlyOffer = {
+    basePlanIdAndroid: 'yearly',
+    displayPrice: '$49.99/year',
+    offerTokenAndroid: 'yearly-offer-token',
+    paymentMode: 'free-trial',
+    period: { unit: 'week' },
+    periodCount: 2,
+    type: 'introductory',
+  };
   const product = {
     displayPrice: '$9.99',
     subscriptionOffers: [
@@ -424,18 +436,18 @@ test('selects Google Play subscription offers by configured base plan', () => {
         displayPrice: '$4.99/month',
         offerTokenAndroid: 'monthly-offer-token',
       },
-      {
-        basePlanIdAndroid: 'yearly',
-        displayPrice: '$49.99/year',
-        offerTokenAndroid: 'yearly-offer-token',
-      },
+      yearlyOffer,
     ],
   } as never;
 
   expect(selectGooglePlaySubscriptionOffer(product, 'yearly')).toEqual({
     displayPrice: '$49.99/year',
+    offer: yearlyOffer,
     offerToken: 'yearly-offer-token',
   });
+  expect(introOfferLabelForOffer(yearlyOffer as never)).toBe(
+    'Eligible users may get a free trial for 2 weeks',
+  );
   expect(selectGooglePlaySubscriptionOffer(product, 'weekly')).toBeNull();
   expect(
     selectGooglePlaySubscriptionOffer(

@@ -1,8 +1,21 @@
+import type { PushMutationResponse, UnregisterPushTokenRequest } from '@web-app-demo/contracts';
+
+type ModernUnregisterPushTokenRequest = Extract<
+  UnregisterPushTokenRequest,
+  { installationId: string }
+>;
+
+export type PushInstallationMutation = {
+  generation: number;
+  installationId: string;
+  installationSecret: string;
+};
+
 export type PushTokenCleanupApi = {
   unregisterExpoPushToken: (
-    input?: { expoPushToken?: string },
+    input: ModernUnregisterPushTokenRequest,
     options?: { retryOnUnauthorized?: boolean },
-  ) => Promise<unknown>;
+  ) => Promise<PushMutationResponse>;
 };
 
 export type PushTokenCleanupStorage = {
@@ -15,40 +28,53 @@ export type PushTokenCleanupStorage = {
 
 export async function unregisterKnownExpoPushTokens(input: {
   api: PushTokenCleanupApi;
+  beginInstallationMutation: () => Promise<PushInstallationMutation>;
+  clearStoredExpoPushTokenForMutation?: (
+    mutation: PushInstallationMutation,
+  ) => Promise<boolean>;
   clearStoredOnFailure?: boolean;
+  commitInstallationDeactivation: (
+    mutation: PushInstallationMutation,
+  ) => Promise<boolean>;
+  isCancelled?: () => boolean;
   retryOnUnauthorized?: boolean;
   storage: PushTokenCleanupStorage;
 }) {
+  if (input.isCancelled?.()) return;
   const storedToken = await input.storage.getStoredExpoPushToken();
-  const tokens = uniqueExpoPushTokens([
-    storedToken,
-    ...(await input.storage.getPendingExpoPushTokenCleanupTokens()),
-  ]);
+  if (input.isCancelled?.()) return;
+  const pendingTokens = await input.storage.getPendingExpoPushTokenCleanupTokens();
+  if (input.isCancelled?.()) return;
+  const tokens = uniqueExpoPushTokens([storedToken, ...pendingTokens]);
   if (tokens.length === 0) return;
 
-  let firstError: unknown;
-
+  const mutation = await input.beginInstallationMutation();
+  if (input.isCancelled?.()) return;
   for (const token of tokens) {
-    try {
-      await input.api.unregisterExpoPushToken(
-        { expoPushToken: token },
-        { retryOnUnauthorized: input.retryOnUnauthorized },
-      );
-      await input.storage.clearPendingExpoPushTokenCleanup(token);
-      if (token === storedToken) {
-        await input.storage.clearStoredExpoPushToken();
-      }
-    } catch (error) {
-      firstError ??= error;
-      await input.storage.setPendingExpoPushTokenCleanup(token);
-      if (input.clearStoredOnFailure && token === storedToken) {
-        await input.storage.clearStoredExpoPushToken();
-      }
-    }
+    await input.storage.setPendingExpoPushTokenCleanup(token);
+    if (input.isCancelled?.()) return;
   }
 
-  if (firstError) {
-    throw firstError;
+  try {
+    const response = await input.api.unregisterExpoPushToken(
+      {
+        expoPushTokens: tokens,
+        generation: mutation.generation,
+        installationId: mutation.installationId,
+        installationSecret: mutation.installationSecret,
+      },
+      { retryOnUnauthorized: input.retryOnUnauthorized },
+    );
+    if (input.isCancelled?.() || !response.applied) return;
+    await input.commitInstallationDeactivation(mutation);
+  } catch (error) {
+    if (input.isCancelled?.()) return;
+    if (input.clearStoredOnFailure && storedToken) {
+      await input.storage.setPendingExpoPushTokenCleanup(storedToken);
+      if (input.isCancelled?.()) return;
+      await input.clearStoredExpoPushTokenForMutation?.(mutation);
+    }
+    throw error;
   }
 }
 

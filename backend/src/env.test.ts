@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 
 import { describe, expect, test } from 'bun:test'
 
-import { loadEnv } from './env'
+import { loadBackgroundEnv, loadEnv } from './env'
 
 describe('loadEnv', () => {
   test('parses defaults and comma-separated origins', () => {
@@ -31,6 +31,18 @@ describe('loadEnv', () => {
     expect(env.GOOGLE_PLAY_PACKAGE_NAME).toBeUndefined()
     expect(env.GOOGLE_PLAY_PRODUCT_IDS).toEqual([])
     expect(env.GOOGLE_PLAY_BASE_PLAN_IDS).toEqual([])
+    expect(env.ENABLE_TEST_PUSH).toBe(false)
+  })
+
+  test('loads background entrypoints without exposing the API signing key', () => {
+    const env = loadBackgroundEnv({
+      NODE_ENV: 'production',
+      DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
+      JWT_SECRET: 'fedcba9876543210'.repeat(4),
+    })
+
+    expect(env.JWT_SECRET).toBe('0123456789abcdef'.repeat(4))
+    expect(env.CORS_ORIGINS).toEqual(['https://background.invalid'])
   })
 
   test('parses backend .env.example with optional blank App Store fields', () => {

@@ -2,40 +2,35 @@ import { AuthApi, type AuthTransportKind } from '@/features/auth';
 import { BillingApi } from '@/features/billing';
 import { NotificationsApi } from '@/features/notifications';
 import { ApiTransport } from '@/platform/api';
+import { SessionController } from '@/platform/session';
 
-export class SessionController {
-  private accessToken: string | null = null;
-  private expiredHandler: () => void | Promise<void> = () => undefined;
-
-  getAccessToken = () => this.accessToken;
-  setAccessToken = (accessToken: string | null) => {
-    this.accessToken = accessToken;
-  };
-  expire = () => this.expiredHandler();
-  setExpiredHandler(handler: () => void | Promise<void>) {
-    this.expiredHandler = handler;
-  }
-}
+export { SessionController } from '@/platform/session';
 
 export function createMobileApis(input: {
   authTransport: AuthTransportKind;
-  clearRefreshToken: () => Promise<void>;
-  getRefreshToken: () => Promise<string | null>;
   session: SessionController;
-  setRefreshToken: (refreshToken: string) => Promise<void>;
 }) {
   let auth!: AuthApi;
   const transport = new ApiTransport(
     {
       expire: input.session.expire,
       getAccessToken: input.session.getAccessToken,
-      refresh: () => auth.refresh(),
+      getGeneration: input.session.getGeneration,
+      isGenerationCurrent: input.session.isGenerationCurrent,
+      refresh: (generation) => auth.refresh(generation),
       setAccessToken: input.session.setAccessToken,
     },
     undefined,
     input.authTransport === 'cookie' ? 'include' : undefined,
   );
-  auth = new AuthApi(transport, input, input.authTransport);
+  auth = new AuthApi(transport, {
+    clearRefreshToken: input.session.clearRefreshToken,
+    getAccessToken: input.session.getAccessToken,
+    getGeneration: input.session.getGeneration,
+    getRefreshToken: input.session.getRefreshToken,
+    isGenerationCurrent: input.session.isGenerationCurrent,
+    setRefreshToken: input.session.setRefreshToken,
+  }, input.authTransport);
 
   return {
     auth,

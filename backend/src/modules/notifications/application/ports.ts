@@ -19,6 +19,17 @@ export type ProcessPushOutboxOptions = {
   now?: Date
   onlyIds?: string[]
   processingStaleMs?: number
+  signal?: AbortSignal
+}
+
+export type CheckPushReceiptsOptions = {
+  limit?: number
+  now?: Date
+  signal?: AbortSignal
+}
+
+export type RedactTerminalNotificationDataOptions = {
+  limit?: number
 }
 
 export type ProcessPushOutboxMetrics = {
@@ -42,23 +53,40 @@ export type CheckPushReceiptsMetrics = {
 export type PushTokenRepository = {
   cleanup(userId: string, expoPushTokens: string[]): Promise<void>
   hasActive(userId: string): Promise<boolean>
-  register(userId: string, input: RegisterPushTokenRequest): Promise<void>
-  unregister(userId: string, input: UnregisterPushTokenRequest): Promise<void>
+  register(
+    userId: string,
+    sessionId: string,
+    input: RegisterPushTokenRequest,
+    now: Date,
+  ): Promise<PushInstallationMutationResult>
+  unregister(
+    userId: string,
+    sessionId: string,
+    input: UnregisterPushTokenRequest,
+    now: Date,
+  ): Promise<PushInstallationMutationResult>
 }
+
+export type PushInstallationMutationResult =
+  | 'applied'
+  | 'forbidden'
+  | 'inactive-session'
+  | 'stale'
 
 export type PushOutbox = {
   enqueue(
     input: EnqueuePushNotificationInput,
   ): Promise<{ created: boolean; id: string }>
   process(options?: ProcessPushOutboxOptions): Promise<ProcessPushOutboxMetrics>
+  redactTerminalData(options?: RedactTerminalNotificationDataOptions): Promise<number>
 }
 
 export type PushReceipts = {
-  check(options?: { limit?: number; now?: Date }): Promise<CheckPushReceiptsMetrics>
+  check(options?: CheckPushReceiptsOptions): Promise<CheckPushReceiptsMetrics>
 }
 
 export type NotificationServiceDependencies = {
-  createDedupeId(): string
+  now(): Date
   outbox: PushOutbox
   receipts: PushReceipts
   tokens: PushTokenRepository

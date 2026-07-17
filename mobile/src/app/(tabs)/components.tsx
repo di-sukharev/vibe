@@ -167,7 +167,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Toaster, useToast } from '@/components/ui/sonner';
 import { Typography } from '@/components/ui/typography';
 import { TEST_IDS } from '@/constants/testIds';
-import { useAuth } from '@/features/auth';
+import { AuthSessionErrorNotice, useAuth } from '@/features/auth';
 
 export default function ComponentsScreen() {
   return (
@@ -222,12 +222,19 @@ function ComponentsCatalog() {
               onPress={() => router.push('/details/components')}>
               Details
             </Button>
-            <Button testID={TEST_IDS.auth.logoutButton} variant="outline" onPress={() => void auth.logout()}>
+            <Button
+              disabled={auth.isTransitioning}
+              loading={auth.isTransitioning}
+              testID={TEST_IDS.auth.logoutButton}
+              variant="outline"
+              onPress={() => void auth.logout().catch(() => undefined)}>
               Logout
             </Button>
           </>
         }
       />
+
+      <AuthSessionErrorNotice />
 
       <CatalogSection title="Actions">
           <ButtonGroup>

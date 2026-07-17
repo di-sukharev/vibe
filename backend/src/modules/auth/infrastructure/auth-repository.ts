@@ -1,4 +1,4 @@
-import type { DbClient } from '../../../db'
+import { acquirePushTokenUserLock, type DbClient } from '../../../db'
 import { Prisma } from '../../../generated/prisma/client'
 import type { AuthRepository } from '../application/ports'
 import { AuthFailure } from '../domain/errors'
@@ -181,10 +181,26 @@ export function createPrismaAuthRepository(db: DbClient): AuthRepository {
     },
 
     revokeSessionById(input) {
-      return db.authSession.updateMany({
-        where: { id: input.sessionId, revokedAt: null },
-        data: { revokedAt: input.now },
-      }).then(({ count }) => count === 1)
+      return db.$transaction(async (tx) => {
+        const session = await tx.authSession.findUnique({
+          where: { id: input.sessionId },
+          select: { userId: true },
+        })
+        if (!session) return false
+
+        await acquirePushTokenUserLock(tx, session.userId)
+        const revoked = await tx.authSession.updateMany({
+          where: { id: input.sessionId, revokedAt: null },
+          data: { revokedAt: input.now },
+        })
+        await tx.pushToken.deleteMany({
+          where: {
+            registrationSessionId: input.sessionId,
+            userId: session.userId,
+          },
+        })
+        return revoked.count === 1
+      })
     },
 
     findActiveAccessSession(input) {
@@ -216,13 +232,19 @@ export function createPrismaAuthRepository(db: DbClient): AuthRepository {
         })
         if (!session) return null
 
+        await acquirePushTokenUserLock(tx, session.userId)
         await cleanup({
           expoPushTokens: input.expoPushTokens,
           store: {
             async removePushTokens(userId, expoPushTokens) {
-              if (expoPushTokens.length === 0) return
+              const ownership: Prisma.PushTokenWhereInput[] = [
+                { registrationSessionId: session.id },
+              ]
+              if (expoPushTokens.length > 0) {
+                ownership.push({ expoPushToken: { in: expoPushTokens } })
+              }
               await tx.pushToken.deleteMany({
-                where: { expoPushToken: { in: expoPushTokens }, userId },
+                where: { OR: ownership, userId },
               })
             },
           },

@@ -78,6 +78,123 @@ describe('Expo push client', () => {
     ).rejects.toBeInstanceOf(ExpoPushTransientError)
   })
 
+  test('times out a stalled Expo response body as a transient failure', async () => {
+    let stalledBody: ReturnType<typeof createStalledJsonResponse> | undefined
+    const request = sendExpoPushMessages(
+      [{ body: 'Body', title: 'Title', to: 'ExponentPushToken[token]' }],
+      {
+        fetchImpl: async (_input, init) => {
+          stalledBody = createStalledJsonResponse(init?.signal)
+          return stalledBody.response
+        },
+        requestTimeoutMs: 5,
+      },
+    )
+    const settled = observeSettlement(request)
+
+    try {
+      await stalledBody?.bodyStarted
+      const outcome = await Promise.race([
+        settled,
+        delay(250).then(() => ({ status: 'stalled' }) as const),
+      ])
+
+      expect(outcome.status).toBe('rejected')
+      if (outcome.status === 'rejected') {
+        expect(outcome.error).toBeInstanceOf(ExpoPushTransientError)
+      }
+    } finally {
+      stalledBody?.cleanup()
+      await settled
+    }
+  })
+
+  test('cancels an active Expo request when the worker aborts', async () => {
+    const controller = new AbortController()
+    const request = sendExpoPushMessages(
+      [{ body: 'Body', title: 'Title', to: 'ExponentPushToken[token]' }],
+      {
+        fetchImpl: async (_input, init) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(new Error('worker aborted')))
+            controller.abort()
+          }),
+        requestTimeoutMs: 30_000,
+        signal: controller.signal,
+      },
+    )
+
+    await expect(request).rejects.toBeInstanceOf(ExpoPushTransientError)
+  })
+
+  test('cancels a stalled Expo response body when the worker aborts', async () => {
+    const controller = new AbortController()
+    let stalledBody: ReturnType<typeof createStalledJsonResponse> | undefined
+    const request = sendExpoPushMessages(
+      [{ body: 'Body', title: 'Title', to: 'ExponentPushToken[token]' }],
+      {
+        fetchImpl: async (_input, init) => {
+          stalledBody = createStalledJsonResponse(init?.signal)
+          return stalledBody.response
+        },
+        requestTimeoutMs: 30_000,
+        signal: controller.signal,
+      },
+    )
+    const settled = observeSettlement(request)
+
+    try {
+      await stalledBody?.bodyStarted
+      controller.abort()
+      const outcome = await Promise.race([
+        settled,
+        delay(250).then(() => ({ status: 'stalled' }) as const),
+      ])
+
+      expect(outcome.status).toBe('rejected')
+      if (outcome.status === 'rejected') {
+        expect(outcome.error).toBeInstanceOf(ExpoPushTransientError)
+      }
+    } finally {
+      stalledBody?.cleanup()
+      await settled
+    }
+  })
+
+  test('cleans request timers and caller abort listeners after every completion path', async () => {
+    const fetchOutcomes = [
+      () => json({ data: [{ id: 'ticket-1', status: 'ok' }] }),
+      () => new Response('not json', { status: 200 }),
+      () => new Response('{}', { status: 400, statusText: 'Bad Request' }),
+      () => {
+        throw new Error('network failed')
+      },
+    ]
+
+    for (const fetchOutcome of fetchOutcomes) {
+      const callerController = new AbortController()
+      let requestSignal: AbortSignal | null | undefined
+      const request = sendExpoPushMessages(
+        [{ body: 'Body', title: 'Title', to: 'ExponentPushToken[token]' }],
+        {
+          fetchImpl: async (_input, init) => {
+            requestSignal = init?.signal
+            return fetchOutcome()
+          },
+          requestTimeoutMs: 5,
+          signal: callerController.signal,
+        },
+      )
+
+      await request.catch(() => undefined)
+      await delay(20)
+      expect(requestSignal?.aborted).toBe(false)
+
+      callerController.abort()
+      expect(requestSignal?.aborted).toBe(false)
+    }
+  })
+
   test('reads receipts and exposes DeviceNotRegistered errors', async () => {
     const receipts = await getExpoPushReceipts(['ticket-1', 'ticket-2'], {
       fetchImpl: async (_input, init) => {
@@ -98,6 +215,23 @@ describe('Expo push client', () => {
     expect(receipts['ticket-1']?.status).toBe('ok')
     expect(isDeviceNotRegisteredError(receipts['ticket-2']!)).toBe(true)
   })
+
+  test('rejects malformed successful Expo responses as transient provider failures', async () => {
+    await expect(
+      sendExpoPushMessages(
+        [{ body: 'Body', title: 'Title', to: 'ExponentPushToken[token]' }],
+        {
+          fetchImpl: async () => json({ data: [{ status: 'ok' }] }),
+        },
+      ),
+    ).rejects.toBeInstanceOf(ExpoPushTransientError)
+
+    await expect(
+      getExpoPushReceipts(['ticket-1'], {
+        fetchImpl: async () => json({ data: { 'ticket-1': { status: 'surprise' } } }),
+      }),
+    ).rejects.toBeInstanceOf(ExpoPushTransientError)
+  })
 })
 
 function json(body: unknown) {
@@ -107,4 +241,48 @@ function json(body: unknown) {
     },
     status: 200,
   })
+}
+
+function createStalledJsonResponse(signal?: AbortSignal | null) {
+  let abortBody: (() => void) | undefined
+  let rejectBody: ((error: Error) => void) | undefined
+  let resolveBodyStarted: (() => void) | undefined
+  const bodyStarted = new Promise<void>((resolve) => {
+    resolveBodyStarted = resolve
+  })
+
+  const response = {
+    json: () => {
+      resolveBodyStarted?.()
+      return new Promise<unknown>((_resolve, reject) => {
+        rejectBody = reject
+        abortBody = () => reject(new Error('response body aborted'))
+        if (signal?.aborted) abortBody()
+        else signal?.addEventListener('abort', abortBody, { once: true })
+      })
+    },
+    ok: true,
+    status: 200,
+    statusText: 'OK',
+  } as Response
+
+  return {
+    bodyStarted,
+    cleanup: () => {
+      if (abortBody) signal?.removeEventListener('abort', abortBody)
+      rejectBody?.(new Error('test cleanup'))
+    },
+    response,
+  }
+}
+
+function observeSettlement<T>(promise: Promise<T>) {
+  return promise.then(
+    (value) => ({ status: 'fulfilled', value }) as const,
+    (error: unknown) => ({ error, status: 'rejected' }) as const,
+  )
+}
+
+function delay(milliseconds: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, milliseconds))
 }

@@ -14,3 +14,14 @@ test('offer-code controller owns token expiry lifecycle with an explicit clock',
   controller.clear();
   expect(controller.current(now)).toBeNull();
 });
+
+test('offer-code controller only conditionally clears the token it currently owns', () => {
+  const controller = new OfferCodeRedemptionController();
+  const now = Date.parse('2026-07-10T12:00:00.000Z');
+
+  controller.store('user-b-token', now);
+  expect(controller.clearIfCurrent('user-a-token')).toBe(false);
+  expect(controller.current(now)).toBe('user-b-token');
+  expect(controller.clearIfCurrent('user-b-token')).toBe(true);
+  expect(controller.current(now)).toBeNull();
+});

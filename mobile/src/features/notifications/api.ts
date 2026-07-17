@@ -23,7 +23,7 @@ export class NotificationsApi {
   }
 
   unregisterExpoPushToken(
-    input: UnregisterPushTokenRequest = {},
+    input: UnregisterPushTokenRequest,
     options: { retryOnUnauthorized?: boolean } = {},
   ): Promise<PushMutationResponse> {
     return this.transport.request(

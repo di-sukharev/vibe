@@ -85,6 +85,30 @@ services:
         value: "60"
         scope: RUN_TIME
         type: GENERAL
+      - key: IAP_BODY_LIMIT_BYTES
+        value: "65536"
+        scope: RUN_TIME
+        type: GENERAL
+      - key: IAP_RATE_LIMIT_MAX
+        value: "60"
+        scope: RUN_TIME
+        type: GENERAL
+      - key: IAP_RATE_LIMIT_WINDOW_SECONDS
+        value: "60"
+        scope: RUN_TIME
+        type: GENERAL
+      - key: WEBHOOK_BODY_LIMIT_BYTES
+        value: "262144"
+        scope: RUN_TIME
+        type: GENERAL
+      - key: WEBHOOK_RATE_LIMIT_MAX
+        value: "600"
+        scope: RUN_TIME
+        type: GENERAL
+      - key: WEBHOOK_RATE_LIMIT_WINDOW_SECONDS
+        value: "60"
+        scope: RUN_TIME
+        type: GENERAL
       - key: SHUTDOWN_GRACE_SECONDS
         value: "20"
         scope: RUN_TIME
@@ -101,7 +125,8 @@ services:
         value: "true"
         scope: RUN_TIME
         type: GENERAL
-REPLACE_WITH_OPTIONAL_EXPO_PUSH_ACCESS_TOKEN_ENV
+REPLACE_WITH_OPTIONAL_ENABLE_TEST_PUSH_ENV
+REPLACE_WITH_OPTIONAL_IAP_ENVS
 REPLACE_WITH_OPTIONAL_STORAGE_ENVS
 REPLACE_WITH_OPTIONAL_BACKEND_WORKERS
 jobs:

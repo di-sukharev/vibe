@@ -6,9 +6,10 @@ This template implements premium subscriptions through `expo-iap` on iOS and And
 
 - Mobile fetches configured subscription products through `expo-iap`.
 - iOS purchases use `request.apple`, `appAccountToken: user.id`, and `andDangerouslyFinishTransactionAutomatically: false`.
-- Android purchases use `request.google`, `subscriptionOffers`, and `obfuscatedAccountId/ProfileId: user.id`.
+- Android purchases use `request.google`, `subscriptionOffers`, and the same `user.id` for `obfuscatedAccountId` and `obfuscatedProfileId`. The backend rejects conflicting identity fields, serializes ownership claims across the current and linked purchase-token chain, and never reassigns a stored token to another user.
 - Mobile sends App Store signed transaction JWS or Google Play `{ productId, purchaseToken, basePlanId? }` to the backend.
 - Backend verifies App Store data with `@apple/app-store-server-library` and Google Play data with Android Publisher API `subscriptionsv2.get`.
+- Apple verification is pinned to `APPLE_IAP_ENVIRONMENT`; production never retries an invalid payload against Sandbox or silently migrates a stored environment.
 - Backend rejects products outside `APPLE_IAP_PRODUCT_IDS` or `GOOGLE_PLAY_PRODUCT_IDS`; Google Play verification also requires `GOOGLE_PLAY_BASE_PLAN_IDS` to explicitly allow every accepted base plan.
 - Mobile calls `finishTransaction` only after backend verification and entitlement write succeed.
 - Restore and foreground sync use store available purchases, then backend reconcile. Android also supports empty reconcile so the backend can refresh stored Google purchase tokens.
@@ -45,9 +46,13 @@ APPLE_IAP_ENVIRONMENT=Sandbox
 APPLE_IAP_ISSUER_ID=...
 APPLE_IAP_KEY_ID=...
 APPLE_IAP_PRIVATE_KEY_BASE64=...
-APPLE_IAP_ROOT_CERTS_DIR=/absolute/path/to/apple/root-certs
 APPLE_IAP_PRODUCT_IDS=com.example.app.premium.monthly,com.example.app.premium.yearly
 ```
+
+The backend image bundles the public Apple trust anchors published by Apple. Leave
+`APPLE_IAP_ROOT_CERTS_DIR` unset normally; set it only when the deployment intentionally mounts a
+reviewed replacement directory. Use `APPLE_IAP_ENVIRONMENT=Production` and the numeric
+`APPLE_IAP_APP_APPLE_ID` in production. Sandbox and Production payloads are not interchangeable.
 
 Google Play:
 
@@ -61,6 +66,11 @@ GOOGLE_PLAY_BASE_PLAN_IDS=monthly,yearly
 Create a Google Cloud service account, link it in Play Console, grant subscription/order read access, enable the Android Publisher API, then base64-encode the downloaded service-account JSON for `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64`.
 
 Backend credentials are secrets. Do not put App Store API keys, Apple private keys, or Google service-account JSON in mobile env.
+
+For the default DigitalOcean path, export either complete store group before running
+`bun run deploy:do:specs backend-final`. The generator rejects partial groups, rejects App Store
+Sandbox configuration in a production spec, uses the bundled certificate path, and emits the Apple
+private key and Google service-account JSON as `SECRET` runtime values.
 
 ## Mobile Env
 
@@ -106,13 +116,19 @@ The paywall exposes restore on both stores.
 - Android restore asks Google Play Billing for available purchases, sends `{ productId, purchaseToken }` pairs to `POST /api/iap/google-play/reconcile`, and falls back to empty reconcile so the backend can refresh stored tokens.
 - Launch and foreground sync call backend entitlement first, then store available purchases when the store connection is available.
 
-V1 does not include Google RTDN or a scheduled backend reconcile job. Before serious production use, add RTDN or cron so renewals, holds, refunds, and revocations update even when the user does not open the app. Design that integration to call the same backend Google Play reconcile service.
+The backend includes a bounded scheduled safety net for already stored Google Play purchase tokens. `maintenance:process` selects only `pending`, active, grace-period, and billing-retry rows whose last reconcile attempt is at least 15 minutes old, then atomically advances that timestamp before the provider call so overlapping cron/manual runs cannot process the same purchase. It processes at most 100 rows per run and gives each Android Publisher request a 15-second timeout. It admits another purchase only while at least 31 seconds remain in the 50-second task budget, covering the worst-case verification plus acknowledgement calls. Every claimed attempt advances the separate reconcile timestamp, including provider failures, so permanently failing rows cannot starve newer purchases. Failures do not block the remaining admitted batch, but any failures make the scheduled job exit non-zero after reporting aggregate counts. Cron metrics also report the total due backlog and the oldest due age, so a batch that succeeds but remains persistently undersized is visible. Terminal purchases leave the polling set.
+
+Schedule `maintenance:process` at least every 15 minutes in production. It combines Google Play reconcile with auth-session cleanup and skips billing when Google Play is not configured. `billing:google-play:reconcile` is also available as a dedicated task and requires the complete Google Play environment group. The DigitalOcean spec generator places Google credentials in the API and the applicable scheduled job, not unrelated workers.
+
+This polling path does not replace Google RTDN: it can refresh only tokens that the app has already ingested. Add RTDN when the product must discover out-of-app purchases or react closer to real time; route RTDN through the same backend ingest/reconcile application service.
+
+App Store subscription status lookup has a 15-second application deadline. The installed Apple server SDK exposes neither a request timeout nor an `AbortSignal` for `getAllSubscriptionStatuses()`, so the backend returns control at the deadline but cannot cancel the SDK's underlying transport request. Keep provider concurrency bounded at the caller/runtime level and re-check this limitation when upgrading the SDK.
 
 ## Offer Codes and Deferred Billing Surfaces
 
 App Store offer-code redemption is supported on iOS. Mobile creates a short-lived backend redemption token, opens `presentCodeRedemptionSheetIOS()`, and links tokenless redeemed transactions only after that user action.
 
-Google Play code redemption is not implemented in this template. Users can still redeem Play codes through Google Play; production apps that depend on out-of-app redemption freshness should add RTDN or scheduled reconcile.
+Google Play code redemption is not implemented in this template. Users can still redeem Play codes through Google Play. The scheduled reconcile refreshes an already known token; products that must discover a newly redeemed purchase without opening the app still need RTDN.
 
 Alternative billing, external purchase links, signed promotional-offer purchase flows, user-choice billing, and developer-billing reporting are deferred.
 
@@ -155,7 +171,10 @@ Manual checks:
 - ownership mismatch fails when the store purchase belongs to another app user
 - profile opens App Store or Google Play subscription management
 - App Store webhook replay is idempotent
-- Google Play renew/hold/revoke freshness is covered by RTDN or scheduled reconcile before production launch
+- App Store webhook concurrent delivery either owns the processing lease or returns a retryable response; stale leases are reclaimed safely
+- App Store webhook bodies and request rates are bounded before verification through the separate `WEBHOOK_BODY_LIMIT_BYTES` and `WEBHOOK_RATE_LIMIT_*` controls, and failed verification deletes its provisional claim instead of retaining attacker-controlled payload hashes
+- `maintenance:process` runs every 15 minutes and reports zero failed Google Play reconciliations
+- RTDN is configured when newly redeemed or otherwise out-of-app purchases must be discovered before the app next syncs
 
 ## Troubleshooting
 
@@ -175,3 +194,4 @@ Manual checks:
 - Google Play subscriptionsv2.get: https://developers.google.com/android-publisher/api-ref/rest/v3/purchases.subscriptionsv2/get
 - Google Play acknowledge: https://developers.google.com/android-publisher/api-ref/rest/v3/purchases.subscriptions/acknowledge
 - Google Play RTDN: https://developer.android.com/google/play/billing/rtdn-reference
+- Apple PKI root certificates: https://www.apple.com/certificateauthority/

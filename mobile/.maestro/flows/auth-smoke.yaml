@@ -36,8 +36,7 @@ tags:
     id: ${SUBMIT_BUTTON_ID}
     enabled: true
 - assertVisible:
-    id: ${COMPONENTS_CATALOG_ID}
-- assertVisible: ${E2E_EMAIL}
+    id: ${PAYWALL_SCREEN_ID}
 - stopApp
 - openLink:
     link: ${DEV_CLIENT_URL}
@@ -48,9 +47,8 @@ tags:
       - tapOn: Open
 - extendedWaitUntil:
     visible:
-      id: ${COMPONENTS_CATALOG_ID}
+      id: ${PAYWALL_SCREEN_ID}
     timeout: 60000
-- assertVisible: ${E2E_EMAIL}
 - tapOn:
     id: ${LOGOUT_BUTTON_ID}
 - assertVisible:

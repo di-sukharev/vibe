@@ -18,6 +18,7 @@ import {
 } from './primitives';
 import { useUiTheme } from './theme';
 import { MIN_TOUCH_TARGET } from './touch-target';
+import { buttonAccessibilityLabel } from './button-utils';
 
 export type ButtonProps = Omit<PressableProps, 'style' | 'children'> & {
   children?: ReactNode;
@@ -40,6 +41,8 @@ export function Button({
   textStyle,
   loading,
   disabled,
+  accessibilityLabel,
+  accessibilityState,
   ...props
 }: ButtonProps) {
   const theme = useUiTheme();
@@ -50,7 +53,13 @@ export function Button({
 
   return (
     <UiPressable
+      accessibilityLabel={accessibilityLabel ?? buttonAccessibilityLabel(children)}
       accessibilityRole="button"
+      accessibilityState={{
+        ...accessibilityState,
+        busy: Boolean(loading),
+        disabled: Boolean(disabled || loading),
+      }}
       {...props}
       disabled={disabled || loading}
       style={[

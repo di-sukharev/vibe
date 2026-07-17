@@ -18,7 +18,7 @@ export function createNotificationsModule(input: {
   })
   const service = new NotificationService({
     ...adapters,
-    createDedupeId: () => crypto.randomUUID(),
+    now: () => new Date(),
   })
 
   return {
@@ -31,8 +31,13 @@ export function createNotificationsModule(input: {
       authenticateAccessToken: (
         accessToken: string | undefined,
       ) => Promise<AuthenticatedPrincipal>,
-    ) => createNotificationRoutes({ authenticateAccessToken, service }),
+    ) => createNotificationRoutes({
+      authenticateAccessToken,
+      service,
+      testPushEnabled: Boolean(input.env.ENABLE_TEST_PUSH),
+    }),
     processOutbox: service.processOutbox.bind(service),
+    redactTerminalData: service.redactTerminalData.bind(service),
   }
 }
 
@@ -40,4 +45,5 @@ export type {
   CheckPushReceiptsMetrics,
   EnqueuePushNotificationInput,
   ProcessPushOutboxMetrics,
+  RedactTerminalNotificationDataOptions,
 } from './application/ports'

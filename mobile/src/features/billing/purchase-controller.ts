@@ -141,7 +141,7 @@ export function buildGooglePlayReconcilePayloadFromPurchases(
     const validation = validateGooglePlayPurchaseForIngest(purchase);
     if (!validation.ok) continue;
 
-    const basePlanId = basePlanIdsByProductId.get(validation.productId);
+    const basePlanId = validation.basePlanId ?? basePlanIdsByProductId.get(validation.productId);
     const key = `${validation.productId}:${validation.purchaseToken}`;
     if (seenKeys.has(key)) continue;
     seenKeys.add(key);
@@ -373,8 +373,11 @@ export function validateGooglePlayPurchaseForIngest(purchase: Purchase) {
     };
   }
 
+  const basePlanId = purchase.currentPlanId?.trim() || null;
+
   return {
     ok: true as const,
+    basePlanId,
     productId,
     purchaseToken,
     transactionKey: purchase.transactionId?.trim() || `${productId}:${purchaseToken}`,
@@ -386,6 +389,7 @@ export function selectGooglePlaySubscriptionOffer(product: ProductSubscription, 
   if (standardizedOffer?.offerTokenAndroid) {
     return {
       displayPrice: standardizedOffer.displayPrice || product.displayPrice,
+      offer: standardizedOffer,
       offerToken: standardizedOffer.offerTokenAndroid,
     };
   }
@@ -406,10 +410,29 @@ export function purchaseButtonLabel(product: ProductSubscription) {
 }
 
 export function introOfferLabel(product: ProductSubscription) {
-  const offer =
-    product.subscriptionOffers?.find((subscriptionOffer) => subscriptionOffer.type === 'introductory') ??
-    ('subscriptionInfoIOS' in product ? product.subscriptionInfoIOS?.introductoryOffer : null);
-  if (!offer) return null;
+  const standardizedOffer = product.subscriptionOffers?.find(
+    (subscriptionOffer) => subscriptionOffer.type === 'introductory',
+  );
+  if (standardizedOffer) return formatIntroOfferLabel(standardizedOffer);
+
+  const iosOffer = 'subscriptionInfoIOS' in product
+    ? product.subscriptionInfoIOS?.introductoryOffer
+    : null;
+  return iosOffer ? formatIntroOfferLabel(iosOffer) : null;
+}
+
+export function introOfferLabelForOffer(offer: SubscriptionOffer | null | undefined) {
+  if (!offer || offer.type !== 'introductory') return null;
+
+  return formatIntroOfferLabel(offer);
+}
+
+function formatIntroOfferLabel(offer: {
+  displayPrice: string;
+  paymentMode?: string | null;
+  period?: { unit?: string | null } | null;
+  periodCount?: number | null;
+}) {
 
   const period = formatOfferPeriod(offer.periodCount, offer.period?.unit);
 

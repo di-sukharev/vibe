@@ -12,6 +12,12 @@ export class OfferCodeRedemptionController {
     this.session = null;
   }
 
+  clearIfCurrent(token: string) {
+    if (this.session?.token !== token) return false;
+    this.session = null;
+    return true;
+  }
+
   current(nowMs: number) {
     if (!this.session || this.session.expiresAtMs <= nowMs) {
       this.session = null;
