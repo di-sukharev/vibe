@@ -66,30 +66,3 @@ export const uiSpacingTokens = {
   xxl: 32,
   xxxl: 64,
 } as const;
-
-export const legacyColorTokens = {
-  light: {
-    text: uiColorTokens.light.foreground,
-    background: uiColorTokens.light.background,
-    backgroundElement: uiColorTokens.light.muted,
-    backgroundSelected: uiColorTokens.light.accent,
-    textSecondary: uiColorTokens.light.mutedForeground,
-  },
-  dark: {
-    text: uiColorTokens.dark.foreground,
-    background: uiColorTokens.dark.background,
-    backgroundElement: uiColorTokens.dark.muted,
-    backgroundSelected: uiColorTokens.dark.accent,
-    textSecondary: uiColorTokens.dark.mutedForeground,
-  },
-} as const;
-
-export const legacySpacingTokens = {
-  half: uiSpacingTokens.xxs,
-  one: uiSpacingTokens.xs,
-  two: uiSpacingTokens.sm,
-  three: uiSpacingTokens.lg,
-  four: uiSpacingTokens.xl,
-  five: uiSpacingTokens.xxl,
-  six: uiSpacingTokens.xxxl,
-} as const;

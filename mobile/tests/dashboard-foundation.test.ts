@@ -7,9 +7,8 @@ import {
   dashboardNavigationMode,
 } from '../src/components/dashboard/model';
 import {
-  legacyColorTokens,
-  legacySpacingTokens,
   uiColorTokens,
+  uiRadiusTokens,
   uiSpacingTokens,
 } from '../src/components/ui/theme-tokens';
 
@@ -54,11 +53,12 @@ test('account initials stay useful for names, emails, and empty identities', () 
   expect(accountInitials(null, '')).toBe('?');
 });
 
-test('legacy mobile token aliases resolve from the canonical UI theme', () => {
-  expect(legacyColorTokens.light.background).toBe(uiColorTokens.light.background);
-  expect(legacyColorTokens.dark.text).toBe(uiColorTokens.dark.foreground);
-  expect(legacySpacingTokens.two).toBe(uiSpacingTokens.sm);
-  expect(legacySpacingTokens.four).toBe(uiSpacingTokens.xl);
+test('native UI uses one canonical color, radius, and spacing scale', () => {
+  expect(uiColorTokens.light.background).toBe('#ffffff');
+  expect(uiColorTokens.dark.foreground).toBe('#fafafa');
+  expect(uiRadiusTokens.full).toBeGreaterThan(uiRadiusTokens.xxl);
+  expect(uiSpacingTokens.xs).toBeLessThan(uiSpacingTokens.sm);
+  expect(uiSpacingTokens.xl).toBeLessThan(uiSpacingTokens.xxl);
 });
 
 test('semantic muted-surface labels meet normal-text contrast in every theme', () => {

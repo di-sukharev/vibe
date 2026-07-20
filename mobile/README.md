@@ -13,7 +13,8 @@ This section may be updated during first-run bootstrap. If the root `README.md` 
 - Active premium users land on `/components`, which lives in the bottom tab shell with `/profile`.
 - `/details/[id]` is a stack screen outside the tabs and uses an in-screen back button at the top left. It is part of the premium surface.
 - App Store and Google Play subscriptions are active purchase paths. App Store offer-code redemption is supported on iOS. Google Play code redemption, signed promotional-offer purchase flows, alternative billing, and external purchase links are deferred.
-- App screens should use `src/components/screen.tsx` for safe-area handling, standard spacing, scroll/non-scroll layout, keyboard avoidance, and consistent optional back navigation.
+- Product screens compose `src/components/dashboard/ScreenShell.tsx`, which owns the shared native site header and delegates safe-area, scrolling, keyboard avoidance, and back navigation to the low-level `Screen` layout primitive.
+- Phones use the native bottom-tab shell. Expo Web switches to the same compact side-rail/inset composition at the shared wide-layout breakpoint.
 
 ## Stack
 
@@ -175,6 +176,8 @@ Use TanStack Query for server state, TanStack Form for forms, and shared Zod sch
 Product code lives in `src/features/auth`, `src/features/billing`, and `src/features/notifications`. `src/composition` builds the namespaced APIs and passes each provider only its own interface. `src/platform/api` owns endpoint-agnostic fetch, auth retry, base URL, and error parsing; each feature API owns its endpoint paths and schemas. Routes are thin wrappers that import features through public indexes. Run `bun run architecture:check` after boundary changes and `bun run doctor` (pinned to Expo Doctor 1.20.0) after Expo dependency changes.
 
 Mobile UI primitives live in `src/components/ui` and mirror the local Web ShadCN registry by file name. They are React Native-first implementations using native style props, controlled/uncontrolled values, and native touch patterns instead of DOM/Radix props such as `className` or `asChild`. The protected `/components` route is the local component catalog and the post-auth smoke surface.
+
+The canonical native color, radius, spacing, typography, and interaction tokens live in `src/components/ui/theme-tokens.ts` and `src/components/ui/theme.ts`. Shared dashboard composition belongs in `src/components/dashboard`: `ScreenShell`, `SiteHeader`, section/metric/account cards, navigation rail/items, data rows, and reusable loading/empty/error states. Product-owned auth and billing components accept semantic data, state, and callbacks; they do not expose `style` or `className`. Routes only arrange those closed components.
 
 Render visible text through `src/components/ui/typography.tsx`. `Typography` owns the mobile type scale from `h1` through `h6` plus body, caption, label, button, link, and code text variants; screens and UI primitives should not import React Native `Text` directly or use legacy text wrappers.
 

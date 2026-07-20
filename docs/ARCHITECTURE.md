@@ -131,6 +131,16 @@ contracts must be narrowed locally instead of forwarding `className` or `style`.
 
 Mobile composition selects cookie auth for Expo Web and token auth for native iOS/Android. Browser refresh credentials must never be persisted in `localStorage`, `sessionStorage`, AsyncStorage, or another JavaScript-readable store.
 
+Mobile follows the same dashboard ownership model without copying DOM or
+Tailwind components. `mobile/src/components/ui` is the complete generic native
+primitive library and owns the canonical color, radius, spacing, typography,
+and interaction tokens. `mobile/src/components/dashboard` owns closed shared
+screen/header/card/state/navigation compositions. Feature-owned auth and
+billing components accept semantic data, state, and callbacks; routes only
+compose them. Phones keep native bottom tabs, while wide Expo Web uses the
+shared side-rail/inset shell. Both navigation modes expose the same active,
+focus, pressed, disabled, and accessible-name semantics.
+
 Do not create a new form, query, auth, or API abstraction until the existing pattern stops solving the current problem.
 
 `website` is a separate Astro workspace for public SSG/SSR pages. Pages prerender to static HTML by default. Marketplace freshness should climb this ladder: SSG plus rebuild/redeploy for durable listing/category/content changes; cached on-demand/SSR routes with CDN headers such as `stale-while-revalidate` when freshness matters more than a full redeploy cycle; Astro server islands for non-SEO-critical dynamic or personalized fragments; uncached or personalized SSR only for request-specific pages such as live search, personalized public views, or inventory/price pages where stale HTML is unacceptable. On-demand/SSR routes and server islands both require an Astro adapter and a runtime-capable deployment; they do not work from a pure Static Site host or object-storage static website. Server islands on cached pages or rolling deploys require a stable secret `ASTRO_KEY` shared by build and runtime environments; never commit it, expose it as `PUBLIC_*`, or bake it into static output. Shared CDN caching is only for anonymous, public-equivalent HTML; auth-dependent or personalized responses must use `private`/`no-store` or a deliberate `Vary: Cookie`/`Authorization` strategy, and `ASTRO_KEY` is not a cache privacy boundary.
