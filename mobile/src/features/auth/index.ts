@@ -12,6 +12,7 @@ export {
 } from './token-store';
 export { SocialAuthButtons } from './components/social-auth-buttons';
 export { AuthSessionErrorNotice } from './components/session-error-notice';
+export { SessionControls } from './components/session-controls';
 export { AuthScreen } from './screens/AuthScreen';
 export {
   googleSignInConfigFromEnv,

@@ -33,6 +33,10 @@ export const TEST_IDS = {
     restoreButton: 'paywall.restore-button',
     screen: 'paywall.screen',
   },
+  profile: {
+    manageSubscriptionButton: 'profile.manage-subscription-button',
+    screen: 'profile.screen',
+  },
   screen: {
     backButton: 'screen.back-button',
   },

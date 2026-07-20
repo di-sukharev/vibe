@@ -1,8 +1,10 @@
 import { Redirect, useLocalSearchParams, type Href } from 'expo-router';
 
-import { KeyValueCard } from '@/components/key-value-card';
-import { PageHeader } from '@/components/page-header';
-import { Screen } from '@/components/screen';
+import {
+  DataRow,
+  ScreenShell,
+  SectionCard,
+} from '@/components/dashboard';
 import { ScreenLoader } from '@/components/screen-states';
 import { TEST_IDS } from '@/constants/testIds';
 import { useAuth } from '@/features/auth';
@@ -29,14 +31,22 @@ export default function DetailsScreen() {
   }
 
   return (
-    <Screen
+    <ScreenShell
       backButton="auto"
       backButtonTestID={TEST_IDS.details.backButton}
       backFallbackHref="/components"
-      centered
-      testID={TEST_IDS.details.screen}>
-      <PageHeader eyebrow="Stack screen" title="Details" />
-      <KeyValueCard label="Route parameter" value={detailsId ?? 'missing-id'} />
-    </Screen>
+      description="A stack route rendered with the same native header and data-card pattern."
+      eyebrow="Stack screen"
+      testID={TEST_IDS.details.screen}
+      title="Details">
+      <SectionCard
+        description="Values are read directly from the Expo Router parameter."
+        title="Route data">
+        <DataRow
+          label="Route parameter"
+          value={detailsId ?? 'missing-id'}
+        />
+      </SectionCard>
+    </ScreenShell>
   );
 }

@@ -359,6 +359,101 @@ test('auth mode chooser exposes labelled tab semantics', async () => {
   await act(async () => root.unmount());
 });
 
+test('bottom navigation item exposes active and disabled tab state', async () => {
+  const { BottomNavigationItem } =
+    await import('../src/components/dashboard/BottomNavigationItem');
+  const container = fakeDocument.createElement('div');
+  const root = createRoot(container);
+
+  await renderAndFlush(
+    root,
+    <BottomNavigationItem
+      disabled
+      icon={{
+        android: 'person',
+        ios: 'person.crop.circle.fill',
+        web: 'person',
+      }}
+      isActive
+      label="Profile"
+      testID="tabs.profile"
+    />,
+  );
+
+  const item = findByTestID(container, 'tabs.profile');
+  expect(item?.attributes.role).toBe('tab');
+  expect(item?.attributes['aria-current']).toBe('page');
+  expect(item?.attributes['aria-selected']).toBe('true');
+  expect(item?.attributes.disabled).toBe('');
+
+  await renderAndFlush(
+    root,
+    <BottomNavigationItem
+      icon={{
+        android: 'view_module',
+        ios: 'square.grid.2x2.fill',
+        web: 'view_module',
+      }}
+      isActive={false}
+      label="Components"
+      testID="tabs.components"
+    />,
+  );
+
+  expect(
+    findByTestID(container, 'tabs.components')?.attributes['aria-current'],
+  ).toBeUndefined();
+
+  await act(async () => root.unmount());
+});
+
+test('profile controls reflect store connection and logout progress', async () => {
+  const { SubscriptionSummary } =
+    await import('../src/features/billing/components/subscription-summary');
+  const { SessionControls } =
+    await import('../src/features/auth/components/session-controls');
+  const container = fakeDocument.createElement('div');
+  const root = createRoot(container);
+  const subscription = {
+    entitlement: 'premium' as const,
+    expiresAt: '2026-08-20T12:00:00.000Z',
+    isActive: true,
+    originalTransactionId: 'original-1',
+    platform: 'ios' as const,
+    productId: 'premium.monthly',
+    state: 'active' as const,
+    transactionId: 'transaction-1',
+    updatedAt: '2026-07-20T12:00:00.000Z',
+    willAutoRenew: true,
+  };
+
+  await renderAndFlush(
+    root,
+    <SubscriptionSummary
+      isConnected={false}
+      isManaging={false}
+      onManage={() => undefined}
+      subscription={subscription}
+    />,
+  );
+
+  expect(
+    findByTestID(container, 'profile.manage-subscription-button')?.attributes
+      .disabled,
+  ).toBe('');
+
+  await renderAndFlush(
+    root,
+    <SessionControls isLoggingOut onLogout={() => undefined} />,
+  );
+
+  expect(
+    findByTestID(container, 'auth.logout-button')?.attributes.disabled,
+  ).toBe('');
+
+  await act(async () => root.unmount());
+});
+
 test('paywall actions preserve purchase, restore, and platform availability states', async () => {
   const { PaywallActions } =
     await import('../src/features/billing/components/paywall-components');

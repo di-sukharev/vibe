@@ -1,24 +1,21 @@
 import type { ReactNode } from 'react';
-import { View } from 'react-native';
 
-import { Typography } from '@/components/ui/typography';
-import { useUiTheme } from '@/components/ui/theme';
+import { SectionCard } from '@/components/dashboard/SectionCard';
 
 type CatalogSectionProps = {
   children: ReactNode;
+  description?: ReactNode;
   title: ReactNode;
 };
 
-export function CatalogSection({ children, title }: CatalogSectionProps) {
-  const theme = useUiTheme();
-  const sectionStyle = { gap: theme.spacing.md };
-
+export function CatalogSection({
+  children,
+  description,
+  title,
+}: CatalogSectionProps) {
   return (
-    <View style={sectionStyle}>
-      <Typography variant="bodyLg" weight="700">
-        {title}
-      </Typography>
-      <View style={sectionStyle}>{children}</View>
-    </View>
+    <SectionCard description={description} title={title}>
+      {children}
+    </SectionCard>
   );
 }

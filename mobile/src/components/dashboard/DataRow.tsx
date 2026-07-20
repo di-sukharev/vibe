@@ -39,7 +39,7 @@ export function DataRow({
         ) : null}
       </View>
       {value ? (
-        <Typography variant="bodySm" muted>
+        <Typography align="right" style={styles.value} variant="bodySm" muted>
           {value}
         </Typography>
       ) : null}
@@ -85,5 +85,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderBottomWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
+  },
+  value: {
+    flexShrink: 1,
   },
 });

@@ -3,9 +3,8 @@ import { useState } from 'react';
 import { StyleSheet } from 'react-native';
 
 import { CatalogSection } from '@/components/catalog-section';
+import { ScreenShell } from '@/components/dashboard';
 import { InlineGroup } from '@/components/inline-group';
-import { PageHeader } from '@/components/page-header';
-import { Screen } from '@/components/screen';
 import { ScreenLoader } from '@/components/screen-states';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import {
@@ -201,42 +200,38 @@ function ComponentsCatalog() {
   }
 
   return (
-    <Screen
-      padded={false}
-      scroll
-      contentStyle={styles.content}
-      scrollViewProps={{ showsVerticalScrollIndicator: false }}
-      testID={TEST_IDS.components.catalog}>
-      <PageHeader
-        rootTestID={TEST_IDS.auth.dashboard}
-        eyebrow="Mobile UI foundation"
-        title="ShadCN native components"
-        titleTestID={TEST_IDS.components.title}
-        description={auth.user.email}
-        descriptionTestID={TEST_IDS.auth.userEmail}
-        actions={
-          <>
-            <Button
-              testID={TEST_IDS.details.openButton}
-              variant="outline"
-              onPress={() => router.push('/details/components')}>
-              Details
-            </Button>
-            <Button
-              disabled={auth.isTransitioning}
-              loading={auth.isTransitioning}
-              testID={TEST_IDS.auth.logoutButton}
-              variant="outline"
-              onPress={() => void auth.logout().catch(() => undefined)}>
-              Logout
-            </Button>
-          </>
-        }
-      />
+    <ScreenShell
+      actions={
+        <>
+          <Button
+            testID={TEST_IDS.details.openButton}
+            variant="outline"
+            onPress={() => router.push('/details/components')}>
+            Details
+          </Button>
+          <Button
+            disabled={auth.isTransitioning}
+            loading={auth.isTransitioning}
+            testID={TEST_IDS.auth.logoutButton}
+            variant="outline"
+            onPress={() => void auth.logout().catch(() => undefined)}>
+            Logout
+          </Button>
+        </>
+      }
+      description={auth.user.email}
+      descriptionTestID={TEST_IDS.auth.userEmail}
+      eyebrow="Mobile UI foundation"
+      headerTestID={TEST_IDS.auth.dashboard}
+      testID={TEST_IDS.components.catalog}
+      title="ShadCN native components"
+      titleTestID={TEST_IDS.components.title}>
 
       <AuthSessionErrorNotice />
 
-      <CatalogSection title="Actions">
+      <CatalogSection
+        description="Buttons, toggles, and grouped controls."
+        title="Actions">
           <ButtonGroup>
             <Button>Default</Button>
             <Button variant="secondary">Secondary</Button>
@@ -258,7 +253,9 @@ function ComponentsCatalog() {
           </ButtonGroup>
         </CatalogSection>
 
-        <CatalogSection title="Forms">
+        <CatalogSection
+          description="Inputs, selection controls, and field feedback."
+          title="Forms">
           <FieldSet>
             <FieldLegend>Account</FieldLegend>
             <FieldGroup>
@@ -312,7 +309,9 @@ function ComponentsCatalog() {
           <Label>Standalone label</Label>
         </CatalogSection>
 
-        <CatalogSection title="Surfaces">
+        <CatalogSection
+          description="Alerts, cards, progress, and empty states."
+          title="Surfaces">
           <Alert>
             <AlertTitle>Alert title</AlertTitle>
             <AlertDescription>Neutral alert description.</AlertDescription>
@@ -353,7 +352,9 @@ function ComponentsCatalog() {
           </KbdGroup>
         </CatalogSection>
 
-        <CatalogSection title="Data display">
+        <CatalogSection
+          description="Structured content for compact application screens."
+          title="Data display">
           <AvatarGroup>
             <Avatar>
               <AvatarFallback>DS</AvatarFallback>
@@ -399,7 +400,9 @@ function ComponentsCatalog() {
           </ChartContainer>
         </CatalogSection>
 
-        <CatalogSection title="Disclosure">
+        <CatalogSection
+          description="Progressively reveal content without leaving the screen."
+          title="Disclosure">
           <Accordion type="single" defaultValue="a">
             <AccordionItem value="a">
               <AccordionTrigger>Accordion trigger</AccordionTrigger>
@@ -424,7 +427,9 @@ function ComponentsCatalog() {
           </Tabs>
         </CatalogSection>
 
-        <CatalogSection title="Overlays">
+        <CatalogSection
+          description="Native modal, sheet, drawer, popover, and tooltip adaptations."
+          title="Overlays">
           <InlineGroup>
             <Dialog>
               <DialogTrigger fallback="Dialog" />
@@ -496,7 +501,9 @@ function ComponentsCatalog() {
           </InlineGroup>
         </CatalogSection>
 
-        <CatalogSection title="Menus">
+        <CatalogSection
+          description="Contextual actions and searchable command surfaces."
+          title="Menus">
           <DropdownMenu>
             <DropdownMenuTrigger fallback="Dropdown" />
             <DropdownMenuContent>
@@ -553,7 +560,9 @@ function ComponentsCatalog() {
           </ComboboxChips>
         </CatalogSection>
 
-        <CatalogSection title="Navigation and layout">
+        <CatalogSection
+          description="Navigation, pagination, responsive layout, and direction."
+          title="Navigation and layout">
           <Breadcrumb>
             <BreadcrumbList>
               <BreadcrumbItem>
@@ -641,7 +650,7 @@ function ComponentsCatalog() {
             Show toast
           </Button>
       </CatalogSection>
-    </Screen>
+    </ScreenShell>
   );
 }
 
@@ -654,11 +663,6 @@ const styles = StyleSheet.create({
   aspect: {
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  content: {
-    gap: 24,
-    padding: 20,
-    paddingBottom: 48,
   },
   resizable: {
     minHeight: 120,

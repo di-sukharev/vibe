@@ -1,4 +1,5 @@
 export { AccountSummary } from './AccountSummary';
+export { BottomNavigationItem } from './BottomNavigationItem';
 export { DataRow } from './DataRow';
 export { MetricCard } from './MetricCard';
 export { NavigationRail, NavigationRailItem } from './NavigationRail';

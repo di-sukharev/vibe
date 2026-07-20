@@ -1,4 +1,8 @@
-import { Tabs as RouterTabs } from 'expo-router';
+import {
+  Tabs as RouterTabs,
+} from 'expo-router';
+import type { BottomTabBarButtonProps } from '@react-navigation/bottom-tabs';
+import { PlatformPressable } from '@react-navigation/elements';
 import { SymbolView } from 'expo-symbols';
 import { StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,9 +22,19 @@ export default function AppTabs() {
         headerShown: false,
         sceneStyle: { backgroundColor: theme.colors.background },
         tabBarActiveTintColor: theme.colors.foreground,
+        tabBarActiveBackgroundColor: theme.colors.accent,
+        tabBarButton: NativeTabButton,
         tabBarHideOnKeyboard: true,
+        tabBarInactiveBackgroundColor: theme.colors.transparent,
         tabBarInactiveTintColor: theme.colors.mutedForeground,
-        tabBarItemStyle: [styles.tabBarItem, { paddingVertical: theme.spacing.xs }],
+        tabBarItemStyle: [
+          styles.tabBarItem,
+          {
+            borderRadius: theme.radius.lg,
+            marginHorizontal: theme.spacing.xs,
+            paddingVertical: theme.spacing.xs,
+          },
+        ],
         tabBarStyle: [
           styles.tabBar,
           {
@@ -74,11 +88,28 @@ export default function AppTabs() {
   );
 }
 
+function NativeTabButton({
+  style,
+  ...props
+}: BottomTabBarButtonProps) {
+  const theme = useUiTheme();
+
+  return (
+    <PlatformPressable
+      {...props}
+      pressOpacity={theme.opacity.pressed}
+      style={style}
+    />
+  );
+}
+
 const styles = StyleSheet.create({
   tabBar: {
     borderTopWidth: StyleSheet.hairlineWidth,
     elevation: 0,
     shadowOpacity: 0,
   },
-  tabBarItem: {},
+  tabBarItem: {
+    overflow: 'hidden',
+  },
 });

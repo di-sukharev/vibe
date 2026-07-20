@@ -1,9 +1,14 @@
-import { KeyValueCard } from '@/components/key-value-card';
-import { PageHeader } from '@/components/page-header';
-import { Screen } from '@/components/screen';
-import { Button } from '@/components/ui/button';
-import { AuthSessionErrorNotice, useAuth } from '@/features/auth';
-import { useSubscriptionIap } from '@/features/billing';
+import { AccountSummary, ScreenShell } from '@/components/dashboard';
+import { TEST_IDS } from '@/constants/testIds';
+import {
+  AuthSessionErrorNotice,
+  SessionControls,
+  useAuth,
+} from '@/features/auth';
+import {
+  SubscriptionSummary,
+  useSubscriptionIap,
+} from '@/features/billing';
 
 export default function ProfileScreen() {
   const auth = useAuth();
@@ -12,39 +17,39 @@ export default function ProfileScreen() {
   if (!auth.user) return null;
 
   return (
-    <Screen centered>
-      <PageHeader
-        eyebrow="Account"
-        title={auth.user.displayName ?? 'Profile'}
-        description={auth.user.email}
+    <ScreenShell
+      description="Review your identity, entitlement, and current device session."
+      eyebrow="Account"
+      testID={TEST_IDS.profile.screen}
+      title="Profile">
+      <AccountSummary
+        badge={auth.user.role === 'admin' ? 'Admin' : 'User'}
+        description={`Member since ${formatAccountDate(auth.user.createdAt)}`}
+        displayName={auth.user.displayName}
+        email={auth.user.email}
       />
 
       <AuthSessionErrorNotice />
 
-      <KeyValueCard label="User ID" value={auth.user.id} />
-      <KeyValueCard label="Subscription" value={subscriptionLabel(auth.user.subscription.state)} />
+      <SubscriptionSummary
+        isConnected={iap.isConnected}
+        isManaging={iap.isManagingSubscriptions}
+        onManage={() => void iap.manageSubscriptions()}
+        subscription={auth.user.subscription}
+      />
 
-      {auth.user.subscription.platform === 'ios' || auth.user.subscription.platform === 'android' ? (
-        <Button
-          disabled={!iap.isConnected || iap.isManagingSubscriptions}
-          loading={iap.isManagingSubscriptions}
-          variant="outline"
-          onPress={() => void iap.manageSubscriptions()}>
-          Manage subscription
-        </Button>
-      ) : null}
-
-      <Button
-        disabled={auth.isTransitioning}
-        loading={auth.isTransitioning}
-        variant="outline"
-        onPress={() => void auth.logout().catch(() => undefined)}>
-        Logout
-      </Button>
-    </Screen>
+      <SessionControls
+        isLoggingOut={auth.isTransitioning}
+        onLogout={() => void auth.logout().catch(() => undefined)}
+      />
+    </ScreenShell>
   );
 }
 
-function subscriptionLabel(state: string) {
-  return state.replaceAll('_', ' ');
+function formatAccountDate(createdAt: string) {
+  return new Intl.DateTimeFormat(undefined, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  }).format(new Date(createdAt));
 }

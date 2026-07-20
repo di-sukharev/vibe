@@ -6,9 +6,8 @@ import {
   type TabListProps,
   type TabTriggerSlotProps,
 } from 'expo-router/ui';
-import { SymbolView, type SymbolViewProps } from 'expo-symbols';
+import type { SymbolViewProps } from 'expo-symbols';
 import {
-  Pressable,
   StyleSheet,
   View,
   useWindowDimensions,
@@ -17,13 +16,13 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
+  BottomNavigationItem,
   NavigationRail,
   NavigationRailItem,
   NAVIGATION_RAIL_WIDTH,
   dashboardNavigationMode,
 } from '@/components/dashboard';
 import { useUiTheme } from '@/components/ui/theme';
-import { Typography } from '@/components/ui/typography';
 import { TEST_IDS } from '@/constants/testIds';
 
 export default function AppTabs() {
@@ -124,22 +123,13 @@ type TabButtonProps = TabTriggerSlotProps & {
 };
 
 function TabButton({ children, icon, isFocused, ...props }: TabButtonProps) {
-  const theme = useUiTheme();
-  const color = isFocused ? theme.colors.foreground : theme.colors.mutedForeground;
-
   return (
-    <Pressable
+    <BottomNavigationItem
       {...props}
-      style={({ pressed }) => [
-        styles.tabButton,
-        { gap: theme.spacing.xs },
-        pressed && styles.pressed,
-      ]}>
-      <SymbolView name={icon} size={22} tintColor={color} />
-      <Typography colorValue={color} variant="caption" weight="700">
-        {children}
-      </Typography>
-    </Pressable>
+      icon={icon}
+      isActive={isFocused}
+      label={typeof children === 'string' ? children : 'Navigation item'}
+    />
   );
 }
 
@@ -155,9 +145,6 @@ function RailTabButton({ children, icon, isFocused, ...props }: TabButtonProps) 
 }
 
 const styles = {
-  pressed: {
-    opacity: 0.72,
-  },
   root: {
     flex: 1,
     minHeight: '100vh' as unknown as ViewStyle['minHeight'],
@@ -177,11 +164,5 @@ const styles = {
     left: 0,
     position: 'fixed' as ViewStyle['position'],
     right: 0,
-  },
-  tabButton: {
-    alignItems: 'center',
-    flex: 1,
-    justifyContent: 'center',
-    minHeight: 48,
   },
 } satisfies Record<string, ViewStyle>;
