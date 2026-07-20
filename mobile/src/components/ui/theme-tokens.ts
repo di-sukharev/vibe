@@ -1,0 +1,95 @@
+export const uiColorTokens = {
+  light: {
+    background: '#ffffff',
+    foreground: '#252525',
+    card: '#ffffff',
+    cardForeground: '#252525',
+    popover: '#ffffff',
+    popoverForeground: '#252525',
+    primary: '#343434',
+    primaryForeground: '#fafafa',
+    secondary: '#f7f7f7',
+    secondaryForeground: '#343434',
+    muted: '#f7f7f7',
+    mutedForeground: '#666666',
+    navigationForeground: '#343434',
+    accent: '#f7f7f7',
+    accentForeground: '#343434',
+    destructive: '#d92d20',
+    destructiveForeground: '#ffffff',
+    border: '#e5e5e5',
+    input: '#e5e5e5',
+    ring: '#a1a1a1',
+    transparent: 'transparent',
+  },
+  dark: {
+    background: '#252525',
+    foreground: '#fafafa',
+    card: '#343434',
+    cardForeground: '#fafafa',
+    popover: '#343434',
+    popoverForeground: '#fafafa',
+    primary: '#e5e5e5',
+    primaryForeground: '#343434',
+    secondary: '#444444',
+    secondaryForeground: '#fafafa',
+    muted: '#444444',
+    mutedForeground: '#b8b8b8',
+    navigationForeground: '#e5e5e5',
+    accent: '#444444',
+    accentForeground: '#fafafa',
+    destructive: '#f97066',
+    destructiveForeground: '#250806',
+    border: '#464646',
+    input: '#525252',
+    ring: '#8a8a8a',
+    transparent: 'transparent',
+  },
+} as const;
+
+export const uiRadiusTokens = {
+  sm: 6,
+  md: 8,
+  lg: 10,
+  xl: 14,
+  xxl: 18,
+  full: 999,
+} as const;
+
+export const uiSpacingTokens = {
+  xxs: 2,
+  xs: 4,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 24,
+  xxl: 32,
+  xxxl: 64,
+} as const;
+
+export const legacyColorTokens = {
+  light: {
+    text: uiColorTokens.light.foreground,
+    background: uiColorTokens.light.background,
+    backgroundElement: uiColorTokens.light.muted,
+    backgroundSelected: uiColorTokens.light.accent,
+    textSecondary: uiColorTokens.light.mutedForeground,
+  },
+  dark: {
+    text: uiColorTokens.dark.foreground,
+    background: uiColorTokens.dark.background,
+    backgroundElement: uiColorTokens.dark.muted,
+    backgroundSelected: uiColorTokens.dark.accent,
+    textSecondary: uiColorTokens.dark.mutedForeground,
+  },
+} as const;
+
+export const legacySpacingTokens = {
+  half: uiSpacingTokens.xxs,
+  one: uiSpacingTokens.xs,
+  two: uiSpacingTokens.sm,
+  three: uiSpacingTokens.lg,
+  four: uiSpacingTokens.xl,
+  five: uiSpacingTokens.xxl,
+  six: uiSpacingTokens.xxxl,
+} as const;

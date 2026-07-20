@@ -1,6 +1,10 @@
-import { useColorScheme, type TextStyle } from 'react-native';
+import { Platform, useColorScheme, type TextStyle } from 'react-native';
 
-import { Fonts } from '@/constants/theme';
+import {
+  uiColorTokens,
+  uiRadiusTokens,
+  uiSpacingTokens,
+} from './theme-tokens';
 
 export type UiScheme = 'light' | 'dark';
 export type UiTypographyVariant =
@@ -41,6 +45,7 @@ export type UiTheme = {
     secondaryForeground: string;
     muted: string;
     mutedForeground: string;
+    navigationForeground: string;
     accent: string;
     accentForeground: string;
     destructive: string;
@@ -59,12 +64,14 @@ export type UiTheme = {
     full: number;
   };
   spacing: {
+    xxs: number;
     xs: number;
     sm: number;
     md: number;
     lg: number;
     xl: number;
     xxl: number;
+    xxxl: number;
   };
   typography: Record<UiTypographyVariant, UiTypographyStyle>;
   opacity: {
@@ -74,47 +81,24 @@ export type UiTheme = {
   };
 };
 
+const fonts = Platform.select({
+  ios: {
+    mono: 'ui-monospace',
+  },
+  default: {
+    mono: 'monospace',
+  },
+  web: {
+    mono: 'var(--font-mono)',
+  },
+});
+
 export const uiThemes: Record<UiScheme, UiTheme> = {
   light: {
     scheme: 'light',
-    colors: {
-      background: '#ffffff',
-      foreground: '#252525',
-      card: '#ffffff',
-      cardForeground: '#252525',
-      popover: '#ffffff',
-      popoverForeground: '#252525',
-      primary: '#343434',
-      primaryForeground: '#fafafa',
-      secondary: '#f7f7f7',
-      secondaryForeground: '#343434',
-      muted: '#f7f7f7',
-      mutedForeground: '#666666',
-      accent: '#f7f7f7',
-      accentForeground: '#343434',
-      destructive: '#d92d20',
-      destructiveForeground: '#ffffff',
-      border: '#e5e5e5',
-      input: '#e5e5e5',
-      ring: '#a1a1a1',
-      transparent: 'transparent',
-    },
-    radius: {
-      sm: 6,
-      md: 8,
-      lg: 10,
-      xl: 14,
-      xxl: 18,
-      full: 999,
-    },
-    spacing: {
-      xs: 4,
-      sm: 8,
-      md: 12,
-      lg: 16,
-      xl: 24,
-      xxl: 32,
-    },
+    colors: uiColorTokens.light,
+    radius: uiRadiusTokens,
+    spacing: uiSpacingTokens,
     typography: createTypographyScale(),
     opacity: {
       pressed: 0.72,
@@ -124,44 +108,9 @@ export const uiThemes: Record<UiScheme, UiTheme> = {
   },
   dark: {
     scheme: 'dark',
-    colors: {
-      background: '#252525',
-      foreground: '#fafafa',
-      card: '#343434',
-      cardForeground: '#fafafa',
-      popover: '#343434',
-      popoverForeground: '#fafafa',
-      primary: '#e5e5e5',
-      primaryForeground: '#343434',
-      secondary: '#444444',
-      secondaryForeground: '#fafafa',
-      muted: '#444444',
-      mutedForeground: '#a1a1a1',
-      accent: '#444444',
-      accentForeground: '#fafafa',
-      destructive: '#f97066',
-      destructiveForeground: '#250806',
-      border: '#464646',
-      input: '#525252',
-      ring: '#8a8a8a',
-      transparent: 'transparent',
-    },
-    radius: {
-      sm: 6,
-      md: 8,
-      lg: 10,
-      xl: 14,
-      xxl: 18,
-      full: 999,
-    },
-    spacing: {
-      xs: 4,
-      sm: 8,
-      md: 12,
-      lg: 16,
-      xl: 24,
-      xxl: 32,
-    },
+    colors: uiColorTokens.dark,
+    radius: uiRadiusTokens,
+    spacing: uiSpacingTokens,
     typography: createTypographyScale(),
     opacity: {
       pressed: 0.72,
@@ -189,7 +138,7 @@ function createTypographyScale(): Record<UiTypographyVariant, UiTypographyStyle>
     button: { fontSize: 14, lineHeight: 20, fontWeight: '600', letterSpacing: 0 },
     link: { fontSize: 14, lineHeight: 20, fontWeight: '600', letterSpacing: 0 },
     code: {
-      fontFamily: Fonts.mono,
+      fontFamily: fonts.mono,
       fontSize: 12,
       fontWeight: '500',
       letterSpacing: 0,

@@ -4,31 +4,31 @@ import { StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Typography } from '@/components/ui/typography';
+import { useUiTheme } from '@/components/ui/theme';
 import { TEST_IDS } from '@/constants/testIds';
-import { Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
 
 export default function AppTabs() {
-  const colors = useTheme();
+  const theme = useUiTheme();
   const insets = useSafeAreaInsets();
-  const tabBarHeight = 56 + Math.max(insets.bottom, Spacing.two);
+  const tabBarHeight = 56 + Math.max(insets.bottom, theme.spacing.sm);
 
   return (
     <RouterTabs
       screenOptions={{
         headerShown: false,
-        sceneStyle: { backgroundColor: colors.background },
-        tabBarActiveTintColor: colors.text,
+        sceneStyle: { backgroundColor: theme.colors.background },
+        tabBarActiveTintColor: theme.colors.foreground,
         tabBarHideOnKeyboard: true,
-        tabBarInactiveTintColor: colors.textSecondary,
-        tabBarItemStyle: styles.tabBarItem,
+        tabBarInactiveTintColor: theme.colors.mutedForeground,
+        tabBarItemStyle: [styles.tabBarItem, { paddingVertical: theme.spacing.xs }],
         tabBarStyle: [
           styles.tabBar,
           {
-            backgroundColor: colors.background,
-            borderTopColor: colors.backgroundElement,
+            backgroundColor: theme.colors.background,
+            borderTopColor: theme.colors.border,
             height: tabBarHeight,
-            paddingBottom: Math.max(insets.bottom, Spacing.two),
+            paddingBottom: Math.max(insets.bottom, theme.spacing.sm),
+            paddingTop: theme.spacing.sm,
           },
         ],
       }}>
@@ -78,10 +78,7 @@ const styles = StyleSheet.create({
   tabBar: {
     borderTopWidth: StyleSheet.hairlineWidth,
     elevation: 0,
-    paddingTop: Spacing.two,
     shadowOpacity: 0,
   },
-  tabBarItem: {
-    paddingVertical: Spacing.one,
-  },
+  tabBarItem: {},
 });

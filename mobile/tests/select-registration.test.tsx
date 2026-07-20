@@ -127,29 +127,38 @@ const fakeDocument = {
 };
 
 type NativeHostProps = {
+  'aria-current'?: unknown;
+  accessibilityLabel?: unknown;
   accessibilityRole?: unknown;
   accessibilityState?: unknown;
   children?: React.ReactNode | ((state: { pressed: boolean }) => React.ReactNode);
   disabled?: boolean;
   onPress?: () => void;
   pointerEvents?: unknown;
+  role?: unknown;
   style?: unknown;
 };
 
 function NativeHost(tagName: string) {
   return function Host({
+    'aria-current': ariaCurrent,
+    accessibilityLabel,
     accessibilityRole: _accessibilityRole,
     accessibilityState: _accessibilityState,
     children,
     disabled,
     onPress,
     pointerEvents: _pointerEvents,
+    role,
     style: _style,
   }: NativeHostProps) {
     return React.createElement(tagName, {
+      'aria-current': ariaCurrent,
+      'aria-label': accessibilityLabel,
       children: typeof children === 'function' ? children({ pressed: false }) : children,
       disabled,
       onClick: onPress,
+      role,
     });
   };
 }
@@ -185,6 +194,10 @@ mock.module('react-native-safe-area-context', () => ({
   SafeAreaView: NativeHost('div'),
 }));
 
+mock.module('expo-symbols', () => ({
+  SymbolView: NativeHost('span'),
+}));
+
 Object.assign(globalThis, {
   document: fakeDocument,
   HTMLElement: FakeDomElement,
@@ -203,6 +216,53 @@ async function renderAndFlush(root: Root, element: React.ReactNode) {
     await waitForEffects();
   });
 }
+
+test('wide dashboard navigation exposes the active destination as the current page', async () => {
+  const { NavigationRail, NavigationRailItem } =
+    await import('../src/components/dashboard/NavigationRail');
+  const container = fakeDocument.createElement('div');
+  const root = createRoot(container);
+
+  await renderAndFlush(
+    root,
+    <NavigationRail title="web_app_demo">
+      <NavigationRailItem
+        icon={{ ios: 'square.grid.2x2.fill', android: 'view_module', web: 'view_module' }}
+        isActive
+        label="Components"
+      />
+    </NavigationRail>,
+  );
+
+  expect((container.firstChild as FakeElement).attributes.role).toBe('navigation');
+  expect((container.firstChild as FakeElement).attributes['aria-label']).toBe(
+    'Primary navigation',
+  );
+
+  await renderAndFlush(
+    root,
+    <NavigationRailItem
+      icon={{ ios: 'square.grid.2x2.fill', android: 'view_module', web: 'view_module' }}
+      isActive
+      label="Components"
+    />,
+  );
+
+  expect((container.firstChild as FakeElement).attributes['aria-current']).toBe('page');
+
+  await renderAndFlush(
+    root,
+    <NavigationRailItem
+      icon={{ ios: 'person.crop.circle.fill', android: 'person', web: 'person' }}
+      isActive={false}
+      label="Profile"
+    />,
+  );
+
+  expect((container.firstChild as FakeElement).attributes['aria-current']).toBeUndefined();
+
+  await act(async () => root.unmount());
+});
 
 test('Select registers option effects, preserves same-value replacements, and clears removed selections', async () => {
   const { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } =

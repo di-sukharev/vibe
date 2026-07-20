@@ -1,10 +1,10 @@
 import { Screen } from '@/components/screen';
-import { Spinner } from '@/components/ui/spinner';
+import { ScreenState } from '@/components/dashboard';
 
 export function ScreenLoader() {
   return (
     <Screen centered padded={false}>
-      <Spinner />
+      <ScreenState status="loading" />
     </Screen>
   );
 }

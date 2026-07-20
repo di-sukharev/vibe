@@ -14,9 +14,8 @@ import {
 } from 'react-native';
 import { SafeAreaView, type Edge } from 'react-native-safe-area-context';
 
+import { useUiTheme } from '@/components/ui/theme';
 import { TEST_IDS } from '@/constants/testIds';
-import { Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
 
 type ScreenBackButton = boolean | 'auto';
 
@@ -52,7 +51,7 @@ export function Screen({
   testID,
 }: ScreenProps) {
   const router = useRouter();
-  const colors = useTheme();
+  const theme = useUiTheme();
   const canGoBack = getCanGoBack(router);
   const showBackButton =
     backButton === true || (backButton === 'auto' && (canGoBack || Boolean(backFallbackHref)));
@@ -71,7 +70,14 @@ export function Screen({
   const body = (
     <SafeAreaView edges={edges} style={styles.safeArea}>
       {showBackButton && (
-        <View style={styles.header}>
+        <View
+          style={[
+            styles.header,
+            {
+              paddingHorizontal: theme.spacing.lg,
+              paddingTop: theme.spacing.sm,
+            },
+          ]}>
           <Pressable
             accessibilityLabel="Back"
             accessibilityRole="button"
@@ -80,15 +86,15 @@ export function Screen({
             style={[
               styles.backButton,
               {
-                backgroundColor: colors.background,
-                borderColor: colors.backgroundElement,
+                backgroundColor: theme.colors.background,
+                borderColor: theme.colors.border,
               },
             ]}
             testID={backButtonTestID}>
             <SymbolView
               name={{ ios: 'chevron.left', android: 'arrow_back', web: 'arrow_back' }}
               size={22}
-              tintColor={colors.text}
+              tintColor={theme.colors.foreground}
             />
           </Pressable>
         </View>
@@ -99,8 +105,8 @@ export function Screen({
           {...scrollViewProps}
           contentContainerStyle={[
             styles.scrollContent,
-            { gap: Spacing.four },
-            padded && styles.padded,
+            { gap: theme.spacing.xl },
+            padded && { padding: theme.spacing.xl },
             centered && styles.centeredContent,
             contentStyle,
           ]}
@@ -112,8 +118,8 @@ export function Screen({
         <View
           style={[
             styles.content,
-            { gap: Spacing.four },
-            padded && styles.padded,
+            { gap: theme.spacing.xl },
+            padded && { padding: theme.spacing.xl },
             centered && styles.centeredContent,
             contentStyle,
           ]}
@@ -125,7 +131,7 @@ export function Screen({
   );
 
   return (
-    <View style={[styles.screen, { backgroundColor: colors.background }, style]}>
+    <View style={[styles.screen, { backgroundColor: theme.colors.background }, style]}>
       {keyboardAvoiding ? (
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -165,14 +171,9 @@ const styles = StyleSheet.create({
   header: {
     alignItems: 'flex-start',
     minHeight: 56,
-    paddingHorizontal: Spacing.three,
-    paddingTop: Spacing.two,
   },
   keyboardView: {
     flex: 1,
-  },
-  padded: {
-    padding: Spacing.four,
   },
   safeArea: {
     flex: 1,
