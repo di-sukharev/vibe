@@ -6,7 +6,8 @@ test('registers, restores the session, opens protected UI, and logs out', async 
 
   await page.goto('/')
 
-  await expect(page.getByRole('heading', { name: /auth, validation/i })).toBeVisible()
+  await expect(page.getByRole('main')).toHaveCount(1)
+  await expect(page.getByRole('heading', { level: 1, name: /auth, validation/i })).toBeVisible()
   await page.getByRole('button', { name: 'Create account' }).click()
   await expect(page.getByText('Invalid email address')).toBeVisible()
   await expect(page.getByText('Password must be at least 8 characters')).toBeVisible()
@@ -24,8 +25,16 @@ test('registers, restores the session, opens protected UI, and logs out', async 
   await page.getByLabel('Password').fill(e2ePassword)
   await page.getByRole('button', { name: 'Create account' }).click()
 
-  await expect(page.getByRole('heading', { name: 'Session is active' })).toBeVisible()
-  await expect(page.getByText(email)).toBeVisible()
+  await expect(page).toHaveURL(/\/app$/)
+  await expect(page.getByRole('main')).toHaveCount(1)
+  await expect(page.getByRole('navigation', { name: 'Primary navigation' })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 1, name: `Welcome, ${displayName}` })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Home' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Profile' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Settings' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Dashboard' })).toHaveCount(0)
+  await expect(page.getByRole('link', { name: 'Users' })).toHaveCount(0)
+  await expect(page.getByRole('main').getByText(email, { exact: true })).toBeVisible()
   await expect
     .poll(async () =>
       (await page.context().cookies()).some(
@@ -46,16 +55,16 @@ test('registers, restores the session, opens protected UI, and logs out', async 
 
   await expect((await refreshAfterReload).status()).toBe(200)
   await expect((await meAfterReload).status()).toBe(200)
-  await expect(page.getByRole('heading', { name: 'Session is active' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: `Welcome, ${displayName}` })).toBeVisible()
 
-  await page.getByRole('link', { name: 'Open app' }).click()
-  await expect(page.getByRole('heading', { name: displayName })).toBeVisible()
-  await expect(page.getByText(email)).toBeVisible()
+  await page.getByRole('link', { name: 'Profile' }).click()
+  await page.getByLabel('Display name').fill('Updated Web User')
+  await page.getByRole('button', { name: 'Save profile' }).click()
+  await expect(page.getByText('Profile saved')).toBeVisible()
+  await page.reload()
+  await expect(page.getByLabel('Display name')).toHaveValue('Updated Web User')
 
   await page.getByRole('button', { name: 'Logout' }).click()
-  await expect(page.getByRole('heading', { name: 'Login required' })).toBeVisible()
-
-  await page.getByRole('link', { name: 'Go to auth' }).click()
   await expect(page.getByRole('button', { name: 'Create account' })).toBeVisible()
 
   await page.getByRole('tab', { name: 'Login' }).click()
@@ -66,7 +75,8 @@ test('registers, restores the session, opens protected UI, and logs out', async 
 
   await page.getByLabel('Password').fill(e2ePassword)
   await page.getByRole('button', { name: 'Login' }).click()
-  await expect(page.getByRole('heading', { name: 'Session is active' })).toBeVisible()
+  await expect(page).toHaveURL(/\/app\/profile$/)
+  await expect(page.getByLabel('Display name')).toHaveValue('Updated Web User')
 })
 
 test('keeps one logical browser session active across concurrent tabs', async ({ page }) => {
@@ -76,18 +86,18 @@ test('keeps one logical browser session active across concurrent tabs', async ({
   await page.getByLabel('Email').fill(email)
   await page.getByLabel('Password').fill(e2ePassword)
   await page.getByRole('button', { name: 'Create account' }).click()
-  await expect(page.getByRole('heading', { name: 'Session is active' })).toBeVisible()
+  await expect(page).toHaveURL(/\/app$/)
 
   const secondPage = await page.context().newPage()
   await secondPage.goto('/')
-  await expect(secondPage.getByRole('heading', { name: 'Session is active' })).toBeVisible()
+  await expect(secondPage).toHaveURL(/\/app$/)
 
   await Promise.all([page.reload(), secondPage.reload()])
 
-  await expect(page.getByRole('heading', { name: 'Session is active' })).toBeVisible()
-  await expect(secondPage.getByRole('heading', { name: 'Session is active' })).toBeVisible()
-  await expect(page.getByText(email)).toBeVisible()
-  await expect(secondPage.getByText(email)).toBeVisible()
+  await expect(page).toHaveURL(/\/app$/)
+  await expect(secondPage).toHaveURL(/\/app$/)
+  await expect(page.getByRole('heading', { name: `Welcome, ${email}` })).toBeVisible()
+  await expect(secondPage.getByRole('heading', { name: `Welcome, ${email}` })).toBeVisible()
 
   await page.route('**/api/auth/logout', async (route) => {
     await route.fulfill({
@@ -97,7 +107,7 @@ test('keeps one logical browser session active across concurrent tabs', async ({
     })
   })
   await page.getByRole('button', { name: 'Logout' }).click()
-  await expect(page.getByRole('alert')).toContainText('Your session is still active')
+  await expect(page.getByRole('alert')).toContainText('Logout failed')
 
   await secondPage.getByRole('button', { name: 'Logout' }).click()
   await expect(secondPage.getByRole('button', { name: 'Create account' })).toBeVisible()
@@ -111,11 +121,11 @@ test('remote logout recovers a tab from a transient bootstrap error', async ({ p
   await page.getByLabel('Email').fill(email)
   await page.getByLabel('Password').fill(e2ePassword)
   await page.getByRole('button', { name: 'Create account' }).click()
-  await expect(page.getByRole('heading', { name: 'Session is active' })).toBeVisible()
+  await expect(page).toHaveURL(/\/app$/)
 
   const healthyPage = await page.context().newPage()
   await healthyPage.goto('/')
-  await expect(healthyPage.getByRole('heading', { name: 'Session is active' })).toBeVisible()
+  await expect(healthyPage).toHaveURL(/\/app$/)
 
   await page.route('**/api/auth/refresh', async (route) => {
     await route.fulfill({
@@ -149,8 +159,8 @@ test('concurrent account changes converge every tab on the winning cookie sessio
     secondPage.getByRole('button', { name: 'Create account' }).click(),
   ])
 
-  await expect(page.getByRole('heading', { name: 'Session is active' })).toBeVisible()
-  await expect(secondPage.getByRole('heading', { name: 'Session is active' })).toBeVisible()
+  await expect(page).toHaveURL(/\/app$/)
+  await expect(secondPage).toHaveURL(/\/app$/)
   let winningEmail = ''
   await expect
     .poll(async () => {

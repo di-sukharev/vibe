@@ -104,3 +104,38 @@ test('IAP ingress has an independent bounded request rate', async () => {
   expect(limited.status).toBe(429)
   expect(limited.headers.get('retry-after')).toBeTruthy()
 })
+
+test('account mutations reject oversized bodies before authentication', async () => {
+  const app = createApp({
+    env: { ...env, AUTH_BODY_LIMIT_BYTES: 32 },
+    prisma: {} as DbClient,
+  })
+  const request = (path: string) => app.request(path, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ displayName: 'x'.repeat(64), role: 'admin' }),
+  })
+
+  expect((await request('/api/users/me')).status).toBe(413)
+  expect((await request('/api/admin/users/0196f6f8-6600-7000-8000-000000000001/role')).status)
+    .toBe(413)
+})
+
+test('account mutations share bounded write-rate protection', async () => {
+  const app = createApp({
+    env: { ...env, AUTH_RATE_LIMIT_MAX: 1 },
+    prisma: {} as DbClient,
+  })
+  const request = (path: string) => app.request(path, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  })
+
+  expect((await request('/api/users/me')).status).toBe(401)
+  const limited = await request(
+    '/api/admin/users/0196f6f8-6600-7000-8000-000000000001/role',
+  )
+  expect(limited.status).toBe(429)
+  expect(limited.headers.get('retry-after')).toBeTruthy()
+})

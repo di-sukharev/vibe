@@ -237,6 +237,78 @@ maybeDescribe('push notification API and outbox', () => {
     expect(await prisma.pushToken.findUnique({ where: { expoPushToken } })).toBeNull()
   })
 
+  test('serializes role changes with an in-flight push registration', async () => {
+    const admin = await registerUser('push-role-registration-admin@example.com')
+    await prisma.user.update({
+      where: { id: admin.userId },
+      data: { role: 'admin' },
+    })
+    const target = await registerUser('push-role-registration-target@example.com')
+    const installationId = randomUUID()
+    const expoPushToken = 'ExponentPushToken[role-registration-race]'
+    let markSessionChecked: () => void = () => undefined
+    const sessionChecked = new Promise<void>((resolve) => {
+      markSessionChecked = resolve
+    })
+    let releaseRegistration: () => void = () => undefined
+    const registrationBarrier = new Promise<void>((resolve) => {
+      releaseRegistration = resolve
+    })
+    const registrationPrisma = prisma.$extends({
+      query: {
+        authSession: {
+          async count({ args, query }) {
+            const count = await query(args)
+            if (args.where?.id === target.sessionId) {
+              markSessionChecked()
+              await registrationBarrier
+            }
+            return count
+          },
+        },
+      },
+    }) as unknown as DbClient
+    const registration = registerPushToken(
+      registrationPrisma,
+      target.userId,
+      target.sessionId,
+      {
+        expoPushToken,
+        generation: 1,
+        installationId,
+        installationSecret: randomUUID(),
+      },
+      new Date(),
+    )
+    await sessionChecked
+
+    let roleChangeSettled = false
+    const roleChange = Promise.resolve(app.request(
+      `/api/admin/users/${target.userId}/role`,
+      {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${admin.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ role: 'admin' }),
+      },
+    )).finally(() => {
+      roleChangeSettled = true
+    })
+    await new Promise<void>((resolve) => setTimeout(resolve, 50))
+    const roleChangeSettledBeforeRegistration = roleChangeSettled
+    releaseRegistration()
+    expect(await registration).toBe('applied')
+    expect((await roleChange).status).toBe(200)
+    expect(roleChangeSettledBeforeRegistration).toBe(false)
+    expect(await prisma.pushToken.findUnique({ where: { expoPushToken } })).toBeNull()
+    expect(await prisma.authSession.findUniqueOrThrow({
+      where: { id: target.sessionId },
+      select: { revokedAt: true },
+    })).toEqual({ revokedAt: expect.any(Date) })
+  })
+
   test('newer installation generations win across accounts and reject late mutations', async () => {
     const accountA = await registerUser('push-installation-a@example.com')
     const accountB = await registerUser('push-installation-b@example.com')
@@ -1234,6 +1306,113 @@ maybeDescribe('push notification API and outbox', () => {
     expect(metrics.sent).toBe(1)
     expect(events).toEqual(['send-started', 'send-finished', 'logout-returned'])
   })
+
+  test('role changes wait for an admitted Expo send before revoking delivery authority', async () => {
+    const admin = await registerUser('push-role-send-admin@example.com')
+    await prisma.user.update({
+      where: { id: admin.userId },
+      data: { role: 'admin' },
+    })
+    const target = await registerUser('push-role-send-target@example.com')
+    const independentTarget = await prisma.user.create({
+      data: {
+        email: 'push-role-independent-target@example.com',
+        passwordHash: null,
+        role: 'user',
+      },
+      select: { id: true },
+    })
+    const now = new Date()
+    await prisma.pushToken.create({
+      data: {
+        expoPushToken: 'ExponentPushToken[role-send-race]',
+        registrationSessionId: target.sessionId,
+        userId: target.userId,
+      },
+    })
+    const queued = await enqueuePushNotification(prisma, {
+      body: 'Admitted before the role change',
+      dedupeKey: 'role-send-race',
+      scheduledFor: now,
+      title: 'Role send race',
+      userId: target.userId,
+    })
+    let markSendStarted: () => void = () => undefined
+    const sendStarted = new Promise<void>((resolve) => {
+      markSendStarted = resolve
+    })
+    let releaseSend: () => void = () => undefined
+    const sendBarrier = new Promise<void>((resolve) => {
+      releaseSend = resolve
+    })
+    const worker = processPushOutbox(
+      {
+        env,
+        prisma,
+        pushClientOptions: {
+          fetchImpl: async () => {
+            markSendStarted()
+            await sendBarrier
+            return json({ data: [{ id: 'role-send-ticket', status: 'ok' }] })
+          },
+        },
+      },
+      { now, onlyIds: [queued.id] },
+    )
+    await sendStarted
+
+    let roleChangeSettled = false
+    const roleChange = Promise.resolve(app.request(
+      `/api/admin/users/${target.userId}/role`,
+      {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${admin.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ role: 'admin' }),
+      },
+    )).finally(() => {
+      roleChangeSettled = true
+    })
+    const contentionStartedAt = Date.now()
+    await new Promise<void>((resolve) => setTimeout(resolve, 100))
+    const independentRoleChange = app.request(
+      `/api/admin/users/${independentTarget.id}/role`,
+      {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${admin.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ role: 'admin' }),
+      },
+    )
+    const independentResponseBeforeRelease = await Promise.race([
+      independentRoleChange,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 1_000)),
+    ])
+    const remainingContentionMs = Math.max(
+      0,
+      5_250 - (Date.now() - contentionStartedAt),
+    )
+    await new Promise<void>((resolve) => setTimeout(resolve, remainingContentionMs))
+    const roleChangeSettledBeforeSend = roleChangeSettled
+    const contentionElapsedMs = Date.now() - contentionStartedAt
+    releaseSend()
+    const [metrics, roleChangeResponse, independentResponse] = await Promise.all([
+      worker,
+      roleChange,
+      independentRoleChange,
+    ])
+    expect(contentionElapsedMs).toBeGreaterThanOrEqual(5_000)
+    expect(roleChangeSettledBeforeSend).toBe(false)
+    expect(independentResponseBeforeRelease?.status).toBe(200)
+    expect(metrics.sent).toBe(1)
+    expect(roleChangeResponse.status).toBe(200)
+    expect(independentResponse.status).toBe(200)
+    expect(await prisma.pushToken.count({ where: { userId: target.userId } })).toBe(0)
+  }, 15_000)
 
   test('same-token account transfer waits for an admitted send and fences the previous generation', async () => {
     const accountA = await registerUser('delivery-transfer-a@example.com')

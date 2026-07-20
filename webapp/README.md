@@ -1,6 +1,6 @@
 # Webapp
 
-The CSR browser client provides the baseline auth flow for future app features. It lives behind authentication and needs no SEO, so it stays client-side rendered; the public, SEO-facing surfaces live in the `website` workspace instead. It consumes the same API contracts as mobile and should keep server-state, form-state, and auth behavior centralized.
+The CSR browser client provides authenticated, role-specific workspaces. It needs no SEO, so it stays client-side rendered; the public, SEO-facing surfaces live in the `website` workspace instead. It consumes the same API contracts as mobile and keeps server-state, form-state, auth, and role navigation centralized.
 
 ## Project Surface Status
 
@@ -57,6 +57,26 @@ Use TanStack Query for server state, TanStack Mutation for API writes, TanStack 
 
 Put user-specific TanStack Query keys under the `['session', ...]` prefix. Login, registration, confirmed logout, and auth expiry remove and cancel stale session scope while preserving public caches. Successful account changes notify other same-origin tabs to bootstrap from the winning HttpOnly cookie; confirmed logout and auth expiry clear their in-memory session UI. A failed server logout leaves both the HttpOnly cookie and local authenticated state intact and shows a retryable error instead of pretending the user signed out.
 
+The route map is intentionally disjoint:
+
+- `/` is login and registration.
+- `user` owns `/app`, `/app/profile`, and `/app/settings`.
+- `admin` owns `/admin`, `/admin/users`, and `/admin/settings`.
+
+The auth bootstrap finishes before a workspace shell renders. Guests are returned
+to a safe known internal path after login, while an authenticated account that
+opens the other role’s zone is redirected to its own home. `WorkspaceShell` owns
+the classic shadcn/ui `SidebarProvider`, collapsible desktop sidebar, mobile
+sheet, inset/trigger, role-specific menu, account footer, and logout behavior.
+Pages only compose their content.
+
+`src/features/users` owns profile API/mutation state and user pages;
+`src/features/admin` owns dashboard/list/role API queries and admin pages; and
+`src/features/navigation` owns the pure role-to-route map. Profile mutations
+update only the current-user query. Role mutations invalidate only admin
+dashboard/directory queries; a target user’s revoked session is observed by that
+client on its next authenticated request or bootstrap.
+
 Keep raw fetch, base URL handling, and shared error parsing in the endpoint-agnostic `src/platform/api`. Each `src/features/<context>` owns its paths, schemas, queries, and provider. Pages import features only through public `index.ts`; features use platform and UI primitives; platform and `src/components/ui` never import product features. Run `bun run architecture:check` after changing boundaries.
 
 Use shadcn/ui for web interface primitives. Treat `src/components/ui` as the shared UI primitive layer: most files are shadcn registry output, plus project-wide primitives such as `Typography`. Import those primitives through `@/components/ui/*`. Put app-specific wrappers and composed product components in `src/components` so normal lint rules keep applying. Avoid adding new one-off global CSS classes for product UI; compose screens with Tailwind utilities and shadcn theme tokens from `src/index.css`.
@@ -77,9 +97,16 @@ Use the local `shadcn` devDependency pinned in `webapp/package.json` and `bun.lo
 
 ## E2E
 
-The Playwright smoke tests live in `e2e/specs/auth.spec.ts` and verify client-side auth validation visibility, register/login mode switching, register, refresh after reload, protected UI, logout, invalid login error rendering, successful login after logout, concurrent session restoration, cross-tab logout/error recovery, and convergence after competing account changes in two tabs.
+The Playwright tests live in `e2e/specs/auth.spec.ts` and
+`e2e/specs/rbac.spec.ts`. They verify auth validation, register/login, refresh
+after reload, profile persistence, role-specific sidebar contents, safe return
+paths, cross-role redirects, seeded-admin login, admin promotion, target-session
+revocation, and the existing concurrent-tab session behavior.
 
-The run starts Docker Compose `postgres_test`, applies migrations to `web_app_demo_test`, starts the backend with `TEST_DATABASE_URL` as its `DATABASE_URL`, starts Vite, and removes the test database volume after the run by default.
+The run starts Docker Compose `postgres_test`, applies migrations to
+`web_app_demo_test`, idempotently seeds the E2E administrator, starts the backend
+with `TEST_DATABASE_URL` as its `DATABASE_URL`, starts Vite, and removes the test
+database volume after the run by default.
 
 First run:
 

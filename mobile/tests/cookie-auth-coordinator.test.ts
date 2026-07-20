@@ -741,6 +741,7 @@ function authResponse(principal: string) {
       id: principal,
       email: `${principal}@example.com`,
       displayName: null,
+      role: 'user',
       createdAt: '2026-05-11T00:00:00.000Z',
       subscription: inactiveSubscription,
     },

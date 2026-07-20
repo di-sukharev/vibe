@@ -8,6 +8,7 @@ const user = {
   email: 'user@example.com',
   passwordHash: 'password-hash',
   displayName: null,
+  role: 'user' as const,
   createdAt: new Date('2026-01-01T00:00:00.000Z'),
 }
 
@@ -32,7 +33,7 @@ test('refresh keeps the logical session id stable while rotating its credential'
     findUserByProviderSubject: async () => null,
     createPasswordUserWithSession: async () => ({ user, session: { id: 'session-created' } }),
     createSocialUser: async () => ({ created: true, user }),
-    createSession: async () => ({ id: 'session-created' }),
+    createSession: async () => ({ user, session: { id: 'session-created' } }),
     findActiveRefreshSession: async (input) => {
       refreshCutoffs.push(input.createdAfter)
       return {

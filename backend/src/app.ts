@@ -13,6 +13,7 @@ import {
   type GooglePlaySubscriptionVerifier,
 } from './modules/billing'
 import { createNotificationsModule } from './modules/notifications'
+import { createUsersModule } from './modules/users'
 
 type CreateAppOptions = {
   env: AppEnv
@@ -44,6 +45,11 @@ export function createApp({
     logoutCleanup: notifications.logoutCleanup,
     subscriptionReader: billing.getSubscription,
   })
+  const users = createUsersModule({
+    db: prisma,
+    requireAdmin: auth.requireAdmin,
+    requireAuth: auth.requireAuth,
+  })
   const app = new OpenAPIHono<AuthHttpEnv>({ defaultHook: validationErrorHook })
 
   app.use(secureHeaders())
@@ -70,6 +76,10 @@ export function createApp({
   }
   for (const middleware of createIngressSecurity(publicWriteSecurity)) {
     app.use('/api/auth/*', middleware)
+  }
+  for (const middleware of createIngressSecurity(publicWriteSecurity)) {
+    app.use('/api/users/*', middleware)
+    app.use('/api/admin/*', middleware)
   }
   for (const middleware of createIngressSecurity({
     ...publicWriteSecurity,
@@ -117,6 +127,8 @@ export function createApp({
   })
 
   app.route('/api/auth', auth.routes)
+  app.route('/api/users', users.userRoutes)
+  app.route('/api/admin', users.adminRoutes)
   app.route('/api/iap', billing.createRoutes(auth.authenticateAccessToken))
   app.route('/api/notifications', notifications.createRoutes(auth.authenticateAccessToken))
   app.route('/api/webhooks', billing.webhookRoutes)

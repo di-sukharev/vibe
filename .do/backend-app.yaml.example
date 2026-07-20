@@ -138,11 +138,12 @@ jobs:
       deploy_on_push: true
     source_dir: /
     dockerfile_path: backend/Dockerfile
-    run_command: bun run prisma:deploy
+    run_command: bun run db:deploy
     instance_count: 1
     envs:
       - key: DATABASE_URL
         value: "${REPLACE_WITH_DO_DB_COMPONENT_NAME.DATABASE_URL}"
         scope: RUN_TIME
         type: SECRET
+REPLACE_WITH_INITIAL_ADMIN_ENVS
 REPLACE_WITH_OPTIONAL_BACKEND_CRON_JOBS

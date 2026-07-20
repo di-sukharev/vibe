@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { SignJWT } from 'jose'
+import { decodeJwt, SignJWT } from 'jose'
 
 import type { AppEnv } from '../../../env'
 import { signAccessToken, verifyAccessToken } from './access-tokens'
@@ -52,6 +52,7 @@ describe('access tokens', () => {
       sessionId: 'session_1',
       email: 'user@example.com',
     })
+    expect(decodeJwt(token)).not.toHaveProperty('role')
   })
 
   test('rejects JWTs signed with any algorithm except HS256', async () => {

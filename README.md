@@ -152,6 +152,19 @@ Then apply migrations:
 bun run --cwd backend prisma:deploy
 ```
 
+Registration and social sign-in always create the `user` role. To make the local
+administrator usable, set `ADMIN_SEED_PASSWORD` in `backend/.env`, then run the
+idempotent seed:
+
+```bash
+bun run --cwd backend prisma:seed
+```
+
+Without a seed password, `admin@example.com` is still created as `admin`, but its
+password credential remains locked. Re-running the seed without a password never
+clears an existing password hash; re-running it with the already configured
+password preserves existing sessions and push registrations.
+
 ### Run The Active Surfaces
 
 Start only the app surfaces you need in separate terminals:
@@ -215,6 +228,8 @@ Test runners use the separate Docker Compose `postgres_test` service and the `TE
 - `bun run --cwd mobile e2e:maestro:audit` - check the mobile Maestro flow and runner inputs for known flaky patterns.
 - `bun run --cwd backend prisma:migrate` - create/apply a Prisma migration in development.
 - `bun run --cwd backend prisma:deploy` - apply existing Prisma migrations on a server.
+- `bun run --cwd backend prisma:seed` - idempotently create or unlock the local administrator.
+- `bun run --cwd backend db:deploy` - production pre-deploy: migrate, optionally bootstrap the first administrator, and require a login-capable administrator.
 
 ## Project READMEs
 
@@ -235,7 +250,7 @@ This project is licensed under the Apache License 2.0. If you distribute a fork,
 
 ## Architecture Notes
 
-API contracts live in `packages/contracts` and are imported by every active layer. The backend validates input with those Zod schemas; the webapp and mobile app reuse the same schemas in TanStack Form and API clients.
+API contracts live in `packages/contracts` and are imported by every active layer. The backend validates input with those Zod schemas; the webapp and mobile app reuse the same schemas in TanStack Form and API clients. `UserDto.role` is the shared `user | admin` role contract; authorization still uses the current database record rather than a role embedded in JWT claims.
 
 The backend follows the Product Modules flow `transport -> application -> domain/ports -> infrastructure`. Routes own HTTP representation, application services own use cases and orchestration, optional domain code owns pure policies and transitions, and context-specific infrastructure owns Prisma and provider SDKs. Cross-context imports go only through each module's public `index.ts`; API, worker, and cron entrypoints share `src/runtime.ts` for env and Prisma lifecycle.
 

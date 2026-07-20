@@ -5,6 +5,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { getDomain } from 'tldts'
 
+import { parseAdminSeedConfig } from '../backend/src/modules/users/domain/admin-seed-config.ts'
 import { validateDigitalOceanCronSchedule } from './do-cron.mjs'
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -117,6 +118,7 @@ if (includesBackend) {
     ),
     REPLACE_WITH_OPTIONAL_IAP_ENVS: optionalIapEnvBlock('      '),
     REPLACE_WITH_OPTIONAL_STORAGE_ENVS: optionalStorageEnvBlock(),
+    REPLACE_WITH_INITIAL_ADMIN_ENVS: initialAdminEnvBlock(),
   })
 }
 
@@ -174,7 +176,7 @@ function printUsage() {
   console.error('')
   console.error('Required env:')
   console.error('  all targets: DO_GITHUB_REPO, optional DO_PROJECT_SLUG, DO_GIT_BRANCH, DO_APP_REGION')
-  console.error('  backend-initial: JWT_SECRET')
+  console.error('  backend-initial: JWT_SECRET, ADMIN_SEED_EMAIL, ADMIN_SEED_PASSWORD')
   console.error('  backend-final: JWT_SECRET, DO_BACKEND_URL, DO_WEBAPP_URL, DO_AUTH_SITE_DOMAIN')
   console.error('  webapp: DO_BACKEND_URL, DO_WEBAPP_URL, DO_AUTH_SITE_DOMAIN')
   console.error('  website: no target-specific values')
@@ -205,6 +207,23 @@ function requiredEnv(name) {
 
 function requiredUrlEnv(name) {
   return normalizeHttpsUrl(name, requiredEnv(name))
+}
+
+function initialAdminEnvBlock() {
+  if (target !== 'backend-initial') return ''
+
+  const { email, password } = parseAdminSeedConfig(process.env, { requirePassword: true })
+  assertSafeYamlString('ADMIN_SEED_EMAIL', email)
+  assertSafeYamlString('ADMIN_SEED_PASSWORD', password)
+
+  return `      - key: ADMIN_SEED_EMAIL
+        value: ${yamlString(email)}
+        scope: RUN_TIME
+        type: SECRET
+      - key: ADMIN_SEED_PASSWORD
+        value: ${yamlString(password)}
+        scope: RUN_TIME
+        type: SECRET`
 }
 
 function buildBackendCorsOrigins(webappUrl, authSiteDomain) {

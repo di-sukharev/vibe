@@ -7,6 +7,81 @@ const repoRoot = resolve(import.meta.dirname, '..');
 const backendSpecPath = resolve(repoRoot, '.scratch/deploy/backend-app.yaml');
 
 describe('prepare-do-specs', () => {
+  test('requires strong bootstrap admin credentials only for the initial backend deployment', () => {
+    const missing = runPrepareSpecs({}, { target: 'backend-initial' });
+    expect(missing.status).not.toBe(0);
+    expect(`${missing.stdout}\n${missing.stderr}`).toContain('ADMIN_SEED_EMAIL');
+
+    const weak = runPrepareSpecs(
+      {
+        ADMIN_SEED_EMAIL: 'admin@example.com',
+        ADMIN_SEED_PASSWORD: 'password123',
+      },
+      { target: 'backend-initial' },
+    );
+    expect(weak.status).not.toBe(0);
+    expect(`${weak.stdout}\n${weak.stderr}`).toContain('at least 12 characters');
+
+    for (const password of ['            ', 'aaaaaaaaaaaa', 'adminadminadmin']) {
+      const degenerate = runPrepareSpecs(
+        {
+          ADMIN_SEED_EMAIL: 'admin@example.com',
+          ADMIN_SEED_PASSWORD: password,
+        },
+        { target: 'backend-initial' },
+      );
+      expect(degenerate.status).not.toBe(0);
+      expect(`${degenerate.stdout}\n${degenerate.stderr}`).toContain('ADMIN_SEED_PASSWORD');
+    }
+
+    const invalidEmail = runPrepareSpecs(
+      {
+        ADMIN_SEED_EMAIL: 'a..b@example.com',
+        ADMIN_SEED_PASSWORD: 'a-strong-initial-password',
+      },
+      { target: 'backend-initial' },
+    );
+    expect(invalidEmail.status).not.toBe(0);
+
+    const whitespaceSensitivePassword = '  whitespace-sensitive-password  ';
+    const whitespacePassword = runPrepareSpecs(
+      {
+        ADMIN_SEED_EMAIL: 'admin@example.com',
+        ADMIN_SEED_PASSWORD: whitespaceSensitivePassword,
+      },
+      { target: 'backend-initial' },
+    );
+    expect(whitespacePassword.status).toBe(0);
+    expect(readFileSync(backendSpecPath, 'utf8')).toContain(
+      JSON.stringify(whitespaceSensitivePassword),
+    );
+
+    const complete = runPrepareSpecs(
+      {
+        ADMIN_SEED_EMAIL: 'admin@example.com',
+        ADMIN_SEED_PASSWORD: 'a-strong-initial-password',
+      },
+      { target: 'backend-initial' },
+    );
+    expect(complete.status).toBe(0);
+
+    const initialSpec = readFileSync(backendSpecPath, 'utf8');
+    const api = serviceBlock(initialSpec, 'api');
+    const migrate = componentBlock(initialSpec, '  - name: migrate\n', []);
+    expect(api).not.toContain('ADMIN_SEED_PASSWORD');
+    expect(migrate).toContain('run_command: bun run db:deploy');
+    expect(migrate).toContain('key: ADMIN_SEED_EMAIL');
+    expect(migrate).toContain('key: ADMIN_SEED_PASSWORD');
+    expect(migrate).toContain('type: SECRET');
+
+    const final = runPrepareSpecs();
+    expect(final.status).toBe(0);
+    const finalSpec = readFileSync(backendSpecPath, 'utf8');
+    expect(finalSpec).toContain('run_command: bun run db:deploy');
+    expect(finalSpec).not.toContain('ADMIN_SEED_EMAIL');
+    expect(finalSpec).not.toContain('ADMIN_SEED_PASSWORD');
+  });
+
   test('rejects placeholder and obviously weak production JWT secrets', () => {
     for (const jwtSecret of [
       'replace-with-at-least-32-random-characters',

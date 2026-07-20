@@ -12,6 +12,7 @@ model User {
   email                   String                   @unique
   passwordHash            String?                  @map("password_hash")
   displayName             String?                  @map("display_name")
+  role                    UserRole                 @default(user)
   appleSubject            String?                  @unique @map("apple_subject")
   googleSubject           String?                  @unique @map("google_subject")
   createdAt               DateTime                 @default(now()) @map("created_at")
@@ -25,7 +26,15 @@ model User {
   pushNotificationOutbox  PushNotificationOutbox[]
   pushDeliveries          PushDelivery[]
 
+  @@index([role], map: "users_role_idx")
   @@map("users")
+}
+
+enum UserRole {
+  user
+  admin
+
+  @@map("user_role")
 }
 
 model AuthSession {

@@ -1,5 +1,3 @@
-import { Link } from '@tanstack/react-router'
-import type { UserDto } from '@web-app-demo/contracts'
 import type { PropsWithChildren, ReactNode } from 'react'
 
 import { AuthForm } from '@/features/auth'
@@ -8,11 +6,7 @@ import { Button } from '@/components/ui/button'
 import {
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
 } from '@/components/ui/card'
-import { Separator } from '@/components/ui/separator'
 import { Spinner } from '@/components/ui/spinner'
 import { Typography } from '@/components/ui/typography'
 
@@ -38,62 +32,6 @@ export function GuestAuthSection() {
         through the backend.
       </SectionIntro>
       <AuthForm />
-    </PageSection>
-  )
-}
-
-export function ActiveSessionSection({ user }: { user: UserDto }) {
-  return (
-    <PageSection>
-      <SectionIntro eyebrow="Authenticated starter" title="Session is active">
-        Logged in as{' '}
-        <Typography as="strong" variant="emphasis" tone="default">
-          {user.email}
-        </Typography>
-        . This is the baseline auth pattern for future web features.
-      </SectionIntro>
-      <SectionAction to="/app">Open app</SectionAction>
-    </PageSection>
-  )
-}
-
-export function LoginRequiredSection() {
-  return (
-    <PageSection>
-      <SectionIntro eyebrow="Protected example" title="Login required">
-        This route intentionally stays small and shows where protected product UI
-        begins.
-      </SectionIntro>
-      <SectionAction to="/">Go to auth</SectionAction>
-    </PageSection>
-  )
-}
-
-export function CurrentUserSection({ user }: { user: UserDto }) {
-  return (
-    <PageSection>
-      <div className="grid gap-3">
-        <Badge variant="outline">Current user</Badge>
-        <Typography variant="h1">{user.displayName ?? user.email}</Typography>
-        <Typography tone="muted">{user.email}</Typography>
-      </div>
-
-      <Separator />
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Card size="sm">
-          <CardHeader>
-            <CardTitle>User ID</CardTitle>
-            <CardDescription wrap="break">{user.id}</CardDescription>
-          </CardHeader>
-        </Card>
-        <Card size="sm">
-          <CardHeader>
-            <CardTitle>Created</CardTitle>
-            <CardDescription>{new Date(user.createdAt).toLocaleString()}</CardDescription>
-          </CardHeader>
-        </Card>
-      </div>
     </PageSection>
   )
 }
@@ -134,7 +72,7 @@ export function SessionErrorSection({ retry }: { retry: () => Promise<void> }) {
 }
 
 function PageSection({ children, layout = 'stack' }: PageSectionProps) {
-  return <section className={sectionLayoutClasses[layout]}>{children}</section>
+  return <main className={sectionLayoutClasses[layout]}>{children}</main>
 }
 
 function SectionIntro({
@@ -153,23 +91,6 @@ function SectionIntro({
         <Typography variant="h1">{title}</Typography>
         <Typography tone="muted">{children}</Typography>
       </div>
-    </div>
-  )
-}
-
-function SectionAction({
-  children,
-  to,
-}: PropsWithChildren<{
-  to: '/'
-} | {
-  to: '/app'
-}>) {
-  return (
-    <div className="justify-self-start">
-      <Button asChild size="lg">
-        <Link to={to}>{children}</Link>
-      </Button>
     </div>
   )
 }

@@ -9,6 +9,32 @@ export function createPrisma(connectionString: string) {
 
 export type DbClient = ReturnType<typeof createPrisma>
 
+// Push admission intentionally holds its per-user fence through the provider
+// call. Authority transitions acquire that target fence before their short
+// global role-policy section, so this budget always covers the complete send
+// fence plus the final revocation work.
+export const maximumPushSendFenceTransactionMs = 120_000
+export const userAuthorityTransitionTransactionOptions = {
+  timeout: maximumPushSendFenceTransactionMs + 15_000,
+} as const
+
+export function acquireUserRoleMutationLock(
+  prisma: Pick<DbClient, '$executeRaw'>,
+) {
+  return prisma.$executeRaw(
+    Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended('user-role-mutations', 0))`,
+  )
+}
+
+export function acquireUserAuthenticationAuthorityLock(
+  prisma: Pick<DbClient, '$executeRaw'>,
+  userId: string,
+) {
+  return prisma.$executeRaw(
+    Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`auth-authority:${userId}`}, 0))`,
+  )
+}
+
 export function acquirePushTokenUserLock(
   prisma: Pick<DbClient, '$executeRaw'>,
   userId: string,

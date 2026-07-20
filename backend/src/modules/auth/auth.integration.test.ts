@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test'
 
 import { createApp } from '../../app'
-import { createPrisma } from '../../db'
+import { createPrisma, type DbClient } from '../../db'
 import type { AppEnv } from '../../env'
 import { socialAuthProviderDeps } from './infrastructure/social-providers'
 
@@ -774,6 +774,65 @@ maybeDescribe('auth API integration', () => {
     expect(body.refreshToken).toBeString()
   })
 
+  test('revokes social session issuance that wins authentication authority before a role change', async () => {
+    const admin = await registerForMeGuard('social-race-admin@example.com')
+    await prisma.user.update({
+      where: { id: admin.userId },
+      data: { role: 'admin' },
+    })
+    const target = await prisma.user.create({
+      data: {
+        email: 'social-race-target@example.com',
+        googleSubject: 'social-race-subject',
+        passwordHash: null,
+      },
+    })
+    const sessionCreateGate = gateNextSessionCreate()
+    const socialApp = createApp({
+      env: { ...env, GOOGLE_AUTH_CLIENT_IDS: ['google-client-id'] },
+      prisma: sessionCreateGate.db,
+    })
+    socialAuthProviderDeps.verifyGoogleIdToken = async () => ({
+      provider: 'google',
+      subject: 'social-race-subject',
+    })
+
+    try {
+      const socialLogin = socialApp.request('/api/auth/token/social/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken: 'social-race-token' }),
+      })
+      await sessionCreateGate.reached
+
+      let roleChangeSettled = false
+      const roleChange = Promise.resolve(app.request(`/api/admin/users/${target.id}/role`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${admin.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ role: 'admin' }),
+      })).finally(() => {
+        roleChangeSettled = true
+      })
+      await new Promise<void>((resolve) => setTimeout(resolve, 50))
+      const roleChangeSettledBeforeSocialLogin = roleChangeSettled
+      sessionCreateGate.release()
+
+      const [socialResponse, roleResponse] = await Promise.all([socialLogin, roleChange])
+      const socialBody = await socialResponse.json()
+      expect(socialResponse.status).toBe(200)
+      expect(roleResponse.status).toBe(200)
+      expect(roleChangeSettledBeforeSocialLogin).toBe(false)
+      expect(await app.request('/api/auth/me', {
+        headers: { Authorization: `Bearer ${socialBody.accessToken}` },
+      })).toHaveProperty('status', 401)
+    } finally {
+      sessionCreateGate.release()
+    }
+  })
+
   test('concurrent first-time social auth requests sign into the same provider user', async () => {
     const socialApp = createApp({
       env: {
@@ -1038,5 +1097,32 @@ maybeDescribe('auth API integration', () => {
       refreshToken: registerBody.refreshToken as string,
       userId: user.id,
     }
+  }
+
+  function gateNextSessionCreate() {
+    let markReached: () => void = () => undefined
+    const reached = new Promise<void>((resolve) => {
+      markReached = resolve
+    })
+    let releaseGate: () => void = () => undefined
+    const barrier = new Promise<void>((resolve) => {
+      releaseGate = resolve
+    })
+    let gated = false
+    const db = prisma.$extends({
+      query: {
+        authSession: {
+          async create({ args, query }) {
+            if (!gated) {
+              gated = true
+              markReached()
+              await barrier
+            }
+            return query(args)
+          },
+        },
+      },
+    }) as unknown as DbClient
+    return { db, reached, release: releaseGate }
   }
 })

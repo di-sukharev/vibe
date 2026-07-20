@@ -10,6 +10,7 @@ import {
   acquirePushInstallationLock,
   acquirePushTokenValueLock,
   acquirePushTokenUserLock,
+  maximumPushSendFenceTransactionMs,
   type DbClient,
 } from '../../../db'
 import type { AppEnv } from '../../../env'
@@ -1348,7 +1349,10 @@ async function sendAuthorizedPushBatch(
 
 function outboxSendFenceTiming(processingStaleMs: number, requestTimeoutMs: number) {
   const safetyMs = Math.min(5_000, Math.max(1, Math.floor(requestTimeoutMs / 6)))
-  const transactionTimeoutMs = Math.max(1, processingStaleMs - safetyMs)
+  const transactionTimeoutMs = Math.min(
+    maximumPushSendFenceTransactionMs,
+    Math.max(1, processingStaleMs - safetyMs),
+  )
   return {
     providerDeadlineMs: Math.max(1, transactionTimeoutMs - safetyMs),
     transactionTimeoutMs,

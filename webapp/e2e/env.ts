@@ -20,6 +20,8 @@ export const defaultBackendPort =
 export const defaultWebPort =
   process.env.E2E_WEB_PORT ?? String(preferredWebPort)
 export const defaultDatabaseUrl = `postgresql://superuser:superpassword@localhost:${defaultPostgresTestPort}/web_app_demo_test?schema=public`
+export const e2eAdminEmail = 'admin@example.com'
+export const e2eAdminPassword = 'admin-e2e-password'
 
 export function composeEnv(extra: NodeJS.ProcessEnv = {}) {
   const explicitDatabaseUrl =

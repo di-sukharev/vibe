@@ -26,6 +26,7 @@ transport -> application -> domain/ports -> infrastructure -> DTO
 - `src/env.ts` validates environment variables with Zod.
 - `src/db.ts` creates the Prisma client.
 - `src/modules/auth/index.ts` is the auth module's public boundary and golden path. Its route factory captures dependencies in closures; request context contains only the authenticated principal.
+- `src/modules/users/index.ts` owns profile updates, administrator reads, and role mutations. It depends on auth only through the authenticated principal and route-guard capabilities.
 - `src/modules/notifications/index.ts` owns Expo Push token registration, durable push outbox processing, Expo ticket/receipt handling, and stale-token cleanup.
 
 Backend module ownership:
@@ -76,6 +77,24 @@ Mobile API changes must account for installed clients that cannot be upgraded at
 
 Refresh-token rotation updates the credential atomically inside one logical session, preserving already-issued access tokens for other tabs. The immediately previous credential is accepted only during a short race-tolerance window; presenting any older credential after that window revokes the token family as potentially compromised. `/api/auth/me` checks both the JWT and the active database session, including its absolute lifetime.
 
+Roles are `user | admin` in PostgreSQL and in `UserDto`, but deliberately absent
+from JWT claims. Every authenticated request resolves the current user through
+the active database session, so server authorization observes promotions and
+demotions immediately. Registration and new social accounts always create
+`user`; only the users/admin module changes roles. Its serialized transaction
+prevents self-demotion and a zero-administrator state, and revokes the target’s
+sessions after a real change. Existing-account session issuance, role changes,
+and bootstrap credential changes share a per-user authentication-authority
+fence. Login re-reads the user and verifies the current password under that
+fence before inserting a session, so an old credential cannot create a session
+after a password reset and a session response uses the role current at issuance.
+Push admission holds its per-user fence only for a shared bounded transaction
+budget. Role and bootstrap authority transitions use a larger transaction
+budget and acquire the target push fence before the authentication fence. Role
+mutations enter the short global role-policy section only after both target
+fences, so time queued behind another target's send cannot consume their own
+send-fence budget. They then revoke every session and push token atomically.
+
 ## Frontend
 
 There are two browser surfaces, split by whether the pages need SEO. `website` (Astro, SSG by default, SSR/hybrid only when needed) owns public, search-indexable, and link-previewed pages: landing, marketing, content, and the public catalog of a storefront or marketplace. `webapp` (React CSR) owns screens that live behind sign-in and need no SEO: buyer account, seller/admin panels, checkout/account workflows, dashboards, settings, and authenticated tools. A marketplace normally uses both surfaces, sharing `@web-app-demo/contracts`. The native mobile app is a third client that consumes the same contracts. The decision rule the installing agent should apply is in the root [README.md](../README.md) under "Choosing `webapp` vs `website`".
@@ -92,6 +111,12 @@ The webapp and mobile app follow the same client rules:
 
 Auth in `src/features/auth` is the client golden path: its API adapter owns auth endpoints and refresh/retry, its provider exposes only auth behavior, and pages never receive a universal API service locator. Future providers should receive narrow context APIs such as `BillingApi` or `NotificationsApi` from composition.
 
+The webapp has two non-overlapping authenticated route trees: `/app/*` for
+`user`, and `/admin/*` for `admin`. Route guards wait for auth bootstrap, redirect
+guests through a role-checked internal return path, and send cross-role requests
+to the current role’s home. The shared workspace shell owns the full shadcn
+sidebar visual unit; role navigation is a pure feature-owned map.
+
 Mobile composition selects cookie auth for Expo Web and token auth for native iOS/Android. Browser refresh credentials must never be persisted in `localStorage`, `sessionStorage`, AsyncStorage, or another JavaScript-readable store.
 
 Do not create a new form, query, auth, or API abstraction until the existing pattern stops solving the current problem.
@@ -104,7 +129,7 @@ Astro remains the default website stack because it is content-first, static-firs
 
 ## Testing
 
-Backend unit/integration tests verify auth, billing, and notifications behavior at their owning layers. Webapp E2E uses Playwright and starts a real backend + Vite through `webServer`. Mobile E2E uses Maestro and stable React Native `testID` selectors.
+Backend unit/integration tests verify auth, users/admin RBAC, billing, and notifications behavior at their owning layers. Webapp E2E uses Playwright and starts a real backend + Vite through `webServer`, including a seeded administrator and session-revoking role promotion. Mobile E2E uses Maestro and stable React Native `testID` selectors.
 
 Client E2E in this template is a happy-path smoke layer, not the place for large validation matrices. Keep negative payloads, password/JWT/session rules, and error-shape checks in backend tests. Add fast client-level tests for form validation and API state edge cases when those surfaces grow.
 

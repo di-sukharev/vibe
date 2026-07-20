@@ -61,14 +61,16 @@ export class AuthService {
 
   async login(input: LoginRequest, metadata: SessionMetadata) {
     const user = await this.dependencies.repository.findUserByEmail(input.email)
-    if (
-      !user?.passwordHash ||
-      !(await this.dependencies.passwords.verify(input.password, user.passwordHash))
-    ) {
+    if (!user?.passwordHash) {
       throw new AuthFailure('invalid_credentials', 'Invalid email or password')
     }
 
-    return this.issueSession(user, metadata)
+    return this.issueSession(user, metadata, async (currentUser) =>
+      Boolean(
+        currentUser.passwordHash &&
+        await this.dependencies.passwords.verify(input.password, currentUser.passwordHash)
+      ),
+    )
   }
 
   async socialAuth(
@@ -247,18 +249,26 @@ export class AuthService {
     return Boolean(userId)
   }
 
-  private async issueSession(user: AuthUserRecord, metadata: SessionMetadata) {
+  private async issueSession(
+    user: AuthUserRecord,
+    metadata: SessionMetadata,
+    authorizeUser: (user: AuthUserRecord) => boolean | Promise<boolean> = () => true,
+  ) {
     const now = this.dependencies.clock.now()
     const refreshToken = this.dependencies.refreshTokens.create()
-    const session = await this.dependencies.repository.createSession({
+    const issued = await this.dependencies.repository.createSession({
+      authorizeUser,
       userId: user.id,
       refreshTokenHash: this.dependencies.refreshTokens.hash(refreshToken),
       refreshTokenFamilyHash: this.dependencies.refreshTokens.familyHash(refreshToken),
       expiresAt: this.refreshExpiresAt(now),
       metadata,
     })
+    if (!issued) {
+      throw new AuthFailure('invalid_credentials', 'Invalid email or password')
+    }
 
-    return this.sessionResponse(user, session.id, refreshToken)
+    return this.sessionResponse(issued.user, issued.session.id, refreshToken)
   }
 
   private async sessionResponse(user: AuthUserRecord, sessionId: string, refreshToken: string) {

@@ -153,6 +153,8 @@ export DO_PROJECT_SLUG=project-slug
 export DO_GIT_BRANCH=master
 export DO_APP_REGION=fra
 export JWT_SECRET="$(openssl rand -hex 32)"
+export ADMIN_SEED_EMAIL=admin@example.com
+export ADMIN_SEED_PASSWORD='<unique 12-128 character bootstrap password>'
 export DO_AUTH_SITE_DOMAIN=example.com
 export DO_BACKEND_URL=https://api.example.com
 export DO_WEBAPP_URL=https://app.example.com
@@ -168,6 +170,15 @@ export DO_API_INSTANCE_COUNT=1
 ```
 
 Reuse the same `JWT_SECRET` for later `backend-final` updates unless the user intentionally wants to invalidate all existing sessions.
+
+`ADMIN_SEED_EMAIL` and `ADMIN_SEED_PASSWORD` are required only for
+`backend-initial`. The generator rejects missing, shorter-than-12,
+longer-than-128, blank, known-template, or repeated-pattern passwords. It writes
+both values as `SECRET` env only on the `migrate` `PRE_DEPLOY` job; they are
+never attached to the API, static webapp, workers, or cron components. Do not
+keep exporting the bootstrap password for `backend-final`. Spec generation and
+the pre-deploy bootstrap use the same validator; accepted password bytes,
+including intentional leading or trailing spaces, are passed through unchanged.
 
 Typical first deploy order:
 
@@ -232,13 +243,18 @@ Backend service requirements:
 
 The default one-container shape is not a high-availability floor; it is the budget starter. Raise `instance_count` to two or three when availability or traffic justifies the extra monthly cost. Use `apps-s-1vcpu-2gb` or larger shared containers when memory pressure is the primary limit. Move to dedicated CPU only after metrics show CPU-bound work, noisy shared-CPU performance, strict latency requirements, or a need for CPU-based autoscaling. `webapp` and fully prerendered `website` output are Static Site components and do not have App Platform runtime container sizes. A `website` route with SSR/on-demand rendering or server islands needs a runtime service.
 
-Apply Prisma migrations from a protected one-off App Platform console/job with the same production env:
+The committed App Platform `migrate` PRE_DEPLOY job runs:
 
 ```bash
-bun run --cwd backend prisma:deploy
+bun run db:deploy
 ```
 
-Do not run `prisma migrate dev` in production and do not hand-write migration SQL.
+That command applies existing Prisma migrations, bootstraps or unlocks the first
+administrator when the initial job has seed credentials, and then requires at
+least one `admin` with a password credential. Later `backend-final` jobs receive
+no bootstrap credentials and therefore never reset the seed password, but still
+block a release if no login-capable administrator remains. Do not run `prisma
+migrate dev` in production and do not hand-write migration SQL.
 
 ## Backend Worker And Cron
 
@@ -460,6 +476,7 @@ After deployment:
 - verify public media loads through the Spaces CDN domain when storage is active;
 - verify private file links expire and require backend authorization when private storage is active;
 - verify Prisma migrations were applied exactly once to the production database.
+- verify the PRE_DEPLOY log confirms a login-capable administrator without printing bootstrap credentials.
 
 ## Failure Modes This Template Guards Against
 

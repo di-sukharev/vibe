@@ -1,4 +1,8 @@
-import { acquirePushTokenUserLock, type DbClient } from '../../../db'
+import {
+  acquirePushTokenUserLock,
+  acquireUserAuthenticationAuthorityLock,
+  type DbClient,
+} from '../../../db'
 import { Prisma } from '../../../generated/prisma/client'
 import type { AuthRepository } from '../application/ports'
 import { AuthFailure } from '../domain/errors'
@@ -17,6 +21,7 @@ export function createPrismaAuthRepository(db: DbClient): AuthRepository {
               email: input.user.email,
               passwordHash: input.user.passwordHash,
               displayName: input.user.displayName,
+              role: 'user',
             },
           })
           const session = await tx.authSession.create({
@@ -56,6 +61,7 @@ export function createPrismaAuthRepository(db: DbClient): AuthRepository {
               displayName: input.displayName,
               email: input.email,
               passwordHash: null,
+              role: 'user',
               ...(input.provider === 'apple'
                 ? { appleSubject: input.subject }
                 : { googleSubject: input.subject }),
@@ -85,16 +91,25 @@ export function createPrismaAuthRepository(db: DbClient): AuthRepository {
     },
 
     createSession(input) {
-      return db.authSession.create({
-        data: {
-          userId: input.userId,
-          refreshTokenHash: input.refreshTokenHash,
-          refreshTokenFamilyHash: input.refreshTokenFamilyHash,
-          expiresAt: input.expiresAt,
-          userAgent: input.metadata.userAgent,
-          ipAddress: input.metadata.ipAddress,
-        },
-        select: { id: true },
+      return db.$transaction(async (tx) => {
+        await acquireUserAuthenticationAuthorityLock(tx, input.userId)
+        const user = await tx.user.findUnique({
+          where: { id: input.userId },
+        })
+        if (!user || !(await input.authorizeUser(user))) return null
+
+        const session = await tx.authSession.create({
+          data: {
+            userId: user.id,
+            refreshTokenHash: input.refreshTokenHash,
+            refreshTokenFamilyHash: input.refreshTokenFamilyHash,
+            expiresAt: input.expiresAt,
+            userAgent: input.metadata.userAgent,
+            ipAddress: input.metadata.ipAddress,
+          },
+          select: { id: true },
+        })
+        return { user, session }
       })
     },
 

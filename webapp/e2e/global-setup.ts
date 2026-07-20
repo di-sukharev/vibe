@@ -3,6 +3,8 @@ import {
   composeEnv,
   composeProjectName,
   defaultDatabaseUrl,
+  e2eAdminEmail,
+  e2eAdminPassword,
   repositoryRoot,
 } from './env'
 
@@ -66,4 +68,9 @@ export default async function globalSetup() {
   }
 
   run('bun', ['run', '--cwd', 'backend', 'prisma:deploy'], env)
+  run('bun', ['run', '--cwd', 'backend', 'prisma:seed'], {
+    ...env,
+    ADMIN_SEED_EMAIL: e2eAdminEmail,
+    ADMIN_SEED_PASSWORD: e2eAdminPassword,
+  })
 }

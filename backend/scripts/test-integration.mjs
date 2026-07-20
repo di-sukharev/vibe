@@ -74,6 +74,7 @@ run(
   [
     'test',
     'src/modules/auth/auth.integration.test.ts',
+    'src/modules/users/users.integration.test.ts',
     'src/modules/billing/billing.integration.test.ts',
     'src/modules/notifications/notifications.integration.test.ts',
   ],

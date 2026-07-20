@@ -15,6 +15,7 @@ test('creates a password user and initial session inside one database transactio
           email: 'user@example.com',
           passwordHash: 'password-hash',
           displayName: null,
+          role: 'user' as const,
           createdAt,
           updatedAt: createdAt,
         }
