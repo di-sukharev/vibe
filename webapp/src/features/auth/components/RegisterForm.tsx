@@ -56,7 +56,7 @@ export function RegisterForm({
         void form.handleSubmit()
       }}
     >
-      <FieldGroup density="compact">
+      <FieldGroup className="gap-4">
         <form.Field
           name="displayName"
           children={(field) => (
@@ -143,8 +143,8 @@ export function RegisterForm({
         <form.Subscribe
           selector={(state) => state.isSubmitting}
           children={(isSubmitting) => (
-            <Button type="submit" size="lg" fullWidth disabled={isSubmitting}>
-              {isSubmitting ? 'Working...' : 'Create account'}
+            <Button type="submit" size="lg" className="w-full" disabled={isSubmitting}>
+              {isSubmitting ? 'Creating account…' : 'Create account'}
             </Button>
           )}
         />

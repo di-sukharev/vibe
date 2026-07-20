@@ -79,29 +79,31 @@ client on its next authenticated request or bootstrap.
 
 Keep raw fetch, base URL handling, and shared error parsing in the endpoint-agnostic `src/platform/api`. Each `src/features/<context>` owns its paths, schemas, queries, and provider. Pages import features only through public `index.ts`; features use platform and UI primitives; platform and `src/components/ui` never import product features. Run `bun run architecture:check` after changing boundaries.
 
-Use shadcn/ui for web interface primitives. Treat `src/components/ui` as the shared UI primitive layer: most files are shadcn registry output, plus project-wide primitives such as `Typography`. Import those primitives through `@/components/ui/*`. Put app-specific wrappers and composed product components in `src/components` so normal lint rules keep applying. Avoid adding new one-off global CSS classes for product UI; compose screens with Tailwind utilities and shadcn theme tokens from `src/index.css`.
+Use shadcn/ui for web interface primitives. Treat `src/components/ui` as the complete shared UI primitive layer: most files are local shadcn registry output, plus project-wide primitives such as `Typography`. Keep this library intact even when a primitive is not used by the starter pages. Import primitives through `@/components/ui/*`; shared dashboard shell composition lives in `src/components/dashboard`, while feature-owned product panels live beside their API/query state in `src/features/<context>`.
+
+Product components own their surface, padding, radius, internal spacing, typography, responsive behavior, and control sizing. Their public props are semantic data, states, and callbacks—never cosmetic `className` or `style` escape hatches. Pages may arrange closed product components with layout wrappers; only low-level UI and explicit layout primitives accept constrained styling props. Narrow inherited DOM props locally with literal `Pick`/`Omit`, as `DashboardLink` does, and keep product-component props explicit. Avoid one-off global CSS classes for product UI; component-owned visuals use Tailwind utilities and the shadcn theme tokens from `src/index.css`.
 
 All web typography must go through `src/components/ui/typography.tsx`. Use `Typography` for page copy, headings `h1` through `h6`, labels, controls, captions, emphasis, shortcuts, code/kbd text, and screen-reader-only text. Do not add raw heading/paragraph/emphasis elements or Tailwind text-size/font/leading/tracking utilities in pages or UI components; the local ESLint typography policy enforces this.
 
-The current shadcn configuration is `radix-maia` with the `hugeicons` icon library and CSS variables, as recorded in `components.json`. This template intentionally keeps the official shadcn component registry available in `src/components/ui` so future projects can start from a complete local UI foundation. Do not add community registries, blocks, or custom UI generator output unless the product asks for them.
+The current shadcn configuration is `radix-maia` with the `hugeicons` icon library and CSS variables, as recorded in `components.json`. This template intentionally includes the full official shadcn component registry from `bunx shadcn@latest add --all -c webapp` so future projects can start from a complete local UI foundation. Its authenticated shell follows the local dashboard-01 composition without carrying demo navigation, JSON, charts, or analytics data; dashboard cards render only real product/API state. Do not add community registries, blocks, or custom UI generator output unless the product asks for them.
 
 When adding or refreshing shadcn components:
 
 ```bash
 bun run --cwd webapp ui:info
-bun run --cwd webapp ui:add -- --dry-run <component>
 bun run --cwd webapp ui:add -- <component>
 ```
 
-Use the local `shadcn` devDependency pinned in `webapp/package.json` and `bun.lock`; do not use `shadcn@latest` for routine refreshes because it can produce registry output that no longer matches this template. Review dry-run diffs before applying updates, especially when the CLI wants to overwrite existing primitives. Keep local compatibility fixes small, preserve `Typography` ownership of text styles, and leave app-specific composition outside `src/components/ui`.
+Use the local `shadcn` devDependency pinned in `webapp/package.json` and `bun.lock`; do not use `shadcn@latest` for routine refreshes because it can produce registry output that no longer matches this template. If generated files need compatibility fixes for current package versions, keep the edits small and leave app-specific composition outside `src/components/ui`.
 
 ## E2E
 
 The Playwright tests live in `e2e/specs/auth.spec.ts` and
 `e2e/specs/rbac.spec.ts`. They verify auth validation, register/login, refresh
-after reload, profile persistence, role-specific sidebar contents, safe return
-paths, cross-role redirects, seeded-admin login, admin promotion, target-session
-revocation, and the existing concurrent-tab session behavior.
+after reload, profile/theme persistence, role-specific sidebar contents, safe
+return paths, cross-role redirects, seeded-admin login, admin data
+error-recovery and empty states, self-demotion protection, admin promotion,
+target-session revocation, and the existing concurrent-tab session behavior.
 
 The run starts Docker Compose `postgres_test`, applies migrations to
 `web_app_demo_test`, idempotently seeds the E2E administrator, starts the backend

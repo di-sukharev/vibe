@@ -1,3 +1,4 @@
+import type { Page } from '@playwright/test'
 import { e2ePassword, expect, test, uniqueEmail } from '../helpers/test'
 
 test('registers, restores the session, opens protected UI, and logs out', async ({ page }) => {
@@ -8,6 +9,7 @@ test('registers, restores the session, opens protected UI, and logs out', async 
 
   await expect(page.getByRole('main')).toHaveCount(1)
   await expect(page.getByRole('heading', { level: 1, name: /auth, validation/i })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Account access' })).toHaveCount(1)
   await page.getByRole('button', { name: 'Create account' }).click()
   await expect(page.getByText('Invalid email address')).toBeVisible()
   await expect(page.getByText('Password must be at least 8 characters')).toBeVisible()
@@ -35,6 +37,13 @@ test('registers, restores the session, opens protected UI, and logs out', async 
   await expect(page.getByRole('link', { name: 'Dashboard' })).toHaveCount(0)
   await expect(page.getByRole('link', { name: 'Users' })).toHaveCount(0)
   await expect(page.getByRole('main').getByText(email, { exact: true })).toBeVisible()
+  await expect(page.getByRole('main').getByText('Subscription', { exact: true })).toBeVisible()
+  await expect(page.getByRole('main').getByText('Premium · Inactive', { exact: true })).toBeVisible()
+  await expect(
+    page.getByRole('main').getByText('No store subscription is currently linked.', {
+      exact: true,
+    }),
+  ).toBeVisible()
   await expect
     .poll(async () =>
       (await page.context().cookies()).some(
@@ -58,13 +67,53 @@ test('registers, restores the session, opens protected UI, and logs out', async 
   await expect(page.getByRole('heading', { name: `Welcome, ${displayName}` })).toBeVisible()
 
   await page.getByRole('link', { name: 'Profile' }).click()
-  await page.getByLabel('Display name').fill('Updated Web User')
+  await expect(page.getByLabel('Email')).toHaveAttribute('readonly', '')
+  await page.getByLabel('Display name').fill(' A ')
+  await expect(page.getByText('Display name must be at least 2 characters.')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Save profile' })).toBeDisabled()
+  await page.getByLabel('Display name').fill('  Updated Web User  ')
   await page.getByRole('button', { name: 'Save profile' }).click()
   await expect(page.getByText('Profile saved')).toBeVisible()
+  await expect(page.getByLabel('Display name')).toHaveValue('Updated Web User')
   await page.reload()
   await expect(page.getByLabel('Display name')).toHaveValue('Updated Web User')
 
+  await page.getByRole('link', { name: 'Settings' }).click()
+  await page.getByLabel('Theme').click()
+  await page.getByRole('option', { name: 'Dark' }).click()
+  await expect(page.locator('html')).toHaveClass(/dark/)
+  await page.reload()
+  await expect(page.locator('html')).toHaveClass(/dark/)
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem('web_app_demo_theme')))
+    .toBe('dark')
+
+  await page.route('**/api/auth/logout', async (route) => {
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: { code: 'UNAVAILABLE', message: 'Temporary logout failure' },
+      }),
+    })
+  })
   await page.getByRole('button', { name: 'Logout' }).click()
+  await expect(page.getByRole('alert')).toContainText('Your session is still active')
+  await expect(page.getByRole('button', { name: 'Logout' })).toBeEnabled()
+  await page.unroute('**/api/auth/logout')
+
+  await page.getByRole('button', { name: 'Logout' }).click()
+  await expect(page.getByRole('button', { name: 'Create account' })).toBeVisible()
+  await page.getByRole('tab', { name: 'Login' }).click()
+  await page.getByLabel('Email').fill(email)
+  await page.getByLabel('Password').fill(e2ePassword)
+  await page.getByRole('button', { name: 'Login' }).click()
+  await expect(page).toHaveURL(/\/app\/settings$/)
+  await expect(page.locator('html')).toHaveClass(/dark/)
+
+  await page.getByRole('link', { name: 'Profile' }).click()
+
+  await logoutFromAccountMenu(page)
   await expect(page.getByRole('button', { name: 'Create account' })).toBeVisible()
 
   await page.getByRole('tab', { name: 'Login' }).click()
@@ -106,10 +155,10 @@ test('keeps one logical browser session active across concurrent tabs', async ({
       body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: 'Temporary logout failure' } }),
     })
   })
-  await page.getByRole('button', { name: 'Logout' }).click()
+  await logoutFromAccountMenu(page)
   await expect(page.getByRole('alert')).toContainText('Logout failed')
 
-  await secondPage.getByRole('button', { name: 'Logout' }).click()
+  await logoutFromAccountMenu(secondPage)
   await expect(secondPage.getByRole('button', { name: 'Create account' })).toBeVisible()
   await expect(page.getByRole('alert')).toHaveCount(0)
 })
@@ -139,8 +188,43 @@ test('remote logout recovers a tab from a transient bootstrap error', async ({ p
   await page.reload()
   await expect(page.getByText('Session check is temporarily unavailable')).toBeVisible()
 
-  await healthyPage.getByRole('button', { name: 'Logout' }).click()
+  await logoutFromAccountMenu(healthyPage)
   await expect(page.getByRole('button', { name: 'Create account' })).toBeVisible()
+})
+
+test('unknown routes wait for session recovery before choosing their return destination', async ({
+  page,
+}) => {
+  const email = uniqueEmail('web-e2e-not-found')
+  await page.goto('/')
+  await page.getByLabel('Email').fill(email)
+  await page.getByLabel('Password').fill(e2ePassword)
+  await page.getByRole('button', { name: 'Create account' }).click()
+  await expect(page).toHaveURL(/\/app$/)
+
+  let failRefresh = true
+  await page.route('**/api/auth/refresh', async (route) => {
+    if (!failRefresh) {
+      await route.continue()
+      return
+    }
+    failRefresh = false
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: { code: 'UNAVAILABLE', message: 'Temporary bootstrap failure' },
+      }),
+    })
+  })
+
+  await page.goto('/missing-page')
+  await expect(page.getByText('Session check is temporarily unavailable')).toBeVisible()
+  await page.getByRole('button', { name: 'Try again' }).click()
+
+  await expect(page.getByRole('heading', { level: 1, name: 'Page not found' })).toBeVisible()
+  await page.getByRole('link', { name: 'Return to workspace' }).click()
+  await expect(page).toHaveURL(/\/app$/)
 })
 
 test('concurrent account changes converge every tab on the winning cookie session', async ({ page }) => {
@@ -175,3 +259,8 @@ test('concurrent account changes converge every tab on the winning cookie sessio
     })
     .not.toBe('')
 })
+
+async function logoutFromAccountMenu(page: Page) {
+  await page.getByRole('button', { name: 'Open account menu' }).click()
+  await page.getByRole('menuitem', { name: 'Log out' }).click()
+}

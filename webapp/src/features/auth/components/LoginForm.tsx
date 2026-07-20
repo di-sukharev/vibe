@@ -54,7 +54,7 @@ export function LoginForm({
         void form.handleSubmit()
       }}
     >
-      <FieldGroup density="compact">
+      <FieldGroup className="gap-4">
         <form.Field
           name="email"
           children={(field) => (
@@ -115,8 +115,8 @@ export function LoginForm({
         <form.Subscribe
           selector={(state) => state.isSubmitting}
           children={(isSubmitting) => (
-            <Button type="submit" size="lg" fullWidth disabled={isSubmitting}>
-              {isSubmitting ? 'Working...' : 'Login'}
+            <Button type="submit" size="lg" className="w-full" disabled={isSubmitting}>
+              {isSubmitting ? 'Signing in…' : 'Login'}
             </Button>
           )}
         />

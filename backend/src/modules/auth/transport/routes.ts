@@ -27,6 +27,7 @@ import { executeAuth } from './errors'
 import type { AuthHttpEnv } from './middleware'
 
 const refreshCookieName = 'web_app_demo_refresh'
+const bearerSecurity = [{ BearerAuth: [] }]
 
 const cookieAuthResponseContent = {
   'application/json': {
@@ -246,6 +247,7 @@ const tokenRefreshRoute = createRoute({
 const meRoute = createRoute({
   method: 'get',
   path: '/me',
+  security: bearerSecurity,
   responses: {
     200: { content: meResponseContent, description: 'Current user' },
     401: { content: errorResponseContent, description: 'Invalid access token' },

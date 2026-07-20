@@ -81,6 +81,7 @@ maybeDescribe('auth API integration', () => {
 
     expect(register.status).toBe(201)
     expect(registerBody.user.email).toBe('user@example.com')
+    expect(registerBody.user.role).toBe('user')
     expect(registerBody.accessToken).toBeString()
     expect(registerBody.refreshToken).toBeString()
     expect(register.headers.get('set-cookie')).toBeNull()

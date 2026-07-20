@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 
 import {
+  adminUsersPagination,
   adminUsersViewState,
   roleMutationFeedback,
 } from '../src/features/admin/model'
@@ -18,6 +19,20 @@ test('admin directory exposes loading, error, empty, and ready states', () => {
   expect(
     adminUsersViewState({ isPending: false, isError: false, itemCount: 1 }),
   ).toBe('ready')
+})
+
+test('admin pagination respects the reachable server window', () => {
+  expect(adminUsersPagination({
+    hasNext: false,
+    page: 100,
+    pageSize: 20,
+    total: 2_001,
+  })).toEqual({
+    canGoNext: false,
+    reachableUsers: 2_000,
+    totalPages: 100,
+    wasBounded: true,
+  })
 })
 
 test('role mutation exposes explicit error and success feedback', () => {

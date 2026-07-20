@@ -37,6 +37,7 @@ test('profile updates return the authenticated subscription snapshot without a p
       page: 1,
       pageSize: 20,
       total: 0,
+      hasNext: false,
     }) },
     clock: { now: () => new Date('2026-07-20T00:00:00.000Z') },
     profileWriter: {

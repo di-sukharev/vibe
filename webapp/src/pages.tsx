@@ -1,15 +1,14 @@
-import { Link, Outlet, useLocation, useRouter, useSearch } from '@tanstack/react-router'
+import { Outlet, useLocation, useRouter, useSearch } from '@tanstack/react-router'
 import type { UserDto, UserRole } from '@web-app-demo/contracts'
 import { useEffect, useRef } from 'react'
 
-import { PageContainer, PageHeader } from '@/components/PageLayout'
 import {
   GuestAuthSection,
+  NotFoundSection,
   SessionErrorSection,
   SessionLoadingSection,
 } from '@/components/WebRouteSections'
 import { WorkspaceShell } from '@/components/WorkspaceShell'
-import { Button } from '@/components/ui/button'
 import { AdminDashboard, AdminSettings, AdminUsers } from '@/features/admin'
 import { useAuth } from '@/features/auth'
 import { homePathForRole, safeReturnPath } from '@/features/navigation'
@@ -72,26 +71,14 @@ export function AdminWorkspaceLayout() {
 
 export function NotFoundPage() {
   const auth = useAuth()
+
+  if (auth.isBootstrapping) return <SessionLoadingSection />
+  if (auth.sessionError && !auth.user) {
+    return <SessionErrorSection retry={auth.retrySession} />
+  }
+
   const destination = auth.user ? homePathForRole(auth.user.role) : '/'
-  return (
-    <main>
-      <PageContainer>
-        <PageHeader
-          description="The page you requested does not exist."
-          title="Page not found"
-        />
-        <div>
-          <Button asChild>
-            {destination === '/' ? (
-              <Link search={{ returnTo: undefined }} to="/">Return home</Link>
-            ) : (
-              <Link to={destination}>Return home</Link>
-            )}
-          </Button>
-        </div>
-      </PageContainer>
-    </main>
-  )
+  return <NotFoundSection destination={destination} />
 }
 
 function WorkspaceRoute({ role }: { role: UserRole }) {

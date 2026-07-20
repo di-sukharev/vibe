@@ -65,6 +65,133 @@ test('mobile workspace navigation closes the sidebar sheet', async ({ page }) =>
   await expect(mobileSidebar).toBeHidden()
 })
 
+test('workspace navigation and account controls are keyboard operable', async ({
+  page,
+}) => {
+  await page.goto('/')
+  await page.getByRole('tab', { name: 'Login' }).click()
+  await page.getByLabel('Email').fill(e2eAdminEmail)
+  await page.getByLabel('Password').fill(e2eAdminPassword)
+  await page.getByRole('button', { name: 'Login' }).click()
+  await expect(page).toHaveURL(/\/admin$/)
+
+  const usersLink = page.getByRole('link', { name: 'Users' })
+  await usersLink.focus()
+  await expect(usersLink).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(page).toHaveURL(/\/admin\/users$/)
+
+  const accountMenu = page.getByRole('button', { name: 'Open account menu' })
+  await accountMenu.focus()
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('menuitem', { name: 'Log out' })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('menuitem', { name: 'Log out' })).toBeHidden()
+  await expect(accountMenu).toBeFocused()
+
+  const sidebar = page.locator('[data-slot="sidebar"][data-state]')
+  const sidebarTrigger = page.locator('[data-sidebar="trigger"]')
+  await sidebarTrigger.focus()
+  await page.keyboard.press('Enter')
+  await expect(sidebar).toHaveAttribute('data-state', 'collapsed')
+})
+
+test('admin data surfaces recover from errors and expose safe directory states', async ({
+  page,
+}) => {
+  let dashboardRequests = 0
+  await page.route('**/api/admin/dashboard', async (route) => {
+    dashboardRequests += 1
+    if (dashboardRequests === 1) {
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: { code: 'INTERNAL_ERROR', message: 'Dashboard temporarily unavailable' },
+        }),
+      })
+      return
+    }
+    await route.continue()
+  })
+
+  await page.goto('/')
+  await page.getByRole('tab', { name: 'Login' }).click()
+  await page.getByLabel('Email').fill(e2eAdminEmail)
+  await page.getByLabel('Password').fill(e2eAdminPassword)
+  await page.getByRole('button', { name: 'Login' }).click()
+
+  await expect(page).toHaveURL(/\/admin$/)
+  await expect(page.getByRole('alert')).toContainText('Dashboard temporarily unavailable')
+  await page.getByRole('button', { name: 'Try again' }).click()
+  await expect(page.getByText('Total users', { exact: true })).toBeVisible()
+  await expect(page.getByText('Administrators', { exact: true })).toBeVisible()
+  await expect(page.getByText('New in 7 days', { exact: true })).toBeVisible()
+  await expect(page.locator('[data-slot="chart"]')).toHaveCount(0)
+
+  let directoryRequests = 0
+  await page.route('**/api/admin/users?*', async (route) => {
+    directoryRequests += 1
+    if (directoryRequests === 1) {
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: { code: 'INTERNAL_ERROR', message: 'Directory temporarily unavailable' },
+        }),
+      })
+      return
+    }
+    await route.continue()
+  })
+  await page.getByRole('link', { name: 'Users' }).click()
+  await expect(page.getByRole('alert')).toContainText('Directory temporarily unavailable')
+  await page.getByRole('button', { name: 'Try again' }).click()
+  await expect(page.getByText(/Page 1 of \d+ · \d+ users/)).toBeVisible()
+
+  await page.getByLabel('Search users').fill(e2eAdminEmail)
+  await page.getByRole('button', { name: 'Search' }).click()
+  await page.getByLabel(`Role for ${e2eAdminEmail}`).click()
+  await expect(page.getByRole('option', { name: 'User' })).toBeDisabled()
+  await page.keyboard.press('Escape')
+
+  await page.getByLabel('Search users').fill(`missing-${Date.now()}@example.com`)
+  await page.getByRole('button', { name: 'Search' }).click()
+  await expect(page.getByText('No users found', { exact: true })).toBeVisible()
+  await expect(page.getByText('Try a different name or email.')).toBeVisible()
+})
+
+test('workspace account menu keeps a failed logout visible and retryable', async ({ page }) => {
+  const userEmail = uniqueEmail('web-e2e-sidebar-logout')
+  await page.goto('/')
+  await page.getByLabel('Email').fill(userEmail)
+  await page.getByLabel('Password').fill(e2ePassword)
+  await page.getByRole('button', { name: 'Create account' }).click()
+  await expect(page).toHaveURL(/\/app$/)
+
+  await page.route('**/api/auth/logout', async (route) => {
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: { code: 'UNAVAILABLE', message: 'Temporary logout failure' },
+      }),
+    })
+  })
+
+  const sidebar = page.locator('[data-slot="sidebar"][data-state]')
+  await page.locator('[data-sidebar="trigger"]').click()
+  await expect(sidebar).toHaveAttribute('data-state', 'collapsed')
+  await page.locator('[data-sidebar="footer"] [data-sidebar="menu-button"]').click()
+  await page.getByRole('menuitem', { name: 'Log out' }).click()
+
+  await expect(sidebar).toHaveAttribute('data-state', 'expanded')
+  await expect(page.getByRole('alert')).toHaveText('Logout failed. Please try again.')
+  await expect(page).toHaveURL(/\/app$/)
+  await page.locator('[data-sidebar="footer"] [data-sidebar="menu-button"]').click()
+  await expect(page.getByRole('menuitem', { name: 'Log out' })).toBeEnabled()
+})
+
 test('role mutation failures are announced inside the confirmation dialog', async ({
   browser,
   page,

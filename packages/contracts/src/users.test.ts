@@ -64,6 +64,8 @@ describe('user and admin contracts', () => {
       pageSize: 100,
     })
     expect(() => adminUsersQuerySchema.parse({ page: '0' })).toThrow()
+    expect(adminUsersQuerySchema.parse({ page: '100' }).page).toBe(100)
+    expect(() => adminUsersQuerySchema.parse({ page: '101' })).toThrow()
     expect(() => adminUsersQuerySchema.parse({ pageSize: '101' })).toThrow()
   })
 
@@ -111,7 +113,8 @@ describe('user and admin contracts', () => {
         page: 1,
         pageSize: 20,
         total: 1,
+        hasNext: false,
       }),
-    ).toMatchObject({ page: 1, pageSize: 20, total: 1 })
+    ).toMatchObject({ page: 1, pageSize: 20, total: 1, hasNext: false })
   })
 })

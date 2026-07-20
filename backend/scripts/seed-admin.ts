@@ -6,6 +6,12 @@ import {
   parseAdminSeedConfig,
 } from '../src/modules/users/infrastructure/admin-bootstrap'
 
+if (process.env.NODE_ENV === 'production') {
+  throw new Error(
+    'prisma:seed is disabled in production; use db:deploy for strict administrator bootstrap',
+  )
+}
+
 const databaseUrl = process.env.DATABASE_URL?.trim()
 if (!databaseUrl) {
   throw new Error('DATABASE_URL is required to seed the administrator')

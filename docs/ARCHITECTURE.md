@@ -115,7 +115,19 @@ The webapp has two non-overlapping authenticated route trees: `/app/*` for
 `user`, and `/admin/*` for `admin`. Route guards wait for auth bootstrap, redirect
 guests through a role-checked internal return path, and send cross-role requests
 to the current role’s home. The shared workspace shell owns the full shadcn
-sidebar visual unit; role navigation is a pure feature-owned map.
+dashboard-01 sidebar/inset visual unit; role navigation is a pure feature-owned
+map. Shared shell building blocks live in `src/components/dashboard`, while
+account and admin panels stay with their owning feature. Dashboard metrics and
+tables render only contract-validated API state; the template does not ship fake
+analytics or demo chart data.
+
+UI primitives in `src/components/ui` are the complete local shadcn library and
+remain available for future product work. Closed product components own their
+visual surface and accept semantic data, state, and callbacks rather than
+`className` or `style`. Routes/pages compose them through layout wrappers.
+Low-level UI and explicit layout primitives are the only styling-prop boundary.
+Product components expose semantic data, state, and callbacks; inherited DOM
+contracts must be narrowed locally instead of forwarding `className` or `style`.
 
 Mobile composition selects cookie auth for Expo Web and token auth for native iOS/Android. Browser refresh credentials must never be persisted in `localStorage`, `sessionStorage`, AsyncStorage, or another JavaScript-readable store.
 

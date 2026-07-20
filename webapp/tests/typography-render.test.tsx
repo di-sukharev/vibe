@@ -22,6 +22,18 @@ function Root({ children }: { children?: React.ReactNode }) {
   return <>{children}</>
 }
 
+function SeparatorRoot({
+  decorative,
+  orientation,
+  ...props
+}: PrimitiveProps & {
+  decorative?: boolean
+  orientation?: 'horizontal' | 'vertical'
+}) {
+  void decorative
+  return <div data-orientation={orientation} {...props} />
+}
+
 function SlotRoot({
   children,
   className,
@@ -91,8 +103,19 @@ mock.module('radix-ui', () => ({
     Value: span,
     Viewport: div,
   },
+  Separator: {
+    Root: SeparatorRoot,
+  },
   Slot: {
     Root: SlotRoot,
+  },
+  Tooltip: {
+    Arrow: span,
+    Content: div,
+    Portal,
+    Provider: Root,
+    Root,
+    Trigger: Primitive('button'),
   },
 }))
 

@@ -3,6 +3,7 @@ import type {
   AdminUsersQuery,
   UserRole,
 } from '@web-app-demo/contracts'
+import { ADMIN_USERS_MAX_PAGE } from '@web-app-demo/contracts'
 
 import {
   acquirePushTokenUserLock,
@@ -76,6 +77,7 @@ export function createPrismaUsersRepository(db: DbClient): UsersRepository {
         page,
         pageSize,
         total,
+        hasNext: page < ADMIN_USERS_MAX_PAGE && page * pageSize < total,
       }
     },
 
