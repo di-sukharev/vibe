@@ -8,7 +8,12 @@ const mobileRoot = resolve(scriptDir, '../..')
 const flowPath = resolve(mobileRoot, '.maestro/flows/auth-smoke.yaml')
 const envExamplePath = resolve(mobileRoot, '.maestro/.env.example')
 const appPath = resolve(mobileRoot, 'src/features/auth/screens/AuthScreen.tsx')
+const screenShellPath = resolve(mobileRoot, 'src/components/dashboard/ScreenShell.tsx')
 const paywallPath = resolve(mobileRoot, 'src/features/billing/screens/PaywallScreen.tsx')
+const paywallComponentsPath = resolve(
+  mobileRoot,
+  'src/features/billing/components/paywall-components.tsx',
+)
 
 const requiredEnvKeys = [
   'APP_ID',
@@ -48,44 +53,124 @@ function declaredEnvKeys(fileContents) {
   )
 }
 
-function nativePaywallLogoutHasTestId(source) {
-  const sourceFile = ts.createSourceFile(paywallPath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
-  const paywallScreen = sourceFile.statements.find(
-    (statement) => ts.isFunctionDeclaration(statement) && statement.name?.text === 'PaywallScreen',
+function functionDeclaration(sourceFile, name) {
+  return sourceFile.statements.find(
+    (statement) => ts.isFunctionDeclaration(statement) && statement.name?.text === name,
   )
-  const nativeReturn = paywallScreen?.body?.statements.find(ts.isReturnStatement)
+}
 
-  if (!nativeReturn?.expression) {
-    return false
-  }
+function jsxAttribute(sourceFile, node, name) {
+  return node.attributes.properties
+    .filter(ts.isJsxAttribute)
+    .find((attribute) => attribute.name.getText(sourceFile) === name)
+}
 
-  let nativeLogoutHasTestId = false
+function jsxBooleanAttributeIsEnabled(attribute) {
+  if (!attribute) return false
+  if (!attribute.initializer) return true
+  if (!ts.isJsxExpression(attribute.initializer)) return false
+
+  return attribute.initializer.expression?.kind === ts.SyntaxKind.TrueKeyword
+}
+
+export function authScreenUsesKeyboardAwareShell(source) {
+  const sourceFile = ts.createSourceFile(
+    appPath,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  )
+  const authScreen = functionDeclaration(sourceFile, 'AuthScreen')
+  let usesKeyboardAwareShell = false
 
   function visit(node) {
-    if (ts.isJsxElement(node) && node.openingElement.tagName.getText(sourceFile) === 'Button') {
-      const attributes = node.openingElement.attributes.properties.filter(ts.isJsxAttribute)
-      const onPress = attributes.find((attribute) => attribute.name.getText(sourceFile) === 'onPress')
-      const testId = attributes.find((attribute) => attribute.name.getText(sourceFile) === 'testID')
-
-      if (
-        onPress?.initializer?.getText(sourceFile).includes('auth.logout') &&
-        testId?.initializer?.getText(sourceFile) === '{TEST_IDS.auth.logoutButton}'
-      ) {
-        nativeLogoutHasTestId = true
-      }
+    if (
+      (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node)) &&
+      (ts.isJsxElement(node)
+        ? node.openingElement.tagName.getText(sourceFile)
+        : node.tagName.getText(sourceFile)) === 'ScreenShell'
+    ) {
+      const openingElement = ts.isJsxElement(node) ? node.openingElement : node
+      usesKeyboardAwareShell ||= jsxBooleanAttributeIsEnabled(
+        jsxAttribute(sourceFile, openingElement, 'keyboardAware'),
+      )
     }
 
     ts.forEachChild(node, visit)
   }
 
-  visit(nativeReturn.expression)
-  return nativeLogoutHasTestId
+  if (authScreen?.body) visit(authScreen.body)
+  return usesKeyboardAwareShell
+}
+
+export function nativePaywallLogoutHasTestId(screenSource, componentsSource) {
+  const screenFile = ts.createSourceFile(
+    paywallPath,
+    screenSource,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  )
+  const componentsFile = ts.createSourceFile(
+    paywallComponentsPath,
+    componentsSource,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  )
+  const paywallScreen = functionDeclaration(screenFile, 'PaywallScreen')
+  const accountActions = functionDeclaration(componentsFile, 'PaywallAccountActions')
+  const nativeReturn = paywallScreen?.body?.statements.find(ts.isReturnStatement)
+  let screenWiresLogout = false
+  let componentExposesTestId = false
+
+  function visitScreen(node) {
+    if (
+      ts.isJsxSelfClosingElement(node) &&
+      node.tagName.getText(screenFile) === 'PaywallAccountActions'
+    ) {
+      const onLogout = jsxAttribute(screenFile, node, 'onLogout')
+      screenWiresLogout ||= Boolean(
+        onLogout?.initializer?.getText(screenFile).includes('auth.logout'),
+      )
+    }
+
+    ts.forEachChild(node, visitScreen)
+  }
+
+  function visitComponent(node) {
+    if (
+      ts.isJsxElement(node) &&
+      node.openingElement.tagName.getText(componentsFile) === 'Button'
+    ) {
+      const onPress = jsxAttribute(componentsFile, node.openingElement, 'onPress')
+      const testId = jsxAttribute(componentsFile, node.openingElement, 'testID')
+
+      if (
+        onPress?.initializer?.getText(componentsFile) === '{onLogout}' &&
+        testId?.initializer?.getText(componentsFile) ===
+          '{TEST_IDS.auth.logoutButton}'
+      ) {
+        componentExposesTestId = true
+      }
+    }
+
+    ts.forEachChild(node, visitComponent)
+  }
+
+  if (nativeReturn?.expression) visitScreen(nativeReturn.expression)
+  if (accountActions?.body) visitComponent(accountActions.body)
+
+  return screenWiresLogout && componentExposesTestId
 }
 
 export function runMaestroPolicyAudit() {
   const flow = readRequiredFile(flowPath)
   const app = readRequiredFile(appPath)
+  const screenShell = readRequiredFile(screenShellPath)
   const paywall = readRequiredFile(paywallPath)
+  const paywallComponents = readRequiredFile(paywallComponentsPath)
   const envKeys = declaredEnvKeys(readRequiredFile(envExamplePath))
   const missingEnvKeys = requiredEnvKeys.filter((key) => !envKeys.has(key))
 
@@ -126,12 +211,14 @@ export function runMaestroPolicyAudit() {
     'password field must stay secure in production and become automatable only under EXPO_PUBLIC_E2E=1',
   )
   assert(
-    app.includes('keyboardDismissMode="on-drag"') || app.includes("keyboardDismissMode: 'on-drag'"),
-    'auth form ScrollView must use keyboardDismissMode="on-drag" for iOS Maestro stability',
+    authScreenUsesKeyboardAwareShell(app) &&
+      screenShell.includes("keyboardDismissMode: keyboardAware ? 'on-drag' : undefined") &&
+      screenShell.includes('keyboardAvoiding={keyboardAware}'),
+    'auth form must use the keyboard-aware ScreenShell with on-drag dismissal for iOS Maestro stability',
   )
   assert(
-    nativePaywallLogoutHasTestId(paywall),
-    'native PaywallScreen logout button must expose TEST_IDS.auth.logoutButton for Maestro',
+    nativePaywallLogoutHasTestId(paywall, paywallComponents),
+    'native PaywallScreen logout action must expose TEST_IDS.auth.logoutButton through PaywallAccountActions',
   )
 }
 

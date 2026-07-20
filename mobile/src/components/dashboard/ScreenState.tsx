@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   Empty,
   EmptyContent,
@@ -32,11 +32,13 @@ export function ScreenState({
 
   if (status === 'error') {
     return (
-      <Alert variant="destructive" testID={testID}>
-        <AlertTitle>{title ?? 'Something went wrong'}</AlertTitle>
-        {description ? <AlertDescription>{description}</AlertDescription> : null}
-        {action ? <AlertAction>{action}</AlertAction> : null}
-      </Alert>
+      <View style={{ gap: theme.spacing.sm }}>
+        <Alert variant="destructive" testID={testID}>
+          <AlertTitle>{title ?? 'Something went wrong'}</AlertTitle>
+          {description ? <AlertDescription>{description}</AlertDescription> : null}
+        </Alert>
+        {action ? <View style={styles.errorAction}>{action}</View> : null}
+      </View>
     );
   }
 
@@ -67,6 +69,9 @@ export function ScreenState({
 }
 
 const styles = StyleSheet.create({
+  errorAction: {
+    alignItems: 'flex-start',
+  },
   loading: {
     alignItems: 'center',
     justifyContent: 'center',

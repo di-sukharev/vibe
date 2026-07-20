@@ -16,8 +16,7 @@ import {
   AuthTextField,
   type AuthMode,
 } from '../components/auth-components';
-import { PageHeader } from '@/components/page-header';
-import { Screen } from '@/components/screen';
+import { ScreenShell, ScreenState } from '@/components/dashboard';
 import { ScreenLoader } from '@/components/screen-states';
 import { Button } from '@/components/ui/button';
 import { SocialAuthButtons } from '../components/social-auth-buttons';
@@ -70,21 +69,26 @@ export function AuthScreen() {
 
   if (auth.sessionError && !auth.user) {
     return (
-      <Screen centered>
-        <PageHeader
-          eyebrow="Session recovery"
-          title="Your session is still safe."
-          description="The server could not be reached, so the app preserved the authority needed to recover safely."
+      <ScreenShell
+        centered
+        description="The app preserved your local authority and will only continue after the server confirms the session."
+        eyebrow="Session recovery"
+        title="Your session is still safe.">
+        <ScreenState
+          action={
+            <Button
+              accessibilityLabel="Retry session recovery"
+              disabled={auth.isTransitioning}
+              loading={auth.isTransitioning}
+              onPress={() => void auth.retrySession()}>
+              Try again
+            </Button>
+          }
+          description={auth.sessionError}
+          status="error"
+          title="We could not reach the server"
         />
-        <AuthError message={auth.sessionError} />
-        <Button
-          accessibilityLabel="Retry session recovery"
-          disabled={auth.isTransitioning}
-          loading={auth.isTransitioning}
-          onPress={() => void auth.retrySession()}>
-          Try again
-        </Button>
-      </Screen>
+      </ScreenShell>
     );
   }
 
@@ -93,22 +97,20 @@ export function AuthScreen() {
   }
 
   return (
-    <Screen
+    <ScreenShell
       centered
-      keyboardAvoiding
-      scroll
-      scrollViewProps={{
-        keyboardDismissMode: 'on-drag',
-        keyboardShouldPersistTaps: 'handled',
-        showsVerticalScrollIndicator: false,
-      }}>
-      <PageHeader
-        eyebrow="Golden path template"
-        title="Auth, Zod contracts, Query, and Form are ready."
-        size="hero"
-      />
+      description="Use email and password or continue with an available identity provider."
+      eyebrow="Golden path template"
+      keyboardAware
+      title="Welcome to your workspace.">
 
-      <AuthPanel>
+      <AuthPanel
+        description={
+          isRegister
+            ? 'Create a user account. Account roles are assigned securely by the server.'
+            : 'Enter your existing account credentials to continue.'
+        }
+        title={isRegister ? 'Create an account' : 'Welcome back'}>
         <AuthModeTabs
           disabled={auth.isTransitioning}
           mode={mode}
@@ -186,6 +188,6 @@ export function AuthScreen() {
           onError={setError}
         />
       </AuthPanel>
-    </Screen>
+    </ScreenShell>
   );
 }

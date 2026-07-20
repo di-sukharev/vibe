@@ -1,34 +1,21 @@
-import type { ProductSubscription } from 'expo-iap';
 import { Redirect, useRouter } from 'expo-router';
-import { Pressable, StyleSheet, View } from 'react-native';
 
-import { PageHeader } from '@/components/page-header';
-import { Screen } from '@/components/screen';
+import { ScreenShell } from '@/components/dashboard';
 import { ScreenLoader } from '@/components/screen-states';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Spinner } from '@/components/ui/spinner';
-import { Typography } from '@/components/ui/typography';
 import { TEST_IDS } from '@/constants/testIds';
-import { Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
 import { AuthSessionErrorNotice, useAuth } from '@/features/auth';
 import { useSubscriptionIap } from '../provider';
-
-type PaywallPlan = {
-  displayName: string;
-  displayPrice: string;
-  id: string;
-  introOfferLabel: string | null;
-  product: ProductSubscription;
-  productId: string;
-};
+import {
+  PaywallAccountActions,
+  PaywallActions,
+  PaywallErrorNotice,
+  PaywallPlanSelector,
+} from '../components/paywall-components';
 
 export function PaywallScreen() {
   const auth = useAuth();
   const router = useRouter();
   const iap = useSubscriptionIap();
-  const colors = useTheme();
 
   if (auth.isBootstrapping) {
     return <ScreenLoader />;
@@ -44,228 +31,74 @@ export function PaywallScreen() {
 
   if (!iap.isSupported) {
     return (
-      <Screen centered testID={TEST_IDS.paywall.screen}>
-        <PageHeader
-          eyebrow="Premium"
-          title="Subscriptions are not available here."
-          description="Open this screen in the iOS or Android app to subscribe through the native store. Your account, profile, and logout remain available."
+      <ScreenShell
+        centered
+        description="Open this screen in the iOS or Android app to subscribe through the native store."
+        eyebrow="Premium"
+        testID={TEST_IDS.paywall.screen}
+        title="Subscriptions are not available here.">
+        <AuthSessionErrorNotice />
+        <PaywallAccountActions
+          isLoggingOut={auth.isTransitioning}
+          onLogout={() => void auth.logout().catch(() => undefined)}
+          onProfile={() => router.push('/profile')}
         />
-        <View style={styles.actions}>
-          <Button testID={TEST_IDS.paywall.profileButton} onPress={() => router.push('/profile')} variant="outline">
-            Profile
-          </Button>
-          <Button
-            disabled={auth.isTransitioning}
-            loading={auth.isTransitioning}
-            testID={TEST_IDS.auth.logoutButton}
-            onPress={() => void auth.logout().catch(() => undefined)}
-            variant="outline">
-            Logout
-          </Button>
-        </View>
-      </Screen>
+      </ScreenShell>
     );
   }
 
   const selectedPlan = iap.plans.find((plan) => plan.id === iap.selectedPlanId) ?? null;
-  const isPrimaryLoading = iap.isPurchasing || iap.isSyncing;
   const isConnecting = !iap.isConnected && !iap.error;
   const isProductListEmpty = iap.isConnected && !iap.isLoadingProducts && iap.plans.length === 0;
   const storeName = iap.platform === 'android' ? 'Google Play' : 'App Store';
+  const planPresentations = iap.plans.map((plan) => ({
+    description: plan.product.description,
+    displayName: plan.displayName,
+    displayPrice: plan.displayPrice,
+    id: plan.id,
+    introOfferLabel: plan.introOfferLabel,
+    productId: plan.productId,
+  }));
 
   return (
-    <Screen
-      scroll
-      contentStyle={styles.content}
-      scrollViewProps={{ showsVerticalScrollIndicator: false }}
-      testID={TEST_IDS.paywall.screen}>
-      <PageHeader
-        eyebrow="Premium"
-        title="Unlock the full component workspace."
-        description={`Subscribe through ${storeName}. The backend verifies every transaction before premium access is granted.`}
-      />
+    <ScreenShell
+      description={`Subscribe through ${storeName}. The backend verifies every transaction before premium access is granted.`}
+      eyebrow="Premium"
+      testID={TEST_IDS.paywall.screen}
+      title="Unlock the full component workspace.">
 
       <AuthSessionErrorNotice />
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Choose a plan</CardTitle>
-          <CardDescription>Monthly and yearly plans are managed by the store and can be restored any time.</CardDescription>
-        </CardHeader>
-        <CardContent accessibilityRole="radiogroup" style={styles.cardContent}>
-          {iap.isLoadingProducts && iap.products.length === 0 ? (
-            <View style={styles.loadingRow} testID={TEST_IDS.paywall.loading}>
-              <Spinner />
-              <Typography muted>Loading {storeName} products...</Typography>
-            </View>
-          ) : null}
+      <PaywallPlanSelector
+        isConnecting={isConnecting}
+        isEmpty={isProductListEmpty}
+        isLoading={iap.isLoadingProducts && iap.products.length === 0}
+        plans={planPresentations}
+        selectedPlanId={selectedPlan?.id ?? null}
+        storeName={storeName}
+        onSelect={iap.setSelectedPlanId}
+      />
 
-          {isConnecting ? (
-            <View style={styles.loadingRow} testID={TEST_IDS.paywall.loading}>
-              <Spinner />
-              <Typography muted>Connecting to {storeName}...</Typography>
-            </View>
-          ) : null}
+      {iap.error ? <PaywallErrorNotice message={iap.error} /> : null}
 
-          {isProductListEmpty ? (
-            <View
-              style={[
-                styles.notice,
-                {
-                  backgroundColor: colors.backgroundElement,
-                },
-              ]}
-              testID={TEST_IDS.paywall.empty}>
-              <Typography weight="600">Products are not available yet.</Typography>
-              <Typography muted>
-                Check the product IDs, base plans, store status, tester account, real-device build, and custom dev-client.
-              </Typography>
-            </View>
-          ) : null}
+      <PaywallActions
+        canRestore={iap.isConnected}
+        isPurchasing={iap.isPurchasing}
+        isRedeemingOfferCode={iap.isRedeemingOfferCode}
+        isRestoring={iap.isRestoring}
+        isSyncing={iap.isSyncing}
+        onPurchase={() => void iap.purchase()}
+        onRedeemOfferCode={() => void iap.redeemOfferCode()}
+        onRestore={() => void iap.restore()}
+        platform={iap.platform === 'android' ? 'android' : 'ios'}
+        selectedPlanPrice={selectedPlan?.displayPrice ?? null}
+      />
 
-          {iap.plans.map((plan) => (
-            <PlanOption
-              key={plan.id}
-              plan={plan}
-              selected={plan.id === selectedPlan?.id}
-              onPress={() => iap.setSelectedPlanId(plan.id)}
-            />
-          ))}
-        </CardContent>
-      </Card>
-
-      {iap.error ? (
-        <View
-          style={[
-            styles.notice,
-            {
-              backgroundColor: colors.backgroundElement,
-            },
-          ]}
-          testID={TEST_IDS.paywall.error}>
-          <Typography weight="600">Subscription is not ready.</Typography>
-          <Typography muted>{iap.error}</Typography>
-        </View>
-      ) : null}
-
-      <View style={styles.actions}>
-        <Button
-          disabled={!selectedPlan || isPrimaryLoading}
-          loading={iap.isPurchasing}
-          onPress={() => void iap.purchase()}
-          testID={TEST_IDS.paywall.purchaseButton}>
-          {selectedPlan ? `Subscribe for ${selectedPlan.displayPrice}` : 'Subscribe'}
-        </Button>
-        <Button
-          disabled={!iap.isConnected || iap.isRestoring || iap.isPurchasing}
-          loading={iap.isRestoring}
-          onPress={() => void iap.restore()}
-          testID={TEST_IDS.paywall.restoreButton}
-          variant="outline">
-          Restore purchases
-        </Button>
-        {iap.platform === 'ios' ? (
-          <Button
-            disabled={!iap.isConnected || iap.isRedeemingOfferCode || iap.isPurchasing}
-            loading={iap.isRedeemingOfferCode}
-            onPress={() => void iap.redeemOfferCode()}
-            testID={TEST_IDS.paywall.redeemOfferCodeButton}
-            variant="outline">
-            Redeem offer code
-          </Button>
-        ) : null}
-      </View>
-
-      <View style={styles.footerActions}>
-        <Button onPress={() => router.push('/profile')} variant="ghost">
-          Profile
-        </Button>
-        <Button
-          disabled={auth.isTransitioning}
-          loading={auth.isTransitioning}
-          testID={TEST_IDS.auth.logoutButton}
-          onPress={() => void auth.logout().catch(() => undefined)}
-          variant="ghost">
-          Logout
-        </Button>
-      </View>
-    </Screen>
+      <PaywallAccountActions
+        isLoggingOut={auth.isTransitioning}
+        onLogout={() => void auth.logout().catch(() => undefined)}
+        onProfile={() => router.push('/profile')}
+      />
+    </ScreenShell>
   );
 }
-
-function PlanOption({
-  onPress,
-  plan,
-  selected,
-}: {
-  onPress: () => void;
-  plan: PaywallPlan;
-  selected: boolean;
-}) {
-  const colors = useTheme();
-
-  return (
-    <Pressable
-      accessibilityLabel={`${plan.displayName}, ${plan.displayPrice}`}
-      accessibilityRole="radio"
-      accessibilityState={{ checked: selected }}
-      onPress={onPress}
-      style={[
-        styles.plan,
-        {
-          backgroundColor: selected ? colors.backgroundSelected : colors.backgroundElement,
-          borderColor: selected ? colors.text : colors.backgroundElement,
-        },
-      ]}
-      testID={`${TEST_IDS.paywall.planOption}.${plan.id}`}>
-      <View style={styles.planText}>
-        <Typography weight="600">{plan.displayName}</Typography>
-        <Typography muted>{plan.product.description || plan.productId}</Typography>
-        {plan.introOfferLabel ? <Typography muted>{plan.introOfferLabel}</Typography> : null}
-      </View>
-      <Typography weight="700">{plan.displayPrice}</Typography>
-    </Pressable>
-  );
-}
-
-const styles = StyleSheet.create({
-  actions: {
-    gap: Spacing.two,
-  },
-  cardContent: {
-    gap: Spacing.two,
-  },
-  content: {
-    paddingBottom: Spacing.five,
-  },
-  footerActions: {
-    flexDirection: 'row',
-    gap: Spacing.two,
-    justifyContent: 'center',
-  },
-  loadingRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: Spacing.two,
-  },
-  notice: {
-    borderRadius: 8,
-    gap: Spacing.one,
-    padding: Spacing.three,
-  },
-  plan: {
-    alignItems: 'center',
-    borderRadius: 8,
-    borderWidth: 1,
-    flexDirection: 'row',
-    gap: Spacing.two,
-    justifyContent: 'space-between',
-    minHeight: 72,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
-  },
-  planText: {
-    flex: 1,
-    gap: Spacing.half,
-  },
-});

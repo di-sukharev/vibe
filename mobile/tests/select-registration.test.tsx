@@ -128,37 +128,52 @@ const fakeDocument = {
 
 type NativeHostProps = {
   'aria-current'?: unknown;
+  accessible?: boolean;
   accessibilityLabel?: unknown;
+  accessibilityLiveRegion?: 'assertive' | 'none' | 'polite';
   accessibilityRole?: unknown;
-  accessibilityState?: unknown;
+  accessibilityState?: {
+    checked?: boolean | 'mixed';
+    disabled?: boolean;
+    selected?: boolean;
+  };
   children?: React.ReactNode | ((state: { pressed: boolean }) => React.ReactNode);
   disabled?: boolean;
   onPress?: () => void;
   pointerEvents?: unknown;
   role?: unknown;
   style?: unknown;
+  testID?: string;
 };
 
 function NativeHost(tagName: string) {
   return function Host({
     'aria-current': ariaCurrent,
+    accessible: _accessible,
     accessibilityLabel,
-    accessibilityRole: _accessibilityRole,
-    accessibilityState: _accessibilityState,
+    accessibilityLiveRegion,
+    accessibilityRole,
+    accessibilityState,
     children,
     disabled,
     onPress,
     pointerEvents: _pointerEvents,
     role,
     style: _style,
+    testID,
   }: NativeHostProps) {
     return React.createElement(tagName, {
       'aria-current': ariaCurrent,
+      'aria-checked': accessibilityState?.checked,
       'aria-label': accessibilityLabel,
+      'aria-live':
+        accessibilityLiveRegion === 'none' ? undefined : accessibilityLiveRegion,
+      'aria-selected': accessibilityState?.selected,
       children: typeof children === 'function' ? children({ pressed: false }) : children,
+      'data-testid': testID,
       disabled,
       onClick: onPress,
-      role,
+      role: role ?? accessibilityRole,
     });
   };
 }
@@ -184,6 +199,7 @@ mock.module('react-native', () => ({
     hairlineWidth: 1,
   },
   Text: NativeHost('span'),
+  TextInput: NativeHost('input'),
   View: NativeHost('div'),
   useColorScheme() {
     return 'light';
@@ -196,6 +212,16 @@ mock.module('react-native-safe-area-context', () => ({
 
 mock.module('expo-symbols', () => ({
   SymbolView: NativeHost('span'),
+}));
+
+mock.module('expo-router', () => ({
+  Redirect: () => null,
+  useRouter: () => ({
+    back: () => undefined,
+    canGoBack: () => false,
+    push: () => undefined,
+    replace: () => undefined,
+  }),
 }));
 
 Object.assign(globalThis, {
@@ -216,6 +242,225 @@ async function renderAndFlush(root: Root, element: React.ReactNode) {
     await waitForEffects();
   });
 }
+
+function findByTestID(node: FakeNode, testID: string): FakeElement | null {
+  if (
+    node instanceof FakeDomElement &&
+    node.attributes['data-testid'] === testID
+  ) {
+    return node as FakeElement;
+  }
+
+  for (const child of node.childNodes) {
+    const match = findByTestID(child, testID);
+    if (match) return match;
+  }
+
+  return null;
+}
+
+function findByRole(node: FakeNode, role: string): FakeElement | null {
+  if (
+    node instanceof FakeDomElement &&
+    node.attributes.role === role
+  ) {
+    return node as FakeElement;
+  }
+
+  for (const child of node.childNodes) {
+    const match = findByRole(child, role);
+    if (match) return match;
+  }
+
+  return null;
+}
+
+function containsNode(ancestor: FakeNode, candidate: FakeNode) {
+  if (ancestor === candidate) return true;
+  return ancestor.childNodes.some((child) => containsNode(child, candidate));
+}
+
+test('alerts expose a polite cross-platform announcement landmark', async () => {
+  const { Alert, AlertDescription, AlertTitle } =
+    await import('../src/components/ui/alert');
+  const container = fakeDocument.createElement('div');
+  const root = createRoot(container);
+
+  await renderAndFlush(
+    root,
+    <Alert variant="destructive">
+      <AlertTitle>Session action needs attention</AlertTitle>
+      <AlertDescription>Try again.</AlertDescription>
+    </Alert>,
+  );
+
+  expect((container.firstChild as FakeElement).attributes.role).toBe('alert');
+  expect((container.firstChild as FakeElement).attributes['aria-live']).toBe(
+    'polite',
+  );
+
+  await act(async () => root.unmount());
+});
+
+test('error-state actions remain outside the accessible alert group', async () => {
+  const { ScreenState } =
+    await import('../src/components/dashboard/ScreenState');
+  const { Button } = await import('../src/components/ui/button');
+  const container = fakeDocument.createElement('div');
+  const root = createRoot(container);
+
+  await renderAndFlush(
+    root,
+    <ScreenState
+      action={<Button testID="retry-session">Try again</Button>}
+      description="The server could not be reached."
+      status="error"
+      title="Session recovery"
+    />,
+  );
+
+  const alert = findByRole(container, 'alert');
+  const action = findByTestID(container, 'retry-session');
+
+  expect(alert).not.toBeNull();
+  expect(action).not.toBeNull();
+  expect(containsNode(alert!, action!)).toBe(false);
+
+  await act(async () => root.unmount());
+});
+
+test('auth mode chooser exposes labelled tab semantics', async () => {
+  const { AuthModeTabs } =
+    await import('../src/features/auth/components/auth-mode-tabs');
+  const container = fakeDocument.createElement('div');
+  const root = createRoot(container);
+
+  await renderAndFlush(
+    root,
+    <AuthModeTabs
+      loginTestID="auth.login"
+      mode="register"
+      onModeChange={() => undefined}
+      registerTestID="auth.register"
+    />,
+  );
+
+  const tabList = container.firstChild as FakeElement;
+  const registerTab = findByTestID(tabList, 'auth.register');
+  const loginTab = findByTestID(tabList, 'auth.login');
+
+  expect(tabList.attributes.role).toBe('tablist');
+  expect(tabList.attributes['aria-label']).toBe('Authentication mode');
+  expect(registerTab?.attributes.role).toBe('tab');
+  expect(registerTab?.attributes['aria-selected']).toBe('true');
+  expect(loginTab?.attributes.role).toBe('tab');
+  expect(loginTab?.attributes['aria-selected']).toBe('false');
+
+  await act(async () => root.unmount());
+});
+
+test('paywall actions preserve purchase, restore, and platform availability states', async () => {
+  const { PaywallActions } =
+    await import('../src/features/billing/components/paywall-components');
+  const container = fakeDocument.createElement('div');
+  const root = createRoot(container);
+
+  await renderAndFlush(
+    root,
+    <PaywallActions
+      canRestore={false}
+      isPurchasing={false}
+      isRedeemingOfferCode={false}
+      isRestoring={false}
+      isSyncing={false}
+      onPurchase={() => undefined}
+      onRedeemOfferCode={() => undefined}
+      onRestore={() => undefined}
+      platform="ios"
+      selectedPlanPrice={null}
+    />,
+  );
+
+  expect(
+    findByTestID(container, 'paywall.purchase-button')?.attributes.disabled,
+  ).toBe('');
+  expect(
+    findByTestID(container, 'paywall.restore-button')?.attributes.disabled,
+  ).toBe('');
+  expect(
+    findByTestID(container, 'paywall.redeem-offer-code-button')?.attributes
+      .disabled,
+  ).toBe('');
+
+  await renderAndFlush(
+    root,
+    <PaywallActions
+      canRestore
+      isPurchasing={false}
+      isRedeemingOfferCode={false}
+      isRestoring={false}
+      isSyncing={false}
+      onPurchase={() => undefined}
+      onRedeemOfferCode={() => undefined}
+      onRestore={() => undefined}
+      platform="android"
+      selectedPlanPrice="$9.99"
+    />,
+  );
+
+  expect(
+    findByTestID(container, 'paywall.purchase-button')?.attributes.disabled,
+  ).toBeUndefined();
+  expect(
+    findByTestID(container, 'paywall.restore-button')?.attributes.disabled,
+  ).toBeUndefined();
+  expect(
+    findByTestID(container, 'paywall.redeem-offer-code-button'),
+  ).toBeNull();
+
+  await act(async () => root.unmount());
+});
+
+test('paywall plan selector exposes one labelled radio group and checked plan', async () => {
+  const { PaywallPlanSelector } =
+    await import('../src/features/billing/components/paywall-components');
+  const container = fakeDocument.createElement('div');
+  const root = createRoot(container);
+
+  await renderAndFlush(
+    root,
+    <PaywallPlanSelector
+      isConnecting={false}
+      isLoading={false}
+      plans={[
+        {
+          description: 'Billed monthly',
+          displayName: 'Monthly',
+          displayPrice: '$9.99',
+          id: 'monthly',
+          introOfferLabel: null,
+          productId: 'premium.monthly',
+        },
+      ]}
+      selectedPlanId="monthly"
+      storeName="App Store"
+      onSelect={() => undefined}
+    />,
+  );
+
+  const radioGroup = findByTestID(container, 'paywall.plan-group');
+  const selectedPlan = findByTestID(
+    container,
+    'paywall.plan-option.monthly',
+  );
+
+  expect(radioGroup?.attributes.role).toBe('radiogroup');
+  expect(radioGroup?.attributes['aria-label']).toBe('Choose a subscription plan');
+  expect(selectedPlan?.attributes.role).toBe('radio');
+  expect(selectedPlan?.attributes['aria-checked']).toBe('true');
+
+  await act(async () => root.unmount());
+});
 
 test('wide dashboard navigation exposes the active destination as the current page', async () => {
   const { NavigationRail, NavigationRailItem } =

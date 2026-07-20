@@ -25,6 +25,7 @@ export const TEST_IDS = {
     empty: 'paywall.empty',
     error: 'paywall.error',
     loading: 'paywall.loading',
+    planGroup: 'paywall.plan-group',
     planOption: 'paywall.plan-option',
     profileButton: 'paywall.profile-button',
     purchaseButton: 'paywall.purchase-button',

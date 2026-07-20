@@ -9,13 +9,24 @@ export type AlertProps = ViewProps & {
   variant?: 'default' | 'destructive';
 };
 
-export function Alert({ children, variant = 'default', style, ...props }: AlertProps) {
+export function Alert({
+  accessibilityLiveRegion = 'polite',
+  accessibilityRole = 'alert',
+  accessible = true,
+  children,
+  variant = 'default',
+  style,
+  ...props
+}: AlertProps) {
   const theme = useUiTheme();
   const isDestructive = variant === 'destructive';
 
   return (
     <Surface
       {...props}
+      accessibilityLiveRegion={accessibilityLiveRegion}
+      accessibilityRole={accessibilityRole}
+      accessible={accessible}
       tone="transparent"
       rounded="xl"
       style={[

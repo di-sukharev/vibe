@@ -1,6 +1,8 @@
-import { View } from 'react-native';
-
-import { Typography } from '@/components/ui/typography';
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from '@/components/ui/alert';
 import { useAuth } from '../provider';
 
 export function AuthSessionErrorNotice() {
@@ -9,10 +11,9 @@ export function AuthSessionErrorNotice() {
   if (!auth.user || !auth.sessionError) return null;
 
   return (
-    <View accessible accessibilityLiveRegion="polite">
-      <Typography color="destructive" variant="body" weight="700">
-        {auth.sessionError}
-      </Typography>
-    </View>
+    <Alert accessibilityLiveRegion="polite" variant="destructive">
+      <AlertTitle>Session action needs attention</AlertTitle>
+      <AlertDescription>{auth.sessionError}</AlertDescription>
+    </Alert>
   );
 }

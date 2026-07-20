@@ -16,6 +16,7 @@ type ScreenShellProps = {
   descriptionTestID?: string;
   eyebrow?: ReactNode;
   headerTestID?: string;
+  keyboardAware?: boolean;
   scroll?: boolean;
   testID?: string;
   title: ReactNode;
@@ -33,6 +34,7 @@ export function ScreenShell({
   descriptionTestID,
   eyebrow,
   headerTestID,
+  keyboardAware,
   scroll = true,
   testID,
   title,
@@ -45,8 +47,13 @@ export function ScreenShell({
       backFallbackHref={backFallbackHref}
       centered={centered}
       contentStyle={styles.content}
+      keyboardAvoiding={keyboardAware}
       scroll={scroll}
-      scrollViewProps={{ showsVerticalScrollIndicator: false }}
+      scrollViewProps={{
+        keyboardDismissMode: keyboardAware ? 'on-drag' : undefined,
+        keyboardShouldPersistTaps: keyboardAware ? 'handled' : undefined,
+        showsVerticalScrollIndicator: false,
+      }}
       testID={testID}>
       <SiteHeader
         actions={actions}
