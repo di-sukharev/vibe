@@ -51,6 +51,7 @@
     "test:backend:integration": "bun run --cwd backend test:integration",
     "test:webapp": "bun run --cwd webapp test",
     "test:mobile": "bun run --cwd mobile test",
+    "test:website": "bun run --cwd website test",
     "smoke:backend:docker": "bun run --cwd backend smoke:docker",
     "e2e:webapp": "bun run --cwd webapp e2e",
     "e2e:mobile": "bun run --cwd mobile e2e:maestro"

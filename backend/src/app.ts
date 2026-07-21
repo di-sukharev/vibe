@@ -2,7 +2,9 @@ import { OpenAPIHono } from '@hono/zod-openapi'
 import { cors } from 'hono/cors'
 import { secureHeaders } from 'hono/secure-headers'
 
+import { createBackgroundTasks, type TaskDeferrer } from './background-tasks'
 import type { DbClient } from './db'
+import { disabledEmailDelivery, type EmailDelivery } from './email/service'
 import type { AppEnv } from './env'
 import { errorResponse, handleError, validationErrorHook } from './http/errors'
 import { createIngressSecurity } from './http/security'
@@ -16,6 +18,8 @@ import { createNotificationsModule } from './modules/notifications'
 import { createUsersModule } from './modules/users'
 
 type CreateAppOptions = {
+  backgroundTasks?: TaskDeferrer
+  emailDelivery?: EmailDelivery
   env: AppEnv
   appStoreIapVerifier?: AppStoreSubscriptionVerifier
   googlePlayIapVerifier?: GooglePlaySubscriptionVerifier
@@ -28,6 +32,8 @@ const defaultWebhookRateLimitWindowSeconds = 60
 
 export function createApp({
   appStoreIapVerifier,
+  backgroundTasks = createBackgroundTasks(),
+  emailDelivery = disabledEmailDelivery,
   env,
   googlePlayIapVerifier,
   prisma,
@@ -40,7 +46,9 @@ export function createApp({
   })
   const notifications = createNotificationsModule({ db: prisma, env })
   const auth = createAuthModule({
+    backgroundTasks,
     db: prisma,
+    emailDelivery,
     env,
     logoutCleanup: notifications.logoutCleanup,
     subscriptionReader: billing.getSubscription,

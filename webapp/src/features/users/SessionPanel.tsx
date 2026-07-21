@@ -21,7 +21,7 @@ import {
   ItemMedia,
   ItemTitle,
 } from '@/components/ui/item'
-import { Typography } from '@/components/ui/typography'
+import { Typography } from '@/components/typography'
 
 export function SessionPanel({ onLogout }: { onLogout: () => Promise<void> }) {
   const [isLoggingOut, setIsLoggingOut] = useState(false)

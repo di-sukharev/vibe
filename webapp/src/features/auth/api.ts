@@ -5,11 +5,17 @@ import {
   cookieRefreshResponseSchema,
   loginRequestSchema,
   meResponseSchema,
+  passwordResetConfirmRequestSchema,
+  passwordResetRequestResponseSchema,
+  passwordResetRequestSchema,
   registerRequestSchema,
   type CookieAuthResponse,
   type CookieRefreshResponse,
   type LoginRequest,
   type MeResponse,
+  type PasswordResetConfirmRequest,
+  type PasswordResetRequest,
+  type PasswordResetRequestResponse,
   type RegisterRequest,
 } from '@web-app-demo/contracts'
 import type { z } from 'zod'
@@ -76,6 +82,32 @@ export class AuthApi {
       })
       const sessionEvent = publishBrowserSessionState('authenticated')
       return { data, sessionEpoch: sessionEvent.epoch }
+    })
+  }
+
+  requestPasswordReset(
+    input: PasswordResetRequest,
+  ): Promise<PasswordResetRequestResponse> {
+    const payload = passwordResetRequestSchema.parse(input)
+    return this.http.request(
+      '/api/auth/password-reset/request',
+      passwordResetRequestResponseSchema,
+      { method: 'POST', body: payload },
+    )
+  }
+
+  confirmPasswordReset(
+    input: PasswordResetConfirmRequest,
+  ): Promise<BrowserSessionTransition<undefined>> {
+    const payload = passwordResetConfirmRequestSchema.parse(input)
+    return this.authCoordinator(async () => {
+      await this.http.raw('/api/auth/password-reset/confirm', {
+        method: 'POST',
+        body: payload,
+      })
+      const sessionEvent = publishBrowserSessionState('cleared')
+      this.options.setAccessToken(null)
+      return { data: undefined, sessionEpoch: sessionEvent.epoch }
     })
   }
 

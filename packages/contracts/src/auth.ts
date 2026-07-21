@@ -44,6 +44,19 @@ export const socialAuthRequestSchema = z.object({
   displayName: displayNameSchema,
 })
 
+export const passwordResetRequestSchema = z.object({
+  email: emailSchema,
+})
+
+export const passwordResetRequestResponseSchema = z.object({
+  accepted: z.literal(true),
+})
+
+export const passwordResetConfirmRequestSchema = z.object({
+  token: z.string().trim().min(43).max(256),
+  password: passwordSchema,
+})
+
 export const cookieRefreshRequestSchema = z.object({}).strict().optional().default({})
 export const cookieLogoutRequestSchema = z.object({}).strict().optional().default({})
 
@@ -93,6 +106,9 @@ export type LoginRequest = z.infer<typeof loginRequestSchema>
 export type SocialAuthProvider = z.infer<typeof socialAuthProviderSchema>
 export type SocialAuthRequest = z.input<typeof socialAuthRequestSchema>
 export type SocialAuthPayload = z.output<typeof socialAuthRequestSchema>
+export type PasswordResetRequest = z.infer<typeof passwordResetRequestSchema>
+export type PasswordResetRequestResponse = z.infer<typeof passwordResetRequestResponseSchema>
+export type PasswordResetConfirmRequest = z.infer<typeof passwordResetConfirmRequestSchema>
 export type CookieRefreshRequest = z.infer<typeof cookieRefreshRequestSchema>
 export type CookieLogoutRequest = z.infer<typeof cookieLogoutRequestSchema>
 export type TokenRefreshRequest = z.infer<typeof tokenRefreshRequestSchema>

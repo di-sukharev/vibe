@@ -17,6 +17,9 @@ export const maximumPushSendFenceTransactionMs = 120_000
 export const userAuthorityTransitionTransactionOptions = {
   timeout: maximumPushSendFenceTransactionMs + 15_000,
 } as const
+export const userAuthenticationSessionTransactionOptions = {
+  timeout: userAuthorityTransitionTransactionOptions.timeout + 5_000,
+} as const
 
 export function acquireUserRoleMutationLock(
   prisma: Pick<DbClient, '$executeRaw'>,

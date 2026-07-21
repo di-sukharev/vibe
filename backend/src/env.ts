@@ -68,6 +68,7 @@ const envSchema = z.object({
         .map((origin) => origin.trim())
         .filter(Boolean),
     ),
+  WEBAPP_ORIGIN: optionalUrlSchema,
   ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(15 * 60),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(30),
   REFRESH_REUSE_GRACE_SECONDS: z.coerce.number().int().nonnegative().max(60).default(10),
@@ -133,6 +134,7 @@ const envSchema = z.object({
   validateJwtSecret(env, ctx)
   validateProductionRuntime(env, ctx)
   validateCorsOrigins(env, ctx)
+  validateWebappOrigin(env, ctx)
   validateSessionTtls(env, ctx)
   validateTrustedProxy(env, ctx)
   validateStorageEnv(env, ctx)
@@ -155,6 +157,33 @@ export function loadBackgroundEnv(source: Record<string, string | undefined>) {
     COOKIE_SECURE: 'true',
     JWT_SECRET: backgroundNonSigningJwtPlaceholder,
   })
+}
+
+function validateWebappOrigin(env: z.infer<typeof envSchema>, ctx: z.RefinementCtx) {
+  if (!env.WEBAPP_ORIGIN) return
+
+  const url = new URL(env.WEBAPP_ORIGIN)
+  if (!['http:', 'https:'].includes(url.protocol)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['WEBAPP_ORIGIN'],
+      message: 'WEBAPP_ORIGIN must use http or https',
+    })
+  }
+  if (url.origin !== env.WEBAPP_ORIGIN) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['WEBAPP_ORIGIN'],
+      message: 'WEBAPP_ORIGIN must contain an origin only, not a path',
+    })
+  }
+  if ((env.COOKIE_SECURE || env.NODE_ENV === 'production') && url.protocol !== 'https:') {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['WEBAPP_ORIGIN'],
+      message: 'WEBAPP_ORIGIN must use HTTPS in production',
+    })
+  }
 }
 
 function validateSessionTtls(env: z.infer<typeof envSchema>, ctx: z.RefinementCtx) {

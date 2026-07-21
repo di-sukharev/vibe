@@ -10,7 +10,7 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from '@/components/ui/sidebar'
-import { Typography } from '@/components/ui/typography'
+import { Typography } from '@/components/typography'
 import type { WorkspaceRoutePath } from '@/features/navigation'
 import { DashboardLink } from './DashboardLink'
 import { NavMain, type DashboardNavigationItem } from './NavMain'

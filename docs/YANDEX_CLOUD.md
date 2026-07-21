@@ -246,7 +246,7 @@ yc serverless trigger create timer \
   --retry-interval 30s
 ```
 
-After deployment, invoke the private cleanup container once with an IAM token and verify HTTP 200 plus `X-Task-Exit-Code: 0`. Then confirm `yc serverless trigger get --name <project>-auth-cleanup-daily` reports an active trigger. After the first scheduled window, inspect the cleanup container's invocation logs and require a recent `Cron auth:sessions:cleanup removed ... stale sessions.` entry; absence of a recent successful entry is an operational failure, not proof that there were zero stale sessions.
+After deployment, invoke the private cleanup container once with an IAM token and verify HTTP 200 plus `X-Task-Exit-Code: 0`. Then confirm `yc serverless trigger get --name <project>-auth-cleanup-daily` reports an active trigger. After the first scheduled window, inspect the cleanup container's invocation logs and require a recent `Cron auth:sessions:cleanup removed ... stale sessions and ... expired password reset tokens.` entry; absence of a recent successful entry is an operational failure, not proof that there were zero stale auth artifacts.
 
 ## Real-Time Pub/Sub
 

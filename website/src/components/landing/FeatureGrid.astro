@@ -1,0 +1,67 @@
+---
+import { Blocks, Gauge, Layers3, Palette, ShieldCheck, Smartphone } from 'lucide-react'
+
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import SectionIntro from './SectionIntro.astro'
+
+const features = [
+  {
+    icon: Blocks,
+    title: 'Модульные блоки',
+    description: 'Меняйте порядок секций, контент и сценарии без переписывания всей страницы.',
+  },
+  {
+    icon: Palette,
+    title: 'Единый визуальный язык',
+    description: 'Цвета, типографика и состояния собраны на общих дизайн-токенах.',
+  },
+  {
+    icon: Smartphone,
+    title: 'Адаптивность из коробки',
+    description: 'Страница одинаково аккуратно работает на телефоне, планшете и десктопе.',
+  },
+  {
+    icon: Gauge,
+    title: 'Быстрая загрузка',
+    description: 'SEO-контент рендерится статически и не требует клиентского JavaScript.',
+  },
+  {
+    icon: ShieldCheck,
+    title: 'Доступный фундамент',
+    description: 'Семантическая разметка, клавиатурная навигация и заметные focus-состояния.',
+  },
+  {
+    icon: Layers3,
+    title: 'Простое развитие',
+    description: 'Добавляйте страницы и продуктовые сценарии поверх понятной структуры компонентов.',
+  },
+]
+---
+
+<section class="border-b py-20 sm:py-24" id="features" aria-labelledby="features-title">
+  <div class="site-container">
+    <div id="features-title">
+      <SectionIntro
+        align="center"
+        eyebrow="Возможности"
+        title="Нужная гибкость без хаоса в коде"
+        description="Каждый блок отвечает за одну задачу и использует общий набор проверенных UI-примитивов. Получается выразительно снаружи и предсказуемо внутри."
+      />
+    </div>
+    <div class="mt-12 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+      {features.map(({ icon: Icon, title, description }) => (
+        <Card className="h-full transition-transform duration-200 hover:-translate-y-1 hover:shadow-md">
+          <CardHeader>
+            <span class="mb-3 grid size-10 place-items-center rounded-xl bg-emerald-100 text-emerald-800">
+              <Icon className="size-5" aria-hidden="true" />
+            </span>
+            <CardTitle className="text-lg">{title}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p class="leading-6 text-muted-foreground">{description}</p>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  </div>
+</section>

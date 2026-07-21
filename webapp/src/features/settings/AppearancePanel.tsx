@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Typography } from '@/components/ui/typography'
+import { Typography } from '@/components/typography'
 
 const themes = ['system', 'light', 'dark'] as const
 type Theme = typeof themes[number]

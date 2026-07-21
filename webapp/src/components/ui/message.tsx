@@ -1,7 +1,7 @@
 import * as React from "react"
 
 import { cn } from "@/lib/utils"
-import { Typography } from "@/components/ui/typography"
+import { Typography } from "@/components/typography"
 
 function MessageGroup({ className, ...props }: React.ComponentProps<"div">) {
   return (

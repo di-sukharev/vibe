@@ -34,11 +34,13 @@ const cronTasks = {
     assertGooglePlayReconcileSucceeded(result)
   },
   'auth:sessions:cleanup': async (runtime, now) => {
-    const count = await cleanupAuthSessions(runtime, now)
-    console.log(`Cron auth:sessions:cleanup removed ${count} stale sessions.`)
+    const { passwordResetTokensDeleted, sessionsDeleted } = await cleanupAuthState(runtime, now)
+    console.log(
+      `Cron auth:sessions:cleanup removed ${sessionsDeleted} stale sessions and ${passwordResetTokensDeleted} expired password reset tokens.`,
+    )
   },
   'maintenance:process': async (runtime, now) => {
-    const authSessionsDeleted = await cleanupAuthSessions(runtime, now)
+    const { passwordResetTokensDeleted, sessionsDeleted } = await cleanupAuthState(runtime, now)
     const terminalNotificationOutboxesRedacted = await createNotificationsModule({
       db: runtime.prisma,
       env: runtime.env,
@@ -47,15 +49,16 @@ const cronTasks = {
       ? await reconcileGooglePlayPurchases(runtime, now)
       : null
     console.log('Cron maintenance:process task completed.', {
-      authSessionsDeleted,
+      authSessionsDeleted: sessionsDeleted,
       googlePlay,
+      passwordResetTokensDeleted,
       terminalNotificationOutboxesRedacted,
     })
     if (googlePlay) assertGooglePlayReconcileSucceeded(googlePlay)
   },
 } satisfies Record<string, CronTask>
 
-async function cleanupAuthSessions({ env, prisma }: BackendRuntime, now: Date) {
+async function cleanupAuthState({ env, prisma }: BackendRuntime, now: Date) {
   const dayMs = 24 * 60 * 60 * 1000
   const retentionCutoff = new Date(
     now.getTime() - env.SESSION_RETENTION_DAYS * dayMs,
@@ -94,16 +97,24 @@ async function cleanupAuthSessions({ env, prisma }: BackendRuntime, now: Date) {
           AND session."created_at" > ${absoluteSessionNotBefore}
       )
   `
-  const { count } = await prisma.authSession.deleteMany({
-    where: {
-      OR: [
-        { expiresAt: { lt: retentionCutoff } },
-        { revokedAt: { lt: retentionCutoff } },
-        { createdAt: { lt: absoluteRetentionCutoff } },
-      ],
-    },
-  })
-  return count
+  const [sessions, passwordResetTokens] = await Promise.all([
+    prisma.authSession.deleteMany({
+      where: {
+        OR: [
+          { expiresAt: { lt: retentionCutoff } },
+          { revokedAt: { lt: retentionCutoff } },
+          { createdAt: { lt: absoluteRetentionCutoff } },
+        ],
+      },
+    }),
+    prisma.passwordResetToken.deleteMany({
+      where: { expiresAt: { lt: now } },
+    }),
+  ])
+  return {
+    passwordResetTokensDeleted: passwordResetTokens.count,
+    sessionsDeleted: sessions.count,
+  }
 }
 
 async function reconcileGooglePlayPurchases(runtime: BackendRuntime, now: Date) {

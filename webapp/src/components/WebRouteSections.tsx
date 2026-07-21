@@ -2,15 +2,12 @@ import {
   Alert02Icon,
   FileNotFoundIcon,
   ShieldUserIcon,
-  Tick02Icon,
 } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 import { Link } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
 import { useState } from 'react'
 
-import { AuthForm } from '@/features/auth'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import {
@@ -20,67 +17,9 @@ import {
   EmptyMedia,
 } from '@/components/ui/empty'
 import { Spinner } from '@/components/ui/spinner'
-import { Typography } from '@/components/ui/typography'
+import { Typography } from '@/components/typography'
 
-type HomeDestination = '/' | '/app' | '/admin'
-
-const templateCapabilities = [
-  'Role-aware workspace routing',
-  'Shared validation contracts',
-  'Recoverable browser sessions',
-] as const
-
-export function GuestAuthSection() {
-  return (
-    <main className="grid min-h-svh bg-muted/30 lg:grid-cols-[minmax(0,1fr)_minmax(28rem,0.8fr)]">
-      <section className="flex flex-col gap-8 border-b bg-sidebar p-6 text-sidebar-foreground lg:justify-between lg:gap-12 lg:border-r lg:border-b-0 lg:p-12">
-        <div className="flex items-center gap-3">
-          <span className="flex size-9 items-center justify-center rounded-xl bg-sidebar-primary text-sidebar-primary-foreground">
-            <Typography variant="control">W</Typography>
-          </span>
-          <Typography variant="h6">web_app_demo</Typography>
-        </div>
-
-        <div className="grid max-w-2xl gap-6">
-          <Badge variant="outline" className="hidden w-fit lg:inline-flex">
-            Golden path template
-          </Badge>
-          <div className="grid gap-4">
-            <Typography as="h1" variant="h1" balance>
-              Auth, validation, and role-aware workspaces—ready from day one.
-            </Typography>
-            <Typography className="hidden lg:block" tone="muted" pretty>
-              Start with a production-shaped account flow backed by shared contracts,
-              current database roles, and explicit session recovery.
-            </Typography>
-          </div>
-          <ul className="hidden gap-3 lg:grid">
-            {templateCapabilities.map((capability) => (
-              <li className="flex items-center gap-3" key={capability}>
-                <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-sidebar-accent">
-                  <HugeiconsIcon aria-hidden icon={Tick02Icon} strokeWidth={2} />
-                </span>
-                <Typography as="span" variant="bodySm">
-                  {capability}
-                </Typography>
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <Typography className="hidden lg:block" variant="caption" tone="muted">
-          Secure defaults stay server-enforced.
-        </Typography>
-      </section>
-
-      <section className="flex items-center justify-center p-5 sm:p-8 lg:p-12">
-        <div className="w-full max-w-md">
-          <AuthForm />
-        </div>
-      </section>
-    </main>
-  )
-}
+type HomeDestination = '/login' | '/app' | '/admin'
 
 export function SessionLoadingSection() {
   return (
@@ -127,7 +66,7 @@ export function SessionErrorSection({ retry }: { retry: () => Promise<void> }) {
 }
 
 export function NotFoundSection({ destination }: { destination: HomeDestination }) {
-  const authenticated = destination !== '/'
+  const authenticated = destination !== '/login'
 
   return (
     <RouteStateCard
@@ -139,7 +78,7 @@ export function NotFoundSection({ destination }: { destination: HomeDestination 
         {authenticated ? (
           <Link to={destination}>Return to workspace</Link>
         ) : (
-          <Link search={{ returnTo: undefined }} to="/">Return to sign in</Link>
+          <Link search={{ returnTo: undefined }} to="/login">Return to sign in</Link>
         )}
       </Button>
     </RouteStateCard>

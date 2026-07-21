@@ -451,6 +451,54 @@ test('AuthApi preserves backend error status, code, and message', async () => {
   })
 })
 
+test('AuthApi submits password reset requests and clears session state after confirmation', async () => {
+  const calls: Array<{ path: string; body: unknown }> = []
+  let accessToken: string | null = 'existing-access-token'
+
+  globalThis.fetch = async (input, init) => {
+    const path = new URL(String(input)).pathname
+    calls.push({
+      path,
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    })
+    if (path === '/api/auth/password-reset/request') {
+      return json({ accepted: true }, 202)
+    }
+    if (path === '/api/auth/password-reset/confirm') {
+      return new Response(null, { status: 204 })
+    }
+    return json({ error: { code: 'NOT_FOUND', message: 'Unexpected request' } }, 404)
+  }
+
+  const client = new AuthApi({
+    getAccessToken: () => accessToken,
+    setAccessToken: (nextAccessToken) => {
+      accessToken = nextAccessToken
+    },
+  })
+
+  await expect(
+    client.requestPasswordReset({ email: ' USER@Example.COM ' }),
+  ).resolves.toEqual({ accepted: true })
+  await expect(
+    client.confirmPasswordReset({
+      token: 't'.repeat(43),
+      password: 'new-password-123',
+    }),
+  ).resolves.toMatchObject({ data: undefined, sessionEpoch: expect.any(String) })
+  expect(calls).toEqual([
+    {
+      path: '/api/auth/password-reset/request',
+      body: { email: 'user@example.com' },
+    },
+    {
+      path: '/api/auth/password-reset/confirm',
+      body: { token: 't'.repeat(43), password: 'new-password-123' },
+    },
+  ])
+  expect(accessToken).toBeNull()
+})
+
 test('AuthApi clearSession does not revoke a possibly newer shared browser cookie', async () => {
   let accessToken: string | null = 'stale-access-token'
   let authExpiredCalls = 0

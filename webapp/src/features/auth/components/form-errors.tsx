@@ -1,11 +1,17 @@
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 
-export function FormAlert({ message }: { message: string | null }) {
+export function FormAlert({
+  message,
+  title = 'Authentication failed',
+}: {
+  message: string | null
+  title?: string
+}) {
   if (!message) return null
 
   return (
     <Alert variant="destructive">
-      <AlertTitle>Authentication failed</AlertTitle>
+      <AlertTitle>{title}</AlertTitle>
       <AlertDescription>{message}</AlertDescription>
     </Alert>
   )

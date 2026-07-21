@@ -1,0 +1,113 @@
+---
+import { ArrowRight, Check, Sparkles } from 'lucide-react'
+
+import { Badge } from '@/components/ui/badge'
+import { buttonVariants } from '@/components/ui/button'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
+
+interface Props {
+  primaryHref: string
+  primaryLabel: string
+}
+
+const { primaryHref, primaryLabel } = Astro.props
+---
+
+<section class="relative isolate overflow-hidden border-b" id="top" aria-labelledby="hero-title">
+  <div
+    class="absolute inset-0 -z-20 bg-[linear-gradient(180deg,oklch(0.98_0.018_158),oklch(1_0_0)_72%)]"
+    aria-hidden="true"
+  ></div>
+  <div
+    class="absolute -top-48 left-1/2 -z-10 size-[42rem] -translate-x-1/2 rounded-full bg-emerald-300/25 blur-3xl"
+    aria-hidden="true"
+  ></div>
+
+  <div class="site-container grid items-center gap-14 py-20 lg:grid-cols-[1.05fr_0.95fr] lg:py-28">
+    <div class="max-w-3xl">
+      <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-800">
+        <Sparkles data-icon="inline-start" aria-hidden="true" />
+        Шаблон для следующего сильного продукта
+      </Badge>
+      <h1
+        class="mt-6 max-w-3xl font-heading text-5xl leading-[1.02] font-semibold tracking-[-0.04em] text-balance sm:text-6xl lg:text-7xl"
+        id="hero-title"
+      >
+        От идеи до работающего продукта — без лишней сложности.
+      </h1>
+      <p class="mt-6 max-w-2xl text-lg leading-8 text-muted-foreground text-pretty sm:text-xl">
+        Чистая отправная точка для SaaS, сервиса или внутреннего продукта: понятная структура,
+        готовые интерфейсные блоки и фундамент, который легко адаптировать под ваш бренд.
+      </p>
+      <div class="mt-8 flex flex-col gap-3 sm:flex-row">
+        <a class={buttonVariants({ className: 'h-11 px-5', size: 'lg' })} href={primaryHref}>
+          {primaryLabel}
+          <ArrowRight data-icon="inline-end" aria-hidden="true" />
+        </a>
+        <a
+          class={buttonVariants({ className: 'h-11 px-5', size: 'lg', variant: 'outline' })}
+          href="#process"
+        >
+          Посмотреть процесс
+        </a>
+      </div>
+      <ul class="mt-8 grid gap-3 text-sm text-muted-foreground sm:grid-cols-3" aria-label="Преимущества">
+        {['Быстрый старт', 'Адаптивный дизайн', 'Чистая архитектура'].map((item) => (
+          <li class="flex items-center gap-2">
+            <span class="grid size-5 place-items-center rounded-full bg-emerald-100 text-emerald-800">
+              <Check className="size-3.5" aria-hidden="true" />
+            </span>
+            {item}
+          </li>
+        ))}
+      </ul>
+    </div>
+
+    <div class="relative mx-auto w-full max-w-xl lg:mx-0">
+      <div class="absolute -inset-5 -z-10 rounded-[2rem] bg-emerald-200/35 blur-2xl" aria-hidden="true"></div>
+      <Card className="gap-0 overflow-hidden rounded-2xl border-white/70 bg-white/90 py-0 shadow-2xl shadow-emerald-950/10 ring-1 ring-emerald-950/5">
+        <CardHeader className="flex-row items-center justify-between border-b px-5 py-4">
+          <div class="flex items-center gap-2" aria-hidden="true">
+            <span class="size-2.5 rounded-full bg-rose-300"></span>
+            <span class="size-2.5 rounded-full bg-amber-300"></span>
+            <span class="size-2.5 rounded-full bg-emerald-300"></span>
+          </div>
+          <span class="text-xs font-medium text-muted-foreground">northstar.app/overview</span>
+        </CardHeader>
+        <CardContent className="space-y-5 p-5 sm:p-7">
+          <div class="flex items-end justify-between gap-4">
+            <div>
+              <p class="text-xs font-medium text-muted-foreground">Общий прогресс</p>
+              <p class="mt-1 font-heading text-3xl font-semibold tracking-tight">78%</p>
+            </div>
+            <Badge className="bg-emerald-100 text-emerald-800" variant="secondary">+18% за месяц</Badge>
+          </div>
+          <div class="h-2 overflow-hidden rounded-full bg-muted">
+            <div class="h-full w-[78%] rounded-full bg-emerald-600"></div>
+          </div>
+          <div class="grid gap-3 sm:grid-cols-3">
+            {[
+              ['24', 'Активных задач'],
+              ['8', 'Завершено'],
+              ['4.9', 'Оценка команды'],
+            ].map(([value, label]) => (
+              <div class="rounded-xl border bg-muted/40 p-4">
+                <p class="font-heading text-xl font-semibold">{value}</p>
+                <p class="mt-1 text-xs leading-5 text-muted-foreground">{label}</p>
+              </div>
+            ))}
+          </div>
+          <div class="rounded-xl border bg-background p-4">
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <p class="text-sm font-medium">Запуск первой версии</p>
+                <p class="mt-1 text-xs text-muted-foreground">Команда движется по плану</p>
+              </div>
+              <span class="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-800">В работе</span>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  </div>
+</section>

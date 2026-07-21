@@ -279,7 +279,7 @@ const typographyPolicyPlugin = {
       create(context) {
         const filename = context.filename.replaceAll('\\', '/')
         const isTypographyFile = filename.endsWith(
-          '/src/components/ui/typography.tsx'
+          '/src/components/typography.tsx'
         )
         const classMemberVariableUtilities = new WeakMap()
         const classVariableUtilities = new WeakMap()
@@ -523,24 +523,12 @@ export default defineConfig([
     },
   },
   {
-    // shadcn registry output intentionally exports variants/hooks/helpers next to components.
-    // Keep app-specific wrappers outside src/components/ui so regular lint rules still apply.
-    files: [
-      'src/components/ui/badge.tsx',
-      'src/components/ui/button-group.tsx',
-      'src/components/ui/button.tsx',
-      'src/components/ui/carousel.tsx',
-      'src/components/ui/combobox.tsx',
-      'src/components/ui/direction.tsx',
-      'src/components/ui/marker.tsx',
-      'src/components/ui/message-scroller.tsx',
-      'src/components/ui/navigation-menu.tsx',
-      'src/components/ui/sidebar.tsx',
-      'src/components/ui/tabs.tsx',
-      'src/components/ui/toggle.tsx',
-    ],
+    // Official shadcn registry output is regenerated as a unit. Product-specific
+    // composition and typography policy stay outside this directory.
+    files: ['src/components/ui/**/*.{ts,tsx}'],
     rules: {
       'react-refresh/only-export-components': 'off',
+      'typographyPolicy/use-typography-component': 'off',
     },
   },
   {

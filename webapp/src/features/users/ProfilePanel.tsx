@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { Typography } from '@/components/ui/typography'
+import { Typography } from '@/components/typography'
 import { useUpdateProfileMutation } from './queries'
 
 export function ProfilePanel({ user }: { user: UserDto }) {

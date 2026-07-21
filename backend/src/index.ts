@@ -1,9 +1,13 @@
 import { createApp } from './app'
 import { createBackendRuntime } from './runtime'
-import { stopServerGracefully } from './shutdown'
+import { shutdownBackend } from './shutdown'
 
 const runtime = createBackendRuntime()
-const app = createApp({ env: runtime.env, prisma: runtime.prisma })
+const app = createApp({
+  backgroundTasks: runtime.backgroundTasks,
+  env: runtime.env,
+  prisma: runtime.prisma,
+})
 
 const server = Bun.serve({
   port: runtime.env.PORT,
@@ -19,8 +23,11 @@ async function shutdown(signal: string) {
   shuttingDown = true
 
   console.log(`Backend received ${signal}; shutting down`)
-  await stopServerGracefully(server, runtime.env.SHUTDOWN_GRACE_SECONDS * 1000)
-  await runtime.close()
+  await shutdownBackend(
+    server,
+    runtime,
+    runtime.env.SHUTDOWN_GRACE_SECONDS * 1000,
+  )
 }
 
 process.on('SIGINT', () => {

@@ -25,9 +25,24 @@ model User {
   pushTokens              PushToken[]
   pushNotificationOutbox  PushNotificationOutbox[]
   pushDeliveries          PushDelivery[]
+  passwordResetTokens PasswordResetToken[]
 
   @@index([role], map: "users_role_idx")
   @@map("users")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique(map: "password_reset_tokens_token_hash_key") @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade, map: "password_reset_tokens_user_id_fkey")
+
+  @@index([userId, createdAt], map: "password_reset_tokens_user_id_created_at_idx")
+  @@index([expiresAt], map: "password_reset_tokens_expires_at_idx")
+  @@map("password_reset_tokens")
 }
 
 enum UserRole {

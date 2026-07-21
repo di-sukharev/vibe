@@ -33,5 +33,10 @@ export function errorId(errors: FormError[] | undefined, id: string) {
 }
 
 function isFieldName(field: unknown): field is FieldName {
-  return field === 'displayName' || field === 'email' || field === 'password'
+  return (
+    field === 'confirmPassword' ||
+    field === 'displayName' ||
+    field === 'email' ||
+    field === 'password'
+  )
 }

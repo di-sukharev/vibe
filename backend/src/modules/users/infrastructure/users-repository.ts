@@ -128,6 +128,10 @@ export function createPrismaUsersRepository(db: DbClient): UsersRepository {
         await tx.pushToken.deleteMany({
           where: { userId: target.id },
         })
+        await tx.passwordResetToken.updateMany({
+          where: { userId: target.id, usedAt: null },
+          data: { usedAt: input.now },
+        })
         return toAdminUserSummary(updated)
       }, userAuthorityTransitionTransactionOptions)
     },

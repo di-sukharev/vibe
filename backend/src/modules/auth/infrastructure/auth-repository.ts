@@ -2,6 +2,7 @@ import {
   acquirePushTokenUserLock,
   acquireUserAuthenticationAuthorityLock,
   type DbClient,
+  userAuthenticationSessionTransactionOptions,
 } from '../../../db'
 import { Prisma } from '../../../generated/prisma/client'
 import type { AuthRepository } from '../application/ports'
@@ -272,6 +273,93 @@ export function createPrismaAuthRepository(db: DbClient): AuthRepository {
         })
         return revoked.count === 1 ? session.userId : null
       })
+    },
+
+    createPasswordResetToken(input) {
+      return db.$transaction(async (tx) => {
+        await acquireUserAuthenticationAuthorityLock(tx, input.userId)
+        const recentToken = await tx.passwordResetToken.findFirst({
+          where: {
+            userId: input.userId,
+            createdAt: { gte: input.createdAfter },
+          },
+          select: { id: true },
+        })
+        if (recentToken) return false
+
+        await tx.passwordResetToken.updateMany({
+          where: { userId: input.userId, usedAt: null },
+          data: { usedAt: input.now },
+        })
+        await tx.passwordResetToken.create({
+          data: {
+            userId: input.userId,
+            tokenHash: input.tokenHash,
+            expiresAt: input.expiresAt,
+          },
+        })
+        return true
+      }, userAuthenticationSessionTransactionOptions)
+    },
+
+    async invalidatePasswordResetToken(input) {
+      await db.passwordResetToken.updateMany({
+        where: { tokenHash: input.tokenHash, usedAt: null },
+        data: { usedAt: input.now },
+      })
+    },
+
+    async hasActivePasswordResetToken(input) {
+      const token = await db.passwordResetToken.findFirst({
+        where: {
+          tokenHash: input.tokenHash,
+          usedAt: null,
+          expiresAt: { gt: input.now },
+        },
+        select: { id: true },
+      })
+      return token !== null
+    },
+
+    completePasswordReset(input) {
+      return db.$transaction(async (tx) => {
+        const candidate = await tx.passwordResetToken.findFirst({
+          where: {
+            tokenHash: input.tokenHash,
+            usedAt: null,
+            expiresAt: { gt: input.now },
+          },
+          select: { userId: true },
+        })
+        if (!candidate) return null
+
+        await acquireUserAuthenticationAuthorityLock(tx, candidate.userId)
+        const token = await tx.passwordResetToken.findFirst({
+          where: {
+            tokenHash: input.tokenHash,
+            userId: candidate.userId,
+            usedAt: null,
+            expiresAt: { gt: input.now },
+          },
+          select: { user: { select: { email: true } } },
+        })
+        if (!token) return null
+
+        await tx.user.update({
+          where: { id: candidate.userId },
+          data: { passwordHash: input.passwordHash },
+        })
+        await tx.passwordResetToken.updateMany({
+          where: { userId: candidate.userId, usedAt: null },
+          data: { usedAt: input.now },
+        })
+        await tx.authSession.updateMany({
+          where: { userId: candidate.userId, revokedAt: null },
+          data: { revokedAt: input.now },
+        })
+
+        return { email: token.user.email }
+      }, userAuthenticationSessionTransactionOptions)
     },
   }
 }

@@ -5,7 +5,6 @@ import useEmblaCarousel, {
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { Typography } from "@/components/ui/typography"
 import { HugeiconsIcon } from "@hugeicons/react"
 import { ArrowLeft01Icon, ArrowRight01Icon } from "@hugeicons/core-free-icons"
 
@@ -100,8 +99,7 @@ function Carousel({
     api.on("select", onSelect)
 
     return () => {
-      api.off("reInit", onSelect)
-      api.off("select", onSelect)
+      api?.off("select", onSelect)
     }
   }, [api, onSelect])
 
@@ -188,7 +186,7 @@ function CarouselPrevious({
       className={cn(
         "absolute touch-manipulation rounded-full",
         orientation === "horizontal"
-          ? "top-1/2 -left-12 -translate-y-1/2"
+          ? "inset-y-0 -left-12 my-auto"
           : "-top-12 left-1/2 -translate-x-1/2 rotate-90",
         className
       )}
@@ -197,7 +195,7 @@ function CarouselPrevious({
       {...props}
     >
       <HugeiconsIcon icon={ArrowLeft01Icon} strokeWidth={2} />
-      <Typography variant="srOnly">Previous slide</Typography>
+      <span className="sr-only">Previous slide</span>
     </Button>
   )
 }
@@ -218,7 +216,7 @@ function CarouselNext({
       className={cn(
         "absolute touch-manipulation rounded-full",
         orientation === "horizontal"
-          ? "top-1/2 -right-12 -translate-y-1/2"
+          ? "inset-y-0 -right-12 my-auto"
           : "-bottom-12 left-1/2 -translate-x-1/2 rotate-90",
         className
       )}
@@ -227,7 +225,7 @@ function CarouselNext({
       {...props}
     >
       <HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={2} />
-      <Typography variant="srOnly">Next slide</Typography>
+      <span className="sr-only">Next slide</span>
     </Button>
   )
 }

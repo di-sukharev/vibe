@@ -3,7 +3,7 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { Slot } from "radix-ui"
 
 import { cn } from "@/lib/utils"
-import { Typography } from "@/components/ui/typography"
+import { Typography } from "@/components/typography"
 
 function BubbleGroup({ className, ...props }: React.ComponentProps<"div">) {
   return (

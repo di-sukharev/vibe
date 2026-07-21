@@ -12,6 +12,9 @@ import {
   meResponseSchema,
   pushMutationResponseSchema,
   registerPushTokenRequestSchema,
+  passwordResetConfirmRequestSchema,
+  passwordResetRequestResponseSchema,
+  passwordResetRequestSchema,
   registerRequestSchema,
   socialAuthProviderParamsSchema,
   socialAuthRequestSchema,
@@ -70,6 +73,29 @@ describe('auth contracts', () => {
     ).toThrow()
     expect(() =>
       loginRequestSchema.parse({ email: 'user@example.com', password: 'short' }),
+    ).toThrow()
+  })
+
+  test('normalizes password reset requests and keeps their response generic', () => {
+    expect(passwordResetRequestSchema.parse({ email: ' USER@Example.COM ' })).toEqual({
+      email: 'user@example.com',
+    })
+    expect(passwordResetRequestResponseSchema.parse({ accepted: true })).toEqual({
+      accepted: true,
+    })
+    expect(() => passwordResetRequestResponseSchema.parse({ accepted: false })).toThrow()
+  })
+
+  test('requires a bounded reset token and a valid replacement password', () => {
+    const token = 't'.repeat(43)
+    expect(
+      passwordResetConfirmRequestSchema.parse({ token, password: 'new-password-123' }),
+    ).toEqual({ token, password: 'new-password-123' })
+    expect(() =>
+      passwordResetConfirmRequestSchema.parse({ token: 'short', password: 'new-password-123' }),
+    ).toThrow()
+    expect(() =>
+      passwordResetConfirmRequestSchema.parse({ token, password: 'short' }),
     ).toThrow()
   })
 

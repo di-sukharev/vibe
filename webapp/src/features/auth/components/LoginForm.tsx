@@ -1,23 +1,19 @@
 import { useForm } from '@tanstack/react-form'
+import { Link } from '@tanstack/react-router'
 import { loginRequestSchema, type LoginRequest } from '@web-app-demo/contracts'
 import { useId, useState } from 'react'
 
+import { Typography } from '@/components/typography'
 import { Button } from '@/components/ui/button'
-import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { ApiRequestError } from '@/platform/api'
 import { useAuth } from '../use-auth'
 import { FormAlert } from './form-errors'
-import type { AuthDraft, FieldErrors } from './form-model'
+import type { FieldErrors } from './form-model'
 import { clearFieldError, errorId, hasErrors, toFieldErrors } from './form-validation'
 
-export function LoginForm({
-  draft,
-  onDraftChange,
-}: {
-  draft: AuthDraft
-  onDraftChange: (draft: Partial<AuthDraft>) => void
-}) {
+export function LoginForm({ returnTo }: { returnTo?: string }) {
   const auth = useAuth()
   const emailId = useId()
   const emailErrorId = useId()
@@ -27,7 +23,7 @@ export function LoginForm({
   const [formError, setFormError] = useState<string | null>(null)
 
   const form = useForm({
-    defaultValues: { email: draft.email, password: draft.password },
+    defaultValues: { email: '', password: '' },
     onSubmit: async ({ value }) => {
       setFormError(null)
       const result = loginRequestSchema.safeParse(value)
@@ -49,34 +45,44 @@ export function LoginForm({
 
   return (
     <form
+      className="flex flex-col gap-6"
       onSubmit={(event) => {
         event.preventDefault()
         void form.handleSubmit()
       }}
     >
-      <FieldGroup className="gap-4">
+      <FieldGroup>
+        <div className="flex flex-col items-center gap-1 text-center">
+          <Typography as="h1" variant="h3" balance>
+            Login to your account
+          </Typography>
+          <Typography variant="bodySm" tone="muted" balance>
+            Enter your email below to login to your account
+          </Typography>
+        </div>
+
         <form.Field
           name="email"
           children={(field) => (
             <Field data-invalid={hasErrors(fieldErrors.email)}>
               <FieldLabel htmlFor={emailId}>Email</FieldLabel>
               <Input
-                id={emailId}
-                name={field.name}
-                value={field.state.value}
-                type="text"
-                inputMode="email"
-                autoComplete="email"
-                aria-invalid={hasErrors(fieldErrors.email)}
                 aria-describedby={errorId(fieldErrors.email, emailErrorId)}
+                aria-invalid={hasErrors(fieldErrors.email)}
+                autoComplete="email"
+                className="bg-background"
+                id={emailId}
+                inputMode="email"
+                name={field.name}
                 onBlur={field.handleBlur}
                 onChange={(event) => {
-                  const value = event.target.value
-                  field.handleChange(value)
-                  onDraftChange({ email: value })
+                  field.handleChange(event.target.value)
                   clearFieldError('email', setFieldErrors)
                   setFormError(null)
                 }}
+                placeholder="m@example.com"
+                type="email"
+                value={field.state.value}
               />
               <FieldError id={emailErrorId} errors={fieldErrors.email} />
             </Field>
@@ -87,23 +93,29 @@ export function LoginForm({
           name="password"
           children={(field) => (
             <Field data-invalid={hasErrors(fieldErrors.password)}>
-              <FieldLabel htmlFor={passwordId}>Password</FieldLabel>
+              <div className="flex items-center">
+                <FieldLabel htmlFor={passwordId}>Password</FieldLabel>
+                <Typography asChild variant="bodySm">
+                  <Link className="ml-auto underline-offset-4 hover:underline" to="/forgot-password">
+                    Forgot your password?
+                  </Link>
+                </Typography>
+              </div>
               <Input
+                aria-describedby={errorId(fieldErrors.password, passwordErrorId)}
+                aria-invalid={hasErrors(fieldErrors.password)}
+                autoComplete="current-password"
+                className="bg-background"
                 id={passwordId}
                 name={field.name}
-                value={field.state.value}
-                type="password"
-                autoComplete="current-password"
-                aria-invalid={hasErrors(fieldErrors.password)}
-                aria-describedby={errorId(fieldErrors.password, passwordErrorId)}
                 onBlur={field.handleBlur}
                 onChange={(event) => {
-                  const value = event.target.value
-                  field.handleChange(value)
-                  onDraftChange({ password: value })
+                  field.handleChange(event.target.value)
                   clearFieldError('password', setFieldErrors)
                   setFormError(null)
                 }}
+                type="password"
+                value={field.state.value}
               />
               <FieldError id={passwordErrorId} errors={fieldErrors.password} />
             </Field>
@@ -112,14 +124,23 @@ export function LoginForm({
 
         <FormAlert message={formError} />
 
-        <form.Subscribe
-          selector={(state) => state.isSubmitting}
-          children={(isSubmitting) => (
-            <Button type="submit" size="lg" className="w-full" disabled={isSubmitting}>
-              {isSubmitting ? 'Signing in…' : 'Login'}
-            </Button>
-          )}
-        />
+        <Field>
+          <form.Subscribe
+            selector={(state) => state.isSubmitting}
+            children={(isSubmitting) => (
+              <Button disabled={isSubmitting} type="submit">
+                {isSubmitting ? 'Signing in…' : 'Login'}
+              </Button>
+            )}
+          />
+        </Field>
+
+        <FieldDescription className="text-center">
+          Don&apos;t have an account?{' '}
+          <Link search={{ returnTo }} to="/signup">
+            Sign up
+          </Link>
+        </FieldDescription>
       </FieldGroup>
     </form>
   )

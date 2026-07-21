@@ -1,16 +1,24 @@
 import { Outlet, useLocation, useRouter, useSearch } from '@tanstack/react-router'
 import type { UserDto, UserRole } from '@web-app-demo/contracts'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import {
-  GuestAuthSection,
   NotFoundSection,
   SessionErrorSection,
   SessionLoadingSection,
 } from '@/components/WebRouteSections'
 import { WorkspaceShell } from '@/components/WorkspaceShell'
 import { AdminDashboard, AdminSettings, AdminUsers } from '@/features/admin'
-import { useAuth } from '@/features/auth'
+import {
+  AuthPageShell,
+  clearPasswordResetTokenHash,
+  ForgotPasswordForm,
+  LoginForm,
+  RegisterForm,
+  readPasswordResetToken,
+  ResetPasswordForm,
+  useAuth,
+} from '@/features/auth'
 import { homePathForRole, safeReturnPath } from '@/features/navigation'
 import { UserHome, UserProfile, UserSettings } from '@/features/users'
 
@@ -29,7 +37,54 @@ export function HomePage() {
       />
     )
   }
-  return <GuestAuthSection />
+  const destination = returnTo
+    ? `/login?returnTo=${encodeURIComponent(returnTo)}`
+    : '/login'
+  return <HrefRedirect href={destination} />
+}
+
+export function LoginPage() {
+  const { returnTo } = useSearch({ from: '/login' })
+  return (
+    <GuestAuthPage returnTo={returnTo}>
+      <AuthPageShell>
+        <LoginForm returnTo={returnTo} />
+      </AuthPageShell>
+    </GuestAuthPage>
+  )
+}
+
+export function SignupPage() {
+  const { returnTo } = useSearch({ from: '/signup' })
+  return (
+    <GuestAuthPage returnTo={returnTo}>
+      <AuthPageShell>
+        <RegisterForm returnTo={returnTo} />
+      </AuthPageShell>
+    </GuestAuthPage>
+  )
+}
+
+export function ForgotPasswordPage() {
+  return (
+    <GuestAuthPage>
+      <AuthPageShell>
+        <ForgotPasswordForm />
+      </AuthPageShell>
+    </GuestAuthPage>
+  )
+}
+
+export function ResetPasswordPage() {
+  const auth = useAuth()
+  const token = usePasswordResetToken()
+  if (auth.isBootstrapping) return <SessionLoadingSection />
+
+  return (
+    <AuthPageShell>
+      <ResetPasswordForm token={token} />
+    </AuthPageShell>
+  )
 }
 
 export function UserHomePage() {
@@ -77,7 +132,7 @@ export function NotFoundPage() {
     return <SessionErrorSection retry={auth.retrySession} />
   }
 
-  const destination = auth.user ? homePathForRole(auth.user.role) : '/'
+  const destination = auth.user ? homePathForRole(auth.user.role) : '/login'
   return <NotFoundSection destination={destination} />
 }
 
@@ -91,7 +146,7 @@ function WorkspaceRoute({ role }: { role: UserRole }) {
   }
   if (!auth.user) {
     const returnTo = `${location.pathname}${location.searchStr}`
-    return <HrefRedirect href={`/?returnTo=${encodeURIComponent(returnTo)}`} />
+    return <HrefRedirect href={`/login?returnTo=${encodeURIComponent(returnTo)}`} />
   }
   if (auth.user.role !== role) {
     return <HrefRedirect href={homePathForRole(auth.user.role)} />
@@ -102,6 +157,52 @@ function WorkspaceRoute({ role }: { role: UserRole }) {
       <Outlet />
     </WorkspaceShell>
   )
+}
+
+function GuestAuthPage({
+  children,
+  returnTo,
+}: {
+  children: ReactNode
+  returnTo?: string
+}) {
+  const auth = useAuth()
+
+  if (auth.isBootstrapping) return <SessionLoadingSection />
+  if (auth.sessionError && !auth.user) {
+    return <SessionErrorSection retry={auth.retrySession} />
+  }
+  if (auth.user) {
+    return (
+      <HrefRedirect
+        href={safeReturnPath(auth.user.role, returnTo) ?? homePathForRole(auth.user.role)}
+      />
+    )
+  }
+
+  return children
+}
+
+function usePasswordResetToken() {
+  const [token, setToken] = useState(() => {
+    if (typeof window === 'undefined') return ''
+    return readPasswordResetToken(window.location)
+  })
+
+  useEffect(() => {
+    const captureToken = () => {
+      const nextToken = readPasswordResetToken(window.location)
+      if (!nextToken) return
+      setToken(nextToken)
+      clearPasswordResetTokenHash(window.location, window.history)
+    }
+
+    captureToken()
+    window.addEventListener('hashchange', captureToken)
+    return () => window.removeEventListener('hashchange', captureToken)
+  }, [])
+
+  return token
 }
 
 function useWorkspaceUser(role: UserRole): UserDto {

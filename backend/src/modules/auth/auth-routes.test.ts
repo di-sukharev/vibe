@@ -152,4 +152,19 @@ describe('auth routes', () => {
     expect(untrustedLogout.status).toBe(403)
     expect(untrustedLogoutBody.error.code).toBe('FORBIDDEN')
   })
+
+  test('accepts password reset requests generically while email delivery is disabled', async () => {
+    const app = createApp({ env, prisma: {} as DbClient })
+    const response = await app.request('/api/auth/password-reset/request', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: 'https://web.example.com',
+      },
+      body: JSON.stringify({ email: 'unknown@example.com' }),
+    })
+
+    expect(response.status).toBe(202)
+    expect(await response.json()).toEqual({ accepted: true })
+  })
 })

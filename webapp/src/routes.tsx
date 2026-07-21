@@ -21,6 +21,32 @@ const indexRoute = createRoute({
   component: lazyRouteComponent(() => import('./pages'), 'HomePage'),
 })
 
+const loginRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/login',
+  validateSearch: returnToSearch,
+  component: lazyRouteComponent(() => import('./pages'), 'LoginPage'),
+})
+
+const signupRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/signup',
+  validateSearch: returnToSearch,
+  component: lazyRouteComponent(() => import('./pages'), 'SignupPage'),
+})
+
+const forgotPasswordRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/forgot-password',
+  component: lazyRouteComponent(() => import('./pages'), 'ForgotPasswordPage'),
+})
+
+const resetPasswordRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/reset-password',
+  component: lazyRouteComponent(() => import('./pages'), 'ResetPasswordPage'),
+})
+
 const userWorkspaceRoute = createRoute({
   getParentRoute: () => rootRoute,
   id: 'userWorkspace',
@@ -71,6 +97,10 @@ const adminSettingsRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
+  loginRoute,
+  signupRoute,
+  forgotPasswordRoute,
+  resetPasswordRoute,
   userWorkspaceRoute.addChildren([
     userHomeRoute,
     userProfileRoute,
@@ -84,6 +114,12 @@ const routeTree = rootRoute.addChildren([
 ])
 
 export const router = createRouter({ routeTree })
+
+function returnToSearch(search: Record<string, unknown>) {
+  return {
+    returnTo: typeof search.returnTo === 'string' ? search.returnTo : undefined,
+  }
+}
 
 declare module '@tanstack/react-router' {
   interface Register {

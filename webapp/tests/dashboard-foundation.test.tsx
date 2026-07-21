@@ -73,16 +73,13 @@ test('dashboard chrome leaves the document heading to its page content', () => {
   expect(tableMarkup).toContain('>User directory</h2>')
 })
 
-test('dashboard overlay primitives suppress animation for reduced motion', () => {
-  const dropdownMenu = readFileSync(
-    new URL('../src/components/ui/dropdown-menu.tsx', import.meta.url),
-    'utf8',
-  )
-  const tooltip = readFileSync(
-    new URL('../src/components/ui/tooltip.tsx', import.meta.url),
+test('the app globally suppresses generated primitive motion when reduced motion is requested', () => {
+  const stylesheet = readFileSync(
+    new URL('../src/index.css', import.meta.url),
     'utf8',
   )
 
-  expect(dropdownMenu.match(/motion-reduce:animate-none!/g)?.length).toBe(2)
-  expect(tooltip).toContain('motion-reduce:animate-none!')
+  expect(stylesheet).toContain('@media (prefers-reduced-motion: reduce)')
+  expect(stylesheet).toContain('animation-duration: 0.01ms !important')
+  expect(stylesheet).toContain('transition-duration: 0.01ms !important')
 })

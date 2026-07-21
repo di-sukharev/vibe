@@ -3,6 +3,7 @@ export type AuthFailureKind =
   | 'access_token_required'
   | 'email_already_exists'
   | 'invalid_credentials'
+  | 'password_reset_invalid'
   | 'provider_account_already_linked'
   | 'provider_email_required'
   | 'provider_invalid_token'

@@ -1,6 +1,6 @@
 import { Separator } from '@/components/ui/separator'
 import { SidebarTrigger } from '@/components/ui/sidebar'
-import { Typography } from '@/components/ui/typography'
+import { Typography } from '@/components/typography'
 
 export function SiteHeader({ title }: { title: string }) {
   return (

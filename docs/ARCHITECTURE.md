@@ -22,6 +22,7 @@ transport -> application -> domain/ports -> infrastructure -> DTO
 - `src/worker.ts` is the long-running worker entrypoint. Keep it disabled in deployment specs until a real background handler is registered.
 - `src/cron.ts` is the one-shot scheduled-job entrypoint. Add concrete tasks to its registry and deploy scheduled jobs only for named product tasks.
 - `src/runtime.ts` owns shared env loading, Prisma creation, and runtime cleanup for all backend entrypoints.
+- `src/background-tasks.ts` defers response-independent best-effort work and lets the API drain accepted tasks before graceful shutdown. Tasks receive an `AbortSignal`; a task deadline aborts work but keeps its cleanup tracked until settlement, while server draining and task cleanup consume one shared absolute shutdown deadline. Password-reset account lookup and email delivery use this boundary so the public response path has the same account-independent timing without letting a provider stall API responses or shutdown indefinitely.
 - `src/app.ts` is the composition root. It owns the Hono app, CORS, secure headers, error handling, module construction, route mounting, and OpenAPI output.
 - `src/env.ts` validates environment variables with Zod.
 - `src/db.ts` creates the Prisma client.
@@ -76,6 +77,8 @@ Auth v1 is custom JWT-based auth:
 Mobile API changes must account for installed clients that cannot be upgraded atomically with the backend. In particular, adding fields to a response consumed by a strict parser is a breaking change. The notification transport therefore accepts the previous token-only registration/unregistration requests during phased rollout, binds them to the authenticated session, and never lets that legacy path overwrite installation-scoped authority. Remove a compatibility path only in an explicit release after the supported minimum app version no longer uses it.
 
 Refresh-token rotation updates the credential atomically inside one logical session, preserving already-issued access tokens for other tabs. The immediately previous credential is accepted only during a short race-tolerance window; presenting any older credential after that window revokes the token family as potentially compromised. `/api/auth/me` checks both the JWT and the active database session, including its absolute lifetime.
+
+Password reset is part of the auth application boundary. A provider-neutral email port receives transactional messages; the default adapter is deliberately disabled. Reset requests are generic, rate-limited by account cooldown, and persist only a SHA-256 token hash. Confirmation changes the password, consumes outstanding reset credentials, and revokes active sessions in the same authentication-authority transaction without automatically creating a new session.
 
 Roles are `user | admin` in PostgreSQL and in `UserDto`, but deliberately absent
 from JWT claims. Every authenticated request resolves the current user through

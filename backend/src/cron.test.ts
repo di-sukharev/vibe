@@ -15,7 +15,8 @@ describe('runCronTask', () => {
   })
 
   test('deletes expired and revoked auth sessions after the retention window', async () => {
-    const calls: unknown[] = []
+    const sessionCalls: unknown[] = []
+    const resetTokenCalls: unknown[] = []
     let pushTokenMaintenanceQueries = 0
     const cleanupRuntime = {
       env: { SESSION_ABSOLUTE_TTL_DAYS: 90, SESSION_RETENTION_DAYS: 7 },
@@ -26,8 +27,14 @@ describe('runCronTask', () => {
         },
         authSession: {
           deleteMany: async (input: unknown) => {
-            calls.push(input)
+            sessionCalls.push(input)
             return { count: 2 }
+          },
+        },
+        passwordResetToken: {
+          deleteMany: async (input: unknown) => {
+            resetTokenCalls.push(input)
+            return { count: 3 }
           },
         },
       },
@@ -36,9 +43,9 @@ describe('runCronTask', () => {
     const now = new Date('2026-04-08T12:00:00.000Z')
     await runCronTask('auth:sessions:cleanup', cleanupRuntime, now)
 
-    expect(calls).toHaveLength(1)
+    expect(sessionCalls).toHaveLength(1)
     expect(pushTokenMaintenanceQueries).toBe(2)
-    expect(calls[0]).toMatchObject({
+    expect(sessionCalls[0]).toMatchObject({
       where: {
         OR: [
           { expiresAt: { lt: expect.any(Date) } },
@@ -47,6 +54,9 @@ describe('runCronTask', () => {
         ],
       },
     })
+    expect(resetTokenCalls).toEqual([{
+      where: { expiresAt: { lt: now } },
+    }])
   })
 
   test('selects stale Google Play purchases through the bounded reconcile task', async () => {
@@ -105,6 +115,7 @@ describe('runCronTask', () => {
   test('runs session cleanup and configured Google Play reconcile in one maintenance task', async () => {
     const calls = {
       cleanup: 0,
+      passwordResetCleanup: 0,
       pushTokenMaintenanceQueries: 0,
       reconcile: 0,
       terminalRedactionSelection: 0,
@@ -127,6 +138,12 @@ describe('runCronTask', () => {
           deleteMany: async () => {
             calls.cleanup += 1
             return { count: 2 }
+          },
+        },
+        passwordResetToken: {
+          deleteMany: async () => {
+            calls.passwordResetCleanup += 1
+            return { count: 0 }
           },
         },
         googlePlaySubscriptionPurchase: {
@@ -153,6 +170,7 @@ describe('runCronTask', () => {
 
       expect(calls).toEqual({
         cleanup: 1,
+        passwordResetCleanup: 1,
         pushTokenMaintenanceQueries: 2,
         reconcile: 1,
         terminalRedactionSelection: 1,

@@ -1,5 +1,10 @@
 import { useQueryClient } from '@tanstack/react-query'
-import type { LoginRequest, RegisterRequest } from '@web-app-demo/contracts'
+import type {
+  LoginRequest,
+  PasswordResetConfirmRequest,
+  PasswordResetRequest,
+  RegisterRequest,
+} from '@web-app-demo/contracts'
 import {
   type PropsWithChildren,
   useCallback,
@@ -128,6 +133,22 @@ export function AuthProvider({ children }: PropsWithChildren) {
     await logoutAsync()
   }, [logoutAsync])
 
+  const requestPasswordReset = useCallback(
+    async (input: PasswordResetRequest) => {
+      await api.requestPasswordReset(input)
+    },
+    [api],
+  )
+
+  const confirmPasswordReset = useCallback(
+    async (input: PasswordResetConfirmRequest) => {
+      const transition = await api.confirmPasswordReset(input)
+      if (!api.isSessionEpochCurrent(transition.sessionEpoch)) return
+      await clearLocalSession()
+    },
+    [api, clearLocalSession],
+  )
+
   const retrySession = useCallback(async () => {
     if (accessToken) {
       await meQuery.refetch()
@@ -158,8 +179,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
       register,
       login,
       logout,
+      requestPasswordReset,
+      confirmPasswordReset,
     }),
-    [isBootstrapping, login, logout, meQuery.data?.user, register, retrySession, sessionError, transport],
+    [confirmPasswordReset, isBootstrapping, login, logout, meQuery.data?.user, register, requestPasswordReset, retrySession, sessionError, transport],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

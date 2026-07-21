@@ -3,7 +3,9 @@ import { randomUUID } from 'node:crypto'
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test'
 
 import { createApp } from '../../app'
+import { createBackgroundTasks } from '../../background-tasks'
 import { createPrisma, type DbClient } from '../../db'
+import type { EmailMessage } from '../../email/service'
 import type { AppEnv } from '../../env'
 import { socialAuthProviderDeps } from './infrastructure/social-providers'
 
@@ -260,6 +262,131 @@ maybeDescribe('auth API integration', () => {
         },
       }),
     ).toBe(1)
+  })
+
+  test('resets a password with a single-use token and revokes existing sessions', async () => {
+    const backgroundErrors: unknown[] = []
+    const backgroundTasks = createBackgroundTasks({
+      onError: (error) => backgroundErrors.push(error),
+    })
+    const messages: EmailMessage[] = []
+    const emailApp = createApp({
+      backgroundTasks,
+      emailDelivery: {
+        configured: true,
+        send: async (message) => {
+          messages.push(message)
+        },
+      },
+      env,
+      prisma,
+    })
+    const register = await emailApp.request('/api/auth/token/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'reset@example.com',
+        password: 'password123',
+      }),
+    })
+    const registered = await register.json()
+
+    const unknownRequest = await emailApp.request('/api/auth/password-reset/request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'unknown@example.com' }),
+    })
+    const [resetRequest, concurrentResetRequest] = await Promise.all([
+      emailApp.request('/api/auth/password-reset/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'reset@example.com' }),
+      }),
+      emailApp.request('/api/auth/password-reset/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'reset@example.com' }),
+      }),
+    ])
+
+    expect(unknownRequest.status).toBe(202)
+    expect(resetRequest.status).toBe(202)
+    expect(concurrentResetRequest.status).toBe(202)
+    const acceptedBody = await unknownRequest.json()
+    expect(await resetRequest.json()).toEqual(acceptedBody)
+    expect(await concurrentResetRequest.json()).toEqual(acceptedBody)
+    await backgroundTasks.drain()
+    expect(backgroundErrors).toEqual([])
+    expect(messages).toHaveLength(1)
+
+    const resetUrlText = messages[0]!.text
+      .split('\n\n')
+      .find((part) => part.startsWith('http'))
+    expect(resetUrlText).toBeString()
+    const resetUrl = new URL(resetUrlText!)
+    const token = new URLSearchParams(resetUrl.hash.slice(1)).get('token')
+    expect(token).toBeString()
+    expect(token).toHaveLength(43)
+
+    const storedToken = await prisma.passwordResetToken.findUnique({
+      where: { tokenHash: token! },
+    })
+    expect(storedToken).toBeNull()
+    expect(await prisma.passwordResetToken.count()).toBe(1)
+
+    const confirmations = await Promise.all([
+      emailApp.request('/api/auth/password-reset/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, password: 'new-password-123' }),
+      }),
+      emailApp.request('/api/auth/password-reset/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, password: 'new-password-123' }),
+      }),
+    ])
+    expect(confirmations.map(({ status }) => status).sort()).toEqual([204, 400])
+    const successfulConfirm = confirmations.find(({ status }) => status === 204)!
+    const rejectedConfirm = confirmations.find(({ status }) => status === 400)!
+    expect(successfulConfirm.headers.get('set-cookie')).toContain('web_app_demo_refresh=')
+    expect(successfulConfirm.headers.get('set-cookie')).toContain('Max-Age=0')
+    expect((await rejectedConfirm.json()).error.code).toBe('AUTH_PASSWORD_RESET_INVALID')
+    await backgroundTasks.drain()
+    expect(messages.filter(({ subject }) => subject === 'Your password was changed')).toHaveLength(1)
+
+    const replay = await emailApp.request('/api/auth/password-reset/confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, password: 'another-password-123' }),
+    })
+    const replayBody = await replay.json()
+    expect(replay.status).toBe(400)
+    expect(replayBody.error.code).toBe('AUTH_PASSWORD_RESET_INVALID')
+
+    const previousAccess = await emailApp.request('/api/auth/me', {
+      headers: { Authorization: `Bearer ${registered.accessToken}` },
+    })
+    const previousRefresh = await emailApp.request('/api/auth/token/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: registered.refreshToken }),
+    })
+    const previousPassword = await emailApp.request('/api/auth/token/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'reset@example.com', password: 'password123' }),
+    })
+    const newPassword = await emailApp.request('/api/auth/token/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'reset@example.com', password: 'new-password-123' }),
+    })
+
+    expect(previousAccess.status).toBe(401)
+    expect(previousRefresh.status).toBe(401)
+    expect(previousPassword.status).toBe(401)
+    expect(newPassword.status).toBe(200)
   })
 
   test('returns one durable successor across three concurrent refresh requests', async () => {

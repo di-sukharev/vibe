@@ -9,7 +9,7 @@ import {
   CardFooter,
   CardHeader,
 } from '@/components/ui/card'
-import { Typography } from '@/components/ui/typography'
+import { Typography } from '@/components/typography'
 
 export type SectionMetric = {
   description?: string

@@ -29,6 +29,15 @@ const iconsByPath = {
   '/admin/settings': Settings01Icon,
 } as const
 
+function getSidebarDefaultOpen() {
+  const persistedState = document.cookie
+    .split('; ')
+    .find((entry) => entry.startsWith('sidebar_state='))
+    ?.slice('sidebar_state='.length)
+
+  return persistedState !== 'false'
+}
+
 export function WorkspaceShell({
   children,
   onLogout,
@@ -49,7 +58,7 @@ export function WorkspaceShell({
   }))
 
   return (
-    <SidebarProvider>
+    <SidebarProvider defaultOpen={getSidebarDefaultOpen()}>
       <AppSidebar
         accountPath={user.role === 'user' ? '/app/profile' : undefined}
         homePath={homePath}

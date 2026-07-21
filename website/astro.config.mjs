@@ -1,6 +1,9 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
 
+import react from '@astrojs/react';
+import tailwindcss from '@tailwindcss/vite';
+
 // https://astro.build/config
 //
 // Default rendering is static (SSG): every page prerenders to HTML and the
@@ -30,4 +33,9 @@ import { defineConfig } from 'astro/config';
 //      path". Note: built-in per-page ISR is not part of the default
 //      DigitalOcean/Yandex static path; use rebuilds or CDN/runtime cache
 //      freshness instead.
-export default defineConfig({});
+export default defineConfig({
+  integrations: [react()],
+  vite: {
+    plugins: [tailwindcss()]
+  }
+});

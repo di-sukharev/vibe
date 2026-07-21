@@ -43,7 +43,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Typography } from '@/components/ui/typography'
+import { Typography } from '@/components/typography'
 import {
   adminUsersPagination,
   adminUsersViewState,

@@ -1,0 +1,39 @@
+---
+import { ArrowRight } from 'lucide-react'
+
+import { buttonVariants } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+
+interface Props {
+  primaryHref: string
+  primaryLabel: string
+}
+
+const { primaryHref, primaryLabel } = Astro.props
+---
+
+<section class="py-20 sm:py-24" id="cta" aria-labelledby="cta-title">
+  <div class="site-container">
+    <Card className="relative overflow-hidden border-emerald-200 bg-emerald-50 py-0 shadow-sm">
+      <div class="absolute -right-24 -top-24 size-72 rounded-full bg-emerald-200/70 blur-3xl" aria-hidden="true"></div>
+      <CardContent className="relative flex flex-col items-start justify-between gap-8 p-7 sm:p-10 lg:flex-row lg:items-center lg:p-12">
+        <div class="max-w-2xl">
+          <p class="text-sm font-semibold tracking-wide text-emerald-800 uppercase">Готовы начать?</p>
+          <h2 class="mt-3 font-heading text-3xl font-semibold tracking-tight text-balance sm:text-4xl" id="cta-title">
+            Соберите первую версию и покажите идею миру.
+          </h2>
+          <p class="mt-4 text-base leading-7 text-muted-foreground text-pretty sm:text-lg">
+            Замените шаблонный текст, выберите акцентный цвет и подключите своё главное действие.
+          </p>
+        </div>
+        <a
+          class={buttonVariants({ className: 'h-11 shrink-0 px-5', size: 'lg' })}
+          href={primaryHref}
+        >
+          {primaryLabel}
+          <ArrowRight data-icon="inline-end" aria-hidden="true" />
+        </a>
+      </CardContent>
+    </Card>
+  </div>
+</section>

@@ -290,7 +290,7 @@ export DO_BACKEND_NOTIFICATION_CRON_TIME_ZONE=UTC
 bun run deploy:do:specs backend-final
 ```
 
-Use worker components only after a real long-running handler exists. The notification worker is a real handler once the app sends push notifications; the generator still refuses the template placeholder `bun run start:worker`, because that placeholder exits immediately and should not be deployed as an App Platform worker. Production should normally schedule `maintenance:process`; it removes stale auth sessions, redacts legacy terminal notification content, and, when the complete Google Play group is configured, reconciles stale stored purchase tokens in bounded batches. `auth:sessions:cleanup` and `billing:google-play:reconcile` remain available as dedicated tasks; the dedicated billing task fails spec generation without complete Google credentials.
+Use worker components only after a real long-running handler exists. The notification worker is a real handler once the app sends push notifications; the generator still refuses the template placeholder `bun run start:worker`, because that placeholder exits immediately and should not be deployed as an App Platform worker. Production should normally schedule `maintenance:process`; it removes stale auth sessions and expired password-reset tokens, redacts legacy terminal notification content, and, when the complete Google Play group is configured, reconciles stale stored purchase tokens in bounded batches. `auth:sessions:cleanup` and `billing:google-play:reconcile` remain available as dedicated tasks; auth cleanup covers both sessions and reset tokens, while the dedicated billing task fails spec generation without complete Google credentials.
 
 Choose one notification-processing topology explicitly:
 

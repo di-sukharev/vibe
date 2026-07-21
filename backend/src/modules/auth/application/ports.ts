@@ -1,9 +1,11 @@
 import type {
+  PasswordResetRequestResponse,
   RegisterPayload,
   SocialAuthProvider,
   SubscriptionSnapshot,
 } from '@web-app-demo/contracts'
 
+import type { TaskDeferrer } from '../../../background-tasks'
 import type { SessionMetadata } from '../domain/session'
 import type { AuthUserRecord } from '../domain/user'
 
@@ -80,6 +82,20 @@ export type AuthRepository = {
     },
     cleanup: LogoutCleanup,
   ): Promise<string | null>
+  createPasswordResetToken(input: {
+    userId: string
+    tokenHash: string
+    expiresAt: Date
+    now: Date
+    createdAfter: Date
+  }): Promise<boolean>
+  invalidatePasswordResetToken(input: { tokenHash: string; now: Date }): Promise<void>
+  hasActivePasswordResetToken(input: { tokenHash: string; now: Date }): Promise<boolean>
+  completePasswordReset(input: {
+    tokenHash: string
+    passwordHash: string
+    now: Date
+  }): Promise<{ email: string } | null>
 }
 
 export type AccessTokens = {
@@ -91,6 +107,26 @@ export type Passwords = {
   hash(password: string): Promise<string>
   verify(password: string, passwordHash: string): Promise<boolean>
 }
+
+export type PasswordResetTokens = {
+  create(): string
+  hash(token: string): string
+}
+
+export type PasswordResetNotifier = {
+  configured: boolean
+  sendPasswordReset(
+    input: { email: string; token: string; expiresAt: Date },
+    signal: AbortSignal,
+  ): Promise<void>
+  sendPasswordChanged(input: { email: string }, signal: AbortSignal): Promise<void>
+}
+
+export type PasswordResetTaskDeferrer = TaskDeferrer
+
+export const passwordResetAccepted = {
+  accepted: true,
+} satisfies PasswordResetRequestResponse
 
 export type RefreshTokens = {
   create(): string

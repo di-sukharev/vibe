@@ -5,10 +5,12 @@ test('keeps user and administrator workspaces separate', async ({ browser, page 
   const userEmail = uniqueEmail('web-e2e-rbac-user')
 
   await page.goto('/admin/users')
-  await expect(page).toHaveURL(/\?returnTo=%2Fadmin%2Fusers$/)
+  await expect(page).toHaveURL(/\/login\?returnTo=%2Fadmin%2Fusers$/)
+  await page.getByRole('link', { name: 'Sign up' }).click()
   await page.getByLabel('Email').fill(userEmail)
-  await page.getByLabel('Password').fill(e2ePassword)
-  await page.getByRole('button', { name: 'Create account' }).click()
+  await page.getByLabel('Password', { exact: true }).fill(e2ePassword)
+  await page.getByLabel('Confirm Password').fill(e2ePassword)
+  await page.getByRole('button', { name: 'Create Account' }).click()
 
   await expect(page).toHaveURL(/\/app$/)
   await expect(page.getByRole('link', { name: 'Home' })).toBeVisible()
@@ -27,10 +29,9 @@ test('keeps user and administrator workspaces separate', async ({ browser, page 
 
   const adminContext = await browser.newContext()
   const adminPage = await adminContext.newPage()
-  await adminPage.goto('/')
-  await adminPage.getByRole('tab', { name: 'Login' }).click()
+  await adminPage.goto('/login')
   await adminPage.getByLabel('Email').fill(e2eAdminEmail)
-  await adminPage.getByLabel('Password').fill(e2eAdminPassword)
+  await adminPage.getByLabel('Password', { exact: true }).fill(e2eAdminPassword)
   await adminPage.getByRole('button', { name: 'Login' }).click()
 
   await expect(adminPage).toHaveURL(/\/admin$/)
@@ -50,10 +51,11 @@ test('keeps user and administrator workspaces separate', async ({ browser, page 
 test('mobile workspace navigation closes the sidebar sheet', async ({ page }) => {
   const userEmail = uniqueEmail('web-e2e-mobile-sidebar')
   await page.setViewportSize({ width: 390, height: 844 })
-  await page.goto('/')
+  await page.goto('/signup')
   await page.getByLabel('Email').fill(userEmail)
-  await page.getByLabel('Password').fill(e2ePassword)
-  await page.getByRole('button', { name: 'Create account' }).click()
+  await page.getByLabel('Password', { exact: true }).fill(e2ePassword)
+  await page.getByLabel('Confirm Password').fill(e2ePassword)
+  await page.getByRole('button', { name: 'Create Account' }).click()
   await expect(page).toHaveURL(/\/app$/)
 
   await page.locator('[data-sidebar="trigger"]').click()
@@ -68,10 +70,9 @@ test('mobile workspace navigation closes the sidebar sheet', async ({ page }) =>
 test('workspace navigation and account controls are keyboard operable', async ({
   page,
 }) => {
-  await page.goto('/')
-  await page.getByRole('tab', { name: 'Login' }).click()
+  await page.goto('/login')
   await page.getByLabel('Email').fill(e2eAdminEmail)
-  await page.getByLabel('Password').fill(e2eAdminPassword)
+  await page.getByLabel('Password', { exact: true }).fill(e2eAdminPassword)
   await page.getByRole('button', { name: 'Login' }).click()
   await expect(page).toHaveURL(/\/admin$/)
 
@@ -115,10 +116,9 @@ test('admin data surfaces recover from errors and expose safe directory states',
     await route.continue()
   })
 
-  await page.goto('/')
-  await page.getByRole('tab', { name: 'Login' }).click()
+  await page.goto('/login')
   await page.getByLabel('Email').fill(e2eAdminEmail)
-  await page.getByLabel('Password').fill(e2eAdminPassword)
+  await page.getByLabel('Password', { exact: true }).fill(e2eAdminPassword)
   await page.getByRole('button', { name: 'Login' }).click()
 
   await expect(page).toHaveURL(/\/admin$/)
@@ -163,10 +163,11 @@ test('admin data surfaces recover from errors and expose safe directory states',
 
 test('workspace account menu keeps a failed logout visible and retryable', async ({ page }) => {
   const userEmail = uniqueEmail('web-e2e-sidebar-logout')
-  await page.goto('/')
+  await page.goto('/signup')
   await page.getByLabel('Email').fill(userEmail)
-  await page.getByLabel('Password').fill(e2ePassword)
-  await page.getByRole('button', { name: 'Create account' }).click()
+  await page.getByLabel('Password', { exact: true }).fill(e2ePassword)
+  await page.getByLabel('Confirm Password').fill(e2ePassword)
+  await page.getByRole('button', { name: 'Create Account' }).click()
   await expect(page).toHaveURL(/\/app$/)
 
   await page.route('**/api/auth/logout', async (route) => {
@@ -197,18 +198,18 @@ test('role mutation failures are announced inside the confirmation dialog', asyn
   page,
 }) => {
   const userEmail = uniqueEmail('web-e2e-role-error')
-  await page.goto('/')
+  await page.goto('/signup')
   await page.getByLabel('Email').fill(userEmail)
-  await page.getByLabel('Password').fill(e2ePassword)
-  await page.getByRole('button', { name: 'Create account' }).click()
+  await page.getByLabel('Password', { exact: true }).fill(e2ePassword)
+  await page.getByLabel('Confirm Password').fill(e2ePassword)
+  await page.getByRole('button', { name: 'Create Account' }).click()
   await expect(page).toHaveURL(/\/app$/)
 
   const adminContext = await browser.newContext()
   const adminPage = await adminContext.newPage()
-  await adminPage.goto('/')
-  await adminPage.getByRole('tab', { name: 'Login' }).click()
+  await adminPage.goto('/login')
   await adminPage.getByLabel('Email').fill(e2eAdminEmail)
-  await adminPage.getByLabel('Password').fill(e2eAdminPassword)
+  await adminPage.getByLabel('Password', { exact: true }).fill(e2eAdminPassword)
   await adminPage.getByRole('button', { name: 'Login' }).click()
   await adminPage.getByRole('link', { name: 'Users' }).click()
   await adminPage.getByLabel('Search users').fill(userEmail)
@@ -242,18 +243,18 @@ test('promoting a user revokes the old session and opens the admin workspace aft
 }) => {
   const userEmail = uniqueEmail('web-e2e-promoted-user')
 
-  await page.goto('/')
+  await page.goto('/signup')
   await page.getByLabel('Email').fill(userEmail)
-  await page.getByLabel('Password').fill(e2ePassword)
-  await page.getByRole('button', { name: 'Create account' }).click()
+  await page.getByLabel('Password', { exact: true }).fill(e2ePassword)
+  await page.getByLabel('Confirm Password').fill(e2ePassword)
+  await page.getByRole('button', { name: 'Create Account' }).click()
   await expect(page).toHaveURL(/\/app$/)
 
   const adminContext = await browser.newContext()
   const adminPage = await adminContext.newPage()
-  await adminPage.goto('/')
-  await adminPage.getByRole('tab', { name: 'Login' }).click()
+  await adminPage.goto('/login')
   await adminPage.getByLabel('Email').fill(e2eAdminEmail)
-  await adminPage.getByLabel('Password').fill(e2eAdminPassword)
+  await adminPage.getByLabel('Password', { exact: true }).fill(e2eAdminPassword)
   await adminPage.getByRole('button', { name: 'Login' }).click()
   await adminPage.getByRole('link', { name: 'Users' }).click()
 
@@ -268,10 +269,9 @@ test('promoting a user revokes the old session and opens the admin workspace aft
   await expect(adminPage.getByText('Role changed')).toBeVisible()
 
   await page.reload()
-  await expect(page.getByRole('button', { name: 'Create account' })).toBeVisible()
-  await page.getByRole('tab', { name: 'Login' }).click()
+  await expect(page.getByRole('button', { name: 'Login' })).toBeVisible()
   await page.getByLabel('Email').fill(userEmail)
-  await page.getByLabel('Password').fill(e2ePassword)
+  await page.getByLabel('Password', { exact: true }).fill(e2ePassword)
   await page.getByRole('button', { name: 'Login' }).click()
 
   await expect(page).toHaveURL(/\/admin$/)

@@ -5,7 +5,7 @@ The goal of this template's tests is to show future agents where behavior should
 ## Pyramid
 
 - Contracts/unit: shared Zod schema matrices, env parsing, JWTs, password hashing, client API refresh/retry behavior, and token cleanup.
-- Backend integration: refresh-token rotation and replay detection, auth/role guards, profile updates, serialized administrator role changes, duplicate registration, concurrency, and stable error shapes through real routes and PostgreSQL.
+- Backend integration: refresh-token rotation and replay detection, one-time password reset and session revocation, auth/role guards, profile updates, serialized administrator role changes, duplicate registration, concurrency, and stable error shapes through real routes and PostgreSQL.
 - Webapp Playwright: valuable browser flows through a real backend and Vite UI.
 - Mobile Maestro: valuable mobile smoke and regression flows against an installed Expo development build.
 

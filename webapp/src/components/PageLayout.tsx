@@ -1,6 +1,6 @@
 import type { PropsWithChildren, ReactNode } from 'react'
 
-import { Typography } from '@/components/ui/typography'
+import { Typography } from '@/components/typography'
 
 export function PageContainer({ children }: PropsWithChildren) {
   return (

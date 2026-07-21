@@ -1,0 +1,54 @@
+---
+import { Quote } from 'lucide-react'
+
+import { Card, CardContent } from '@/components/ui/card'
+import { Separator } from '@/components/ui/separator'
+import SectionIntro from './SectionIntro.astro'
+
+const metrics = [
+  ['4×', 'быстрее до первого прототипа'],
+  ['0', 'обязательного клиентского JS'],
+  ['100%', 'контента доступно в HTML'],
+]
+---
+
+<section class="border-b py-20 sm:py-24" id="results" aria-labelledby="results-title">
+  <div class="site-container">
+    <div id="results-title">
+      <SectionIntro
+        align="center"
+        eyebrow="Результат"
+        title="Основа, которую не придётся выбрасывать после демо"
+        description="Лендинг остаётся простым для редактирования, быстрым для посетителя и понятным для следующего инженера, который продолжит продукт."
+      />
+    </div>
+
+    <div class="mt-12 grid gap-5 lg:grid-cols-[1.15fr_0.85fr]">
+      <Card className="justify-between bg-primary text-primary-foreground ring-primary/10">
+        <CardContent className="flex h-full flex-col justify-between gap-10 p-7 sm:p-9">
+          <Quote className="size-9 text-emerald-300" aria-hidden="true" />
+          <blockquote class="font-heading text-2xl leading-snug font-medium text-balance sm:text-3xl">
+            «Хороший шаблон не диктует продукт. Он убирает повторяющуюся работу и оставляет команде
+            время на решения, которые действительно отличают сервис.»
+          </blockquote>
+          <div>
+            <p class="font-medium">Команда Northstar</p>
+            <p class="mt-1 text-sm text-primary-foreground/65">Шаблонный отзыв — замените своим</p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="flex h-full flex-col justify-center p-7 sm:p-9">
+          {metrics.map(([value, label], index) => (
+            <div>
+              {index > 0 && <Separator className="my-6" />}
+              <p class="font-heading text-4xl font-semibold tracking-tight">{value}</p>
+              <p class="mt-2 text-sm leading-6 text-muted-foreground">{label}</p>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+    </div>
+  </div>
+</section>

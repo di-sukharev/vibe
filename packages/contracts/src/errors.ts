@@ -19,6 +19,7 @@ export const apiErrorCodeSchema = z.enum([
   'IAP_WEBHOOK_IN_PROGRESS',
   'PAYLOAD_TOO_LARGE',
   'RATE_LIMITED',
+  'AUTH_PASSWORD_RESET_INVALID',
   'INTERNAL_ERROR',
 ])
 

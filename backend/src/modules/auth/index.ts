@@ -1,10 +1,17 @@
+import type { TaskDeferrer } from '../../background-tasks'
 import type { DbClient } from '../../db'
+import type { EmailDelivery } from '../../email/service'
 import type { AppEnv } from '../../env'
 import { AuthService } from './application/auth-service'
 import type { Clock, LogoutCleanup, SubscriptionReader } from './application/ports'
 import { createPrismaAuthRepository } from './infrastructure/auth-repository'
 import { signAccessToken, verifyAccessToken } from './infrastructure/access-tokens'
 import { hashPassword, verifyPassword } from './infrastructure/passwords'
+import { createPasswordResetNotifier } from './infrastructure/password-reset-notifier'
+import {
+  createPasswordResetToken,
+  hashPasswordResetToken,
+} from './infrastructure/password-reset-tokens'
 import {
   createRefreshToken,
   deriveRotatedRefreshToken,
@@ -17,8 +24,10 @@ import { createAuthRoutes } from './transport/routes'
 import { executeAuth } from './transport/errors'
 
 type CreateAuthModuleOptions = {
+  backgroundTasks: TaskDeferrer
   clock?: Clock
   db: DbClient
+  emailDelivery: EmailDelivery
   env: AppEnv
   logoutCleanup?: LogoutCleanup
   subscriptionReader?: SubscriptionReader
@@ -43,8 +52,10 @@ const inactiveSubscriptionReader: SubscriptionReader = () => ({
 })
 
 export function createAuthModule({
+  backgroundTasks,
   clock = systemClock,
   db,
+  emailDelivery,
   env,
   logoutCleanup = noLogoutCleanup,
   subscriptionReader = inactiveSubscriptionReader,
@@ -54,8 +65,19 @@ export function createAuthModule({
       sign: (payload) => signAccessToken(payload, env),
       verify: (token) => verifyAccessToken(token, env),
     },
+    backgroundTasks,
     clock,
     logoutCleanup,
+    passwordResetCooldownSeconds: 60,
+    passwordResetNotifier: createPasswordResetNotifier(
+      emailDelivery,
+      env.WEBAPP_ORIGIN ?? env.CORS_ORIGINS[0] ?? 'http://localhost:5173',
+    ),
+    passwordResetTokenTtlMinutes: 30,
+    passwordResetTokens: {
+      create: createPasswordResetToken,
+      hash: hashPasswordResetToken,
+    },
     passwords: {
       hash: hashPassword,
       verify: verifyPassword,

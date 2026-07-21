@@ -1,0 +1,64 @@
+---
+import { Menu, X } from 'lucide-react'
+
+import { buttonVariants } from '@/components/ui/button'
+import BrandMark from './BrandMark.astro'
+
+interface Props {
+  primaryHref: string
+  primaryLabel: string
+}
+
+const { primaryHref, primaryLabel } = Astro.props
+const navigation = [
+  { href: '#features', label: 'Возможности' },
+  { href: '#process', label: 'Как это работает' },
+  { href: '#results', label: 'Результаты' },
+]
+---
+
+<header class="sticky top-0 z-40 border-b border-border/70 bg-background/90 backdrop-blur-xl">
+  <div class="site-container flex h-16 items-center justify-between gap-6">
+    <a class="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" href="#top">
+      <BrandMark />
+    </a>
+
+    <nav class="hidden items-center gap-7 md:flex" aria-label="Основная навигация">
+      {navigation.map((item) => (
+        <a
+          class="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          href={item.href}
+        >
+          {item.label}
+        </a>
+      ))}
+    </nav>
+
+    <div class="hidden md:block">
+      <a class={buttonVariants({ size: 'sm' })} href={primaryHref}>{primaryLabel}</a>
+    </div>
+
+    <details class="group relative md:hidden">
+      <summary
+        class="grid size-10 cursor-pointer list-none place-items-center rounded-md border bg-background text-foreground shadow-xs transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden"
+        aria-label="Открыть меню"
+      >
+        <Menu className="size-5 group-open:hidden" aria-hidden="true" />
+        <X className="hidden size-5 group-open:block" aria-hidden="true" />
+      </summary>
+      <nav
+        class="absolute right-0 mt-3 flex w-72 flex-col gap-1 rounded-xl border bg-background p-2 shadow-xl"
+        aria-label="Мобильная навигация"
+      >
+        {navigation.map((item) => (
+          <a class="rounded-lg px-3 py-2.5 text-sm font-medium hover:bg-muted" href={item.href}>
+            {item.label}
+          </a>
+        ))}
+        <a class={buttonVariants({ className: 'mt-2 w-full', size: 'sm' })} href={primaryHref}>
+          {primaryLabel}
+        </a>
+      </nav>
+    </details>
+  </div>
+</header>
