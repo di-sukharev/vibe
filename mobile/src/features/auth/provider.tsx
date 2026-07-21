@@ -110,7 +110,7 @@ export function AuthProvider({
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [sessionGeneration, setSessionGeneration] = useState(session.getGeneration());
-  const logoutOperationCoordinator = useMemo(createLogoutOperationCoordinator, []);
+  const logoutOperationCoordinator = useMemo(() => createLogoutOperationCoordinator(), []);
 
   const setAccessToken = useCallback((nextAccessToken: string | null, generation: number) => {
     if (!session.setAccessToken(nextAccessToken, generation)) return false;

@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import {
   Text,
+  type ColorValue,
   type StyleProp,
   type TextProps,
   type TextStyle,
@@ -40,7 +41,7 @@ export type TypographyProps = Omit<TextProps, 'style'> & {
   children?: ReactNode;
   align?: TextStyle['textAlign'];
   color?: TypographyColor;
-  colorValue?: string;
+  colorValue?: ColorValue;
   muted?: boolean;
   variant?: TypographyVariant;
   weight?: TextStyle['fontWeight'];

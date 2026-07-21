@@ -260,7 +260,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   modalOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    position: 'absolute',
+    inset: 0,
   },
   modalContentHost: {
     flex: 1,

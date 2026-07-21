@@ -865,7 +865,7 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
         setIsManagingSubscriptions(false);
       }
     }
-  }, [auth.isTransitioning, connected, isOperationScopeCurrent, operationScope, platform, selectedPlan?.productId, user?.subscription.productId]);
+  }, [auth.isTransitioning, connected, isOperationScopeCurrent, operationScope, platform, selectedPlan, user]);
 
   useEffect(() => {
     if (connected && userId) {
