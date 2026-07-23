@@ -38,6 +38,35 @@ test('backend env example owns the local Docker Compose ports', async () => {
   expect(backendEnvExample).toMatch(/^POSTGRES_TEST_PORT=54330$/m)
 })
 
+test('documented manual Compose commands load the backend-owned env file', async () => {
+  const documentationPaths = [
+    'README.md',
+    'backend/README.md',
+    'docs/LOCAL_DATABASE.md',
+    'docs/TESTING.md',
+    'mobile/README.md',
+    'webapp/README.md',
+    'website/README.md',
+  ]
+  const commandsMissingBackendEnv = []
+
+  for (const documentationPath of documentationPaths) {
+    const documentation = await readFile(resolve(repositoryRoot, documentationPath), 'utf8')
+
+    for (const [lineIndex, line] of documentation.split('\n').entries()) {
+      if (
+        line.startsWith('docker compose ') &&
+        line !== 'docker compose version' &&
+        !line.startsWith('docker compose --env-file backend/.env ')
+      ) {
+        commandsMissingBackendEnv.push(`${documentationPath}:${lineIndex + 1}: ${line}`)
+      }
+    }
+  }
+
+  expect(commandsMissingBackendEnv).toEqual([])
+})
+
 test('defaultTestDatabaseUrl builds the documented postgres test URL', () => {
   expect(defaultTestDatabaseUrl('55432')).toBe(
     'postgresql://superuser:superpassword@localhost:55432/web_app_demo_test?schema=public',
