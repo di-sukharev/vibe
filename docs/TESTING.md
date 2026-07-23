@@ -125,10 +125,14 @@ Prerequisites:
 
 Start the mobile E2E backend on the test database in a separate terminal. Prefer LAN-reachable URLs for both iOS Simulator and Android Emulator so the same runbook also works on physical devices:
 
+Create `backend/.env` from `backend/.env.example` first if it does not already
+exist. Keep `POSTGRES_TEST_PORT` and `TEST_DATABASE_URL` aligned there when using
+a custom test port.
+
 ```bash
 docker compose version
 docker info
-docker compose up -d postgres_test
+docker compose --env-file backend/.env up -d postgres_test
 export TEST_DATABASE_URL="postgresql://superuser:superpassword@localhost:54330/web_app_demo_test?schema=public"
 export LAN_IP=<your-machine-lan-ip>
 export BACKEND_PORT=3000
