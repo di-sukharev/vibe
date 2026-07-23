@@ -31,29 +31,9 @@ Agents should check `docker compose version` and `docker info` before database o
    - macOS: Docker Desktop, or another Docker Engine that includes Compose v2.
    - Linux: Docker Engine plus the Docker Compose plugin, with the Docker service running.
 3. After installation, rerun `docker compose version` and `docker info`.
-4. Continue only after both commands succeed. Then run `docker compose pull postgres` and `docker compose up -d postgres`.
+4. Continue only after both commands succeed. Then create `backend/.env` and run the start commands below.
 
 If Docker cannot be installed on the machine, local database-backed development and E2E are blocked. Do not silently fall back to a cloud database or a different local PostgreSQL setup.
-
-## Start Development Database
-
-```bash
-docker compose pull postgres
-docker compose up -d postgres
-docker compose ps postgres
-docker compose exec postgres pg_isready -U superuser -d web_app_demo
-```
-
-The development database is:
-
-```text
-host: localhost
-port: 54329
-database: web_app_demo
-user: superuser
-password: superpassword
-DATABASE_URL: postgresql://superuser:superpassword@localhost:54329/web_app_demo?schema=public
-```
 
 Create the backend env file:
 
@@ -67,6 +47,30 @@ cp backend/.env.example backend/.env
 Copy-Item backend/.env.example backend/.env
 ```
 
+## Start Development Database
+
+Pass the backend-owned env file explicitly because Docker Compose only auto-loads
+an env file from the repository root, where this template intentionally keeps no
+environment files:
+
+```bash
+docker compose --env-file backend/.env pull postgres
+docker compose --env-file backend/.env up -d postgres
+docker compose --env-file backend/.env ps postgres
+docker compose --env-file backend/.env exec postgres pg_isready -U superuser -d web_app_demo
+```
+
+The development database is:
+
+```text
+host: localhost
+port: 54329
+database: web_app_demo
+user: superuser
+password: superpassword
+DATABASE_URL: postgresql://superuser:superpassword@localhost:54329/web_app_demo?schema=public
+```
+
 Then apply Prisma migrations:
 
 ```bash
@@ -75,26 +79,16 @@ bun run --cwd backend prisma:deploy
 
 ## Optional Port Overrides
 
-If `54329` is already in use, create a repository-root `.env` from `.env.example` and change `POSTGRES_PORT`:
-
-```bash
-# macOS, Linux, or Git Bash on Windows
-cp .env.example .env
-```
-
-```powershell
-# Windows PowerShell
-Copy-Item .env.example .env
-```
-
-After changing the port, update `backend/.env` so `DATABASE_URL` uses the same port.
+If `54329` is already in use, change both `POSTGRES_PORT` and the port inside
+`DATABASE_URL` in `backend/.env`, then keep using
+`docker compose --env-file backend/.env ...`.
 
 ## Test Database
 
 `postgres_test` is reserved for integration, Docker smoke, and Playwright flows:
 
 ```bash
-docker compose up -d postgres_test
+docker compose --env-file backend/.env up -d postgres_test
 ```
 
 Manual default connection:
@@ -117,16 +111,16 @@ The test database name must end with `_test`. Backend integration, Docker smoke,
 Stop containers but keep local data:
 
 ```bash
-docker compose down
+docker compose --env-file backend/.env down
 ```
 
 Delete local PostgreSQL data only when you intentionally want a clean database:
 
 ```bash
-docker compose down -v
+docker compose --env-file backend/.env down -v
 ```
 
-PostgreSQL major upgrades are not automatic data migrations. If this template bumps from one PostgreSQL major version to another, either export/import the data manually or delete the local development volumes with `docker compose down -v` when the data is disposable.
+PostgreSQL major upgrades are not automatic data migrations. If this template bumps from one PostgreSQL major version to another, either export/import the data manually or delete the local development volumes with `docker compose --env-file backend/.env down -v` when the data is disposable.
 
 ## Current Upstream Documentation
 

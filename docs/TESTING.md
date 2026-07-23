@@ -28,8 +28,8 @@ Do not add E2E coverage just because a branch exists. Add it when it prevents a 
 ```bash
 docker compose version
 docker info
-docker compose up -d postgres
 cp backend/.env.example backend/.env
+docker compose --env-file backend/.env up -d postgres
 bun run test
 bun run test:contracts
 bun run test:backend

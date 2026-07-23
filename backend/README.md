@@ -19,9 +19,9 @@ Run these from the repository root:
 ```bash
 docker compose version
 docker info
-docker compose pull postgres
-docker compose up -d postgres
 cp backend/.env.example backend/.env
+docker compose --env-file backend/.env pull postgres
+docker compose --env-file backend/.env up -d postgres
 bun run --cwd backend dev
 bun run --cwd backend typecheck
 bun run --cwd backend test
@@ -49,7 +49,7 @@ On Windows PowerShell, use `Copy-Item backend/.env.example backend/.env` instead
 
 ## Env
 
-Copy `backend/.env.example` to `backend/.env` for local development. The example `DATABASE_URL` matches the Docker Compose `postgres` service documented in [../docs/LOCAL_DATABASE.md](../docs/LOCAL_DATABASE.md): database `web_app_demo`, user `superuser`, password `superpassword`, host port `54329`.
+Copy `backend/.env.example` to `backend/.env` for local development and pass it to manual Compose commands with `docker compose --env-file backend/.env ...`. The example `DATABASE_URL` matches the Docker Compose `postgres` service documented in [../docs/LOCAL_DATABASE.md](../docs/LOCAL_DATABASE.md): database `web_app_demo`, user `superuser`, password `superpassword`, host port `54329`.
 
 The example `TEST_DATABASE_URL` matches the Docker Compose `postgres_test` service: database `web_app_demo_test`, user `superuser`, password `superpassword`, manual host port `54330`. Automated runners may replace the port with a repository-derived value so parallel checkouts do not collide.
 

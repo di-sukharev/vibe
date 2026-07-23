@@ -1,9 +1,12 @@
 import { afterEach, expect, test } from 'bun:test'
+import { readFile, readdir } from 'node:fs/promises'
+import { resolve } from 'node:path'
 
 import {
   assertTestDatabaseUrl,
   defaultTestDatabaseUrl,
   postgresPortFromDatabaseUrl,
+  repositoryRoot,
 } from './repo-env.mjs'
 
 const envKeys = ['TEST_ALLOW_NON_TEST_DATABASE']
@@ -18,6 +21,21 @@ afterEach(() => {
       process.env[key] = value
     }
   }
+})
+
+test('environment files live under their owning apps instead of the repository root', async () => {
+  const rootEnvironmentFiles = (await readdir(repositoryRoot))
+    .filter((name) => name.startsWith('.env'))
+    .sort()
+
+  expect(rootEnvironmentFiles).toEqual([])
+})
+
+test('backend env example owns the local Docker Compose ports', async () => {
+  const backendEnvExample = await readFile(resolve(repositoryRoot, 'backend/.env.example'), 'utf8')
+
+  expect(backendEnvExample).toMatch(/^POSTGRES_PORT=54329$/m)
+  expect(backendEnvExample).toMatch(/^POSTGRES_TEST_PORT=54330$/m)
 })
 
 test('defaultTestDatabaseUrl builds the documented postgres test URL', () => {

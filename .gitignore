@@ -23,8 +23,11 @@ bun-debug.log*
 # Environment files
 .env
 .env.*
-!.env.example
-!.env*.example
+!backend/.env*.example
+!webapp/.env*.example
+!website/.env*.example
+!mobile/.env*.example
+!mobile/.maestro/.env*.example
 .envrc
 
 # Local credentials and secret material
