@@ -136,7 +136,8 @@ This block applies only while installing the template as a new project:
 ## Safety And Workspace Hygiene
 
 - Never stop or kill processes merely to free ports; use isolated ports, alternate URLs, or test overrides.
-- Do not propose or implement CI/CD, hosted automation, deployment pipelines, or release ceremony unless explicitly asked. Add local automation only when it removes real repeated pain.
+- Do not create CI/CD, GitHub Actions, hosted automation, deployment pipelines, or release ceremony unless the user explicitly requests it.
+- Run relevant tests, typechecks, linters, builds, and other task checks locally before reporting completion; add local automation only when it removes real repeated pain.
 - Avoid reading whole `.env` files, credential stores, cookies, or production records unless necessary. Never expose raw secrets, credentials, private keys, customer data, or sensitive values in commands, tool output, logs, screenshots, fixtures, docs, commits, or responses; redact unavoidable output.
 - Keep investigation artifacts under `.scratch/` or tool-owned artifact directories, not the repository root.
 - Do not create or use git worktrees unless explicitly asked.

@@ -48,7 +48,7 @@ The integration and Docker smoke runners refuse database names that do not end w
 
 The Docker smoke test uses a unique Compose project and host port for every invocation, builds the backend image, starts it against its own `postgres_test`, waits for `/health/ready`, verifies DB-backed token auth, and removes only the isolated containers, network, and volume it created.
 
-`.github/workflows/ci.yml` runs typecheck, build, architecture boundaries, deployment/script tests, contract/client/backend tests, Docker smoke, and Playwright on pushes to `main`, `master`, and `mobile` plus pull requests. Mobile lint, tests, and Expo Doctor run only when `mobile/package.json` exists, so the same workflow remains valid on the web-only `master` branch.
+This template does not ship with GitHub Actions or other hosted CI/CD. Run the relevant checks locally after each task, starting with the smallest set that meaningfully covers the changed surface and expanding only when risk justifies it.
 
 ## Webapp E2E
 
