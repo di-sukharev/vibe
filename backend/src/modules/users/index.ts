@@ -7,6 +7,7 @@ import { createPrismaUsersRepository } from './infrastructure/users-repository'
 import { createUsersRoutes } from './transport/routes'
 
 type CreateUsersModuleOptions = {
+  adminUsersReadRateLimit: MiddlewareHandler<AuthHttpEnv>
   db: DbClient
   requireAdmin: MiddlewareHandler<AuthHttpEnv>
   requireAuth: MiddlewareHandler<AuthHttpEnv>
@@ -22,6 +23,7 @@ export function createUsersModule(options: CreateUsersModuleOptions) {
     userRoleUpdater: repository,
   })
   return createUsersRoutes({
+    adminUsersReadRateLimit: options.adminUsersReadRateLimit,
     requireAdmin: options.requireAdmin,
     requireAuth: options.requireAuth,
     service,

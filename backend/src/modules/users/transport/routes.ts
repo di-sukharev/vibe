@@ -23,9 +23,12 @@ const errorContent = {
   },
 }
 
+const bearerSecurity = [{ BearerAuth: [] }]
+
 const updateProfileRoute = createRoute({
   method: 'patch',
   path: '/me',
+  security: bearerSecurity,
   request: {
     body: {
       content: {
@@ -42,12 +45,15 @@ const updateProfileRoute = createRoute({
     },
     400: { content: errorContent, description: 'Invalid payload' },
     401: { content: errorContent, description: 'Authentication required' },
+    413: { content: errorContent, description: 'Request body is too large' },
+    429: { content: errorContent, description: 'Too many requests' },
   },
 })
 
 const dashboardRoute = createRoute({
   method: 'get',
   path: '/dashboard',
+  security: bearerSecurity,
   responses: {
     200: {
       content: { 'application/json': { schema: adminDashboardResponseSchema } },
@@ -61,6 +67,7 @@ const dashboardRoute = createRoute({
 const listUsersRoute = createRoute({
   method: 'get',
   path: '/users',
+  security: bearerSecurity,
   request: {
     query: adminUsersQuerySchema,
   },
@@ -72,12 +79,14 @@ const listUsersRoute = createRoute({
     400: { content: errorContent, description: 'Invalid query' },
     401: { content: errorContent, description: 'Authentication required' },
     403: { content: errorContent, description: 'Administrator access required' },
+    429: { content: errorContent, description: 'Too many requests' },
   },
 })
 
 const updateRoleRoute = createRoute({
   method: 'patch',
   path: '/users/{userId}/role',
+  security: bearerSecurity,
   request: {
     params: adminUserParamsSchema,
     body: {
@@ -98,16 +107,20 @@ const updateRoleRoute = createRoute({
     403: { content: errorContent, description: 'Administrator access required' },
     404: { content: errorContent, description: 'User not found' },
     409: { content: errorContent, description: 'Role update conflict' },
+    413: { content: errorContent, description: 'Request body is too large' },
+    429: { content: errorContent, description: 'Too many requests' },
   },
 })
 
 type CreateUsersRoutesOptions = {
+  adminUsersReadRateLimit: MiddlewareHandler<AuthHttpEnv>
   requireAdmin: MiddlewareHandler<AuthHttpEnv>
   requireAuth: MiddlewareHandler<AuthHttpEnv>
   service: UsersService
 }
 
 export function createUsersRoutes({
+  adminUsersReadRateLimit,
   requireAdmin,
   requireAuth,
   service,
@@ -125,6 +138,7 @@ export function createUsersRoutes({
 
   adminRoutes.use('*', requireAuth)
   adminRoutes.use('*', requireAdmin)
+  adminRoutes.use('/users', adminUsersReadRateLimit)
   adminRoutes.openapi(dashboardRoute, async (c) => c.json(await service.dashboard(), 200))
   adminRoutes.openapi(listUsersRoute, async (c) => {
     return c.json(await service.listUsers(c.req.valid('query')), 200)

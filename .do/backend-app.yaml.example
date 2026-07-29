@@ -85,6 +85,14 @@ services:
         value: "60"
         scope: RUN_TIME
         type: GENERAL
+      - key: ADMIN_USERS_READ_RATE_LIMIT_MAX
+        value: "120"
+        scope: RUN_TIME
+        type: GENERAL
+      - key: ADMIN_USERS_READ_RATE_LIMIT_WINDOW_SECONDS
+        value: "60"
+        scope: RUN_TIME
+        type: GENERAL
       - key: IAP_BODY_LIMIT_BYTES
         value: "65536"
         scope: RUN_TIME

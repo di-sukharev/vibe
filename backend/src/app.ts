@@ -7,7 +7,7 @@ import type { DbClient } from './db'
 import { disabledEmailDelivery, type EmailDelivery } from './email/service'
 import type { AppEnv } from './env'
 import { errorResponse, handleError, validationErrorHook } from './http/errors'
-import { createIngressSecurity } from './http/security'
+import { createFixedWindowRateLimit, createIngressSecurity } from './http/security'
 import { createAuthModule, type AuthHttpEnv } from './modules/auth'
 import {
   createBillingModule,
@@ -53,12 +53,24 @@ export function createApp({
     logoutCleanup: notifications.logoutCleanup,
     subscriptionReader: billing.getSubscription,
   })
+  const adminUsersReadRateLimit = createFixedWindowRateLimit<AuthHttpEnv>({
+    errorMessage: 'Too many admin user directory requests',
+    key: (c) => c.var.user.id,
+    max: env.ADMIN_USERS_READ_RATE_LIMIT_MAX,
+    windowSeconds: env.ADMIN_USERS_READ_RATE_LIMIT_WINDOW_SECONDS,
+  })
   const users = createUsersModule({
+    adminUsersReadRateLimit,
     db: prisma,
     requireAdmin: auth.requireAdmin,
     requireAuth: auth.requireAuth,
   })
   const app = new OpenAPIHono<AuthHttpEnv>({ defaultHook: validationErrorHook })
+  app.openAPIRegistry.registerComponent('securitySchemes', 'BearerAuth', {
+    type: 'http',
+    scheme: 'bearer',
+    bearerFormat: 'JWT',
+  })
 
   app.use(secureHeaders())
   app.use(

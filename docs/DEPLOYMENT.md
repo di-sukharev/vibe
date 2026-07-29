@@ -44,6 +44,8 @@ SESSION_RETENTION_DAYS=7
 AUTH_BODY_LIMIT_BYTES=65536
 AUTH_RATE_LIMIT_MAX=60
 AUTH_RATE_LIMIT_WINDOW_SECONDS=60
+ADMIN_USERS_READ_RATE_LIMIT_MAX=120
+ADMIN_USERS_READ_RATE_LIMIT_WINDOW_SECONDS=60
 IAP_BODY_LIMIT_BYTES=65536
 IAP_RATE_LIMIT_MAX=60
 IAP_RATE_LIMIT_WINDOW_SECONDS=60
@@ -61,6 +63,8 @@ COOKIE_SECURE=true
 `JWT_SECRET` belongs in the production backend runtime env. Generate it with `openssl rand -hex 32`; that command creates 32 random bytes encoded as 64 hex characters. Do not use the placeholder from `backend/.env.example`, repeated characters, or human phrases.
 
 DigitalOcean App Platform puts the real client address in `do-connecting-ip`; its `X-Forwarded-For` identifies the ingress server. Keep `TRUSTED_PROXY_CLIENT_IP_HEADER=do-connecting-ip` on this deployment path so auth/webhook ingress limits and session metadata are scoped to the actual client.
+
+`AUTH_RATE_LIMIT_*` and `ADMIN_USERS_READ_RATE_LIMIT_*` use bounded in-process maps. The admin directory budget is shared by all sessions and search filters for the same administrator, but neither budget is global across multiple backend processes. Replace the in-memory store with shared state before scaling the API to multiple instances when global enforcement is required.
 
 If storage is active, also configure:
 

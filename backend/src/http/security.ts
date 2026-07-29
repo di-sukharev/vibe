@@ -1,4 +1,4 @@
-import type { Context, MiddlewareHandler } from 'hono'
+import type { Context, Env, MiddlewareHandler } from 'hono'
 import { getConnInfo } from 'hono/bun'
 import { bodyLimit } from 'hono/body-limit'
 import { isIP } from 'node:net'
@@ -19,7 +19,15 @@ type RateLimitBucket = {
   resetAt: number
 }
 
-const maxTrackedClients = 10_000
+type FixedWindowRateLimitOptions<E extends Env> = {
+  errorMessage: string
+  key: (c: Context<E>) => string
+  max: number
+  now?: () => number
+  windowSeconds: number
+}
+
+const maxTrackedKeys = 10_000
 
 export function createIngressSecurity(options: IngressSecurityOptions): MiddlewareHandler[] {
   return [
@@ -32,8 +40,12 @@ export function createIngressSecurity(options: IngressSecurityOptions): Middlewa
 }
 
 function createIngressRateLimit(options: IngressSecurityOptions): MiddlewareHandler {
-  const buckets = new Map<string, RateLimitBucket>()
-  const windowMs = options.rateLimitWindowSeconds * 1000
+  const rateLimit = createFixedWindowRateLimit({
+    errorMessage: 'Too many requests',
+    key: (c) => clientAddress(c, options),
+    max: options.rateLimitMax,
+    windowSeconds: options.rateLimitWindowSeconds,
+  })
 
   return async (c, next) => {
     if (c.req.method === 'OPTIONS' || c.req.method === 'GET') {
@@ -41,33 +53,47 @@ function createIngressRateLimit(options: IngressSecurityOptions): MiddlewareHand
       return
     }
 
-    const now = Date.now()
-    let key = clientAddress(c, options)
+    return rateLimit(c, next)
+  }
+}
+
+export function createFixedWindowRateLimit<E extends Env>(
+  options: FixedWindowRateLimitOptions<E>,
+): MiddlewareHandler<E> {
+  // This bounded store is intentionally process-local. Replace it with shared state when
+  // requests for one rate-limit policy can be served by multiple backend processes.
+  const buckets = new Map<string, RateLimitBucket>()
+  const now = options.now ?? Date.now
+  const windowMs = options.windowSeconds * 1000
+
+  return async (c, next) => {
+    const currentTime = now()
+    let key = options.key(c)
     let bucket = buckets.get(key)
 
-    if (!bucket || bucket.resetAt <= now) {
-      if (buckets.size >= maxTrackedClients - 1) {
-        deleteExpiredBuckets(buckets, now)
+    if (!bucket || bucket.resetAt <= currentTime) {
+      if (buckets.size >= maxTrackedKeys - 1) {
+        deleteExpiredBuckets(buckets, currentTime)
       }
-      if (buckets.size >= maxTrackedClients - 1) {
+      if (buckets.size >= maxTrackedKeys - 1) {
         key = 'overflow'
         bucket = buckets.get(key)
       }
     }
 
-    if (!bucket || bucket.resetAt <= now) {
-      bucket = { count: 0, resetAt: now + windowMs }
+    if (!bucket || bucket.resetAt <= currentTime) {
+      bucket = { count: 0, resetAt: currentTime + windowMs }
       buckets.set(key, bucket)
     }
 
     bucket.count += 1
-    c.header('RateLimit-Limit', String(options.rateLimitMax))
-    c.header('RateLimit-Remaining', String(Math.max(0, options.rateLimitMax - bucket.count)))
+    c.header('RateLimit-Limit', String(options.max))
+    c.header('RateLimit-Remaining', String(Math.max(0, options.max - bucket.count)))
     c.header('RateLimit-Reset', String(Math.ceil(bucket.resetAt / 1000)))
 
-    if (bucket.count > options.rateLimitMax) {
-      c.header('Retry-After', String(Math.max(1, Math.ceil((bucket.resetAt - now) / 1000))))
-      return c.json(errorResponse('RATE_LIMITED', 'Too many requests'), 429)
+    if (bucket.count > options.max) {
+      c.header('Retry-After', String(Math.max(1, Math.ceil((bucket.resetAt - currentTime) / 1000))))
+      return c.json(errorResponse('RATE_LIMITED', options.errorMessage), 429)
     }
 
     await next()

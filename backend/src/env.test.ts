@@ -16,6 +16,8 @@ describe('loadEnv', () => {
     expect(env.ACCESS_TOKEN_TTL_SECONDS).toBe(900)
     expect(env.REFRESH_REUSE_GRACE_SECONDS).toBe(10)
     expect(env.SESSION_ABSOLUTE_TTL_DAYS).toBe(90)
+    expect(env.ADMIN_USERS_READ_RATE_LIMIT_MAX).toBe(120)
+    expect(env.ADMIN_USERS_READ_RATE_LIMIT_WINDOW_SECONDS).toBe(60)
     expect(env.COOKIE_SECURE).toBe(false)
     expect(env.CORS_ORIGINS).toEqual(['http://localhost:5173', 'http://localhost:8081'])
     expect(env.SPACES_REGION).toBeUndefined()

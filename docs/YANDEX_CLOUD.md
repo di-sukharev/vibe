@@ -98,6 +98,8 @@ SESSION_RETENTION_DAYS=7
 AUTH_BODY_LIMIT_BYTES=65536
 AUTH_RATE_LIMIT_MAX=60
 AUTH_RATE_LIMIT_WINDOW_SECONDS=60
+ADMIN_USERS_READ_RATE_LIMIT_MAX=120
+ADMIN_USERS_READ_RATE_LIMIT_WINDOW_SECONDS=60
 SHUTDOWN_GRACE_SECONDS=20
 TRUST_PROXY=true
 TRUSTED_PROXY_CLIENT_IP_HEADER=x-forwarded-for
@@ -107,7 +109,7 @@ COOKIE_SECURE=true
 
 Yandex Serverless Containers append the invoking user's address to `X-Forwarded-For`, including after any values supplied by the caller. Selecting the last value avoids trusting a caller-controlled first entry. Recheck this provider contract if the backend moves behind a different Yandex ingress product.
 
-`AUTH_RATE_LIMIT_*` configures an in-process `Map`, so it is only a per-instance backstop. `--concurrency 1` limits simultaneous calls inside one instance; it does not keep Serverless Containers on one instance, and the platform can start instances in multiple availability zones. For meaningful production protection of login/register/refresh/logout, attach Yandex Smart Web Security with an Advanced Rate Limiter profile to the API Gateway, or replace the backend limiter with shared cross-instance state. Do not use the older API Gateway `x-yc-apigateway-rate-limit` extension for a new deployment: Yandex marks it deprecated and directs users to Smart Web Security. A container instance cap is a capacity/cost control, not a security boundary.
+`AUTH_RATE_LIMIT_*` and `ADMIN_USERS_READ_RATE_LIMIT_*` configure in-process `Map` stores, so they are only per-instance backstops. The admin directory budget is shared by all sessions and search filters for the same administrator inside an instance. `--concurrency 1` limits simultaneous calls inside one instance; it does not keep Serverless Containers on one instance, and the platform can start instances in multiple availability zones. For meaningful production protection, attach Yandex Smart Web Security with an Advanced Rate Limiter profile to the API Gateway or replace the backend limiters with shared cross-instance state. Do not use the older API Gateway `x-yc-apigateway-rate-limit` extension for a new deployment: Yandex marks it deprecated and directs users to Smart Web Security. A container instance cap is a capacity/cost control, not a security boundary.
 
 Container environment variables are part of a revision. When deploying with `yc serverless container revision deploy --environment`, include the full required environment for that revision because changing environment variables creates a new revision. Prefer the console, Terraform, or Yandex Lockbox for sensitive values when shell quoting becomes risky.
 

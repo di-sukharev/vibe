@@ -11,11 +11,13 @@ const accessTokenPayloadSchema = z.object({
 
 export type AccessTokenPayload = z.infer<typeof accessTokenPayloadSchema>
 
+type AccessTokenSigningEnv = Pick<AppEnv, 'ACCESS_TOKEN_TTL_SECONDS' | 'JWT_SECRET'>
+
 function secretKey(secret: string) {
   return new TextEncoder().encode(secret)
 }
 
-export function signAccessToken(payload: AccessTokenPayload, env: AppEnv) {
+export function signAccessToken(payload: AccessTokenPayload, env: AccessTokenSigningEnv) {
   return new SignJWT({
     sessionId: payload.sessionId,
     email: payload.email,

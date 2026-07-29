@@ -138,6 +138,8 @@ Production deployment for the backend uses DigitalOcean App Platform with Digita
 - `GET /health/live`
 - `GET /health/ready`
 
+`GET /api/admin/users` has a separate in-memory read budget, keyed by administrator ID and shared across that administrator's sessions and search filters. It defaults to 120 requests per 60 seconds through `ADMIN_USERS_READ_RATE_LIMIT_*` and does not consume the account-mutation budget. The store is process-local; use shared rate-limit state when the API runs in multiple backend processes and global enforcement is required.
+
 Passwords are hashed through `Bun.password` with Argon2id. Access tokens are short-lived JWTs through `jose`. Initial refresh tokens are random; rotated successors are opaque, domain-separated HMAC values derived with the server secret so concurrent uses of the same credential receive the same successor. The database stores the current and immediately previous SHA-256 hashes plus a family locator hash. Refresh atomically rotates the credential inside the same logical session, so another browser tab's still-valid access token is not revoked. Reuse of any older family credential after the short race-tolerance window revokes that session as potentially compromised.
 
 Successful cookie refresh responses keep the established `{ accessToken }` shape; token refresh adds only the rotated refresh credential required by native storage. Clients compare the `userId` and `sessionId` claims in the current and refreshed access tokens before replacing local state or retrying an authenticated request. Keeping the response additive-free preserves phased rollout compatibility with installed strict-parser clients.
