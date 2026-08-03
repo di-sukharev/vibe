@@ -77,6 +77,10 @@ services:
         value: "65536"
         scope: RUN_TIME
         type: GENERAL
+      - key: INGRESS_RATE_LIMIT_PROVIDER
+        value: "local"
+        scope: RUN_TIME
+        type: GENERAL
       - key: AUTH_RATE_LIMIT_MAX
         value: "60"
         scope: RUN_TIME

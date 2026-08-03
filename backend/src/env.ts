@@ -75,6 +75,7 @@ const envSchema = z.object({
   SESSION_ABSOLUTE_TTL_DAYS: z.coerce.number().int().positive().default(90),
   SESSION_RETENTION_DAYS: z.coerce.number().int().nonnegative().default(7),
   AUTH_BODY_LIMIT_BYTES: z.coerce.number().int().positive().max(1024 * 1024).default(64 * 1024),
+  INGRESS_RATE_LIMIT_PROVIDER: z.enum(['local', 'yandex-sws']).default('local'),
   AUTH_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(60),
   AUTH_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
   ADMIN_USERS_READ_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(120),
@@ -139,6 +140,7 @@ const envSchema = z.object({
   validateWebappOrigin(env, ctx)
   validateSessionTtls(env, ctx)
   validateTrustedProxy(env, ctx)
+  validateIngressRateLimitProvider(env, ctx)
   validateStorageEnv(env, ctx)
   validateAppleIapEnv(env, ctx)
   validateGooglePlayIapEnv(env, ctx)
@@ -214,6 +216,28 @@ function validateTrustedProxy(env: z.infer<typeof envSchema>, ctx: z.RefinementC
       message: 'TRUSTED_PROXY_CLIENT_IP_POSITION requires TRUSTED_PROXY_CLIENT_IP_HEADER',
     })
   }
+}
+
+function validateIngressRateLimitProvider(
+  env: z.infer<typeof envSchema>,
+  ctx: z.RefinementCtx,
+) {
+  if (env.INGRESS_RATE_LIMIT_PROVIDER !== 'yandex-sws') return
+
+  const hasYandexProxyContract =
+    env.TRUST_PROXY &&
+    env.TRUSTED_PROXY_CLIENT_IP_HEADER === 'x-forwarded-for' &&
+    env.TRUSTED_PROXY_CLIENT_IP_POSITION === 'last'
+  if (hasYandexProxyContract) return
+
+  ctx.addIssue({
+    code: 'custom',
+    path: ['INGRESS_RATE_LIMIT_PROVIDER'],
+    message:
+      'INGRESS_RATE_LIMIT_PROVIDER=yandex-sws requires TRUST_PROXY=true, ' +
+      'TRUSTED_PROXY_CLIENT_IP_HEADER=x-forwarded-for, and ' +
+      'TRUSTED_PROXY_CLIENT_IP_POSITION=last',
+  })
 }
 
 function validateJwtSecret(env: z.infer<typeof envSchema>, ctx: z.RefinementCtx) {

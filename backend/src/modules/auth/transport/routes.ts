@@ -23,6 +23,7 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 
 import type { AppEnv } from '../../../env'
 import { AppError, validationErrorHook } from '../../../http/errors'
+import { ingressErrorResponses } from '../../../http/openapi'
 import { clientAddress } from '../../../http/security'
 import type { AuthService } from '../application/auth-service'
 import { userDtoFromPrincipal } from '../domain/user'
@@ -74,11 +75,6 @@ const errorResponseContent = {
   },
 }
 
-const authWriteErrorResponses = {
-  413: { content: errorResponseContent, description: 'Request body is too large' },
-  429: { content: errorResponseContent, description: 'Too many authentication requests' },
-}
-
 const cookieRegisterRoute = createRoute({
   method: 'post',
   path: '/register',
@@ -92,7 +88,7 @@ const cookieRegisterRoute = createRoute({
     },
   },
   responses: {
-    ...authWriteErrorResponses,
+    ...ingressErrorResponses,
     201: {
       content: cookieAuthResponseContent,
       description: 'Created user and browser session',
@@ -119,7 +115,7 @@ const tokenRegisterRoute = createRoute({
     },
   },
   responses: {
-    ...authWriteErrorResponses,
+    ...ingressErrorResponses,
     201: {
       content: tokenAuthResponseContent,
       description: 'Created user and explicit token session',
@@ -142,7 +138,7 @@ const cookieLoginRoute = createRoute({
     },
   },
   responses: {
-    ...authWriteErrorResponses,
+    ...ingressErrorResponses,
     200: {
       content: cookieAuthResponseContent,
       description: 'Created browser session',
@@ -169,7 +165,7 @@ const tokenLoginRoute = createRoute({
     },
   },
   responses: {
-    ...authWriteErrorResponses,
+    ...ingressErrorResponses,
     200: {
       content: tokenAuthResponseContent,
       description: 'Created explicit token session',
@@ -193,7 +189,7 @@ const tokenSocialAuthRoute = createRoute({
     },
   },
   responses: {
-    ...authWriteErrorResponses,
+    ...ingressErrorResponses,
     200: { content: tokenAuthResponseContent, description: 'Created social session' },
     201: { content: tokenAuthResponseContent, description: 'Created social user and session' },
     400: { content: errorResponseContent, description: 'Invalid payload' },
@@ -216,7 +212,7 @@ const cookieRefreshRoute = createRoute({
     },
   },
   responses: {
-    ...authWriteErrorResponses,
+    ...ingressErrorResponses,
     200: {
       content: cookieRefreshResponseContent,
       description: 'Rotated browser session and returned a new access token',
@@ -243,7 +239,7 @@ const tokenRefreshRoute = createRoute({
     },
   },
   responses: {
-    ...authWriteErrorResponses,
+    ...ingressErrorResponses,
     200: {
       content: tokenRefreshResponseContent,
       description: 'Rotated explicit token session',
@@ -276,7 +272,7 @@ const cookieLogoutRoute = createRoute({
     },
   },
   responses: {
-    ...authWriteErrorResponses,
+    ...ingressErrorResponses,
     204: { description: 'Browser session revoked' },
     400: { content: errorResponseContent, description: 'Invalid payload' },
     403: {
@@ -299,7 +295,7 @@ const tokenLogoutRoute = createRoute({
     },
   },
   responses: {
-    ...authWriteErrorResponses,
+    ...ingressErrorResponses,
     204: { description: 'Explicit token session revoked' },
     400: { content: errorResponseContent, description: 'Invalid payload' },
   },
@@ -318,7 +314,7 @@ const passwordResetRequestRoute = createRoute({
     },
   },
   responses: {
-    ...authWriteErrorResponses,
+    ...ingressErrorResponses,
     202: {
       content: passwordResetRequestResponseContent,
       description: 'Password reset request accepted',
@@ -340,7 +336,7 @@ const passwordResetConfirmRoute = createRoute({
     },
   },
   responses: {
-    ...authWriteErrorResponses,
+    ...ingressErrorResponses,
     204: { description: 'Password changed and existing sessions revoked' },
     400: {
       content: errorResponseContent,

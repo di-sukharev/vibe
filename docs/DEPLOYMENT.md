@@ -42,6 +42,7 @@ REFRESH_REUSE_GRACE_SECONDS=10
 SESSION_ABSOLUTE_TTL_DAYS=90
 SESSION_RETENTION_DAYS=7
 AUTH_BODY_LIMIT_BYTES=65536
+INGRESS_RATE_LIMIT_PROVIDER=local
 AUTH_RATE_LIMIT_MAX=60
 AUTH_RATE_LIMIT_WINDOW_SECONDS=60
 ADMIN_USERS_READ_RATE_LIMIT_MAX=120
@@ -62,9 +63,9 @@ COOKIE_SECURE=true
 
 `JWT_SECRET` belongs in the production backend runtime env. Generate it with `openssl rand -hex 32`; that command creates 32 random bytes encoded as 64 hex characters. Do not use the placeholder from `backend/.env.example`, repeated characters, or human phrases.
 
-DigitalOcean App Platform puts the real client address in `do-connecting-ip`; its `X-Forwarded-For` identifies the ingress server. Keep `TRUSTED_PROXY_CLIENT_IP_HEADER=do-connecting-ip` on this deployment path so auth/webhook ingress limits and session metadata are scoped to the actual client.
+DigitalOcean App Platform puts the real client address in `do-connecting-ip`; its `X-Forwarded-For` identifies the ingress server. Keep `INGRESS_RATE_LIMIT_PROVIDER=local` and `TRUSTED_PROXY_CLIENT_IP_HEADER=do-connecting-ip` on this deployment path so auth/webhook ingress limits and session metadata are scoped to the actual client.
 
-`AUTH_RATE_LIMIT_*` and `ADMIN_USERS_READ_RATE_LIMIT_*` use bounded in-process maps. The admin directory budget is shared by all sessions and search filters for the same administrator, but neither budget is global across multiple backend processes. Replace the in-memory store with shared state before scaling the API to multiple instances when global enforcement is required.
+With `INGRESS_RATE_LIMIT_PROVIDER=local`, `AUTH_RATE_LIMIT_*`, `IAP_RATE_LIMIT_*`, `WEBHOOK_RATE_LIMIT_*`, and `ADMIN_USERS_READ_RATE_LIMIT_*` use bounded in-process maps. The admin directory budget is shared by all sessions and search filters for the same administrator, but none of these budgets is global across multiple backend processes. Replace the ingress budgets with a trusted edge/WAF policy or shared state before scaling the API to multiple instances. `yandex-sws` is reserved for the Yandex Cloud path documented in [YANDEX_CLOUD.md](YANDEX_CLOUD.md); it disables only the backend's IP-keyed ingress budgets after Smart Web Security is active, while body limits and the administrator-keyed directory budget remain enabled.
 
 If storage is active, also configure:
 

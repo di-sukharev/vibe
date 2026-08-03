@@ -88,6 +88,7 @@ export function createApp({
   )
   const publicWriteSecurity = {
     bodyLimitBytes: env.AUTH_BODY_LIMIT_BYTES,
+    rateLimitEnabled: env.INGRESS_RATE_LIMIT_PROVIDER === 'local',
     rateLimitMax: env.AUTH_RATE_LIMIT_MAX,
     rateLimitWindowSeconds: env.AUTH_RATE_LIMIT_WINDOW_SECONDS,
     trustProxy: env.TRUST_PROXY,

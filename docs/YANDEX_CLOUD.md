@@ -84,22 +84,30 @@ Before you deploy the revision, configure the full runtime environment for that 
 
 Serverless Containers set `PORT` automatically. The backend must continue reading `PORT` from the environment and exposing `/health/live` and `/health/ready`.
 
-Production env must include:
+The initial production revision must keep the backend ingress limiter active. Use this safe
+baseline until the SWS rollout checks below pass:
 
 ```bash
 DATABASE_URL=postgresql://...
 JWT_SECRET=<64-or-more-hex-characters>
-CORS_ORIGINS=https://webapp.example.com,https://website.example.com
+CORS_ORIGINS=https://app.example.com
 ACCESS_TOKEN_TTL_SECONDS=900
 REFRESH_TOKEN_TTL_DAYS=30
 REFRESH_REUSE_GRACE_SECONDS=10
 SESSION_ABSOLUTE_TTL_DAYS=90
 SESSION_RETENTION_DAYS=7
 AUTH_BODY_LIMIT_BYTES=65536
+INGRESS_RATE_LIMIT_PROVIDER=local
 AUTH_RATE_LIMIT_MAX=60
 AUTH_RATE_LIMIT_WINDOW_SECONDS=60
 ADMIN_USERS_READ_RATE_LIMIT_MAX=120
 ADMIN_USERS_READ_RATE_LIMIT_WINDOW_SECONDS=60
+IAP_BODY_LIMIT_BYTES=65536
+IAP_RATE_LIMIT_MAX=60
+IAP_RATE_LIMIT_WINDOW_SECONDS=60
+WEBHOOK_BODY_LIMIT_BYTES=262144
+WEBHOOK_RATE_LIMIT_MAX=600
+WEBHOOK_RATE_LIMIT_WINDOW_SECONDS=60
 SHUTDOWN_GRACE_SECONDS=20
 TRUST_PROXY=true
 TRUSTED_PROXY_CLIENT_IP_HEADER=x-forwarded-for
@@ -109,7 +117,9 @@ COOKIE_SECURE=true
 
 Yandex Serverless Containers append the invoking user's address to `X-Forwarded-For`, including after any values supplied by the caller. Selecting the last value avoids trusting a caller-controlled first entry. Recheck this provider contract if the backend moves behind a different Yandex ingress product.
 
-`AUTH_RATE_LIMIT_*` and `ADMIN_USERS_READ_RATE_LIMIT_*` configure in-process `Map` stores, so they are only per-instance backstops. The admin directory budget is shared by all sessions and search filters for the same administrator inside an instance. `--concurrency 1` limits simultaneous calls inside one instance; it does not keep Serverless Containers on one instance, and the platform can start instances in multiple availability zones. For meaningful production protection, attach Yandex Smart Web Security with an Advanced Rate Limiter profile to the API Gateway or replace the backend limiters with shared cross-instance state. Do not use the older API Gateway `x-yc-apigateway-rate-limit` extension for a new deployment: Yandex marks it deprecated and directs users to Smart Web Security. A container instance cap is a capacity/cost control, not a security boundary.
+After SWS is actively blocking and the rollout checks pass, change only `INGRESS_RATE_LIMIT_PROVIDER` to `yandex-sws` in a new container revision. This tells the backend that Smart Web Security owns the IP-keyed auth, account-write, IAP, and webhook budgets; it does not configure Yandex Cloud. In this mode, `AUTH_RATE_LIMIT_*`, `IAP_RATE_LIMIT_*`, and `WEBHOOK_RATE_LIMIT_*` remain documented compatibility defaults but are not enforced by the backend. Body limits remain active. `ADMIN_USERS_READ_RATE_LIMIT_*` also remains active because it is keyed by the authenticated administrator ID, which SWS cannot extract from the JWT; use shared application state if that budget must be global across container instances.
+
+`--concurrency 1` limits simultaneous calls inside one instance; it does not keep Serverless Containers on one instance, and the platform can start instances in multiple availability zones. A container instance cap is a capacity/cost control, not a security boundary. Do not use the older API Gateway `x-yc-apigateway-rate-limit` extension: Yandex marks it deprecated and directs new deployments to Smart Web Security.
 
 Container environment variables are part of a revision. When deploying with `yc serverless container revision deploy --environment`, include the full required environment for that revision because changing environment variables creates a new revision. Prefer the console, Terraform, or Yandex Lockbox for sensitive values when shell quoting becomes risky.
 
@@ -137,6 +147,33 @@ yc serverless container add-access-binding \
   --role serverless-containers.containerInvoker
 ```
 
+### Smart Web Security rate limits
+
+Configure SWS before generating the final API Gateway specification. The SWS console owns these values; changing the similarly named backend environment variables does not update an ARL profile.
+
+1. Create an API response template named `<project>-api-rate-limited` with:
+   - response code `429`;
+   - format `JSON`;
+   - body `{"error":{"code":"RATE_LIMITED","message":"Too many requests"}}`;
+   - headers `Retry-After: 60`, `Cache-Control: no-store`,
+     `Access-Control-Allow-Origin: https://app.example.com`,
+     `Access-Control-Allow-Credentials: true`,
+     `Access-Control-Expose-Headers: Retry-After`, and `Vary: Origin`.
+2. Create an ARL profile named `<project>-api-arl` and add the rules below with **Logging only (dry run)** enabled. For each rule, select the response template, use **Grouping by property → IP address**, and select **Temporarily block all requests** with a 60-second block period. The console exposes **Block requests exceeding the limit** only for ungrouped counters, so it is not the correct action for these per-IP rules. Do not use CAPTCHA for API, XHR, webhook, or mobile traffic.
+
+| Rule | Traffic conditions | Grouping | Limit |
+| --- | --- | --- | --- |
+| `auth-writes` | Request URI starts with `/api/auth/`; HTTP method is `POST` | IP address | 60 requests / 60 seconds; block 60 seconds |
+| `account-writes` | Request URI starts with `/api/users/` **or** `/api/admin/`; HTTP method is one of `POST`, `PUT`, `PATCH`, `DELETE` | IP address | 60 requests / 60 seconds; block 60 seconds |
+| `iap-writes` | Request URI starts with `/api/iap/`; HTTP method is `POST` | IP address | 60 requests / 60 seconds; block 60 seconds |
+| `app-store-webhook` | Request URI matches `/api/webhooks/app-store`; HTTP method is `POST` | IP address | 600 requests / 60 seconds; block 60 seconds |
+
+Create a security profile named `<project>-api-sws` from scratch with default action **Allow**, attach the ARL profile, and copy the security profile ID. Smart Protection or WAF is a separate product decision; if enabled for this API, use API protection mode and validate it independently in dry run.
+
+The CORS origin in the response template must exactly match the credentialed browser app origin in `CORS_ORIGINS`; never use `*` with credentials. SWS generates a blocked response before Hono can add its CORS headers, and an SWS response template cannot dynamically reflect arbitrary browser origins. The supported baseline therefore has one browser origin that calls this API. Native/mobile clients do not need CORS. If more than one browser origin must read edge errors, do not switch to `yandex-sws` until each origin has a separately tested provider-supported edge design, such as a dedicated gateway/security profile and exact-origin template.
+
+Enable **Write logs** on the security profile, send them to **Cloud Logging**, select **Advanced Rate Limiter**, and include both **DENY/CAPTCHA** and **ALLOW** verdicts. During dry run, record 100% of ALLOW requests because dry-run matches are allowed; after activation and observation, lower or disable ALLOW sampling to control log volume. Keep the backend on `INGRESS_RATE_LIMIT_PROVIDER=local` while the rules are in dry run, then inspect `dry_run_exceeded_quota_names` and `arl_matched_quotas` and confirm the rule/path distribution is expected. Dry-run requests still reach the backend and may be billable, so include the current SWS pricing in the release decision.
+
 Create an OpenAPI 3 specification outside the repository, for example `.scratch/deploy/yandex-api-gateway.yaml`, using the actual container and service-account IDs:
 
 ```yaml
@@ -144,6 +181,17 @@ openapi: 3.0.0
 info:
   title: project-api
   version: 1.0.0
+x-yc-apigateway:
+  smartWebSecurity:
+    securityProfileId: <security_profile_ID>
+  cors:
+    origin: https://app.example.com
+    methods: [GET, POST, PUT, PATCH, DELETE]
+    allowedHeaders: [Authorization, Content-Type]
+    exposedHeaders: [Retry-After, RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset]
+    credentials: true
+    maxAge: 600
+    optionsSuccessStatus: 204
 paths:
   /{proxy+}:
     x-yc-apigateway-any-method:
@@ -174,9 +222,17 @@ yc serverless api-gateway add-domain <project>-api \
   --certificate-id <certificate_ID>
 ```
 
-Use `https://api.example.com` as `VITE_API_URL` and `https://app.example.com` in backend `CORS_ORIGINS`. Wait for certificate and DNS readiness before the browser auth smoke. The direct container URL remains private and is not a production API endpoint.
+Use `https://api.example.com` as `VITE_API_URL` and the same exact `https://app.example.com` origin in the Gateway CORS rule, SWS response template, and backend `CORS_ORIGINS`. The Gateway rule handles preflight requests; the SWS template keeps an edge-generated `429` readable by browser JavaScript. Wait for certificate and DNS readiness before the browser auth smoke. The direct container URL remains private and is not a production API endpoint.
 
-Before exposing auth routes, connect a Smart Web Security security profile and Advanced Rate Limiter profile to the gateway. Scope limits to the auth write paths and choose client grouping/thresholds from the product's abuse model. Keep the backend limiter enabled as defense in depth, but do not count it as a global attempt limit when Serverless Containers scales out.
+For rollout, use this order so one limiter always remains active:
+
+1. Deploy the initial container revision with `INGRESS_RATE_LIMIT_PROVIDER=local`.
+2. Attach the security profile to a staging gateway with every ARL rule in dry run. Exceed each test quota and confirm its name appears in `dry_run_exceeded_quota_names` with the expected path and method.
+3. Disable dry run in staging and repeat the quota tests. Confirm the SWS log has `module_type=ARL`, `action=DENY`, `arl_verdict=DENY`, and the expected `arl_applied_quota_name`. Also test from the deployed browser origin with credentials and confirm JavaScript can read the JSON `RATE_LIMITED` body and `Retry-After: 60`; inspect the response for the exact `Access-Control-Allow-Origin`, `Access-Control-Allow-Credentials: true`, and `Access-Control-Expose-Headers: Retry-After`. These SWS verdict fields distinguish an edge rejection from the backend's compatible local 429 response.
+4. Activate and verify the same rules on the production gateway while the backend still uses `local`. Confirm normal auth, account write, IAP, and signed webhook requests continue to reach the container.
+5. Only then deploy a container revision that changes `INGRESS_RATE_LIMIT_PROVIDER` to `yandex-sws`.
+
+For rollback, first deploy a container revision with `INGRESS_RATE_LIMIT_PROVIDER=local`. After local protection is restored, return ARL rules to dry run or disconnect the security profile. Never leave `INGRESS_RATE_LIMIT_PROVIDER=yandex-sws` active while the security profile is disconnected or every ARL rule is dry-run-only.
 
 ## Managed PostgreSQL
 
@@ -380,6 +436,16 @@ After deployment:
 - API Gateway Serverless Containers integration: https://yandex.cloud/en/docs/api-gateway/concepts/extensions/containers
 - API Gateway custom domains: https://yandex.cloud/en/docs/api-gateway/operations/api-gw-domains
 - Smart Web Security Advanced Rate Limiter: https://yandex.cloud/en/docs/smartwebsecurity/concepts/arl
+- Creating an ARL profile: https://yandex.cloud/en/docs/smartwebsecurity/operations/arl-profile-create
+- Adding an ARL rule: https://yandex.cloud/en/docs/smartwebsecurity/operations/arl-rule-add
+- Smart Web Security response templates: https://yandex.cloud/en/docs/smartwebsecurity/concepts/response-templates
+- API Gateway Smart Web Security extension: https://yandex.cloud/en/docs/api-gateway/concepts/extensions/sws
+- API Gateway CORS extension: https://yandex.cloud/en/docs/api-gateway/concepts/extensions/cors
+- Connecting a security profile to API Gateway: https://yandex.cloud/en/docs/smartwebsecurity/operations/host-connect
+- Smart Web Security logging: https://yandex.cloud/en/docs/smartwebsecurity/operations/configure-logging
+- Smart Web Security monitoring: https://yandex.cloud/en/docs/smartwebsecurity/operations/monitoring
+- Smart Web Security alerts: https://yandex.cloud/en/docs/smartwebsecurity/operations/alerting
+- Smart Web Security pricing: https://yandex.cloud/en/docs/smartwebsecurity/pricing
 - Deprecated API Gateway rate-limit extension: https://yandex.cloud/en/docs/api-gateway/concepts/extensions/rate-limit
 - Yandex Container Registry quickstart: https://yandex.cloud/en/docs/container-registry/quickstart
 - Yandex Managed Service for PostgreSQL: https://yandex.cloud/en/docs/managed-postgresql/

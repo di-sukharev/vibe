@@ -407,6 +407,8 @@ describe('prepare-do-specs', () => {
     expect(spec).toContain(`    http_port: 8080
     instance_size_slug: apps-s-1vcpu-2gb
     instance_count: 2`);
+    expect(serviceBlock(spec, 'api')).toContain(`      - key: INGRESS_RATE_LIMIT_PROVIDER
+        value: "local"`);
     expect(spec).not.toContain('REPLACE_WITH_');
   });
 

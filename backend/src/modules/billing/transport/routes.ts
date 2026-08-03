@@ -13,6 +13,7 @@ import { createRoute, OpenAPIHono } from '@hono/zod-openapi'
 import type { Context } from 'hono'
 
 import type { AuthenticatedPrincipal } from '../../auth'
+import { ingressErrorResponses } from '../../../http/openapi'
 import type { BillingService } from '../application/billing-service'
 import { executeBilling } from './errors'
 
@@ -58,6 +59,7 @@ const transactionRoute = createRoute({
     },
   },
   responses: {
+    ...ingressErrorResponses,
     200: {
       content: {
         'application/json': {
@@ -98,6 +100,7 @@ const googlePlayTransactionRoute = createRoute({
     },
   },
   responses: {
+    ...ingressErrorResponses,
     200: {
       content: {
         'application/json': {
@@ -129,6 +132,7 @@ const offerCodeRedemptionRoute = createRoute({
   method: 'post',
   path: '/app-store/offer-code-redemption',
   responses: {
+    ...ingressErrorResponses,
     200: {
       content: {
         'application/json': {
@@ -157,6 +161,7 @@ const reconcileRoute = createRoute({
     },
   },
   responses: {
+    ...ingressErrorResponses,
     200: {
       content: {
         'application/json': {
@@ -197,6 +202,7 @@ const googlePlayReconcileRoute = createRoute({
     },
   },
   responses: {
+    ...ingressErrorResponses,
     200: {
       content: {
         'application/json': {
@@ -237,6 +243,7 @@ const webhookRoute = createRoute({
     },
   },
   responses: {
+    ...ingressErrorResponses,
     200: {
       description: 'Recorded App Store Server Notification V2 payload',
     },

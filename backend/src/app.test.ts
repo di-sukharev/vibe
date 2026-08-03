@@ -11,9 +11,11 @@ const env = loadEnv({
 })
 
 async function createAdminDirectoryTestApp({
+  ingressRateLimitProvider = 'local',
   readLimitMax = 120,
   writeLimitMax = 60,
 }: {
+  ingressRateLimitProvider?: 'local' | 'yandex-sws'
   readLimitMax?: number
   writeLimitMax?: number
 } = {}) {
@@ -85,9 +87,12 @@ async function createAdminDirectoryTestApp({
     ...env,
     ADMIN_USERS_READ_RATE_LIMIT_MAX: readLimitMax,
     AUTH_RATE_LIMIT_MAX: writeLimitMax,
+    INGRESS_RATE_LIMIT_PROVIDER: ingressRateLimitProvider,
     TRUST_PROXY: true,
-    TRUSTED_PROXY_CLIENT_IP_HEADER: 'do-connecting-ip',
-    TRUSTED_PROXY_CLIENT_IP_POSITION: 'first' as const,
+    TRUSTED_PROXY_CLIENT_IP_HEADER:
+      ingressRateLimitProvider === 'yandex-sws' ? 'x-forwarded-for' : 'do-connecting-ip',
+    TRUSTED_PROXY_CLIENT_IP_POSITION:
+      ingressRateLimitProvider === 'yandex-sws' ? 'last' as const : 'first' as const,
   }
   const signForSession = (sessionId: string, admin: typeof primaryAdmin) =>
     new SignJWT({ email: admin.email, sessionId })
@@ -244,6 +249,55 @@ test('account mutations share bounded write-rate protection', async () => {
   expect(limited.headers.get('retry-after')).toBeTruthy()
 })
 
+test('Yandex SWS ingress delegates IP request limits while retaining body limits', async () => {
+  const externalEnv = {
+    ...env,
+    AUTH_RATE_LIMIT_MAX: 1,
+    IAP_RATE_LIMIT_MAX: 1,
+    WEBHOOK_RATE_LIMIT_MAX: 1,
+    WEBHOOK_BODY_LIMIT_BYTES: 32,
+    INGRESS_RATE_LIMIT_PROVIDER: 'yandex-sws' as const,
+    TRUST_PROXY: true,
+    TRUSTED_PROXY_CLIENT_IP_HEADER: 'x-forwarded-for',
+    TRUSTED_PROXY_CLIENT_IP_POSITION: 'last' as const,
+  }
+  const app = createApp({ env: externalEnv, prisma: {} as DbClient })
+  const requests = [
+    { expectedStatus: 400, send: () => app.request('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    }) },
+    { expectedStatus: 401, send: () => app.request('/api/users/me', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    }) },
+    { expectedStatus: 400, send: () => app.request('/api/iap/app-store/transactions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    }) },
+    { expectedStatus: 400, send: () => app.request('/api/webhooks/app-store', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    }) },
+  ]
+
+  for (const request of requests) {
+    expect((await request.send()).status).toBe(request.expectedStatus)
+    expect((await request.send()).status).toBe(request.expectedStatus)
+  }
+
+  const oversized = await app.request('/api/webhooks/app-store', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ signedPayload: 'x'.repeat(64) }),
+  })
+  expect(oversized.status).toBe(413)
+})
+
 test('admin user reads share one bounded budget across filters, sessions, and client addresses', async () => {
   const readLimitMax = 120
   const harness = await createAdminDirectoryTestApp({ readLimitMax })
@@ -276,6 +330,19 @@ test('admin user read budgets are isolated by administrator', async () => {
   expect((await request(harness.tokens.primary[0]!)).status).toBe(200)
   expect((await request(harness.tokens.primary[1]!)).status).toBe(429)
   expect((await request(harness.tokens.secondary[0]!)).status).toBe(200)
+})
+
+test('Yandex SWS ingress retains the administrator-keyed directory budget', async () => {
+  const harness = await createAdminDirectoryTestApp({
+    ingressRateLimitProvider: 'yandex-sws',
+    readLimitMax: 1,
+  })
+  const request = () => harness.app.request('/api/admin/users', {
+    headers: { Authorization: `Bearer ${harness.tokens.primary[0]}` },
+  })
+
+  expect((await request()).status).toBe(200)
+  expect((await request()).status).toBe(429)
 })
 
 test('admin user reads and account mutations use independent budgets', async () => {
@@ -323,7 +390,7 @@ test('admin user reads and account mutations use independent budgets', async () 
   })).status).toBe(200)
 })
 
-test('OpenAPI documents account mutation ingress failures', async () => {
+test('OpenAPI documents account and billing mutation ingress failures', async () => {
   const prisma = { $queryRaw: async () => [{ '?column?': 1 }] } as unknown as DbClient
   const app = createApp({ env, prisma })
   const response = await app.request('/openapi.json')
@@ -331,16 +398,12 @@ test('OpenAPI documents account mutation ingress failures', async () => {
     components?: {
       securitySchemes?: Record<string, unknown>
     }
-    paths: Record<string, {
-      get?: {
-        responses: Record<string, unknown>
-        security?: Array<Record<string, unknown>>
-      }
-      patch?: {
-        responses: Record<string, unknown>
-        security?: Array<Record<string, unknown>>
-      }
-    }>
+    paths: Record<string, Partial<Record<'get' | 'patch' | 'post', {
+      responses: Record<string, {
+        headers?: Record<string, unknown>
+      }>
+      security?: Array<Record<string, unknown>>
+    }>>>
   }
 
   expect(response.status).toBe(200)
@@ -364,6 +427,43 @@ test('OpenAPI documents account mutation ingress failures', async () => {
     .toHaveProperty('413')
   expect(document.paths['/api/admin/users/{userId}/role']?.patch?.responses)
     .toHaveProperty('429')
+  const authWritePaths = [
+    '/api/auth/register',
+    '/api/auth/token/register',
+    '/api/auth/login',
+    '/api/auth/token/login',
+    '/api/auth/token/social/{provider}',
+    '/api/auth/refresh',
+    '/api/auth/token/refresh',
+    '/api/auth/logout',
+    '/api/auth/token/logout',
+    '/api/auth/password-reset/request',
+    '/api/auth/password-reset/confirm',
+  ]
+  for (const path of authWritePaths) {
+    expect(document.paths[path]?.post?.responses?.['429']?.headers)
+      .toHaveProperty('Retry-After')
+  }
+  expect(document.paths['/api/users/me']?.patch?.responses?.['429']?.headers)
+    .toHaveProperty('Retry-After')
+  expect(document.paths['/api/admin/users/{userId}/role']?.patch?.responses?.['429']?.headers)
+    .toHaveProperty('Retry-After')
+  expect(document.paths['/api/admin/users']?.get?.responses?.['429']?.headers)
+    .toHaveProperty('Retry-After')
+  const billingPostPaths = [
+    '/api/iap/app-store/transactions',
+    '/api/iap/google-play/transactions',
+    '/api/iap/app-store/offer-code-redemption',
+    '/api/iap/app-store/reconcile',
+    '/api/iap/google-play/reconcile',
+    '/api/webhooks/app-store',
+  ]
+  for (const path of billingPostPaths) {
+    const responses = document.paths[path]?.post?.responses
+    expect(responses).toHaveProperty('413')
+    expect(responses).toHaveProperty('429')
+    expect(responses?.['429']?.headers).toHaveProperty('Retry-After')
+  }
   expect(document.paths['/api/admin/users/{userId}/role']?.patch?.security).toEqual([
     { BearerAuth: [] },
   ])

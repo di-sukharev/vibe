@@ -16,6 +16,7 @@ describe('loadEnv', () => {
     expect(env.ACCESS_TOKEN_TTL_SECONDS).toBe(900)
     expect(env.REFRESH_REUSE_GRACE_SECONDS).toBe(10)
     expect(env.SESSION_ABSOLUTE_TTL_DAYS).toBe(90)
+    expect(env.INGRESS_RATE_LIMIT_PROVIDER).toBe('local')
     expect(env.ADMIN_USERS_READ_RATE_LIMIT_MAX).toBe(120)
     expect(env.ADMIN_USERS_READ_RATE_LIMIT_WINDOW_SECONDS).toBe(60)
     expect(env.COOKIE_SECURE).toBe(false)
@@ -347,6 +348,31 @@ describe('loadEnv', () => {
         TRUSTED_PROXY_CLIENT_IP_HEADER: 'do-connecting-ip',
       }),
     ).not.toThrow()
+  })
+
+  test('requires the documented trusted proxy contract for Yandex SWS ingress', () => {
+    const baseEnv = {
+      DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
+      JWT_SECRET: '12345678901234567890123456789012',
+      INGRESS_RATE_LIMIT_PROVIDER: 'yandex-sws',
+      TRUST_PROXY: 'true',
+      TRUSTED_PROXY_CLIENT_IP_HEADER: 'x-forwarded-for',
+      TRUSTED_PROXY_CLIENT_IP_POSITION: 'last',
+    }
+
+    expect(loadEnv(baseEnv).INGRESS_RATE_LIMIT_PROVIDER).toBe('yandex-sws')
+    expect(() => loadEnv({ ...baseEnv, INGRESS_RATE_LIMIT_PROVIDER: 'unsupported' }))
+      .toThrow('INGRESS_RATE_LIMIT_PROVIDER')
+    expect(() => loadEnv({ ...baseEnv, TRUST_PROXY: 'false' }))
+      .toThrow('INGRESS_RATE_LIMIT_PROVIDER')
+    expect(() => loadEnv({
+      ...baseEnv,
+      TRUSTED_PROXY_CLIENT_IP_HEADER: 'do-connecting-ip',
+    })).toThrow('INGRESS_RATE_LIMIT_PROVIDER')
+    expect(() => loadEnv({
+      ...baseEnv,
+      TRUSTED_PROXY_CLIENT_IP_POSITION: 'first',
+    })).toThrow('INGRESS_RATE_LIMIT_PROVIDER')
   })
 })
 
