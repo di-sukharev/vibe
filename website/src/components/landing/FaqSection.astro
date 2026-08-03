@@ -1,0 +1,59 @@
+---
+import { Plus } from 'lucide-react'
+
+import SectionIntro from './SectionIntro.astro'
+
+const questions = [
+  {
+    question: 'Можно ли начать без опыта в программировании?',
+    answer: 'Да, если начинать с небольших задач. Опишите, какой текст, экран или сценарий нужен. Агент внесёт изменения по правилам шаблона. Ваша часть — проверить результат и решить, что делать дальше.',
+  },
+  {
+    question: 'Как агент понимает, что менять?',
+    answer: 'В проекте заранее описано, где находятся его части, как они связаны и какие проверки запускать. Агент следует этим правилам, когда ищет нужный код, вносит изменения и проверяет результат.',
+  },
+  {
+    question: 'Что можно собрать?',
+    answer: 'Лендинг, веб-приложение, мобильное приложение и сервер с авторизацией и базой данных. Можно взять только нужную часть, а остальные подключить позже.',
+  },
+  {
+    question: 'Какие технологии уже настроены?',
+    answer: 'Astro и Tailwind CSS для лендинга, React и Vite для веб-приложения, Expo и React Native для мобильного приложения, Hono, Prisma и PostgreSQL для сервера.',
+  },
+  {
+    question: 'Как проверяются изменения агента?',
+    answer: 'Агент выбирает и запускает подходящие автоматические проверки кода, тесты или сборку проекта. Затем показывает результаты. Это помогает находить ошибки, но не заменяет ручную проверку страницы или сценария перед публикацией.',
+  },
+  {
+    question: 'Когда понадобится разработчик?',
+    answer: 'Для первых страниц и небольших изменений опыт программирования не обязателен. Перед запуском платежей, работы с персональными данными или сложных интеграций стоит привлечь разработчика.',
+  },
+]
+---
+
+<section class="border-b bg-muted/35 py-20 sm:py-24" id="faq" aria-labelledby="faq-title">
+  <div class="site-container grid gap-12 lg:grid-cols-[0.72fr_1.28fr] lg:gap-20">
+    <div class="lg:sticky lg:top-28 lg:self-start">
+      <SectionIntro
+        eyebrow="Частые вопросы"
+        title="Что знать перед началом"
+        titleId="faq-title"
+        description="Коротко о составе шаблона, работе с агентом и проверке результата."
+      />
+    </div>
+
+    <div class="overflow-hidden rounded-2xl border bg-background px-5 sm:px-7">
+      {questions.map(({ question, answer }, index) => (
+        <details class:list={['group py-5 sm:py-6', index > 0 && 'border-t']}>
+          <summary class="flex cursor-pointer list-none items-center justify-between gap-6 font-heading text-base font-semibold focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-lg [&::-webkit-details-marker]:hidden">
+            {question}
+            <span class="grid size-8 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground transition-transform duration-200 group-open:rotate-45">
+              <Plus className="size-4" aria-hidden="true" />
+            </span>
+          </summary>
+          <p class="max-w-2xl pt-4 pr-12 leading-7 text-muted-foreground">{answer}</p>
+        </details>
+      ))}
+    </div>
+  </div>
+</section>

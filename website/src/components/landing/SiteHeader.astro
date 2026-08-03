@@ -11,9 +11,10 @@ interface Props {
 
 const { primaryHref, primaryLabel } = Astro.props
 const navigation = [
-  { href: '#features', label: 'Возможности' },
-  { href: '#process', label: 'Как это работает' },
-  { href: '#results', label: 'Результаты' },
+  { href: '#features', label: 'Как работает' },
+  { href: '#launch-kit', label: 'Что входит' },
+  { href: '#scenarios', label: 'Что можно собрать' },
+  { href: '#faq', label: 'Вопросы' },
 ]
 ---
 
@@ -23,7 +24,7 @@ const navigation = [
       <BrandMark />
     </a>
 
-    <nav class="hidden items-center gap-7 md:flex" aria-label="Основная навигация">
+    <nav class="hidden items-center gap-5 md:flex lg:gap-7" aria-label="Основная навигация">
       {navigation.map((item) => (
         <a
           class="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -41,7 +42,7 @@ const navigation = [
     <details class="group relative md:hidden">
       <summary
         class="grid size-10 cursor-pointer list-none place-items-center rounded-md border bg-background text-foreground shadow-xs transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden"
-        aria-label="Открыть меню"
+        aria-label="Меню"
       >
         <Menu className="size-5 group-open:hidden" aria-hidden="true" />
         <X className="hidden size-5 group-open:block" aria-hidden="true" />

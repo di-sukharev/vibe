@@ -5,12 +5,16 @@ import { Badge } from '@/components/ui/badge'
 import { buttonVariants } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 
+import HeroScene from './HeroScene'
+
 interface Props {
   primaryHref: string
   primaryLabel: string
+  secondaryHref: string
+  secondaryLabel: string
 }
 
-const { primaryHref, primaryLabel } = Astro.props
+const { primaryHref, primaryLabel, secondaryHref, secondaryLabel } = Astro.props
 ---
 
 <section class="relative isolate overflow-hidden border-b" id="top" aria-labelledby="hero-title">
@@ -24,20 +28,20 @@ const { primaryHref, primaryLabel } = Astro.props
   ></div>
 
   <div class="site-container grid items-center gap-14 py-20 lg:grid-cols-[1.05fr_0.95fr] lg:py-28">
-    <div class="max-w-3xl">
+    <div class="min-w-0 max-w-3xl">
       <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-800">
         <Sparkles data-icon="inline-start" aria-hidden="true" />
-        Шаблон для следующего сильного продукта
+        Шаблон проекта для работы с ИИ
       </Badge>
       <h1
         class="mt-6 max-w-3xl font-heading text-5xl leading-[1.02] font-semibold tracking-[-0.04em] text-balance sm:text-6xl lg:text-7xl"
         id="hero-title"
       >
-        От идеи до работающего продукта — без лишней сложности.
+        Соберите сайт или приложение с ИИ — даже если раньше не писали код.
       </h1>
       <p class="mt-6 max-w-2xl text-lg leading-8 text-muted-foreground text-pretty sm:text-xl">
-        Чистая отправная точка для SaaS, сервиса или внутреннего продукта: понятная структура,
-        готовые интерфейсные блоки и фундамент, который легко адаптировать под ваш бренд.
+        Компания ЙЙ подготовила шаблон с исходным кодом: в нём уже есть лендинг, веб-приложение, мобильное приложение,
+        сервер, компоненты и проверки. Вы ставите задачу обычными словами, ИИ-агент меняет код и показывает результат.
       </p>
       <div class="mt-8 flex flex-col gap-3 sm:flex-row">
         <a class={buttonVariants({ className: 'h-11 px-5', size: 'lg' })} href={primaryHref}>
@@ -46,13 +50,13 @@ const { primaryHref, primaryLabel } = Astro.props
         </a>
         <a
           class={buttonVariants({ className: 'h-11 px-5', size: 'lg', variant: 'outline' })}
-          href="#process"
+          href={secondaryHref}
         >
-          Посмотреть процесс
+          {secondaryLabel}
         </a>
       </div>
       <ul class="mt-8 grid gap-3 text-sm text-muted-foreground sm:grid-cols-3" aria-label="Преимущества">
-        {['Быстрый старт', 'Адаптивный дизайн', 'Чистая архитектура'].map((item) => (
+        {['Первые задачи — без ручного программирования', 'Все части в одном проекте', 'Код остаётся у вас'].map((item) => (
           <li class="flex items-center gap-2">
             <span class="grid size-5 place-items-center rounded-full bg-emerald-100 text-emerald-800">
               <Check className="size-3.5" aria-hidden="true" />
@@ -63,48 +67,52 @@ const { primaryHref, primaryLabel } = Astro.props
       </ul>
     </div>
 
-    <div class="relative mx-auto w-full max-w-xl lg:mx-0">
+    <div class="relative mx-auto min-w-0 w-full max-w-xl lg:mx-0">
       <div class="absolute -inset-5 -z-10 rounded-[2rem] bg-emerald-200/35 blur-2xl" aria-hidden="true"></div>
       <Card className="gap-0 overflow-hidden rounded-2xl border-white/70 bg-white/90 py-0 shadow-2xl shadow-emerald-950/10 ring-1 ring-emerald-950/5">
-        <CardHeader className="flex-row items-center justify-between border-b px-5 py-4">
+        <CardHeader className="flex flex-row items-center justify-between border-b px-5 py-4">
           <div class="flex items-center gap-2" aria-hidden="true">
             <span class="size-2.5 rounded-full bg-rose-300"></span>
             <span class="size-2.5 rounded-full bg-amber-300"></span>
             <span class="size-2.5 rounded-full bg-emerald-300"></span>
           </div>
-          <span class="text-xs font-medium text-muted-foreground">northstar.app/overview</span>
+          <span class="text-xs font-medium text-muted-foreground">Ваш проект</span>
         </CardHeader>
-        <CardContent className="space-y-5 p-5 sm:p-7">
-          <div class="flex items-end justify-between gap-4">
-            <div>
-              <p class="text-xs font-medium text-muted-foreground">Общий прогресс</p>
-              <p class="mt-1 font-heading text-3xl font-semibold tracking-tight">78%</p>
+        <CardContent className="relative h-[27rem] overflow-hidden p-0 sm:h-[31rem]" data-hero-visual>
+          <HeroScene client:only="react">
+            <div
+              slot="fallback"
+              class="relative h-full min-h-[25rem] overflow-hidden bg-[radial-gradient(circle_at_center,rgba(16,185,129,0.24),transparent_34%),linear-gradient(145deg,rgba(236,253,245,0.94),rgba(255,255,255,0.3)_52%,rgba(209,250,229,0.72))]"
+              data-hero-scene-fallback
+              aria-hidden="true"
+            >
+              <div class="absolute top-1/2 left-1/2 size-40 -translate-x-1/2 -translate-y-1/2 rotate-12 rounded-[2.5rem] border border-emerald-200 bg-emerald-400/70 shadow-[0_0_80px_rgba(16,185,129,0.35)]"></div>
+              <div class="absolute top-1/2 left-1/2 size-72 -translate-x-1/2 -translate-y-1/2 rotate-12 rounded-full border border-emerald-300/60"></div>
+              <div class="absolute top-1/2 left-1/2 size-96 -translate-x-1/2 -translate-y-1/2 -rotate-12 rounded-full border border-emerald-200/50"></div>
             </div>
-            <Badge className="bg-emerald-100 text-emerald-800" variant="secondary">+18% за месяц</Badge>
+          </HeroScene>
+
+          <div class="pointer-events-none absolute top-5 right-5 left-5 flex items-center justify-between gap-3" aria-hidden="true">
+            <span class="rounded-full border border-emerald-950/10 bg-white/75 px-3 py-1.5 text-[0.68rem] font-semibold tracking-[0.14em] text-emerald-950 uppercase shadow-sm backdrop-blur-md">
+              Работа с ИИ
+            </span>
+            <span class="flex items-center gap-2 rounded-full border border-emerald-950/10 bg-white/75 px-3 py-1.5 text-xs font-medium text-emerald-950 shadow-sm backdrop-blur-md">
+              <span class="size-1.5 rounded-full bg-emerald-500 shadow-[0_0_0_4px_rgba(16,185,129,0.14)]"></span>
+              Исходный код
+            </span>
           </div>
-          <div class="h-2 overflow-hidden rounded-full bg-muted">
-            <div class="h-full w-[78%] rounded-full bg-emerald-600"></div>
-          </div>
-          <div class="grid gap-3 sm:grid-cols-3">
+
+          <div class="pointer-events-none absolute right-5 bottom-5 left-5 grid grid-cols-3 gap-2" aria-hidden="true">
             {[
-              ['24', 'Активных задач'],
-              ['8', 'Завершено'],
-              ['4.9', 'Оценка команды'],
-            ].map(([value, label]) => (
-              <div class="rounded-xl border bg-muted/40 p-4">
-                <p class="font-heading text-xl font-semibold">{value}</p>
-                <p class="mt-1 text-xs leading-5 text-muted-foreground">{label}</p>
+              ['01', 'Задача'],
+              ['02', 'Изменения'],
+              ['03', 'Проверка'],
+            ].map(([step, label]) => (
+              <div class="rounded-xl border border-white/70 bg-white/72 p-3 shadow-lg shadow-emerald-950/5 backdrop-blur-xl">
+                <p class="text-[0.62rem] font-semibold tracking-[0.16em] text-emerald-700 uppercase">{step}</p>
+                <p class="mt-1 font-heading text-sm font-semibold text-emerald-950 sm:text-base">{label}</p>
               </div>
             ))}
-          </div>
-          <div class="rounded-xl border bg-background p-4">
-            <div class="flex items-center justify-between gap-4">
-              <div>
-                <p class="text-sm font-medium">Запуск первой версии</p>
-                <p class="mt-1 text-xs text-muted-foreground">Команда движется по плану</p>
-              </div>
-              <span class="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-800">В работе</span>
-            </div>
           </div>
         </CardContent>
       </Card>

@@ -13,20 +13,27 @@ const year = new Date().getFullYear()
           <BrandMark />
         </a>
         <p class="mt-4 text-sm leading-6 text-muted-foreground">
-          Чистый шаблон публичного сайта для вашего следующего продукта.
+          Шаблон ЙЙ для создания сайтов и приложений с ИИ.
         </p>
       </div>
       <nav class="grid grid-cols-2 gap-x-10 gap-y-3 text-sm" aria-label="Навигация в подвале">
-        <a class="text-muted-foreground hover:text-foreground" href="#features">Возможности</a>
-        <a class="text-muted-foreground hover:text-foreground" href="#process">Процесс</a>
-        <a class="text-muted-foreground hover:text-foreground" href="#results">Результаты</a>
+        <a class="text-muted-foreground hover:text-foreground" href="#features">Как работает</a>
+        <a class="text-muted-foreground hover:text-foreground" href="#launch-kit">Что входит</a>
+        <a class="text-muted-foreground hover:text-foreground" href="#scenarios">Что можно собрать</a>
+        <a class="text-muted-foreground hover:text-foreground" href="#faq">Вопросы</a>
         <a class="text-muted-foreground hover:text-foreground" href="#top">Наверх</a>
       </nav>
     </div>
     <Separator className="my-8" />
     <div class="flex flex-col justify-between gap-3 text-xs text-muted-foreground sm:flex-row">
-      <p>© {year} Northstar. Шаблонный бренд.</p>
-      <p>Astro · Tailwind CSS · shadcn/ui</p>
+      <p>
+        © {year} ЙЙ · Автор шаблона —{' '}
+        <a
+          class="font-medium text-foreground underline decoration-border underline-offset-4 transition-colors hover:decoration-foreground"
+          href="https://sukharev.dev"
+        >sukharev.dev</a>
+      </p>
+      <p>Astro · React · Expo · Hono · Prisma</p>
     </div>
   </div>
 </footer>

@@ -1,0 +1,66 @@
+---
+import { BriefcaseBusiness, Rocket, Workflow } from 'lucide-react'
+
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import SectionIntro from './SectionIntro.astro'
+
+const audiences = [
+  {
+    icon: Rocket,
+    number: '01',
+    title: 'Тем, кто не программировал',
+    description: 'Чтобы собрать первый сайт или приложение небольшими понятными шагами.',
+    note: 'Начните с одной страницы',
+  },
+  {
+    icon: BriefcaseBusiness,
+    number: '02',
+    title: 'Основателям продукта',
+    description: 'Чтобы собрать первую версию, показать её пользователям и проверить идею до расширения команды.',
+    note: 'Проверьте идею на рабочей версии',
+  },
+  {
+    icon: Workflow,
+    number: '03',
+    title: 'Командам и студиям',
+    description: 'Чтобы не выбирать технологии и структуру заново для каждого нового проекта.',
+    note: 'Одинаковая основа для проектов',
+  },
+]
+---
+
+<section class="border-b bg-muted/35 py-20 sm:py-24" id="audience" aria-labelledby="audience-title">
+  <div class="site-container">
+    <div>
+      <SectionIntro
+        align="center"
+        eyebrow="Для кого"
+        title="Первая версия продукта — с опытом программирования или без"
+        titleId="audience-title"
+        description="Новичку шаблон помогает не потеряться в технических решениях, основателю — проверить идею, команде — начинать проекты на общей основе."
+      />
+    </div>
+
+    <div class="mt-12 grid gap-5 lg:grid-cols-3">
+      {audiences.map(({ icon: Icon, number, title, description, note }) => (
+        <Card className="h-full bg-background py-0">
+          <CardHeader className="flex min-h-24 flex-row items-center justify-between border-b bg-gradient-to-br from-emerald-50/80 via-background to-background p-6">
+            <span class="grid size-11 place-items-center rounded-xl bg-emerald-100 text-emerald-800 shadow-sm ring-1 ring-emerald-200/80">
+              <Icon className="size-5" aria-hidden="true" />
+            </span>
+            <span class="rounded-full border border-emerald-200/80 bg-background/90 px-3 py-1.5 font-heading text-xs font-semibold tracking-widest text-emerald-800 shadow-xs tabular-nums">
+              {number}
+            </span>
+          </CardHeader>
+          <CardContent className="flex h-full flex-col p-6">
+            <CardTitle className="text-xl">{title}</CardTitle>
+            <p class="mt-3 flex-1 leading-6 text-muted-foreground">{description}</p>
+            <p class="mt-8 border-t pt-4 text-xs font-semibold tracking-wide text-emerald-700 uppercase">
+              {note}
+            </p>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  </div>
+</section>

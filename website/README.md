@@ -7,13 +7,16 @@ The website workspace is a separate Astro project for public, SEO-facing surface
 - Astro (static SSG by default; SSR-ready per route)
 - Tailwind CSS 4 through the official Vite plugin
 - shadcn/ui registry rendered through React on the server by default
+- React Three Fiber for the isolated, decorative hero visual
 - TypeScript
 - Vite through Astro
 
 The landing page is composed from small Astro-owned sections under `src/components/landing`.
 The complete generated shadcn registry lives under `src/components/ui`; landing sections use only
-the primitives they need and do not hydrate them on the client. Keep product copy and composition in
-the landing components, global tokens in `src/styles/global.css`, and page metadata in the layout/page.
+the primitives they need and keep product content in static HTML. The hero's R3F scene is the one
+intentional client-only enhancement and remains decorative; it must not own SEO-critical copy. Keep
+product copy and composition in the landing components, global tokens in `src/styles/global.css`,
+and page metadata in the layout/page.
 
 ## Rendering model
 

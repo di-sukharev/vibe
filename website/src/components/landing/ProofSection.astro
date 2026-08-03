@@ -1,40 +1,35 @@
 ---
-import { Quote } from 'lucide-react'
-
 import { Card, CardContent } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import SectionIntro from './SectionIntro.astro'
 
 const metrics = [
-  ['4×', 'быстрее до первого прототипа'],
-  ['0', 'обязательного клиентского JS'],
-  ['100%', 'контента доступно в HTML'],
+  ['Продолжить', 'ставить агенту новые задачи в том же проекте'],
+  ['Передать', 'исходный код разработчику без переноса из конструктора'],
+  ['Опубликовать', 'разместить сайт и сервер на хостинге, а мобильное приложение — в магазинах приложений'],
 ]
 ---
 
 <section class="border-b py-20 sm:py-24" id="results" aria-labelledby="results-title">
   <div class="site-container">
-    <div id="results-title">
+    <div>
       <SectionIntro
         align="center"
-        eyebrow="Результат"
-        title="Основа, которую не придётся выбрасывать после демо"
-        description="Лендинг остаётся простым для редактирования, быстрым для посетителя и понятным для следующего инженера, который продолжит продукт."
+        eyebrow="Что останется у вас"
+        title="Исходный код, который можно развивать дальше"
+        titleId="results-title"
+        description="Проект можно запускать локально, размещать на хостинге и передавать разработчику. Вы не привязаны к закрытому конструктору."
       />
     </div>
 
     <div class="mt-12 grid gap-5 lg:grid-cols-[1.15fr_0.85fr]">
       <Card className="justify-between bg-primary text-primary-foreground ring-primary/10">
         <CardContent className="flex h-full flex-col justify-between gap-10 p-7 sm:p-9">
-          <Quote className="size-9 text-emerald-300" aria-hidden="true" />
-          <blockquote class="font-heading text-2xl leading-snug font-medium text-balance sm:text-3xl">
-            «Хороший шаблон не диктует продукт. Он убирает повторяющуюся работу и оставляет команде
-            время на решения, которые действительно отличают сервис.»
-          </blockquote>
-          <div>
-            <p class="font-medium">Команда Northstar</p>
-            <p class="mt-1 text-sm text-primary-foreground/65">Шаблонный отзыв — замените своим</p>
-          </div>
+          <p class="text-sm font-semibold tracking-wide text-emerald-300 uppercase">Без закрытого конструктора</p>
+          <p class="font-heading text-2xl leading-snug font-medium text-balance sm:text-3xl">
+            Проект состоит из обычных исходных файлов. Их можно хранить в своём репозитории,
+            открывать в редакторе и передавать разработчику.
+          </p>
         </CardContent>
       </Card>
 

@@ -1,0 +1,94 @@
+---
+import { Code2, Gauge, Layers3, Search } from 'lucide-react'
+
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import SectionIntro from './SectionIntro.astro'
+
+const kitItems = [
+  {
+    icon: Layers3,
+    title: 'Четыре части продукта',
+    description: 'Лендинг, веб-приложение, мобильное приложение и сервер находятся в одном проекте.',
+  },
+  {
+    icon: Code2,
+    title: 'Инструкции для агента',
+    description: 'В проекте описано, где менять код, как связаны его части и какие проверки запускать.',
+  },
+  {
+    icon: Search,
+    title: 'Компоненты и стили',
+    description: 'Готовые секции, формы и общие стили избавляют от настройки каждого элемента с нуля.',
+  },
+  {
+    icon: Gauge,
+    title: 'Проверки изменений',
+    description: 'Автоматические проверки и тесты помогают находить ошибки после изменений.',
+  },
+]
+
+const firstSetup = [
+  ['Название и тексты', 'Заменить'],
+  ['Цвета и шрифты', 'Выбрать'],
+  ['Первая функция', 'Описать'],
+  ['Публикация', 'Настроить позже'],
+]
+---
+
+<section class="border-b py-20 sm:py-24" id="launch-kit" aria-labelledby="launch-kit-title">
+  <div class="site-container grid items-center gap-12 lg:grid-cols-[1fr_0.9fr] lg:gap-20">
+    <div>
+      <div>
+        <SectionIntro
+          eyebrow="Что входит в шаблон"
+          title="Начните с продукта, а не с настройки проекта"
+          titleId="launch-kit-title"
+          description="Структура и проверки уже настроены. Выберите нужную часть проекта и добавляйте функции по одной."
+        />
+      </div>
+
+      <div class="mt-10 grid gap-x-8 gap-y-7 sm:grid-cols-2">
+        {kitItems.map(({ icon: Icon, title, description }) => (
+          <div class="grid grid-cols-[auto_1fr] gap-3">
+            <span class="mt-0.5 grid size-9 place-items-center rounded-lg bg-emerald-100 text-emerald-800">
+              <Icon className="size-4.5" aria-hidden="true" />
+            </span>
+            <div>
+              <h3 class="font-heading font-semibold">{title}</h3>
+              <p class="mt-1.5 text-sm leading-6 text-muted-foreground">{description}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+
+    <div class="relative mx-auto w-full max-w-lg">
+      <div class="absolute -inset-6 -z-10 rounded-[2.5rem] bg-emerald-200/35 blur-3xl" aria-hidden="true"></div>
+      <Card className="gap-0 overflow-hidden rounded-2xl bg-primary py-0 text-primary-foreground shadow-2xl shadow-emerald-950/15 ring-0">
+        <CardHeader className="flex flex-row items-center justify-between border-b border-white/10 px-6 py-5">
+          <div>
+            <p class="text-xs text-primary-foreground/60">Перед первой задачей</p>
+            <p class="mt-1 font-heading text-lg font-semibold">Что настроить под себя</p>
+          </div>
+          <Badge className="bg-emerald-300 text-emerald-950">4 пункта</Badge>
+        </CardHeader>
+        <CardContent className="p-6">
+          <ul class="space-y-3">
+            {firstSetup.map(([label, action], index) => (
+              <li class="flex items-center justify-between gap-4 rounded-xl border border-white/10 bg-white/5 px-4 py-3.5">
+                <span class="flex items-center gap-3 text-sm">
+                  <span class="grid size-6 place-items-center rounded-full bg-white/10 text-xs text-white/70 tabular-nums">
+                    {index + 1}
+                  </span>
+                  {label}
+                </span>
+                <span class="text-xs font-medium text-emerald-300">{action}</span>
+              </li>
+            ))}
+          </ul>
+        </CardContent>
+      </Card>
+    </div>
+  </div>
+</section>

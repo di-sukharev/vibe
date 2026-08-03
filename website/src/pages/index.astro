@@ -1,33 +1,46 @@
 ---
+import AudienceSection from '@/components/landing/AudienceSection.astro'
 import CtaSection from '@/components/landing/CtaSection.astro'
+import FaqSection from '@/components/landing/FaqSection.astro'
 import FeatureGrid from '@/components/landing/FeatureGrid.astro'
 import HeroSection from '@/components/landing/HeroSection.astro'
+import LaunchKitSection from '@/components/landing/LaunchKitSection.astro'
 import ProcessSection from '@/components/landing/ProcessSection.astro'
 import ProofSection from '@/components/landing/ProofSection.astro'
+import ScenariosSection from '@/components/landing/ScenariosSection.astro'
 import SiteFooter from '@/components/landing/SiteFooter.astro'
 import SiteHeader from '@/components/landing/SiteHeader.astro'
 import BaseLayout from '@/layouts/BaseLayout.astro'
+import { getSecondaryAction, TEMPLATE_ACTION } from '@/lib/landing-actions'
 
-const title = 'Northstar — чистый старт для сильного продукта'
+const title = 'ЙЙ — шаблон для создания сайтов и приложений с ИИ'
 const description =
-  'Модульный шаблон публичного сайта на Astro, Tailwind CSS и shadcn/ui: быстрый, адаптивный и готовый к развитию.'
+  'Соберите лендинг, веб- или мобильное приложение с ИИ. Технологии, структура проекта, компоненты и проверки уже настроены.'
 const publicWebsiteUrl = import.meta.env.PUBLIC_WEBSITE_URL
 const publicWebappUrl = import.meta.env.PUBLIC_WEBAPP_URL
 const canonicalUrl = publicWebsiteUrl
   ? new URL(Astro.url.pathname, publicWebsiteUrl).toString()
   : undefined
-const primaryHref = publicWebappUrl ?? '#features'
-const primaryLabel = publicWebappUrl ? 'Открыть приложение' : 'Посмотреть возможности'
+const secondaryAction = getSecondaryAction(publicWebappUrl)
 ---
 
 <BaseLayout canonicalUrl={canonicalUrl} description={description} title={title}>
-  <SiteHeader primaryHref={primaryHref} primaryLabel={primaryLabel} />
+  <SiteHeader primaryHref={TEMPLATE_ACTION.href} primaryLabel={TEMPLATE_ACTION.label} />
   <main id="main-content">
-    <HeroSection primaryHref={primaryHref} primaryLabel={primaryLabel} />
+    <HeroSection
+      primaryHref={TEMPLATE_ACTION.href}
+      primaryLabel={TEMPLATE_ACTION.label}
+      secondaryHref={secondaryAction.href}
+      secondaryLabel={secondaryAction.label}
+    />
     <FeatureGrid />
+    <AudienceSection />
+    <LaunchKitSection />
     <ProcessSection />
+    <ScenariosSection />
     <ProofSection />
-    <CtaSection primaryHref={primaryHref} primaryLabel={primaryLabel} />
+    <FaqSection />
+    <CtaSection primaryHref={TEMPLATE_ACTION.href} primaryLabel={TEMPLATE_ACTION.label} />
   </main>
   <SiteFooter />
 </BaseLayout>
