@@ -699,7 +699,7 @@ test('does not let stale Google Play expiration overwrite a fresher active entit
     productId: 'ios_premium',
     originalTransactionId: 'original-ios',
     transactionId: 'transaction-ios',
-    expiresAt: new Date('2026-08-01T00:00:00.000Z'),
+    expiresAt: new Date('2099-08-01T00:00:00.000Z'),
     willAutoRenew: true,
     updatedAt: new Date('2026-06-01T00:00:00.000Z'),
   }
