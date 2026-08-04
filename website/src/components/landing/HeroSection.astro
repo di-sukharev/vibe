@@ -69,34 +69,36 @@ const { primaryHref, primaryLabel, secondaryHref, secondaryLabel } = Astro.props
 
     <div class="relative mx-auto min-w-0 w-full max-w-xl lg:mx-0">
       <div class="absolute -inset-5 -z-10 rounded-[2rem] bg-emerald-200/35 blur-2xl" aria-hidden="true"></div>
-      <Card className="gap-0 overflow-hidden rounded-2xl border-white/70 bg-white/90 py-0 shadow-2xl shadow-emerald-950/10 ring-1 ring-emerald-950/5">
-        <CardHeader className="flex flex-row items-center justify-between border-b px-5 py-4">
+      <Card className="gap-0 overflow-hidden rounded-2xl border-emerald-950/25 bg-[#171c1a] py-0 shadow-2xl shadow-emerald-950/15 ring-1 ring-emerald-950/10">
+        <CardHeader className="flex flex-row items-center justify-between border-b border-white/10 bg-[#121715] px-5 py-4">
           <div class="flex items-center gap-2" aria-hidden="true">
             <span class="size-2.5 rounded-full bg-rose-300"></span>
             <span class="size-2.5 rounded-full bg-amber-300"></span>
             <span class="size-2.5 rounded-full bg-emerald-300"></span>
           </div>
-          <span class="text-xs font-medium text-muted-foreground">Ваш проект</span>
+          <span class="text-xs font-medium text-white/55">Ваш проект</span>
         </CardHeader>
         <CardContent className="relative h-[27rem] overflow-hidden p-0 sm:h-[31rem]" data-hero-visual>
           <HeroScene client:only="react">
             <div
               slot="fallback"
-              class="relative h-full min-h-[25rem] overflow-hidden bg-[radial-gradient(circle_at_center,rgba(16,185,129,0.24),transparent_34%),linear-gradient(145deg,rgba(236,253,245,0.94),rgba(255,255,255,0.3)_52%,rgba(209,250,229,0.72))]"
+              class="relative h-full min-h-[25rem] overflow-hidden bg-[radial-gradient(circle_at_center,rgba(52,211,153,0.12),transparent_44%),linear-gradient(145deg,#1e2522,#121715)]"
               data-hero-scene-fallback
               aria-hidden="true"
             >
-              <div class="absolute top-1/2 left-1/2 size-40 -translate-x-1/2 -translate-y-1/2 rotate-12 rounded-[2.5rem] border border-emerald-200 bg-emerald-400/70 shadow-[0_0_80px_rgba(16,185,129,0.35)]"></div>
-              <div class="absolute top-1/2 left-1/2 size-72 -translate-x-1/2 -translate-y-1/2 rotate-12 rounded-full border border-emerald-300/60"></div>
-              <div class="absolute top-1/2 left-1/2 size-96 -translate-x-1/2 -translate-y-1/2 -rotate-12 rounded-full border border-emerald-200/50"></div>
+              <div class="absolute top-1/2 left-1/2 h-72 w-80 -translate-x-1/2 -translate-y-1/2 rotate-6 rounded-[42%] border-2 border-white/55"></div>
+              <div class="absolute top-1/2 left-1/2 h-48 w-60 -translate-x-1/2 -translate-y-1/2 -rotate-6 rounded-[40%] border border-emerald-200/50"></div>
+              <div class="absolute top-1/2 left-1/2 h-24 w-72 -translate-x-1/2 -translate-y-1/2 rotate-3 rounded-[50%] border-2 border-white/65"></div>
+              <div class="absolute top-1/2 left-1/2 size-16 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white/70"></div>
+              <div class="absolute top-1/2 left-1/2 size-6 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-emerald-200/70"></div>
             </div>
           </HeroScene>
 
           <div class="pointer-events-none absolute top-5 right-5 left-5 flex items-center justify-between gap-3" aria-hidden="true">
-            <span class="rounded-full border border-emerald-950/10 bg-white/75 px-3 py-1.5 text-[0.68rem] font-semibold tracking-[0.14em] text-emerald-950 uppercase shadow-sm backdrop-blur-md">
+            <span class="rounded-full border border-white/10 bg-black/25 px-3 py-1.5 text-[0.68rem] font-semibold tracking-[0.14em] text-white/75 uppercase shadow-sm backdrop-blur-md">
               Работа с ИИ
             </span>
-            <span class="flex items-center gap-2 rounded-full border border-emerald-950/10 bg-white/75 px-3 py-1.5 text-xs font-medium text-emerald-950 shadow-sm backdrop-blur-md">
+            <span class="flex items-center gap-2 rounded-full border border-white/10 bg-black/25 px-3 py-1.5 text-xs font-medium text-white/75 shadow-sm backdrop-blur-md">
               <span class="size-1.5 rounded-full bg-emerald-500 shadow-[0_0_0_4px_rgba(16,185,129,0.14)]"></span>
               Исходный код
             </span>
@@ -108,9 +110,9 @@ const { primaryHref, primaryLabel, secondaryHref, secondaryLabel } = Astro.props
               ['02', 'Изменения'],
               ['03', 'Проверка'],
             ].map(([step, label]) => (
-              <div class="rounded-xl border border-white/70 bg-white/72 p-3 shadow-lg shadow-emerald-950/5 backdrop-blur-xl">
-                <p class="text-[0.62rem] font-semibold tracking-[0.16em] text-emerald-700 uppercase">{step}</p>
-                <p class="mt-1 font-heading text-sm font-semibold text-emerald-950 sm:text-base">{label}</p>
+              <div class="rounded-xl border border-white/10 bg-black/30 p-3 shadow-lg shadow-black/10 backdrop-blur-xl">
+                <p class="text-[0.62rem] font-semibold tracking-[0.16em] text-emerald-300 uppercase">{step}</p>
+                <p class="mt-1 font-heading text-sm font-semibold text-white/90 sm:text-base">{label}</p>
               </div>
             ))}
           </div>
