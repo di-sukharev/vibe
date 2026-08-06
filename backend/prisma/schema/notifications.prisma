@@ -1,0 +1,118 @@
+// Expo push delivery. Optional capability: delete this file and the matching marked block in
+// base.prisma to remove push persistence entirely.
+
+enum PushTokenPlatform {
+  android
+  ios
+
+  @@map("push_token_platform")
+}
+
+enum PushNotificationOutboxStatus {
+  pending
+  processing
+  sent
+  failed
+  skipped
+
+  @@map("push_notification_outbox_status")
+}
+
+enum PushDeliveryStatus {
+  pending
+  sent
+  delivered
+  failed
+  skipped
+
+  @@map("push_delivery_status")
+}
+
+model PushToken {
+  id                    String             @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  userId                String             @map("user_id") @db.Uuid
+  installationId        String?            @unique(map: "push_tokens_installation_id_key") @map("installation_id") @db.Uuid
+  registrationSessionId String?            @map("registration_session_id") @db.Uuid
+  expoPushToken         String             @unique @map("expo_push_token")
+  platform              PushTokenPlatform?
+  deviceId              String?            @map("device_id")
+  disabledAt            DateTime?          @map("disabled_at")
+  createdAt             DateTime           @default(now()) @map("created_at")
+  updatedAt             DateTime           @updatedAt @map("updated_at")
+  user                  User               @relation(fields: [userId], references: [id], onDelete: Cascade, map: "push_tokens_user_id_fkey")
+  installation          PushInstallation?  @relation(fields: [installationId], references: [id], onDelete: Cascade, map: "push_tokens_installation_id_fkey")
+
+  @@index([userId, disabledAt], map: "push_tokens_user_id_disabled_at_idx")
+  @@index([registrationSessionId], map: "push_tokens_registration_session_id_idx")
+  @@map("push_tokens")
+}
+
+model PushInstallation {
+  id                  String      @id @db.Uuid
+  ownerUserId         String      @map("owner_user_id") @db.Uuid
+  authoritySecretHash String?     @map("authority_secret_hash")
+  generation          Int
+  active              Boolean     @default(false)
+  createdAt           DateTime    @default(now()) @map("created_at")
+  updatedAt           DateTime    @updatedAt @map("updated_at")
+  owner               User        @relation(fields: [ownerUserId], references: [id], onDelete: Cascade, map: "push_installations_owner_user_id_fkey")
+  pushToken           PushToken?
+
+  @@index([ownerUserId], map: "push_installations_owner_user_id_idx")
+  @@map("push_installations")
+}
+
+model PushNotificationOutbox {
+  id           String                       @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  userId       String                       @map("user_id") @db.Uuid
+  dedupeKey    String                       @map("dedupe_key")
+  title        String
+  body         String
+  data         Json?
+  status       PushNotificationOutboxStatus @default(pending)
+  scheduledFor DateTime                     @default(now()) @map("scheduled_for")
+  attempts     Int                          @default(0)
+  lastError    String?                      @map("last_error")
+  processingToken String?                   @map("processing_token") @db.Uuid
+  processedAt  DateTime?                    @map("processed_at")
+  createdAt    DateTime                     @default(now()) @map("created_at")
+  updatedAt    DateTime                     @updatedAt @map("updated_at")
+  user         User                         @relation(fields: [userId], references: [id], onDelete: Cascade, map: "push_notification_outbox_user_id_fkey")
+  deliveries   PushDelivery[]
+
+  @@unique([userId, dedupeKey], map: "push_notification_outbox_user_id_dedupe_key_key")
+  @@index([status, scheduledFor], map: "push_notification_outbox_status_scheduled_for_idx")
+  @@index([userId], map: "push_notification_outbox_user_id_idx")
+  @@map("push_notification_outbox")
+}
+
+model PushDelivery {
+  id                   String                 @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  outboxId             String                 @map("outbox_id") @db.Uuid
+  userId               String                 @map("user_id") @db.Uuid
+  pushTokenId          String?                @map("push_token_id") @db.Uuid
+  expoPushToken        String?                @map("expo_push_token")
+  registrationInstallationId String?          @map("registration_installation_id") @db.Uuid
+  registrationGeneration     Int?             @map("registration_generation")
+  registrationSessionId      String?          @map("registration_session_id") @db.Uuid
+  status               PushDeliveryStatus     @default(pending)
+  ticketId             String?                @map("ticket_id")
+  providerStatus       String?                @map("provider_status")
+  providerErrorCode    String?                @map("provider_error_code")
+  errorMessage         String?                @map("error_message")
+  receiptCheckAttempts Int                    @default(0) @map("receipt_check_attempts")
+  receiptNextCheckAt   DateTime?              @map("receipt_next_check_at")
+  receiptClaimToken    String?                @map("receipt_claim_token") @db.Uuid
+  receiptClaimedAt     DateTime?              @map("receipt_claimed_at")
+  receiptCheckedAt     DateTime?              @map("receipt_checked_at")
+  createdAt            DateTime               @default(now()) @map("created_at")
+  updatedAt            DateTime               @updatedAt @map("updated_at")
+  outbox               PushNotificationOutbox @relation(fields: [outboxId], references: [id], onDelete: Cascade, map: "push_deliveries_outbox_id_fkey")
+  user                 User                   @relation(fields: [userId], references: [id], onDelete: Cascade, map: "push_deliveries_user_id_fkey")
+
+  @@unique([outboxId, pushTokenId], map: "push_deliveries_outbox_id_push_token_id_key")
+  @@index([ticketId, status], map: "push_deliveries_ticket_id_status_idx")
+  @@index([status, receiptNextCheckAt], map: "push_deliveries_status_receipt_next_check_at_idx")
+  @@index([userId, createdAt], map: "push_deliveries_user_id_created_at_idx")
+  @@map("push_deliveries")
+}

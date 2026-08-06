@@ -151,9 +151,8 @@ Use these public local demo accounts to inspect both application roles:
 | User | `user@example.com` | `local-user-password` | `/app` |
 
 The command is idempotent, rejects `NODE_ENV=production`, and accepts only a
-loopback PostgreSQL URL. On the `mobile` branch it also gives the ordinary demo
-user a local-only active premium entitlement so mobile opens its main component
-surface immediately; mobile has no administrator UI. Deployment uses
+loopback PostgreSQL URL. It grants no subscription entitlement: signing in never
+depends on billing. Mobile has no administrator UI. Deployment uses
 `db:deploy` and the separate `ADMIN_SEED_*` production bootstrap variables; it
 never runs this development seed. The values committed in `.env.example` are
 public local defaults, so do not reuse them in a deployed environment.

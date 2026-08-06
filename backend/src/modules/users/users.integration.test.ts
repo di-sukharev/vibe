@@ -466,21 +466,12 @@ maybeDescribe('users and admin API integration', () => {
       expect(response.status).toBe(200)
       const body = await response.json()
       expect(body.user.role).toBe(role)
-      expect(body.user.subscription.isActive).toBe(role === 'user')
     }
 
-    expect(await prisma.subscriptionEntitlement.findUniqueOrThrow({
-      where: { userId: (await prisma.user.findUniqueOrThrow({
-        where: { email: accounts.user.email },
-        select: { id: true },
-      })).id },
-      select: { environment: true, expiresAt: true, platform: true, state: true },
-    })).toEqual({
-      environment: 'DevelopmentSeed',
-      expiresAt: null,
-      platform: null,
-      state: 'active',
-    })
+    // capability:billing:start
+    // The demo login must not depend on billing: seeding grants no entitlement at all.
+    expect(await prisma.subscriptionEntitlement.count()).toBe(0)
+    // capability:billing:end
   })
 
   test('concurrent first development seeds converge on one admin and user', async () => {

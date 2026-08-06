@@ -22,7 +22,6 @@ import type {
   Passwords,
   RefreshTokens,
   SocialIdentities,
-  SubscriptionReader,
 } from './ports'
 
 type AuthServiceDependencies = {
@@ -41,7 +40,6 @@ type AuthServiceDependencies = {
   refreshTokens: RefreshTokens
   repository: AuthRepository
   socialIdentities?: SocialIdentities
-  subscriptionReader: SubscriptionReader
 }
 
 export class AuthService {
@@ -387,8 +385,8 @@ export class AuthService {
     return new Date(now.getTime() - this.dependencies.sessionAbsoluteTtlDays * 24 * 60 * 60 * 1000)
   }
 
-  private async userDto(user: AuthUserRecord) {
-    return toUserDto(user, await this.dependencies.subscriptionReader(user.id))
+  private userDto(user: AuthUserRecord) {
+    return toUserDto(user)
   }
 }
 

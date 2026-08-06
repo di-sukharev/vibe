@@ -2,7 +2,6 @@ import type {
   PasswordResetRequestResponse,
   RegisterPayload,
   SocialAuthProvider,
-  SubscriptionSnapshot,
 } from '@web-app-demo/contracts'
 
 import type { TaskDeferrer } from '../../../background-tasks'
@@ -149,9 +148,6 @@ export type SocialIdentities = {
   verify(provider: SocialAuthProvider, idToken: string): Promise<SocialIdentity>
 }
 
-export type SubscriptionReader = (userId: string) =>
-  | SubscriptionSnapshot
-  | Promise<SubscriptionSnapshot>
 export type LogoutCleanupStore = {
   removePushTokens(userId: string, expoPushTokens: string[]): Promise<void>
 }

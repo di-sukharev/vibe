@@ -17,18 +17,6 @@ const user = {
   displayName: 'User',
   role: 'user',
   createdAt: '2026-07-20T00:00:00.000Z',
-  subscription: {
-    entitlement: 'premium',
-    isActive: false,
-    state: 'inactive',
-    platform: null,
-    productId: null,
-    originalTransactionId: null,
-    transactionId: null,
-    expiresAt: null,
-    willAutoRenew: null,
-    updatedAt: null,
-  },
 } as const
 
 describe('user and admin contracts', () => {

@@ -186,7 +186,7 @@ MAESTRO_SKIP_E2E_ENV_PREFLIGHT=1
 MAESTRO_DRY_RUN=1
 ```
 
-Mobile E2E uses `testID` selectors from `mobile/src/constants/testIds.ts`. New flows should add stable selectors in UI instead of relying on fragile coordinates. Text selectors are acceptable for final user-visible messages. The mobile auth smoke checks register, the inactive-subscriber paywall, session restore after app relaunch, and logout. Any product-specific flow that depends on fixture data, such as an order flow that needs an available catalog item, should perform a preflight through the backend API before Maestro starts. Fail with a clear setup error when required test data is missing instead of falling over midway through the UI.
+Mobile E2E uses `testID` selectors from `mobile/src/constants/testIds.ts`. New flows should add stable selectors in UI instead of relying on fragile coordinates. Text selectors are acceptable for final user-visible messages. The mobile auth smoke checks register, the signed-in dashboard, session restore after app relaunch, and logout. Any product-specific flow that depends on fixture data, such as an order flow that needs an available catalog item, should perform a preflight through the backend API before Maestro starts. Fail with a clear setup error when required test data is missing instead of falling over midway through the UI.
 
 Before changing Maestro startup, selectors, or E2E-only app behavior, run:
 

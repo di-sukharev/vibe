@@ -88,7 +88,7 @@ Answer these only when payments are active above; otherwise mark the rows `n/a`.
 | Recurring subscription, one-off purchase, or both? | _unanswered_ |
 | What stops working when someone does not pay? | _unanswered_ |
 
-Whatever this project ends up with, the ledger below is what states it. Browser payments (Stripe and similar) are built as a new module against the answers above and recorded there once they exist. On the mobile template line, where App Store and Google Play subscriptions ship as working code, declining payments means deleting that code during setup and recording it as `removed`. Payments are never half-present, and are never reintroduced on a guess.
+Whatever this project ends up with, the ledger below is what states it. App Store and Google Play subscriptions ship here as working code, but nothing is gated behind them: the template does not assume the product sells anything. If payments are not needed, run `bun run feature:billing:remove`, follow the manual steps it prints, and set the ledger row to `removed`. Browser payments (Stripe and similar) are built as a new module against the answers above. Payments are never half-present, and are never reintroduced on a guess.
 
 ## 7. Deployment
 
@@ -132,9 +132,9 @@ A capability with no row is `absent` by default. Add the row instead of assuming
 | Admin roles | included | Roles and seeding in `backend`; admin UI in `webapp`. |
 | Password reset email delivery | available | The flow is built, but no adapter is passed to `createApp` in `backend/src/index.ts`, so the disabled one is used and no email is ever sent. |
 | File/media storage | available | Service layer only. Needs DigitalOcean Spaces env, plus routes, contracts, and UI before users can upload anything. |
-| Payments / subscriptions | absent | No payment code here. Store subscriptions come from the mobile template line. |
-| Push notifications | absent | No push code here. Expo Push comes from the mobile template line. |
-| Social sign-in (Apple / Google) | absent | No social auth here. It comes from the mobile template line. |
+| Payments / subscriptions | included | App Store + Google Play subscriptions. Nothing is gated behind them by default. If the product does not sell anything, run `bun run feature:billing:remove` and set this row to `removed`. |
+| Push notifications | available | Expo Push is wired but inert until the project has an EAS project id and configured credentials. |
+| Social sign-in (Apple / Google) | available | Code is present; needs Apple/Google client configuration before it works. |
 | Real-time / WebSockets | absent | Requires an explicit product need. |
 | Scheduled background jobs | available | `backend/src/cron.ts` runs `auth:sessions:cleanup` when invoked, but nothing schedules it: export `DO_BACKEND_CRON_*` before `bun run deploy:do:specs`, or add a trigger per `docs/YANDEX_CLOUD.md`. Until then stale sessions and expired reset tokens are never deleted. |
 

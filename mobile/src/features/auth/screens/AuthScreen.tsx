@@ -98,7 +98,7 @@ export function AuthScreen() {
   }
 
   if (auth.user) {
-    return <Redirect href={(auth.user.subscription.isActive ? '/components' : '/paywall') as Href} />;
+    return <Redirect href={'/components' as Href} />;
   }
 
   return (

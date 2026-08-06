@@ -1,16 +1,16 @@
 import type { DbClient } from '../src/db'
-import { bootstrapDevelopmentEntitlement } from '../src/modules/billing/infrastructure/development-entitlement'
 import {
   bootstrapDevelopmentAccounts,
   type DevelopmentSeedAccounts,
 } from '../src/modules/users/infrastructure/development-bootstrap'
 
+// The seed deliberately grants no entitlement: reaching the app must not depend on a
+// subscription, so products that never add billing still get a working demo login.
 export async function bootstrapDevelopmentData(
   db: DbClient,
   accounts: DevelopmentSeedAccounts,
 ) {
   const seeded = await bootstrapDevelopmentAccounts(db, accounts)
-  await bootstrapDevelopmentEntitlement(db, seeded.user.id)
 
   return {
     admin: { email: seeded.admin.email, role: seeded.admin.role },

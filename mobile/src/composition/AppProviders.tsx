@@ -12,7 +12,9 @@ import {
   markPendingLogout,
   setStoredRefreshToken,
 } from '@/features/auth';
+// capability:billing:start
 import { IapProvider } from '@/features/billing';
+// capability:billing:end
 import {
   PushNotificationsProvider,
   PushRegistrationCoordinator,

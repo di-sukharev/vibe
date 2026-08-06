@@ -38,7 +38,6 @@ export function createBillingModule(input: {
         accessToken: string | undefined,
       ) => Promise<AuthenticatedPrincipal>,
     ) => createIapRoutes({ authenticateAccessToken, service }),
-    getSubscription: (userId: string) => service.getSubscription(userId),
     reconcileGooglePlayBatch: (request: {
       before: Date
       deadline: Date

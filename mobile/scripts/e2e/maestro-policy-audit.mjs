@@ -13,11 +13,13 @@ const authComponentsPath = resolve(
   'src/features/auth/components/auth-components.tsx',
 )
 const screenShellPath = resolve(mobileRoot, 'src/components/dashboard/ScreenShell.tsx')
+// capability:billing:start
 const paywallPath = resolve(mobileRoot, 'src/features/billing/screens/PaywallScreen.tsx')
 const paywallComponentsPath = resolve(
   mobileRoot,
   'src/features/billing/components/paywall-components.tsx',
 )
+// capability:billing:end
 
 const requiredEnvKeys = [
   'APP_ID',
@@ -108,6 +110,7 @@ export function authScreenUsesKeyboardAwareShell(source) {
   return usesKeyboardAwareShell
 }
 
+// capability:billing:start
 export function nativePaywallLogoutHasTestId(screenSource, componentsSource) {
   const screenFile = ts.createSourceFile(
     paywallPath,
@@ -168,14 +171,17 @@ export function nativePaywallLogoutHasTestId(screenSource, componentsSource) {
 
   return screenWiresLogout && componentExposesTestId
 }
+// capability:billing:end
 
 export function runMaestroPolicyAudit() {
   const flow = readRequiredFile(flowPath)
   const app = readRequiredFile(appPath)
   const authComponents = readRequiredFile(authComponentsPath)
   const screenShell = readRequiredFile(screenShellPath)
+  // capability:billing:start
   const paywall = readRequiredFile(paywallPath)
   const paywallComponents = readRequiredFile(paywallComponentsPath)
+  // capability:billing:end
   const envKeys = declaredEnvKeys(readRequiredFile(envExamplePath))
   const missingEnvKeys = requiredEnvKeys.filter((key) => !envKeys.has(key))
 
@@ -198,8 +204,8 @@ export function runMaestroPolicyAudit() {
     'auth-smoke.yaml must reopen DEV_CLIENT_URL after stopApp to avoid landing on the simulator home screen',
   )
   assert(
-    flow.includes('id: ${PAYWALL_SCREEN_ID}'),
-    'auth-smoke.yaml must assert the inactive subscriber paywall after registration and restore',
+    flow.includes('id: ${DASHBOARD_ID}'),
+    'auth-smoke.yaml must assert the signed-in dashboard after registration and restore',
   )
   assert(!flow.includes('hideKeyboard'), 'auth-smoke.yaml must not use flaky hideKeyboard')
   assert(
@@ -234,10 +240,12 @@ export function runMaestroPolicyAudit() {
       screenShell.includes('keyboardAvoiding={keyboardAware}'),
     'auth form must use the keyboard-aware ScreenShell with on-drag dismissal for iOS Maestro stability',
   )
+  // capability:billing:start
   assert(
     nativePaywallLogoutHasTestId(paywall, paywallComponents),
     'native PaywallScreen logout action must expose TEST_IDS.auth.logoutButton through PaywallAccountActions',
   )
+  // capability:billing:end
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

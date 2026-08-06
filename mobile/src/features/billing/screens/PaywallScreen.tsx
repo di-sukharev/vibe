@@ -5,6 +5,7 @@ import { ScreenLoader } from '@/components/screen-states';
 import { TEST_IDS } from '@/constants/testIds';
 import { AuthSessionErrorNotice, useAuth } from '@/features/auth';
 import { useSubscriptionIap } from '../provider';
+import { paywallViewState } from './paywall-view-state';
 import {
   PaywallAccountActions,
   PaywallActions,
@@ -17,19 +18,40 @@ export function PaywallScreen() {
   const router = useRouter();
   const iap = useSubscriptionIap();
 
-  if (auth.isBootstrapping) {
+  const viewState = paywallViewState({
+    isBootstrapping: auth.isBootstrapping,
+    isSignedIn: Boolean(auth.user),
+    isStoreSupported: iap.isSupported,
+    isSubscribed: Boolean(iap.subscription?.isActive),
+  });
+
+  if (viewState === 'loading') {
     return <ScreenLoader />;
   }
 
-  if (!auth.user) {
+  if (viewState === 'signed-out') {
     return <Redirect href="/" />;
   }
 
-  if (auth.user.subscription.isActive) {
-    return <Redirect href="/components" />;
+  if (viewState === 'subscribed') {
+    return (
+      <ScreenShell
+        centered
+        description="Your subscription is active. Manage or review it any time from your profile."
+        eyebrow="Premium"
+        testID={TEST_IDS.paywall.screen}
+        title="You're subscribed.">
+        <AuthSessionErrorNotice />
+        <PaywallAccountActions
+          isLoggingOut={auth.isTransitioning}
+          onLogout={() => void auth.logout().catch(() => undefined)}
+          onProfile={() => router.push('/profile')}
+        />
+      </ScreenShell>
+    );
   }
 
-  if (!iap.isSupported) {
+  if (viewState === 'unsupported') {
     return (
       <ScreenShell
         centered

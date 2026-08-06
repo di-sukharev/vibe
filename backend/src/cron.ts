@@ -1,5 +1,7 @@
 import { createBackgroundRuntime, type BackendRuntime } from './runtime'
+// capability:billing:start
 import { createBillingModule } from './modules/billing'
+// capability:billing:end
 import { createNotificationsModule } from './modules/notifications'
 
 type CronTask = (runtime: BackendRuntime, now: Date) => Promise<void>

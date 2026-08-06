@@ -1,0 +1,79 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id                      String                   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  email                   String                   @unique
+  passwordHash            String?                  @map("password_hash")
+  displayName             String?                  @map("display_name")
+  role                    UserRole                 @default(user)
+  appleSubject            String?                  @unique @map("apple_subject")
+  googleSubject           String?                  @unique @map("google_subject")
+  createdAt               DateTime                 @default(now()) @map("created_at")
+  updatedAt               DateTime                 @updatedAt @map("updated_at")
+  sessions                AuthSession[]
+
+  // capability:billing:start - removed together with prisma/schema/billing.prisma
+  subscriptionEntitlement SubscriptionEntitlement?
+  appStoreTransactions    AppStoreTransaction[]
+  googlePlaySubscriptions GooglePlaySubscriptionPurchase[]
+  // capability:billing:end
+
+  // capability:notifications:start - removed together with prisma/schema/notifications.prisma
+  pushInstallations       PushInstallation[]
+  pushTokens              PushToken[]
+  pushNotificationOutbox  PushNotificationOutbox[]
+  pushDeliveries          PushDelivery[]
+  // capability:notifications:end
+  passwordResetTokens PasswordResetToken[]
+
+  @@index([role], map: "users_role_idx")
+  @@map("users")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique(map: "password_reset_tokens_token_hash_key") @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade, map: "password_reset_tokens_user_id_fkey")
+
+  @@index([userId, createdAt], map: "password_reset_tokens_user_id_created_at_idx")
+  @@index([expiresAt], map: "password_reset_tokens_expires_at_idx")
+  @@map("password_reset_tokens")
+}
+
+enum UserRole {
+  user
+  admin
+
+  @@map("user_role")
+}
+
+model AuthSession {
+  id                       String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  userId                   String    @map("user_id") @db.Uuid
+  refreshTokenHash         String    @unique(map: "auth_sessions_refresh_token_hash_key") @map("refresh_token_hash")
+  refreshTokenFamilyHash   String?   @unique(map: "auth_sessions_refresh_token_family_hash_key") @map("refresh_token_family_hash")
+  previousRefreshTokenHash String?   @unique(map: "auth_sessions_previous_refresh_token_hash_key") @map("previous_refresh_token_hash")
+  refreshRotatedAt         DateTime? @map("refresh_rotated_at")
+  expiresAt                DateTime  @map("expires_at")
+  revokedAt                DateTime? @map("revoked_at")
+  userAgent                String?   @map("user_agent")
+  ipAddress                String?   @map("ip_address")
+  createdAt                DateTime  @default(now()) @map("created_at")
+  updatedAt                DateTime  @updatedAt @map("updated_at")
+  user                     User      @relation(fields: [userId], references: [id], onDelete: Cascade, map: "auth_sessions_user_id_fkey")
+
+  @@index([userId], map: "auth_sessions_user_id_idx")
+  @@index([expiresAt], map: "auth_sessions_expires_at_idx")
+  @@map("auth_sessions")
+}

@@ -1,4 +1,4 @@
-import { Redirect, useLocalSearchParams, type Href } from 'expo-router';
+import { Redirect, useLocalSearchParams } from 'expo-router';
 
 import {
   DataRow,
@@ -24,10 +24,6 @@ export default function DetailsScreen() {
 
   if (!auth.user) {
     return <Redirect href="/" />;
-  }
-
-  if (!auth.user.subscription.isActive) {
-    return <Redirect href={'/paywall' as Href} />;
   }
 
   return (

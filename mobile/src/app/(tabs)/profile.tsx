@@ -32,10 +32,12 @@ export default function ProfileScreen() {
       <AuthSessionErrorNotice />
 
       <SubscriptionSummary
+        error={iap.error}
         isConnected={iap.isConnected}
         isManaging={iap.isManagingSubscriptions}
+        isSupported={iap.isSupported}
         onManage={() => void iap.manageSubscriptions()}
-        subscription={auth.user.subscription}
+        subscription={iap.subscription}
       />
 
       <SessionControls

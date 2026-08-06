@@ -4,7 +4,6 @@ import {
   type RegisterRequest,
   type SocialAuthProvider,
   type SocialAuthRequest,
-  type SubscriptionSnapshot,
   type UserDto,
 } from '@web-app-demo/contracts';
 import {
@@ -52,7 +51,6 @@ type AuthContextValue = {
   socialAuth: (provider: SocialAuthProvider, input: SocialAuthRequest) => Promise<void>;
   logout: () => Promise<void>;
   isAccountScopeCurrent: (scope: AuthAccountScope) => boolean;
-  setSubscription: (subscription: SubscriptionSnapshot, scope: AuthAccountScope) => boolean;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -282,28 +280,6 @@ export function AuthProvider({
     return queryClient.getQueryData<MeQueryData>(meQueryKey)?.user.id === scope.userId;
   }, [queryClient, session]);
 
-  const setSubscription = useCallback(
-    (subscription: SubscriptionSnapshot, scope: AuthAccountScope) => {
-      if (!isAccountScopeCurrent(scope)) return false;
-      let updated = false;
-      queryClient.setQueryData<MeQueryData | undefined>(meQueryKey, (current) =>
-        {
-          if (
-            !current?.user ||
-            current.user.id !== scope.userId ||
-            !session.isGenerationCurrent(scope.generation)
-          ) {
-            return current;
-          }
-          updated = true;
-          return updateCachedSubscription(current, subscription);
-        },
-      );
-      return updated;
-    },
-    [isAccountScopeCurrent, queryClient, session],
-  );
-
   const establishSession = useCallback(async (
     request: (generation: number) => Promise<AuthSessionResponse>,
   ) => {
@@ -398,9 +374,8 @@ export function AuthProvider({
       socialAuth,
       logout,
       isAccountScopeCurrent,
-      setSubscription,
     }),
-    [accountScope, isAccountScopeCurrent, isAuthBootstrapping, isTransitioning, login, logout, refreshUser, register, retrySession, sessionError, sessionGeneration, setSubscription, socialAuth, user],
+    [accountScope, isAccountScopeCurrent, isAuthBootstrapping, isTransitioning, login, logout, refreshUser, register, retrySession, sessionError, sessionGeneration, socialAuth, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -420,37 +395,4 @@ function authRecoveryMessage(error: unknown) {
     return 'We could not finish signing you out. Check your connection and try again.';
   }
   return 'We could not restore your session. Check your connection and try again.';
-}
-
-function updateCachedSubscription(
-  current: MeQueryData | undefined,
-  subscription: SubscriptionSnapshot,
-): MeQueryData | undefined {
-  if (!current?.user) return current;
-  if (areSubscriptionSnapshotsEqual(current.user.subscription, subscription)) return current;
-
-  return {
-    user: {
-      ...current.user,
-      subscription,
-    },
-  };
-}
-
-function areSubscriptionSnapshotsEqual(
-  left: SubscriptionSnapshot,
-  right: SubscriptionSnapshot,
-) {
-  return (
-    left.entitlement === right.entitlement &&
-    left.isActive === right.isActive &&
-    left.state === right.state &&
-    left.platform === right.platform &&
-    left.productId === right.productId &&
-    left.originalTransactionId === right.originalTransactionId &&
-    left.transactionId === right.transactionId &&
-    left.expiresAt === right.expiresAt &&
-    left.willAutoRenew === right.willAutoRenew &&
-    left.updatedAt === right.updatedAt
-  );
 }

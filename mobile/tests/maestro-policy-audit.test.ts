@@ -2,9 +2,12 @@ import { expect, test } from 'bun:test';
 
 import {
   authScreenUsesKeyboardAwareShell,
+  // capability:billing:start
   nativePaywallLogoutHasTestId,
+  // capability:billing:end
 } from '../scripts/e2e/maestro-policy-audit.mjs';
 
+// capability:billing:start
 const paywallAccountActionsSource = `
   function PaywallAccountActions({ onLogout }) {
     return (
@@ -16,6 +19,7 @@ const paywallAccountActionsSource = `
     )
   }
 `;
+// capability:billing:end
 
 test('Maestro keyboard audit accepts only an enabled auth-form shell', () => {
   expect(
@@ -35,6 +39,7 @@ test('Maestro keyboard audit accepts only an enabled auth-form shell', () => {
   ).toBe(true);
 });
 
+// capability:billing:start
 test('Maestro logout audit requires the supported final paywall render path', () => {
   expect(
     nativePaywallLogoutHasTestId(
@@ -74,3 +79,4 @@ test('Maestro logout audit requires the supported final paywall render path', ()
     ),
   ).toBe(true);
 });
+// capability:billing:end

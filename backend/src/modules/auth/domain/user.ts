@@ -1,4 +1,4 @@
-import type { SubscriptionSnapshot, UserDto, UserRole } from '@web-app-demo/contracts'
+import type { UserDto, UserRole } from '@web-app-demo/contracts'
 
 export type AuthUserRecord = {
   id: string
@@ -13,17 +13,13 @@ export type AuthenticatedPrincipal = UserDto & {
   sessionId: string
 }
 
-export function toUserDto(
-  user: AuthUserRecord,
-  subscription: SubscriptionSnapshot,
-): UserDto {
+export function toUserDto(user: AuthUserRecord): UserDto {
   return {
     id: user.id,
     email: user.email,
     displayName: user.displayName,
     role: user.role,
     createdAt: user.createdAt.toISOString(),
-    subscription,
   }
 }
 

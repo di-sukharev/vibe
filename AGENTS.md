@@ -119,7 +119,7 @@ This block applies only while installing the template as a new project:
 
 ## Prisma Migrations
 
-- Define schema changes in `schema.prisma` and generate migrations through the repository workflow. Never hand-write or customize `migration.sql`.
+- Define schema changes in `backend/prisma/schema/` and generate migrations through the repository workflow. Never hand-write or customize `migration.sql`.
 - Put backfills, safety checks, preconditions, and rollout guards in the owning backend layer or another repository-supported workflow.
 
 ## Documentation And Operations

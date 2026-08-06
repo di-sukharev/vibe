@@ -38,6 +38,7 @@
     "build:mobile": "bun run --cwd mobile build",
     "build:backend": "bun run --cwd backend build",
     "architecture:check": "bun scripts/architecture-check.mjs",
+    "lint": "bun run --cwd webapp lint && bun run --cwd mobile lint",
     "deploy:do:specs": "bun scripts/prepare-do-specs.mjs",
     "typecheck": "bun run --filter '*' --sequential typecheck",
     "typecheck:webapp": "bun run --cwd webapp typecheck",
@@ -45,7 +46,7 @@
     "typecheck:mobile": "bun run --cwd mobile typecheck",
     "typecheck:backend": "bun run --cwd backend typecheck",
     "test": "bun run test:deploy && bun run test:contracts && bun run test:backend && bun run test:webapp && bun run test:mobile",
-    "test:deploy": "bun test scripts/do-cron.test.mjs scripts/prepare-do-specs.test.mjs scripts/repo-env.test.mjs scripts/architecture-check.test.mjs scripts/ci-shape.test.mjs",
+    "test:deploy": "bun test scripts/do-cron.test.mjs scripts/prepare-do-specs.test.mjs scripts/repo-env.test.mjs scripts/architecture-check.test.mjs scripts/remove-billing.test.mjs",
     "test:contracts": "bun run --cwd packages/contracts test",
     "test:backend": "bun run --cwd backend test",
     "test:backend:unit": "bun run --cwd backend test:unit",
@@ -55,6 +56,7 @@
     "test:website": "bun run --cwd website test",
     "smoke:backend:docker": "bun run --cwd backend smoke:docker",
     "e2e:webapp": "bun run --cwd webapp e2e",
-    "e2e:mobile": "bun run --cwd mobile e2e:maestro"
+    "e2e:mobile": "bun run --cwd mobile e2e:maestro",
+    "feature:billing:remove": "bun scripts/remove-billing.mjs"
   }
 }

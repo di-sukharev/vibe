@@ -77,7 +77,7 @@ maybeDescribe('iap API integration', () => {
     await prisma.$disconnect()
   })
 
-  test('ingests a valid App Store transaction and exposes it on /me', async () => {
+  test('ingests a valid App Store transaction and exposes it on the entitlement endpoint', async () => {
     const session = await registerAndAuthorize('active@example.com')
     verifier.setTransaction('signed-active', activeTransaction(session.user.id))
     verifier.setRenewal('signed-renewal-active', activeRenewal())
@@ -97,17 +97,26 @@ maybeDescribe('iap API integration', () => {
       state: 'active',
     })
 
+    const entitlement = await app.request('/api/iap/entitlement', {
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+    })
+    const entitlementBody = await entitlement.json()
+
+    expect(entitlement.status).toBe(200)
+    expect(entitlementBody.subscription.isActive).toBe(true)
+    expect(entitlementBody.subscription.transactionId).toBe('transaction-active')
+
+    // The user contract stays billing-free, so a product without subscriptions never sees one.
     const me = await app.request('/api/auth/me', {
       headers: { Authorization: `Bearer ${session.accessToken}` },
     })
     const meBody = await me.json()
 
     expect(me.status).toBe(200)
-    expect(meBody.user.subscription.isActive).toBe(true)
-    expect(meBody.user.subscription.transactionId).toBe('transaction-active')
+    expect(meBody.user).not.toHaveProperty('subscription')
   })
 
-  test('returns the active subscription in the login session response', async () => {
+  test('serves the active subscription to a freshly logged-in session', async () => {
     const session = await registerAndAuthorize('login-subscriber@example.com')
     verifier.setTransaction('signed-login-active', activeTransaction(session.user.id))
 
@@ -129,7 +138,13 @@ maybeDescribe('iap API integration', () => {
     const body = await login.json()
 
     expect(login.status).toBe(200)
-    expect(body.user.subscription).toMatchObject({
+
+    const entitlement = await app.request('/api/iap/entitlement', {
+      headers: { Authorization: `Bearer ${body.accessToken}` },
+    })
+
+    expect(entitlement.status).toBe(200)
+    expect((await entitlement.json()).subscription).toMatchObject({
       isActive: true,
       transactionId: 'transaction-active',
     })

@@ -3,7 +3,7 @@ import type { DbClient } from '../../db'
 import type { EmailDelivery } from '../../email/service'
 import type { AppEnv } from '../../env'
 import { AuthService } from './application/auth-service'
-import type { Clock, LogoutCleanup, SubscriptionReader } from './application/ports'
+import type { Clock, LogoutCleanup } from './application/ports'
 import { createPrismaAuthRepository } from './infrastructure/auth-repository'
 import { signAccessToken, verifyAccessToken } from './infrastructure/access-tokens'
 import { hashPassword, verifyPassword } from './infrastructure/passwords'
@@ -30,7 +30,6 @@ type CreateAuthModuleOptions = {
   emailDelivery: EmailDelivery
   env: AppEnv
   logoutCleanup?: LogoutCleanup
-  subscriptionReader?: SubscriptionReader
 }
 
 const systemClock: Clock = {
@@ -38,18 +37,6 @@ const systemClock: Clock = {
 }
 
 const noLogoutCleanup: LogoutCleanup = () => undefined
-const inactiveSubscriptionReader: SubscriptionReader = () => ({
-  entitlement: 'premium',
-  isActive: false,
-  state: 'inactive',
-  platform: null,
-  productId: null,
-  originalTransactionId: null,
-  transactionId: null,
-  expiresAt: null,
-  willAutoRenew: null,
-  updatedAt: null,
-})
 
 export function createAuthModule({
   backgroundTasks,
@@ -58,7 +45,6 @@ export function createAuthModule({
   emailDelivery,
   env,
   logoutCleanup = noLogoutCleanup,
-  subscriptionReader = inactiveSubscriptionReader,
 }: CreateAuthModuleOptions) {
   const service = new AuthService({
     accessTokens: {
@@ -95,7 +81,6 @@ export function createAuthModule({
     socialIdentities: {
       verify: (provider, idToken) => verifySocialIdentity(provider, idToken, env),
     },
-    subscriptionReader,
   })
   const requireAuth = createRequireAuth((accessToken) => service.authenticateAccessToken(accessToken))
 
@@ -109,5 +94,5 @@ export function createAuthModule({
 }
 
 export type { AuthHttpEnv }
-export type { LogoutCleanup, SubscriptionReader } from './application/ports'
+export type { LogoutCleanup } from './application/ports'
 export type { AuthenticatedPrincipal } from './domain/user'

@@ -40,7 +40,7 @@ tags:
     id: ${SUBMIT_BUTTON_ID}
     enabled: true
 - assertVisible:
-    id: ${PAYWALL_SCREEN_ID}
+    id: ${DASHBOARD_ID}
 - stopApp
 - openLink:
     link: ${DEV_CLIENT_URL}
@@ -51,7 +51,7 @@ tags:
       - tapOn: Open
 - extendedWaitUntil:
     visible:
-      id: ${PAYWALL_SCREEN_ID}
+      id: ${DASHBOARD_ID}
     timeout: 60000
 - tapOn:
     id: ${LOGOUT_BUTTON_ID}

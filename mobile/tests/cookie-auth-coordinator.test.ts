@@ -15,19 +15,6 @@ import { logoutWithPushCleanup } from '../src/features/auth/logout';
 import { ApiTransport } from '../src/platform/api/transport';
 
 const originalFetch = globalThis.fetch;
-const inactiveSubscription = {
-  entitlement: 'premium',
-  isActive: false,
-  state: 'inactive',
-  platform: null,
-  productId: null,
-  originalTransactionId: null,
-  transactionId: null,
-  expiresAt: null,
-  willAutoRenew: null,
-  updatedAt: null,
-};
-
 afterEach(() => {
   globalThis.fetch = originalFetch;
 });
@@ -743,7 +730,6 @@ function authResponse(principal: string) {
       displayName: null,
       role: 'user',
       createdAt: '2026-05-11T00:00:00.000Z',
-      subscription: inactiveSubscription,
     },
   };
 }

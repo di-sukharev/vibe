@@ -9,11 +9,13 @@ import type { AppEnv } from './env'
 import { errorResponse, handleError, validationErrorHook } from './http/errors'
 import { createFixedWindowRateLimit, createIngressSecurity } from './http/security'
 import { createAuthModule, type AuthHttpEnv } from './modules/auth'
+// capability:billing:start
 import {
   createBillingModule,
   type AppStoreSubscriptionVerifier,
   type GooglePlaySubscriptionVerifier,
 } from './modules/billing'
+// capability:billing:end
 import { createNotificationsModule } from './modules/notifications'
 import { createUsersModule } from './modules/users'
 
@@ -21,29 +23,39 @@ type CreateAppOptions = {
   backgroundTasks?: TaskDeferrer
   emailDelivery?: EmailDelivery
   env: AppEnv
+  // capability:billing:start
   appStoreIapVerifier?: AppStoreSubscriptionVerifier
   googlePlayIapVerifier?: GooglePlaySubscriptionVerifier
+  // capability:billing:end
   prisma: DbClient
 }
 
+// capability:billing:start
 const defaultWebhookBodyLimitBytes = 256 * 1024
 const defaultWebhookRateLimitMax = 600
 const defaultWebhookRateLimitWindowSeconds = 60
+// capability:billing:end
 
 export function createApp({
+  // capability:billing:start
   appStoreIapVerifier,
+  // capability:billing:end
   backgroundTasks = createBackgroundTasks(),
   emailDelivery = disabledEmailDelivery,
   env,
+  // capability:billing:start
   googlePlayIapVerifier,
+  // capability:billing:end
   prisma,
 }: CreateAppOptions) {
+  // capability:billing:start
   const billing = createBillingModule({
     appStoreVerifier: appStoreIapVerifier,
     db: prisma,
     env,
     googlePlayVerifier: googlePlayIapVerifier,
   })
+  // capability:billing:end
   const notifications = createNotificationsModule({ db: prisma, env })
   const auth = createAuthModule({
     backgroundTasks,
@@ -51,7 +63,6 @@ export function createApp({
     emailDelivery,
     env,
     logoutCleanup: notifications.logoutCleanup,
-    subscriptionReader: billing.getSubscription,
   })
   const adminUsersReadRateLimit = createFixedWindowRateLimit<AuthHttpEnv>({
     errorMessage: 'Too many admin user directory requests',
@@ -102,6 +113,7 @@ export function createApp({
     app.use('/api/users/*', middleware)
     app.use('/api/admin/*', middleware)
   }
+  // capability:billing:start
   for (const middleware of createIngressSecurity({
     ...publicWriteSecurity,
     bodyLimitBytes: env.IAP_BODY_LIMIT_BYTES,
@@ -110,6 +122,7 @@ export function createApp({
   })) {
     app.use('/api/iap/*', middleware)
   }
+  // The only webhook producer today is the App Store; the group goes with billing.
   for (const middleware of createIngressSecurity({
     ...publicWriteSecurity,
     bodyLimitBytes: env.WEBHOOK_BODY_LIMIT_BYTES ?? defaultWebhookBodyLimitBytes,
@@ -119,6 +132,7 @@ export function createApp({
   })) {
     app.use('/api/webhooks/*', middleware)
   }
+  // capability:billing:end
   app.get('/', (c) => {
     return c.json({
       name: 'web_app_demo backend',
@@ -150,9 +164,13 @@ export function createApp({
   app.route('/api/auth', auth.routes)
   app.route('/api/users', users.userRoutes)
   app.route('/api/admin', users.adminRoutes)
+  // capability:billing:start
   app.route('/api/iap', billing.createRoutes(auth.authenticateAccessToken))
+  // capability:billing:end
   app.route('/api/notifications', notifications.createRoutes(auth.authenticateAccessToken))
+  // capability:billing:start
   app.route('/api/webhooks', billing.webhookRoutes)
+  // capability:billing:end
 
   app.doc('/openapi.json', {
     openapi: '3.0.0',

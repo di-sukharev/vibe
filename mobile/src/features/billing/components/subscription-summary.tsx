@@ -12,18 +12,38 @@ import {
 } from './subscription-summary-model';
 
 type SubscriptionSummaryProps = {
+  error: string | null;
   isConnected: boolean;
   isManaging: boolean;
+  isSupported: boolean;
   onManage: () => void;
-  subscription: SubscriptionSnapshot;
+  subscription: SubscriptionSnapshot | null;
 };
 
 export function SubscriptionSummary({
+  error,
   isConnected,
   isManaging,
+  isSupported,
   onManage,
   subscription,
 }: SubscriptionSummaryProps) {
+  // A missing snapshot means one of three different things, and each needs its own answer:
+  // this build has no store, the read failed, or it has not answered yet.
+  if (!subscription) {
+    const pendingState = !isSupported
+      ? 'Store subscriptions are only available in the iOS and Android app.'
+      : error ?? 'Checking your subscription…';
+
+    return (
+      <SectionCard
+        description="Store-backed entitlement details are verified by the backend."
+        title="Subscription">
+        <DataRow label="Status" value={pendingState} />
+      </SectionCard>
+    );
+  }
+
   const canManage =
     subscription.platform === 'ios' || subscription.platform === 'android';
   const status = formatSubscriptionState(subscription.state);

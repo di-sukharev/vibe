@@ -2,6 +2,20 @@
 
 This template implements premium subscriptions through `expo-iap` on iOS and Android. The mobile app is only the store transport; the backend is the entitlement source of truth.
 
+## If The Product Does Not Sell Anything
+
+Billing is an optional capability, not a baseline. Nothing in the template is gated behind a subscription: `/paywall` is a working purchase screen, but no route redirects to it and signing in never depends on an entitlement. A product that sells access adds its own gate and its own navigation into `/paywall`, reading `useSubscriptionIap().subscription`.
+
+If subscriptions are not part of the product, remove them instead of leaving them dormant:
+
+```bash
+bun run feature:billing:remove
+```
+
+The script deletes the billing module, the mobile billing feature, the IAP contracts, `prisma/schema/billing.prisma`, the billing migrations, and every marked `capability:billing` seam. On a project whose database is already deployed, pass `--keep-migrations` and generate a migration that drops the billing tables instead. It then prints the wiring that must be edited by hand, because those places need rewriting rather than deleting. Finish with `bun install`, `bun run typecheck`, `bun run architecture:check`, and `bun run test`, then record `removed` in the `CHECKLIST.md` capability ledger so a future agent does not rebuild billing from a leftover reference.
+
+If the database is already deployed, keep the migrations and generate a new one that drops the billing tables instead.
+
 ## Runtime Shape
 
 - Mobile fetches configured subscription products through `expo-iap`.
@@ -162,10 +176,10 @@ bun run --cwd backend prisma:validate
 
 Manual checks:
 
-- inactive authenticated user lands on `/paywall`
+- authenticated users reach the app without an entitlement; `/paywall` is reachable only when the product navigates there
 - products and Android base plan offers load on real development builds
 - purchase does not auto-finish before backend verification
-- backend activates `/components` only after store verification
+- the entitlement returned by `GET /api/iap/entitlement` turns active only after store verification
 - restore rehydrates entitlement after reinstall/logout/login
 - pending purchases do not unlock premium
 - ownership mismatch fails when the store purchase belongs to another app user

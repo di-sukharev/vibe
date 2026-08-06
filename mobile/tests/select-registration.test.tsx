@@ -488,8 +488,10 @@ test('profile controls reflect store connection and logout progress', async () =
   await renderAndFlush(
     root,
     <SubscriptionSummary
+      error={null}
       isConnected={false}
       isManaging={false}
+      isSupported
       onManage={() => undefined}
       subscription={subscription}
     />,
@@ -508,6 +510,63 @@ test('profile controls reflect store connection and logout progress', async () =
   expect(
     findByTestID(container, 'auth.logout-button')?.attributes.disabled,
   ).toBe('');
+
+  await act(async () => root.unmount());
+});
+
+test('subscription summary separates an unsupported store, a failed read, and a pending one', async () => {
+  const { SubscriptionSummary } =
+    await import('../src/features/billing/components/subscription-summary');
+  const container = fakeDocument.createElement('div');
+  const root = createRoot(container);
+
+  // Without a snapshot the card is the only thing the profile can say about billing, so each
+  // reason has to read differently: a store-less build is not a failure, and neither is loading.
+  await renderAndFlush(
+    root,
+    <SubscriptionSummary
+      error={null}
+      isConnected={false}
+      isManaging={false}
+      isSupported={false}
+      onManage={() => undefined}
+      subscription={null}
+    />,
+  );
+
+  expect(container.textContent).toContain('only available in the iOS and Android app');
+
+  await renderAndFlush(
+    root,
+    <SubscriptionSummary
+      error="App Store is unavailable right now."
+      isConnected={false}
+      isManaging={false}
+      isSupported
+      onManage={() => undefined}
+      subscription={null}
+    />,
+  );
+
+  expect(container.textContent).toContain('App Store is unavailable right now.');
+
+  await renderAndFlush(
+    root,
+    <SubscriptionSummary
+      error={null}
+      isConnected
+      isManaging={false}
+      isSupported
+      onManage={() => undefined}
+      subscription={null}
+    />,
+  );
+
+  const pending = container.textContent;
+
+  expect(pending).toContain('Checking your subscription');
+  expect(pending).not.toContain('only available in the iOS and Android app');
+  expect(findByTestID(container, 'profile.manage-subscription-button')).toBeNull();
 
   await act(async () => root.unmount());
 });

@@ -113,11 +113,9 @@ type SubscriptionContextValue = {
 const SubscriptionContext = createContext<SubscriptionContextValue | null>(null);
 
 export function IapProvider({ api, children }: PropsWithChildren<{ api: BillingApiPort }>) {
-  const auth = useAuth();
-
   if (Platform.OS !== 'ios' && Platform.OS !== 'android') {
     return (
-      <SubscriptionContext.Provider value={unsupportedSubscriptionValue(auth.user?.subscription ?? null)}>
+      <SubscriptionContext.Provider value={unsupportedSubscriptionValue(null)}>
         {children}
       </SubscriptionContext.Provider>
     );
@@ -131,10 +129,21 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
   platform: StorePlatform;
 }>) {
   const auth = useAuth();
-  const { isAccountScopeCurrent, setSubscription } = auth;
+  const { isAccountScopeCurrent } = auth;
   const accountScope = auth.accountScope;
   const user = auth.user;
   const userId = user?.id ?? null;
+  // Billing owns the entitlement: `sync` reads it from the backend and every verified purchase
+  // updates it here, so the auth user contract stays free of subscription state.
+  const [subscription, setSubscriptionState] = useState<SubscriptionSnapshot | null>(null);
+  const setSubscription = useCallback(
+    (next: SubscriptionSnapshot, scope: AuthAccountScope) => {
+      if (!isAccountScopeCurrent(scope)) return false;
+      setSubscriptionState(next);
+      return true;
+    },
+    [isAccountScopeCurrent],
+  );
   const productIds = platform === 'ios' ? iosProductIds : androidProductIds;
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(defaultPlanId(platform));
   const [error, setError] = useState<string | null>(null);
@@ -195,6 +204,8 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
     setIsRedeemingOfferCode(false);
     setIsRestoring(false);
     setIsSyncing(false);
+    // A new account starts with no entitlement until its own sync answers.
+    setSubscriptionState(null);
   }, [accountScope?.generation, userId]);
 
   const queuePurchaseUntilAuthenticated = useCallback((purchase: Purchase, generation: number) => {
@@ -735,8 +746,10 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
       if (!isOperationScopeCurrent(restoreScope)) return;
       if (restoreCancelled) return;
 
-      const originalTransactionIds = platform === 'ios' && user.subscription.originalTransactionId
-        ? [user.subscription.originalTransactionId]
+      // Null until the mount sync answers. That only widens the error copy below: the sync
+      // itself reconciles the same original transaction, so the entitlement still restores.
+      const originalTransactionIds = platform === 'ios' && subscription?.originalTransactionId
+        ? [subscription.originalTransactionId]
         : undefined;
       const purchases = await retryIapOperation(() =>
         platform === 'ios'
@@ -744,16 +757,16 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
           : getAvailablePurchasesFromStore(),
       );
       if (!isOperationScopeCurrent(restoreScope)) return;
-      const subscription = await reconcileAndFinishPurchases({
+      const restoredSubscription = await reconcileAndFinishPurchases({
         finishPurchases: true,
         originalTransactionIds,
         purchases,
       });
       if (!isOperationScopeCurrent(restoreScope)) return;
 
-      if (restoreError && purchases.length === 0 && !subscription?.isActive) {
+      if (restoreError && purchases.length === 0 && !restoredSubscription?.isActive) {
         setError(iapErrorMessage(restoreError));
-      } else if (!subscription?.isActive && purchases.length === 0) {
+      } else if (!restoredSubscription?.isActive && purchases.length === 0) {
         setError(
           originalTransactionIds
             ? `${storeDisplayName(platform)} did not return an active subscription for this account. Please try again.`
@@ -769,7 +782,7 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
         setIsRestoring(false);
       }
     }
-  }, [auth.isTransitioning, connected, isOperationScopeCurrent, operationScope, platform, reconcileAndFinishPurchases, restorePurchases, user]);
+  }, [auth.isTransitioning, connected, isOperationScopeCurrent, operationScope, platform, reconcileAndFinishPurchases, restorePurchases, subscription, user]);
 
   const redeemOfferCode = useCallback(async () => {
     const redemptionScope = operationScope;
@@ -850,7 +863,7 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
         platform === 'android'
           ? {
               packageNameAndroid: androidPackageName ?? undefined,
-              skuAndroid: user?.subscription.productId ?? selectedPlan?.productId ?? undefined,
+              skuAndroid: subscription?.productId ?? selectedPlan?.productId ?? undefined,
             }
           : {},
       );
@@ -865,7 +878,7 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
         setIsManagingSubscriptions(false);
       }
     }
-  }, [auth.isTransitioning, connected, isOperationScopeCurrent, operationScope, platform, selectedPlan, user]);
+  }, [auth.isTransitioning, connected, isOperationScopeCurrent, operationScope, platform, selectedPlan, subscription]);
 
   useEffect(() => {
     if (connected && userId) {
@@ -943,7 +956,7 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
       selectedProductId,
       setSelectedPlanId,
       setSelectedProductId,
-      subscription: user?.subscription ?? null,
+      subscription,
       sync,
     }),
     [
@@ -964,8 +977,8 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
       selectedPlanId,
       selectedProductId,
       setSelectedProductId,
+      subscription,
       sync,
-      user?.subscription,
       subscriptions,
     ],
   );

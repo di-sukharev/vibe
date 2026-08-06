@@ -32,7 +32,7 @@ export class UsersService {
       input.displayName,
     )
     return {
-      user: this.userDto(user, principal),
+      user: this.userDto(user),
     }
   }
 
@@ -60,14 +60,13 @@ export class UsersService {
     }
   }
 
-  private userDto(user: UserRecord, principal: AuthenticatedPrincipal): UserDto {
+  private userDto(user: UserRecord): UserDto {
     return {
       id: user.id,
       email: user.email,
       displayName: user.displayName,
       role: user.role,
       createdAt: user.createdAt.toISOString(),
-      subscription: principal.subscription,
     }
   }
 }

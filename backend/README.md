@@ -182,7 +182,7 @@ Admin list responses expose only `id`, `email`, `displayName`,
 
 The storage service lives in `src/storage` and wraps DigitalOcean Spaces through S3-compatible SDK calls. Product-specific upload routes should validate ownership and permissions, then delegate object key generation, presigned upload/download URLs, public CDN URL construction, and deletion to that service.
 
-Prisma migration SQL is not written by hand. Change `prisma/schema.prisma`, then run `bun run prisma:migrate`.
+Prisma migration SQL is not written by hand. Change the relevant file in `prisma/schema/` - `base.prisma` for core models, or the file owning an optional capability - then run `bun run prisma:migrate`.
 
 ## Current Upstream Documentation
 

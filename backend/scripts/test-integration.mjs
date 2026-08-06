@@ -75,7 +75,9 @@ run(
     'test',
     'src/modules/auth/auth.integration.test.ts',
     'src/modules/users/users.integration.test.ts',
+    // capability:billing:start
     'src/modules/billing/billing.integration.test.ts',
+    // capability:billing:end
     'src/modules/notifications/notifications.integration.test.ts',
   ],
   { env },

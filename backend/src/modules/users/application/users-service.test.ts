@@ -3,20 +3,7 @@ import { expect, test } from 'bun:test'
 import type { AuthenticatedPrincipal } from '../../auth'
 import { UsersService } from './users-service'
 
-const subscription = {
-  entitlement: 'premium' as const,
-  expiresAt: null,
-  isActive: false,
-  originalTransactionId: null,
-  platform: null,
-  productId: null,
-  state: 'inactive' as const,
-  transactionId: null,
-  updatedAt: null,
-  willAutoRenew: null,
-}
-
-test('profile updates return the authenticated subscription snapshot without a post-write read', async () => {
+test('profile updates answer from the write result without a post-write read', async () => {
   const principal: AuthenticatedPrincipal = {
     id: 'user-1',
     email: 'profile@example.com',
@@ -24,7 +11,6 @@ test('profile updates return the authenticated subscription snapshot without a p
     role: 'user',
     createdAt: '2026-07-20T00:00:00.000Z',
     sessionId: 'session-1',
-    subscription,
   }
   const service = new UsersService({
     adminDashboardReader: { dashboard: async () => ({
@@ -61,7 +47,6 @@ test('profile updates return the authenticated subscription snapshot without a p
       displayName: 'Updated Name',
       role: principal.role,
       createdAt: principal.createdAt,
-      subscription,
     },
   })
 })

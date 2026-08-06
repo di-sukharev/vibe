@@ -162,7 +162,7 @@ Run `bun run architecture:check` as part of every validation ladder. The depende
 
 ## Prisma
 
-Do not hand-write Prisma migration SQL. Change `backend/prisma/schema.prisma`, then use:
+Do not hand-write Prisma migration SQL. Change the relevant file in `backend/prisma/schema/`, then use:
 
 ```bash
 bun run --cwd backend prisma:migrate

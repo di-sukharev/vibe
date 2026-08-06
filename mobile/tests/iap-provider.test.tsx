@@ -187,8 +187,7 @@ let authState: {
   };
   isBootstrapping: boolean;
   sessionGeneration: number;
-  setSubscription: ReturnType<typeof mock>;
-  user: { id: string; subscription: SubscriptionSnapshot } | null;
+  user: { id: string } | null;
 };
 let availablePurchases: Purchase[] = [];
 let deepLinkToSubscriptionsMock: ReturnType<typeof mock> = mock(async () => undefined);
@@ -350,10 +349,8 @@ beforeEach(() => {
     },
     isBootstrapping: false,
     sessionGeneration: 1,
-    setSubscription: mock(() => undefined),
     user: {
       id: '018fd4f2-1f3a-7c88-bc49-333333333333',
-      subscription: inactiveSubscription,
     },
   };
   latestContext = null;
@@ -403,7 +400,6 @@ test('IapProvider finishes a verified purchase but never publishes user A entitl
 
   authState.user = {
     id: '018fd4f2-1f3a-7c88-bc49-444444444444',
-    subscription: inactiveSubscription,
   };
   authState.sessionGeneration = 2;
   await rerenderProvider(root);
@@ -415,9 +411,8 @@ test('IapProvider finishes a verified purchase but never publishes user A entitl
   });
 
   expect(currentIap.finishTransaction).toHaveBeenCalledTimes(1);
-  expect(authState.setSubscription).not.toHaveBeenCalledWith(
-    activeSubscription,
-    expect.objectContaining({ userId: '018fd4f2-1f3a-7c88-bc49-444444444444' }),
+  expect(latestContext?.subscription).not.toEqual(
+    expect.objectContaining({ isActive: true }),
   );
   await unmount(root);
 });
@@ -433,7 +428,6 @@ test('IapProvider re-verifies the same store transaction after the signed-in acc
 
   authState.user = {
     id: '018fd4f2-1f3a-7c88-bc49-444444444444',
-    subscription: inactiveSubscription,
   };
   authState.sessionGeneration = 2;
   await rerenderProvider(root);
@@ -458,7 +452,6 @@ test('IapProvider does not suppress a new account store error after the previous
 
   authState.user = {
     id: '018fd4f2-1f3a-7c88-bc49-444444444444',
-    subscription: inactiveSubscription,
   };
   authState.sessionGeneration = 2;
   await rerenderProvider(root);
@@ -491,7 +484,6 @@ test('IapProvider keeps user B product loading state when user A product request
 
   authState.user = {
     id: '018fd4f2-1f3a-7c88-bc49-444444444444',
-    subscription: inactiveSubscription,
   };
   authState.sessionGeneration = 2;
   await rerenderProvider(root);
@@ -570,7 +562,6 @@ test('IapProvider clears an abandoned product loader when the next account is di
 
   authState.user = {
     id: '018fd4f2-1f3a-7c88-bc49-444444444444',
-    subscription: inactiveSubscription,
   };
   authState.sessionGeneration = 2;
   currentIap.connected = false;
@@ -614,7 +605,6 @@ test('IapProvider never reconciles user A available-purchase snapshot as user B'
 
   authState.user = {
     id: '018fd4f2-1f3a-7c88-bc49-444444444444',
-    subscription: inactiveSubscription,
   };
   authState.sessionGeneration = 2;
   await rerenderProvider(root);
@@ -651,7 +641,6 @@ test('IapProvider ignores a delayed purchase error listener from user A after us
 
   authState.user = {
     id: '018fd4f2-1f3a-7c88-bc49-444444444444',
-    subscription: inactiveSubscription,
   };
   authState.sessionGeneration = 2;
   await rerenderProvider(root);
@@ -711,7 +700,6 @@ test('IapProvider ignores a delayed native purchase rejection from user A after 
 
   authState.user = {
     id: '018fd4f2-1f3a-7c88-bc49-444444444444',
-    subscription: inactiveSubscription,
   };
   authState.sessionGeneration = 2;
   await rerenderProvider(root);
@@ -778,7 +766,6 @@ test('IapProvider does not let user A purchase finally clear user B purchase ref
 
   authState.user = {
     id: '018fd4f2-1f3a-7c88-bc49-444444444444',
-    subscription: inactiveSubscription,
   };
   authState.sessionGeneration = 2;
   await rerenderProvider(root);
@@ -832,7 +819,6 @@ test('IapProvider keeps user B sync pending when user A sync rejects late', asyn
 
   authState.user = {
     id: '018fd4f2-1f3a-7c88-bc49-444444444444',
-    subscription: inactiveSubscription,
   };
   authState.sessionGeneration = 2;
   await rerenderProvider(root);
@@ -885,7 +871,6 @@ test('IapProvider keeps user B restore pending when user A restore rejects late'
 
     authState.user = {
       id: '018fd4f2-1f3a-7c88-bc49-444444444444',
-      subscription: inactiveSubscription,
     };
     authState.sessionGeneration = 2;
     await rerenderProvider(root);
@@ -936,7 +921,6 @@ test('IapProvider starts StoreKit listeners before auth resolves and processes q
 
   authState.user = {
     id: '018fd4f2-1f3a-7c88-bc49-333333333333',
-    subscription: inactiveSubscription,
   };
   authState.isBootstrapping = false;
 
@@ -1130,13 +1114,9 @@ test('IapProvider allows retrying a purchase after StoreKit sends a non-ingestab
 
 test('IapProvider restore reconciles available purchases with the backend before finishing', async () => {
   const events: string[] = [];
-  authState.user = {
-    id: '018fd4f2-1f3a-7c88-bc49-333333333333',
-    subscription: {
-      ...inactiveSubscription,
-      originalTransactionId: 'original-1',
-    },
-  };
+  authState.api.entitlement = mock(async () => ({
+    subscription: { ...inactiveSubscription, originalTransactionId: 'original-1' },
+  }));
   authState.api.ingestAppStoreTransaction = mock(async () => {
     events.push('ingest');
     return { subscription: activeSubscription };
@@ -1150,6 +1130,10 @@ test('IapProvider restore reconciles available purchases with the backend before
   });
 
   const root = await renderProvider();
+  // The startup sync already reconciles the known original transaction; this test is about the
+  // order `restore` itself uses, so measure from a clean slate.
+  await waitForEffects();
+  events.length = 0;
   availablePurchases = [purchase];
 
   await act(async () => {
@@ -1196,10 +1180,7 @@ test('IapProvider opens the iOS offer-code sheet and attaches the redemption tok
     signedTransactionInfo: 'signed-transaction',
   });
   expect(currentIap.finishTransaction).toHaveBeenCalledTimes(1);
-  expect(authState.setSubscription).toHaveBeenCalledWith(
-    activeSubscription,
-    { generation: 1, userId: '018fd4f2-1f3a-7c88-bc49-333333333333' },
-  );
+  expect(latestContext?.subscription).toEqual(activeSubscription);
   await unmount(root);
 });
 
@@ -1267,7 +1248,6 @@ test('IapProvider keeps user B offer-code token when user A redemption rejects l
 
   authState.user = {
     id: '018fd4f2-1f3a-7c88-bc49-444444444444',
-    subscription: inactiveSubscription,
   };
   authState.sessionGeneration = 2;
   await rerenderProvider(root);
@@ -1333,7 +1313,6 @@ test('IapProvider keeps user B subscription management pending when user A deep 
 
   authState.user = {
     id: '018fd4f2-1f3a-7c88-bc49-444444444444',
-    subscription: inactiveSubscription,
   };
   authState.sessionGeneration = 2;
   await rerenderProvider(root);
@@ -1716,19 +1695,18 @@ test('IapProvider startup sync surfaces pending StoreKit purchases without inges
 test('IapProvider restore ignores user-cancelled restore sheets', async () => {
   const originalWarn = console.warn;
   console.warn = mock(() => undefined) as never;
-  authState.user = {
-    id: '018fd4f2-1f3a-7c88-bc49-333333333333',
-    subscription: {
-      ...inactiveSubscription,
-      originalTransactionId: 'original-1',
-    },
-  };
+  authState.api.entitlement = mock(async () => ({
+    subscription: { ...inactiveSubscription, originalTransactionId: 'original-1' },
+  }));
   currentIap.restorePurchases = mock(async () => {
     throw { code: 'user-cancelled' };
   });
 
   try {
     const root = await renderProvider();
+    // Ignore the startup sync's own reconcile: the assertion below is about the cancelled restore.
+    await waitForEffects();
+    authState.api.reconcileAppStoreTransactions.mockClear();
 
     await act(async () => {
       await latestContext?.restore();
@@ -1747,13 +1725,9 @@ test('IapProvider restore ignores user-cancelled restore sheets', async () => {
 test('IapProvider restore surfaces StoreKit failures for linked original transactions without local purchases', async () => {
   const originalWarn = console.warn;
   console.warn = mock(() => undefined) as never;
-  authState.user = {
-    id: '018fd4f2-1f3a-7c88-bc49-333333333333',
-    subscription: {
-      ...inactiveSubscription,
-      originalTransactionId: 'original-1',
-    },
-  };
+  authState.api.entitlement = mock(async () => ({
+    subscription: { ...inactiveSubscription, originalTransactionId: 'original-1' },
+  }));
   currentIap.restorePurchases = mock(async () => {
     throw { code: 'network-error' };
   });
@@ -1829,10 +1803,7 @@ test('IapProvider grants backend-verified purchases even when StoreKit finish fa
       await waitForEffects();
     });
 
-    expect(authState.setSubscription).toHaveBeenCalledWith(
-      activeSubscription,
-      { generation: 1, userId: '018fd4f2-1f3a-7c88-bc49-333333333333' },
-    );
+    expect(latestContext?.subscription).toEqual(activeSubscription);
     expect(currentIap.finishTransaction).toHaveBeenCalledTimes(1);
 
     shouldFailFinish = false;
@@ -1864,7 +1835,6 @@ test('IapProvider does not finish available purchases that backend ingest reject
   };
   authState.user = {
     id: '018fd4f2-1f3a-7c88-bc49-333333333333',
-    subscription: activeSubscription,
   };
   authState.api.entitlement = mock(async () => ({ subscription: activeSubscription }));
   authState.api.ingestAppStoreTransaction = mock(async () => {
@@ -1875,7 +1845,16 @@ test('IapProvider does not finish available purchases that backend ingest reject
 
   try {
     const root = await renderProvider();
+    // Startup sync already reconciles the known transaction; clear it so the assertions below
+    // are about the restore path rather than the mount.
     await waitForEffects();
+    authState.api.reconcileAppStoreTransactions.mockClear();
+    currentIap.finishTransaction.mockClear();
+
+    await act(async () => {
+      await latestContext?.restore();
+      await waitForEffects();
+    });
 
     expect(authState.api.ingestAppStoreTransaction).toHaveBeenCalledWith({
       signedTransactionInfo: 'signed-invalid',
@@ -1893,7 +1872,6 @@ test('IapProvider does not finish available purchases that backend ingest reject
 test('IapProvider startup sync scans non-active StoreKit purchases for unfinished cleanup', async () => {
   authState.user = {
     id: '018fd4f2-1f3a-7c88-bc49-333333333333',
-    subscription: activeSubscription,
   };
   authState.api.entitlement = mock(async () => ({ subscription: activeSubscription }));
   availablePurchases = [purchase];
@@ -1916,7 +1894,6 @@ test('IapProvider reconciles known original transactions even before StoreKit co
   currentIap.connected = false;
   authState.user = {
     id: '018fd4f2-1f3a-7c88-bc49-333333333333',
-    subscription: activeSubscription,
   };
   authState.api.entitlement = mock(async () => ({ subscription: activeSubscription }));
 
@@ -1937,7 +1914,6 @@ test('IapProvider falls back to server reconcile when available purchases fail f
   console.warn = mock(() => undefined) as never;
   authState.user = {
     id: '018fd4f2-1f3a-7c88-bc49-333333333333',
-    subscription: activeSubscription,
   };
   authState.api.entitlement = mock(async () => ({ subscription: activeSubscription }));
   getAvailablePurchasesMock = mock(async () => {
@@ -1959,15 +1935,7 @@ test('IapProvider falls back to server reconcile when available purchases fail f
   }
 });
 
-test('IapProvider does not resync just because an unchanged subscription rerenders auth state', async () => {
-  authState.setSubscription = mock((subscription: SubscriptionSnapshot) => {
-    if (!authState.user) return;
-    authState.user = {
-      ...authState.user,
-      subscription: { ...subscription },
-    };
-  });
-
+test('IapProvider does not refetch the entitlement just because auth state rerenders', async () => {
   const root = await renderProvider();
   await waitForEffects();
 

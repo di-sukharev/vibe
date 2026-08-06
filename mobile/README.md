@@ -11,9 +11,9 @@ This section may be updated during first-run bootstrap. If the root `README.md` 
 - `/` is the register/login screen and intentionally has no tabs.
 - Mobile is a user-only product surface. Administrator tools and the seeded
   administrator account belong to the browser webapp, not the mobile UI.
-- Authenticated users without active premium land on `/paywall`.
-- Active premium users land on `/components`, which lives in the bottom tab shell with `/profile`.
-- `/details/[id]` is a stack screen outside the tabs and uses an in-screen back button at the top left. It is part of the premium surface.
+- Authenticated users land on `/components`, which lives in the bottom tab shell with `/profile`.
+- `/details/[id]` is a stack screen outside the tabs and uses an in-screen back button at the top left.
+- `/paywall` is a working subscription screen, but nothing is gated behind it by default: the template does not assume the product sells anything. A product that needs paid access adds its own gate around `useSubscriptionIap().subscription`; a product that does not removes billing entirely (see `docs/IAP.md`).
 - App Store and Google Play subscriptions are active purchase paths. App Store offer-code redemption is supported on iOS. Google Play code redemption, signed promotional-offer purchase flows, alternative billing, and external purchase links are deferred.
 - Product screens compose `src/components/dashboard/ScreenShell.tsx`, which owns the shared native site header and delegates safe-area, scrolling, keyboard avoidance, and back navigation to the low-level `Screen` layout primitive.
 - Phones use the native bottom-tab shell. Expo Web switches to the same compact side-rail/inset composition at the shared wide-layout breakpoint.
@@ -28,8 +28,8 @@ bun run --cwd backend prisma:deploy
 bun run dev:seed
 ```
 
-The development seed gives the ordinary demo user a local-only active premium
-entitlement so the first login opens `/components` instead of the paywall:
+The development seed creates the demo accounts only. It grants no entitlement,
+because reaching the app must not depend on a subscription:
 
 | Email | Password | Mobile landing page |
 | --- | --- | --- |
