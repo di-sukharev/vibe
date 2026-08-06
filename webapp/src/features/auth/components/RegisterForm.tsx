@@ -65,7 +65,7 @@ export function RegisterForm({ returnTo }: { returnTo?: string }) {
         void form.handleSubmit()
       }}
     >
-      <FieldGroup>
+      <FieldGroup className="gap-5">
         <div className="flex flex-col items-center gap-1 text-center">
           <Typography as="h1" variant="h3" balance>
             Create your account

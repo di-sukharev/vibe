@@ -8,7 +8,7 @@ export function SiteHeader({ title }: { title: string }) {
       <div className="flex w-full items-center gap-1 px-4 lg:gap-2 lg:px-6">
         <SidebarTrigger className="-ml-1" />
         <Separator
-          className="mx-2 data-[orientation=vertical]:h-4"
+          className="mx-2 data-[orientation=vertical]:h-4 data-[orientation=vertical]:self-center"
           orientation="vertical"
         />
         <Typography as="span" variant="h6">

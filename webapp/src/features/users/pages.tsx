@@ -21,11 +21,13 @@ export function UserHome({ user }: { user: UserDto }) {
 export function UserProfile({ user }: { user: UserDto }) {
   return (
     <PageContainer>
-      <PageHeader
-        description="Keep the identity shown across your workspace current."
-        title="Profile"
-      />
-      <ProfilePanel user={user} />
+      <div className="grid w-full max-w-2xl gap-6">
+        <PageHeader
+          description="Keep the identity shown across your workspace current."
+          title="Profile"
+        />
+        <ProfilePanel user={user} />
+      </div>
     </PageContainer>
   )
 }

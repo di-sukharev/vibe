@@ -31,6 +31,7 @@ const backendEnv = normalizeEnv({
     process.env.JWT_SECRET ?? 'web-e2e-secret-at-least-thirty-two-characters',
   CORS_ORIGINS: [frontendUrl, 'http://localhost:5173'].join(','),
   COOKIE_SECURE: 'false',
+  AUTH_RATE_LIMIT_MAX: process.env.E2E_AUTH_RATE_LIMIT_MAX ?? '120',
 })
 
 export default defineConfig({

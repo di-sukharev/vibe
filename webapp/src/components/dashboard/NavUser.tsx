@@ -128,7 +128,7 @@ export function NavUser({
                   <DropdownMenuItem asChild>
                     <DashboardLink to={accountPath}>
                       <HugeiconsIcon icon={UserCircle02Icon} strokeWidth={2} />
-                      Account
+                      Profile
                     </DashboardLink>
                   </DropdownMenuItem>
                 )}

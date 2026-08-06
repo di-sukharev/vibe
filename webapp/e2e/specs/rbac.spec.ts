@@ -193,6 +193,21 @@ test('workspace account menu keeps a failed logout visible and retryable', async
   await expect(page.getByRole('menuitem', { name: 'Log out' })).toBeEnabled()
 })
 
+test('workspace account menu opens the user profile', async ({ page }) => {
+  const userEmail = uniqueEmail('web-e2e-sidebar-profile')
+  await page.goto('/signup')
+  await page.getByLabel('Email').fill(userEmail)
+  await page.getByLabel('Password', { exact: true }).fill(e2ePassword)
+  await page.getByLabel('Confirm Password').fill(e2ePassword)
+  await page.getByRole('button', { name: 'Create Account' }).click()
+  await expect(page).toHaveURL(/\/app$/)
+
+  await page.locator('[data-sidebar="footer"] [data-sidebar="menu-button"]').click()
+  await page.getByRole('menuitem', { name: 'Profile' }).click()
+
+  await expect(page).toHaveURL(/\/app\/profile$/)
+})
+
 test('role mutation failures are announced inside the confirmation dialog', async ({
   browser,
   page,

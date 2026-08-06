@@ -40,10 +40,10 @@ export function AppSidebar({
           <SidebarMenuItem>
             <SidebarMenuButton asChild size="lg" tooltip="web_app_demo">
               <DashboardLink to={homePath}>
-                <span className="flex size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
                   <Typography variant="control">W</Typography>
                 </span>
-                <span className="grid min-w-0 gap-0.5">
+                <span className="grid min-w-0 gap-0.5 group-data-[collapsible=icon]:hidden">
                   <Typography variant="control" truncate>
                     web_app_demo
                   </Typography>
