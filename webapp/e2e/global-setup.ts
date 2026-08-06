@@ -70,7 +70,9 @@ export default async function globalSetup() {
   run('bun', ['run', '--cwd', 'backend', 'prisma:deploy'], env)
   run('bun', ['run', '--cwd', 'backend', 'prisma:seed'], {
     ...env,
-    ADMIN_SEED_EMAIL: e2eAdminEmail,
-    ADMIN_SEED_PASSWORD: e2eAdminPassword,
+    DEV_SEED_ADMIN_EMAIL: e2eAdminEmail,
+    DEV_SEED_ADMIN_PASSWORD: e2eAdminPassword,
+    DEV_SEED_USER_EMAIL: 'user@example.com',
+    DEV_SEED_USER_PASSWORD: e2eAdminPassword,
   })
 }

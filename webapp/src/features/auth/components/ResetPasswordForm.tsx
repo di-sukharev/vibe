@@ -7,12 +7,12 @@ import { Typography } from '@/components/typography'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
-import { Input } from '@/components/ui/input'
 import { ApiRequestError } from '@/platform/api'
 import { useAuth } from '../use-auth'
 import { FormAlert } from './form-errors'
 import type { FieldErrors } from './form-model'
 import { clearFieldError, errorId, hasErrors, toFieldErrors } from './form-validation'
+import { PasswordInput } from './PasswordInput'
 
 export function ResetPasswordForm({ token }: { token: string }) {
   const auth = useAuth()
@@ -87,7 +87,7 @@ export function ResetPasswordForm({ token }: { token: string }) {
             <form.Field name="password" children={(field) => (
               <Field data-invalid={hasErrors(fieldErrors.password)}>
                 <FieldLabel htmlFor={passwordId}>New Password</FieldLabel>
-                <Input
+                <PasswordInput
                   aria-describedby={[
                     passwordDescriptionId,
                     errorId(fieldErrors.password, passwordErrorId),
@@ -106,8 +106,8 @@ export function ResetPasswordForm({ token }: { token: string }) {
                       tokenIsValid ? null : 'This password reset link is invalid or incomplete.',
                     )
                   }}
-                  type="password"
                   value={field.state.value}
+                  visibilityLabel="replacement password"
                 />
                 <FieldDescription id={passwordDescriptionId}>
                   Must be at least 8 characters long.
@@ -119,7 +119,7 @@ export function ResetPasswordForm({ token }: { token: string }) {
             <form.Field name="confirmPassword" children={(field) => (
               <Field data-invalid={hasErrors(fieldErrors.confirmPassword)}>
                 <FieldLabel htmlFor={confirmPasswordId}>Confirm Password</FieldLabel>
-                <Input
+                <PasswordInput
                   aria-describedby={errorId(fieldErrors.confirmPassword, confirmPasswordErrorId)}
                   aria-invalid={hasErrors(fieldErrors.confirmPassword)}
                   autoComplete="new-password"
@@ -134,8 +134,8 @@ export function ResetPasswordForm({ token }: { token: string }) {
                       tokenIsValid ? null : 'This password reset link is invalid or incomplete.',
                     )
                   }}
-                  type="password"
                   value={field.state.value}
+                  visibilityLabel="password confirmation"
                 />
                 <FieldError id={confirmPasswordErrorId} errors={fieldErrors.confirmPassword} />
               </Field>

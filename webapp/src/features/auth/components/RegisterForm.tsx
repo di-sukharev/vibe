@@ -12,6 +12,7 @@ import { useAuth } from '../use-auth'
 import { FormAlert } from './form-errors'
 import type { FieldErrors } from './form-model'
 import { clearFieldError, errorId, hasErrors, toFieldErrors } from './form-validation'
+import { PasswordInput } from './PasswordInput'
 
 export function RegisterForm({ returnTo }: { returnTo?: string }) {
   const auth = useAuth()
@@ -127,7 +128,7 @@ export function RegisterForm({ returnTo }: { returnTo?: string }) {
         <form.Field name="password" children={(field) => (
           <Field data-invalid={hasErrors(fieldErrors.password)}>
             <FieldLabel htmlFor={passwordId}>Password</FieldLabel>
-            <Input
+            <PasswordInput
               aria-describedby={[
                 passwordDescriptionId,
                 errorId(fieldErrors.password, passwordErrorId),
@@ -144,7 +145,6 @@ export function RegisterForm({ returnTo }: { returnTo?: string }) {
                 clearFieldError('confirmPassword', setFieldErrors)
                 setFormError(null)
               }}
-              type="password"
               value={field.state.value}
             />
             <FieldDescription id={passwordDescriptionId}>
@@ -157,7 +157,7 @@ export function RegisterForm({ returnTo }: { returnTo?: string }) {
         <form.Field name="confirmPassword" children={(field) => (
           <Field data-invalid={hasErrors(fieldErrors.confirmPassword)}>
             <FieldLabel htmlFor={confirmPasswordId}>Confirm Password</FieldLabel>
-            <Input
+            <PasswordInput
               aria-describedby={errorId(fieldErrors.confirmPassword, confirmPasswordErrorId)}
               aria-invalid={hasErrors(fieldErrors.confirmPassword)}
               autoComplete="new-password"
@@ -170,8 +170,8 @@ export function RegisterForm({ returnTo }: { returnTo?: string }) {
                 clearFieldError('confirmPassword', setFieldErrors)
                 setFormError(null)
               }}
-              type="password"
               value={field.state.value}
+              visibilityLabel="password confirmation"
             />
             <FieldDescription>Please confirm your password.</FieldDescription>
             <FieldError id={confirmPasswordErrorId} errors={fieldErrors.confirmPassword} />

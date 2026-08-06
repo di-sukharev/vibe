@@ -12,6 +12,7 @@ import { useAuth } from '../use-auth'
 import { FormAlert } from './form-errors'
 import type { FieldErrors } from './form-model'
 import { clearFieldError, errorId, hasErrors, toFieldErrors } from './form-validation'
+import { PasswordInput } from './PasswordInput'
 
 export function LoginForm({ returnTo }: { returnTo?: string }) {
   const auth = useAuth()
@@ -101,7 +102,7 @@ export function LoginForm({ returnTo }: { returnTo?: string }) {
                   </Link>
                 </Typography>
               </div>
-              <Input
+              <PasswordInput
                 aria-describedby={errorId(fieldErrors.password, passwordErrorId)}
                 aria-invalid={hasErrors(fieldErrors.password)}
                 autoComplete="current-password"
@@ -114,7 +115,6 @@ export function LoginForm({ returnTo }: { returnTo?: string }) {
                   clearFieldError('password', setFieldErrors)
                   setFormError(null)
                 }}
-                type="password"
                 value={field.state.value}
               />
               <FieldError id={passwordErrorId} errors={fieldErrors.password} />
