@@ -2,10 +2,10 @@ import { describe, expect, test } from 'bun:test'
 import { spawnSync } from 'node:child_process'
 import { resolve } from 'node:path'
 
-const scriptPath = resolve(import.meta.dirname, 'seed-admin.ts')
+const scriptPath = resolve(import.meta.dirname, 'seed-development.ts')
 
-describe('administrator seed command', () => {
-  test('refuses standalone production seeding for every bootstrap credential shape', () => {
+describe('development seed command', () => {
+  test('refuses production seeding before connecting to the database', () => {
     const credentialCases = [
       {},
       {
@@ -33,7 +33,7 @@ describe('administrator seed command', () => {
 
       expect(result.status).not.toBe(0)
       expect(`${result.stdout}\n${result.stderr}`).toContain(
-        'prisma:seed is disabled in production',
+        'Development seed is disabled in production',
       )
     }
   })

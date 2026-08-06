@@ -9,6 +9,7 @@ import {
   bootstrapAdmin,
   parseAdminSeedConfig,
 } from './infrastructure/admin-bootstrap'
+import { bootstrapDevelopmentData } from '../../../scripts/development-seed'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 const maybeDescribe = databaseUrl ? describe : describe.skip
@@ -422,6 +423,64 @@ maybeDescribe('users and admin API integration', () => {
       where: { email: config.email },
       select: { passwordHash: true, role: true },
     })).toEqual({ passwordHash: null, role: 'admin' })
+  })
+
+  test('seeds login-ready development admin and user accounts idempotently', async () => {
+    const accounts = {
+      admin: {
+        email: 'development-admin@example.com',
+        password: 'development-admin-password',
+      },
+      user: {
+        email: 'development-user@example.com',
+        password: 'development-user-password',
+      },
+    }
+
+    expect(await bootstrapDevelopmentData(prisma, accounts)).toEqual({
+      admin: { email: accounts.admin.email, role: 'admin' },
+      user: { email: accounts.user.email, role: 'user' },
+    })
+    const firstHashes = await prisma.user.findMany({
+      where: { email: { in: [accounts.admin.email, accounts.user.email] } },
+      orderBy: { email: 'asc' },
+      select: { email: true, passwordHash: true },
+    })
+
+    await expect(bootstrapDevelopmentData(prisma, accounts)).resolves.toEqual({
+      admin: { email: accounts.admin.email, role: 'admin' },
+      user: { email: accounts.user.email, role: 'user' },
+    })
+    expect(await prisma.user.findMany({
+      where: { email: { in: [accounts.admin.email, accounts.user.email] } },
+      orderBy: { email: 'asc' },
+      select: { email: true, passwordHash: true },
+    })).toEqual(firstHashes)
+
+    for (const [role, credentials] of Object.entries(accounts)) {
+      const response = await app.request('/api/auth/token/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(credentials),
+      })
+      expect(response.status).toBe(200)
+      const body = await response.json()
+      expect(body.user.role).toBe(role)
+      expect(body.user.subscription.isActive).toBe(role === 'user')
+    }
+
+    expect(await prisma.subscriptionEntitlement.findUniqueOrThrow({
+      where: { userId: (await prisma.user.findUniqueOrThrow({
+        where: { email: accounts.user.email },
+        select: { id: true },
+      })).id },
+      select: { environment: true, expiresAt: true, platform: true, state: true },
+    })).toEqual({
+      environment: 'DevelopmentSeed',
+      expiresAt: null,
+      platform: null,
+      state: 'active',
+    })
   })
 
   test('revokes existing sessions and push registrations when bootstrap changes privileges or credentials', async () => {

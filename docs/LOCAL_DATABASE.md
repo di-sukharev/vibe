@@ -77,6 +77,18 @@ Then apply Prisma migrations:
 bun run --cwd backend prisma:deploy
 ```
 
+Optionally seed the login-ready local administrator and user configured by
+`DEV_SEED_ADMIN_*` and `DEV_SEED_USER_*` in `backend/.env`:
+
+```bash
+bun run dev:seed
+```
+
+This command is local-only: it rejects production mode and non-loopback database
+URLs. On the `mobile` branch, the ordinary demo user also receives an active
+development entitlement so the mobile app opens its main authenticated surface
+without a store purchase. Deployment runs `db:deploy`, not the development seed.
+
 ## Optional Port Overrides
 
 If `54329` is already in use, change both `POSTGRES_PORT` and the port inside

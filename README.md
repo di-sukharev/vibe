@@ -154,18 +154,27 @@ Then apply migrations:
 bun run --cwd backend prisma:deploy
 ```
 
-Registration and social sign-in always create the `user` role. To make the local
-administrator usable, set `ADMIN_SEED_PASSWORD` in `backend/.env`, then run the
-idempotent seed:
+Create login-ready local administrator and user accounts from the
+`DEV_SEED_ADMIN_*` and `DEV_SEED_USER_*` values in `backend/.env`:
 
 ```bash
-bun run --cwd backend prisma:seed
+bun run dev:seed
 ```
 
-Without a seed password, `admin@example.com` is still created as `admin`, but its
-password credential remains locked. Re-running the seed without a password never
-clears an existing password hash; re-running it with the already configured
-password preserves existing sessions and push registrations.
+Use these public local demo accounts to inspect both application roles:
+
+| Role | Email | Password | Landing page |
+| --- | --- | --- | --- |
+| Administrator | `admin@example.com` | `local-admin-password` | `/admin` |
+| User | `user@example.com` | `local-user-password` | `/app` |
+
+The command is idempotent, rejects `NODE_ENV=production`, and accepts only a
+loopback PostgreSQL URL. On the `mobile` branch it also gives the ordinary demo
+user a local-only active premium entitlement so mobile opens its main component
+surface immediately; mobile has no administrator UI. Deployment uses
+`db:deploy` and the separate `ADMIN_SEED_*` production bootstrap variables; it
+never runs this development seed. The values committed in `.env.example` are
+public local defaults, so do not reuse them in a deployed environment.
 
 ### Run The Active Surfaces
 
@@ -178,7 +187,27 @@ bun run dev:website
 bun run dev:mobile
 ```
 
-Website-only setups can skip backend/PostgreSQL. A webapp-only project can skip it only after replacing or removing the included auth golden path; the committed webapp's register/login/session journey intentionally requires the backend.
+#### Local Web Origin And Auth Startup
+
+The included `webapp` is a full-stack browser client, not a standalone static
+site. Its register, login, and session bootstrap flows require PostgreSQL and the
+backend. Start the database, apply migrations, and run `dev:backend` before
+opening the webapp. Website-only setups can skip backend/PostgreSQL; a webapp-only
+project can skip them only after replacing or removing the included auth golden
+path.
+
+Use the same browser origin that appears in `backend/.env` under
+`CORS_ORIGINS`. Origins are matched exactly: `http://localhost:5173` and
+`http://127.0.0.1:5173` are different origins. If Vite is started with
+`--host 127.0.0.1`, add `http://127.0.0.1:5173` to `CORS_ORIGINS` and restart the
+backend. Otherwise the page can render while the initial `/api/auth/refresh`
+request fails with `CORS Missing Allow Origin` and the UI reports that the
+session check is temporarily unavailable.
+
+When multiple copies of this repository exist locally, run both development
+commands from the intended copy. A server left running from another copy can
+keep ports `3000` or `5173` occupied and make the browser use that copy's code
+or environment configuration.
 
 Create `webapp/.env` when the browser client should use a non-default API URL:
 
@@ -230,7 +259,7 @@ Test runners use the separate Docker Compose `postgres_test` service and the `TE
 - `bun run --cwd mobile e2e:maestro:audit` - check the mobile Maestro flow and runner inputs for known flaky patterns.
 - `bun run --cwd backend prisma:migrate` - create/apply a Prisma migration in development.
 - `bun run --cwd backend prisma:deploy` - apply existing Prisma migrations on a server.
-- `bun run --cwd backend prisma:seed` - idempotently create or unlock the local administrator.
+- `bun run dev:seed` - idempotently create the local demo accounts and the mobile demo user's development-only premium entitlement.
 - `bun run --cwd backend db:deploy` - production pre-deploy: migrate, optionally bootstrap the first administrator, and require a login-capable administrator.
 
 ## Project READMEs

@@ -31,6 +31,7 @@
     "dev:website": "bun run --cwd website dev",
     "dev:mobile": "bun run --cwd mobile dev",
     "dev:backend": "bun run --cwd backend dev",
+    "dev:seed": "bun run --cwd backend prisma:seed",
     "build": "bun run --filter '*' --sequential build",
     "build:webapp": "bun run --cwd webapp build",
     "build:website": "bun run --cwd website build",

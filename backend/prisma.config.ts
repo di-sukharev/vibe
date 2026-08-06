@@ -9,7 +9,7 @@ export default defineConfig({
   schema: 'prisma/schema.prisma',
   migrations: {
     path: 'prisma/migrations',
-    seed: 'bun scripts/seed-admin.ts',
+    seed: 'bun scripts/seed-development.ts',
   },
   datasource: {
     url: localDatabaseUrl,
