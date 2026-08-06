@@ -6,6 +6,7 @@ export const TEST_IDS = {
     logoutButton: 'auth.logout-button',
     nameInput: 'auth.name-input',
     passwordInput: 'auth.password-input',
+    passwordVisibilityButton: 'auth.password-visibility-button',
     registerTab: 'auth.register-tab',
     socialAppleButton: 'auth.social-apple-button',
     socialGoogleButton: 'auth.social-google-button',

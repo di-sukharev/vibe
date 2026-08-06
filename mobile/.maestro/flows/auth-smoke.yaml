@@ -22,6 +22,10 @@ tags:
 - tapOn:
     id: ${EMAIL_INPUT_ID}
 - inputText: ${E2E_EMAIL}
+- assertVisible: Show password
+- tapOn:
+    id: ${PASSWORD_VISIBILITY_BUTTON_ID}
+- assertVisible: Hide password
 - tapOn:
     id: ${PASSWORD_INPUT_ID}
 - inputText: ${E2E_PASSWORD}

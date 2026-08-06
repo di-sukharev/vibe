@@ -24,6 +24,7 @@ const testIds = {
   LOGOUT_BUTTON_ID: 'auth.logout-button',
   NAME_INPUT_ID: 'auth.name-input',
   PASSWORD_INPUT_ID: 'auth.password-input',
+  PASSWORD_VISIBILITY_BUTTON_ID: 'auth.password-visibility-button',
   PAYWALL_SCREEN_ID: 'paywall.screen',
   SUBMIT_BUTTON_ID: 'auth.submit-button',
 }
@@ -255,7 +256,7 @@ function assertE2eBundleMode() {
     `${[
       'EXPO_PUBLIC_E2E=1 is required for the template Maestro flow.',
       'Expo reads EXPO_PUBLIC_* values when Metro serves or builds the JS bundle.',
-      'Start Metro and run this script with EXPO_PUBLIC_E2E=1 so the password field stays automatable while production builds keep secureTextEntry.',
+      'Start Metro and run this script with EXPO_PUBLIC_E2E=1 so E2E-only integrations such as push registration stay disabled.',
       'Set MAESTRO_SKIP_E2E_ENV_PREFLIGHT=1 only when you intentionally validate a bundle built with the same E2E flag elsewhere.',
     ].join('\n')}\n`,
   )

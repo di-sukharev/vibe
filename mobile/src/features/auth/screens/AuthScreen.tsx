@@ -12,6 +12,7 @@ import {
   AuthError,
   AuthModeTabs,
   AuthPanel,
+  AuthPasswordField,
   AuthSubmitButton,
   AuthTextField,
   type AuthMode,
@@ -24,13 +25,17 @@ import { useAuth } from '../provider';
 import { TEST_IDS } from '@/constants/testIds';
 import { ApiRequestError } from '@/platform/api';
 
-const isE2eMode = process.env.EXPO_PUBLIC_E2E === '1';
-
 export function AuthScreen() {
   const auth = useAuth();
   const [mode, setMode] = useState<AuthMode>('register');
   const [error, setError] = useState<string | null>(null);
+  const [isPasswordVisible, setIsPasswordVisible] = useState(false);
   const isRegister = mode === 'register';
+
+  const handleModeChange = (nextMode: AuthMode) => {
+    setIsPasswordVisible(false);
+    setMode(nextMode);
+  };
 
   const form = useForm({
     defaultValues: {
@@ -116,7 +121,7 @@ export function AuthScreen() {
           mode={mode}
           loginTestID={TEST_IDS.auth.loginTab}
           registerTestID={TEST_IDS.auth.registerTab}
-          onModeChange={setMode}
+          onModeChange={handleModeChange}
         />
 
         {isRegister && (
@@ -153,15 +158,17 @@ export function AuthScreen() {
 
         <form.Field name="password">
           {(field) => (
-            <AuthTextField
+            <AuthPasswordField
               label="Password"
               testID={TEST_IDS.auth.passwordInput}
               value={field.state.value}
               autoComplete={isRegister ? 'new-password' : 'current-password'}
-              secureTextEntry={!isE2eMode}
+              isVisible={isPasswordVisible}
               onBlur={field.handleBlur}
               onChangeText={field.handleChange}
+              onToggleVisibility={() => setIsPasswordVisible((visible) => !visible)}
               errors={field.state.meta.errors}
+              visibilityButtonTestID={TEST_IDS.auth.passwordVisibilityButton}
             />
           )}
         </form.Field>

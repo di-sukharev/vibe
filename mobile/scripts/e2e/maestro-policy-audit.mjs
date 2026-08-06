@@ -8,6 +8,10 @@ const mobileRoot = resolve(scriptDir, '../..')
 const flowPath = resolve(mobileRoot, '.maestro/flows/auth-smoke.yaml')
 const envExamplePath = resolve(mobileRoot, '.maestro/.env.example')
 const appPath = resolve(mobileRoot, 'src/features/auth/screens/AuthScreen.tsx')
+const authComponentsPath = resolve(
+  mobileRoot,
+  'src/features/auth/components/auth-components.tsx',
+)
 const screenShellPath = resolve(mobileRoot, 'src/components/dashboard/ScreenShell.tsx')
 const paywallPath = resolve(mobileRoot, 'src/features/billing/screens/PaywallScreen.tsx')
 const paywallComponentsPath = resolve(
@@ -168,6 +172,7 @@ export function nativePaywallLogoutHasTestId(screenSource, componentsSource) {
 export function runMaestroPolicyAudit() {
   const flow = readRequiredFile(flowPath)
   const app = readRequiredFile(appPath)
+  const authComponents = readRequiredFile(authComponentsPath)
   const screenShell = readRequiredFile(screenShellPath)
   const paywall = readRequiredFile(paywallPath)
   const paywallComponents = readRequiredFile(paywallComponentsPath)
@@ -206,9 +211,22 @@ export function runMaestroPolicyAudit() {
     'auth-smoke.yaml must not use coordinate taps',
   )
   assert(
-    app.includes("process.env.EXPO_PUBLIC_E2E === '1'") &&
-      app.includes('secureTextEntry={!isE2eMode}'),
-    'password field must stay secure in production and become automatable only under EXPO_PUBLIC_E2E=1',
+    flow.includes('- assertVisible: Show password') &&
+      flow.includes('id: ${PASSWORD_VISIBILITY_BUTTON_ID}') &&
+      flow.includes('- assertVisible: Hide password'),
+    'auth-smoke.yaml must reveal the password through the same visibility control users receive',
+  )
+  assert(
+    app.includes('const [isPasswordVisible, setIsPasswordVisible] = useState(false)') &&
+      app.includes('setIsPasswordVisible(false);') &&
+      app.includes('isVisible={isPasswordVisible}') &&
+      app.includes(
+        'onToggleVisibility={() => setIsPasswordVisible((visible) => !visible)}',
+      ) &&
+      app.includes('visibilityButtonTestID={TEST_IDS.auth.passwordVisibilityButton}') &&
+      authComponents.includes('secureTextEntry={!isVisible}') &&
+      !app.includes('secureTextEntry={!isE2eMode}'),
+    'password field must start secure and be controlled only by the user-facing visibility toggle',
   )
   assert(
     authScreenUsesKeyboardAwareShell(app) &&

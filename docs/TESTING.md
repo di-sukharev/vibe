@@ -121,7 +121,7 @@ Prerequisites:
 - A backend started against Docker Compose `postgres_test`, reachable at the `EXPO_PUBLIC_API_URL` used when Metro serves the bundle.
 - A host-reachable `E2E_API_HEALTH_URL` for runner preflight, for example `http://<LAN_IP>:3000/health`.
 - A host-reachable Metro URL in `MAESTRO_DEV_SERVER_URL`, for example `http://<LAN_IP>:8081`.
-- `EXPO_PUBLIC_E2E=1` set when Metro serves the bundle and when the runner starts. This keeps the password field automatable in E2E while production bundles keep `secureTextEntry`.
+- `EXPO_PUBLIC_E2E=1` set when Metro serves the bundle and when the runner starts. This keeps E2E-only integrations such as push registration disabled; the Maestro flow reveals the password through the same eye control users receive.
 
 Start the mobile E2E backend on the test database in a separate terminal. Prefer LAN-reachable URLs for both iOS Simulator and Android Emulator so the same runbook also works on physical devices:
 
@@ -194,7 +194,7 @@ Before changing Maestro startup, selectors, or E2E-only app behavior, run:
 bun run --cwd mobile e2e:maestro:audit
 ```
 
-The policy audit keeps the template from reintroducing known-bad patterns such as `hideKeyboard`, coordinate taps, missing dev-client `openLink`, stale `.maestro/.env.example`, or production password fields being weakened outside `EXPO_PUBLIC_E2E=1`.
+The policy audit keeps the template from reintroducing known-bad patterns such as `hideKeyboard`, coordinate taps, missing dev-client `openLink`, stale `.maestro/.env.example`, or password automation that bypasses the user-facing visibility control.
 
 The template intentionally keeps the official mobile lane on Expo dev client because it does not commit generated native `ios`/`android` folders. A mature product may later move to a bundled iOS E2E app once native folders are owned by that project. That stronger lane should use a dedicated simulator bundle id, runner-owned build/install, one launch helper with `launchApp.clearState/clearKeychain`, isolated backend ports, typed seed manifests, post-run backend assertions, a machine-wide simulator lock, and no Metro/dev-client handoff.
 
@@ -203,7 +203,7 @@ The template intentionally keeps the official mobile lane on Expo dev client bec
 - Maestro needs an installed Expo development build when the app uses `expo-dev-client` or native dependencies. Running the flow through Expo Go usually tests the Expo launcher, not this app.
 - `launchApp` is only used to clear state at the beginning. The flow then opens the bundle through `openLink` with `exp+<slug>://expo-development-client/?url=<metro-url>&disableOnboarding=1`, and it opens the same link again after `stopApp`.
 - Metro and backend URLs must be reachable from the target device. Prefer `EXPO_PUBLIC_API_URL=http://<LAN_IP>:<BACKEND_PORT>`, `bunx expo start --dev-client --host lan --port <METRO_PORT>`, and `MAESTRO_DEV_SERVER_URL=http://<LAN_IP>:<METRO_PORT>`.
-- `secureTextEntry` can break Maestro input on iOS even when Maestro reports success. The template uses `EXPO_PUBLIC_E2E=1` to make the password field non-secure only in E2E bundles.
+- `secureTextEntry` can break Maestro input on iOS even when Maestro reports success. The flow taps the real password-visibility control before entering the password; every app launch still starts with the password hidden.
 - `hideKeyboard` is unreliable on React Native/iOS. Prefer `keyboardDismissMode="on-drag"` on scroll containers, scrolling to the next target, or tapping stable static content when a keyboard must be dismissed.
 - Keep touch targets at least about `44-48pt`. Small `Pressable` controls and custom checkboxes can produce missed taps.
 - Do not rely on `checked: true` for custom React Native checkbox controls. Maestro may expose an accessible value such as `checkbox, checked` while the hierarchy `checked` field remains false. Assert a stable visible or accessible state instead.

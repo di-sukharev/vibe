@@ -10,6 +10,8 @@ type FakeElement = FakeNode & {
   ownerDocument: typeof fakeDocument;
   style: Record<string, unknown>;
   tagName: string;
+  type?: string;
+  value?: string;
 };
 
 class FakeNode {
@@ -137,13 +139,17 @@ type NativeHostProps = {
     disabled?: boolean;
     selected?: boolean;
   };
+  accessibilityValue?: { text?: string };
   children?: React.ReactNode | ((state: { pressed: boolean }) => React.ReactNode);
   disabled?: boolean;
   onPress?: () => void;
+  onChangeText?: (value: string) => void;
   pointerEvents?: unknown;
   role?: unknown;
+  secureTextEntry?: boolean;
   style?: unknown;
   testID?: string;
+  value?: string;
 };
 
 function NativeHost(tagName: string) {
@@ -154,13 +160,17 @@ function NativeHost(tagName: string) {
     accessibilityLiveRegion,
     accessibilityRole,
     accessibilityState,
+    accessibilityValue,
     children,
     disabled,
+    onChangeText,
     onPress,
     pointerEvents: _pointerEvents,
     role,
+    secureTextEntry,
     style: _style,
     testID,
+    value,
   }: NativeHostProps) {
     return React.createElement(tagName, {
       'aria-current': ariaCurrent,
@@ -169,11 +179,15 @@ function NativeHost(tagName: string) {
       'aria-live':
         accessibilityLiveRegion === 'none' ? undefined : accessibilityLiveRegion,
       'aria-selected': accessibilityState?.selected,
+      'aria-valuetext': accessibilityValue?.text,
       children: typeof children === 'function' ? children({ pressed: false }) : children,
       'data-testid': testID,
       disabled,
+      onChange: onChangeText ? () => onChangeText(value ?? '') : undefined,
       onClick: onPress,
       role: role ?? accessibilityRole,
+      type: tagName === 'input' ? (secureTextEntry ? 'password' : 'text') : undefined,
+      value,
     });
   };
 }
@@ -222,6 +236,10 @@ mock.module('expo-router', () => ({
     push: () => undefined,
     replace: () => undefined,
   }),
+}));
+
+mock.module('@/components/ui/input', () => ({
+  Input: NativeHost('input'),
 }));
 
 Object.assign(globalThis, {
@@ -355,6 +373,46 @@ test('auth mode chooser exposes labelled tab semantics', async () => {
   expect(registerTab?.attributes['aria-selected']).toBe('true');
   expect(loginTab?.attributes.role).toBe('tab');
   expect(loginTab?.attributes['aria-selected']).toBe('false');
+
+  await act(async () => root.unmount());
+});
+
+test('auth password field preserves its value through hidden and visible states', async () => {
+  const { AuthPasswordField } =
+    await import('../src/features/auth/components/auth-components');
+  const container = fakeDocument.createElement('div');
+  const root = createRoot(container);
+  const renderPassword = (isVisible: boolean) => (
+    <AuthPasswordField
+      errors={[]}
+      isVisible={isVisible}
+      label="Password"
+      onBlur={() => undefined}
+      onChangeText={() => undefined}
+      onToggleVisibility={() => undefined}
+      testID="auth.password"
+      value="demo-password"
+      visibilityButtonTestID="auth.password-visibility"
+    />
+  );
+
+  await renderAndFlush(root, renderPassword(false));
+  expect(findByTestID(container, 'auth.password')?.type).toBe('password');
+  expect(findByTestID(container, 'auth.password')?.value).toBe('demo-password');
+  expect(findByTestID(container, 'auth.password-visibility')?.attributes['aria-label']).toBe(
+    'Show password',
+  );
+
+  await renderAndFlush(root, renderPassword(true));
+  expect(findByTestID(container, 'auth.password')?.type).toBe('text');
+  expect(findByTestID(container, 'auth.password')?.value).toBe('demo-password');
+  expect(findByTestID(container, 'auth.password-visibility')?.attributes['aria-label']).toBe(
+    'Hide password',
+  );
+
+  await renderAndFlush(root, renderPassword(false));
+  expect(findByTestID(container, 'auth.password')?.type).toBe('password');
+  expect(findByTestID(container, 'auth.password')?.value).toBe('demo-password');
 
   await act(async () => root.unmount());
 });
