@@ -19,22 +19,22 @@ const { primaryHref, primaryLabel, secondaryHref, secondaryLabel } = Astro.props
 
 <section class="relative isolate overflow-hidden border-b" id="top" aria-labelledby="hero-title">
   <div
-    class="absolute inset-0 -z-20 bg-[linear-gradient(180deg,oklch(0.98_0.018_158),oklch(1_0_0)_72%)]"
+    class="absolute inset-0 -z-20 bg-[linear-gradient(180deg,oklch(0.13_0_0),oklch(0.06_0_0)_68%)]"
     aria-hidden="true"
   ></div>
   <div
-    class="absolute -top-48 left-1/2 -z-10 size-[42rem] -translate-x-1/2 rounded-full bg-emerald-300/25 blur-3xl"
+    class="glow-halo absolute -top-56 left-1/2 -z-10 size-[46rem] -translate-x-1/2 rounded-full blur-3xl"
     aria-hidden="true"
   ></div>
 
   <div class="site-container grid items-center gap-14 py-20 lg:grid-cols-[1.05fr_0.95fr] lg:py-28">
     <div class="min-w-0 max-w-3xl">
-      <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-800">
+      <Badge variant="outline" className="border-white/15 bg-white/6 text-white/80">
         <Sparkles data-icon="inline-start" aria-hidden="true" />
         Шаблон проекта для работы с ИИ
       </Badge>
       <h1
-        class="mt-6 max-w-3xl font-heading text-5xl leading-[1.02] font-semibold tracking-[-0.04em] text-balance sm:text-6xl lg:text-7xl"
+        class="glow-text mt-6 max-w-3xl font-heading text-5xl leading-[1.02] font-bold tracking-[-0.04em] text-balance sm:text-6xl lg:text-7xl"
         id="hero-title"
       >
         Соберите сайт или приложение с ИИ — даже если раньше не писали код.
@@ -44,21 +44,25 @@ const { primaryHref, primaryLabel, secondaryHref, secondaryLabel } = Astro.props
         сервер, компоненты и проверки. Вы ставите задачу обычными словами, ИИ-агент меняет код и показывает результат.
       </p>
       <div class="mt-8 flex flex-col gap-3 sm:flex-row">
-        <a class={buttonVariants({ className: 'h-11 px-5', size: 'lg' })} href={primaryHref}>
+        <a class={buttonVariants({ className: 'glow-surface h-11 rounded-full px-6 font-bold', size: 'lg' })} href={primaryHref}>
           {primaryLabel}
           <ArrowRight data-icon="inline-end" aria-hidden="true" />
         </a>
         <a
-          class={buttonVariants({ className: 'h-11 px-5', size: 'lg', variant: 'outline' })}
+          class={buttonVariants({
+            className: 'h-11 rounded-full border-white/15 bg-white/5 px-6 font-bold text-white hover:bg-white/10',
+            size: 'lg',
+            variant: 'outline',
+          })}
           href={secondaryHref}
         >
           {secondaryLabel}
         </a>
       </div>
-      <ul class="mt-8 grid gap-3 text-sm text-muted-foreground sm:grid-cols-3" aria-label="Преимущества">
+      <ul class="mt-8 grid gap-3 text-sm text-white/60 sm:grid-cols-3" aria-label="Преимущества">
         {['Первые задачи — без ручного программирования', 'Все части в одном проекте', 'Код остаётся у вас'].map((item) => (
-          <li class="flex items-center gap-2">
-            <span class="grid size-5 place-items-center rounded-full bg-emerald-100 text-emerald-800">
+          <li class="flex items-start gap-2">
+            <span class="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-white/10 text-white">
               <Check className="size-3.5" aria-hidden="true" />
             </span>
             {item}
@@ -68,38 +72,38 @@ const { primaryHref, primaryLabel, secondaryHref, secondaryLabel } = Astro.props
     </div>
 
     <div class="relative mx-auto min-w-0 w-full max-w-xl lg:mx-0">
-      <div class="absolute -inset-5 -z-10 rounded-[2rem] bg-emerald-200/35 blur-2xl" aria-hidden="true"></div>
-      <Card className="gap-0 overflow-hidden rounded-2xl border-emerald-950/25 bg-[#171c1a] py-0 shadow-2xl shadow-emerald-950/15 ring-1 ring-emerald-950/10">
-        <CardHeader className="flex flex-row items-center justify-between border-b border-white/10 bg-[#121715] px-5 py-4">
+      <div class="glow-halo absolute -inset-6 -z-10 rounded-[2.5rem] blur-2xl" aria-hidden="true"></div>
+      <Card className="glow-surface gap-0 overflow-hidden rounded-2xl bg-[#0d0d0d] py-0 ring-1 ring-white/12">
+        <CardHeader className="flex flex-row items-center justify-between border-b border-white/10 bg-[#080808] px-5 py-4">
           <div class="flex items-center gap-2" aria-hidden="true">
-            <span class="size-2.5 rounded-full bg-rose-300"></span>
-            <span class="size-2.5 rounded-full bg-amber-300"></span>
-            <span class="size-2.5 rounded-full bg-emerald-300"></span>
+            <span class="size-2.5 rounded-full bg-white/25"></span>
+            <span class="size-2.5 rounded-full bg-white/45"></span>
+            <span class="size-2.5 rounded-full bg-white/70"></span>
           </div>
-          <span class="text-xs font-medium text-white/55">Ваш проект</span>
+          <span class="text-xs font-bold text-white/55">Ваш проект</span>
         </CardHeader>
         <CardContent className="relative h-[27rem] overflow-hidden p-0 sm:h-[31rem]" data-hero-visual>
           <HeroScene client:only="react">
             <div
               slot="fallback"
-              class="relative h-full min-h-[25rem] overflow-hidden bg-[radial-gradient(circle_at_center,rgba(52,211,153,0.12),transparent_44%),linear-gradient(145deg,#1e2522,#121715)]"
+              class="relative h-full min-h-[25rem] overflow-hidden bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.12),transparent_46%),linear-gradient(145deg,#151515,#070707)]"
               data-hero-scene-fallback
               aria-hidden="true"
             >
               <div class="absolute top-1/2 left-1/2 h-72 w-80 -translate-x-1/2 -translate-y-1/2 rotate-6 rounded-[42%] border-2 border-white/55"></div>
-              <div class="absolute top-1/2 left-1/2 h-48 w-60 -translate-x-1/2 -translate-y-1/2 -rotate-6 rounded-[40%] border border-emerald-200/50"></div>
+              <div class="absolute top-1/2 left-1/2 h-48 w-60 -translate-x-1/2 -translate-y-1/2 -rotate-6 rounded-[40%] border border-white/35"></div>
               <div class="absolute top-1/2 left-1/2 h-24 w-72 -translate-x-1/2 -translate-y-1/2 rotate-3 rounded-[50%] border-2 border-white/65"></div>
               <div class="absolute top-1/2 left-1/2 size-16 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white/70"></div>
-              <div class="absolute top-1/2 left-1/2 size-6 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-emerald-200/70"></div>
+              <div class="absolute top-1/2 left-1/2 size-6 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white/50"></div>
             </div>
           </HeroScene>
 
           <div class="pointer-events-none absolute top-5 right-5 left-5 flex items-center justify-between gap-3" aria-hidden="true">
-            <span class="rounded-full border border-white/10 bg-black/25 px-3 py-1.5 text-[0.68rem] font-semibold tracking-[0.14em] text-white/75 uppercase shadow-sm backdrop-blur-md">
+            <span class="rounded-full border border-white/10 bg-black/35 px-3 py-1.5 text-[0.68rem] font-bold tracking-[0.14em] text-white/75 uppercase backdrop-blur-md">
               Работа с ИИ
             </span>
-            <span class="flex items-center gap-2 rounded-full border border-white/10 bg-black/25 px-3 py-1.5 text-xs font-medium text-white/75 shadow-sm backdrop-blur-md">
-              <span class="size-1.5 rounded-full bg-emerald-500 shadow-[0_0_0_4px_rgba(16,185,129,0.14)]"></span>
+            <span class="flex items-center gap-2 rounded-full border border-white/10 bg-black/35 px-3 py-1.5 text-xs text-white/75 backdrop-blur-md">
+              <span class="size-1.5 rounded-full bg-white shadow-[0_0_0_4px_rgba(255,255,255,0.16)]"></span>
               Исходный код
             </span>
           </div>
@@ -110,9 +114,9 @@ const { primaryHref, primaryLabel, secondaryHref, secondaryLabel } = Astro.props
               ['02', 'Изменения'],
               ['03', 'Проверка'],
             ].map(([step, label]) => (
-              <div class="rounded-xl border border-white/10 bg-black/30 p-3 shadow-lg shadow-black/10 backdrop-blur-xl">
-                <p class="text-[0.62rem] font-semibold tracking-[0.16em] text-emerald-300 uppercase">{step}</p>
-                <p class="mt-1 font-heading text-sm font-semibold text-white/90 sm:text-base">{label}</p>
+              <div class="rounded-xl border border-white/10 bg-black/45 p-3 backdrop-blur-xl">
+                <p class="text-[0.62rem] font-bold tracking-[0.16em] text-white/50 uppercase">{step}</p>
+                <p class="mt-1 font-heading text-sm font-bold text-white/90 sm:text-base">{label}</p>
               </div>
             ))}
           </div>

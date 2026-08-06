@@ -43,19 +43,19 @@ const audiences = [
 
     <div class="mt-12 grid gap-5 lg:grid-cols-3">
       {audiences.map(({ icon: Icon, number, title, description, note }) => (
-        <Card className="h-full bg-background py-0">
-          <CardHeader className="flex min-h-24 flex-row items-center justify-between border-b bg-gradient-to-br from-emerald-50/80 via-background to-background p-6">
-            <span class="grid size-11 place-items-center rounded-xl bg-emerald-100 text-emerald-800 shadow-sm ring-1 ring-emerald-200/80">
+        <Card className="h-full bg-card py-0">
+          <CardHeader className="flex min-h-24 flex-row items-center justify-between border-b bg-gradient-to-br from-white/8 via-transparent to-transparent p-6">
+            <span class="grid size-11 place-items-center rounded-xl bg-white/10 text-white ring-1 ring-white/15">
               <Icon className="size-5" aria-hidden="true" />
             </span>
-            <span class="rounded-full border border-emerald-200/80 bg-background/90 px-3 py-1.5 font-heading text-xs font-semibold tracking-widest text-emerald-800 shadow-xs tabular-nums">
+            <span class="rounded-full border border-white/15 px-3 py-1.5 font-heading text-xs font-bold tracking-widest text-white/70 tabular-nums">
               {number}
             </span>
           </CardHeader>
           <CardContent className="flex h-full flex-col p-6">
-            <CardTitle className="text-xl">{title}</CardTitle>
+            <CardTitle className="text-xl font-bold">{title}</CardTitle>
             <p class="mt-3 flex-1 leading-6 text-muted-foreground">{description}</p>
-            <p class="mt-8 border-t pt-4 text-xs font-semibold tracking-wide text-emerald-700 uppercase">
+            <p class="mt-8 border-t pt-4 text-xs font-bold tracking-wide text-white/55 uppercase">
               {note}
             </p>
           </CardContent>

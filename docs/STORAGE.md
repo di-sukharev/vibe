@@ -13,18 +13,7 @@ Do not store user uploads or durable generated assets on the App Platform contai
 
 ## Intake Before Building File Features
 
-Ask product-level questions before implementation:
-
-- What will users upload: avatars, photos, documents, videos, exports, or something else?
-- Are files public, private, shared with selected users, or mixed?
-- Which roles can upload, view, replace, and delete files?
-- What are the maximum file size and allowed file types?
-- Do images need thumbnails, responsive sizes, format conversion, compression, cropping, or moderation?
-- How long should files live after the owning record is deleted?
-- Should filenames be user-visible, or should the app generate opaque object keys?
-- Are uploads required in the first version, or can media be deferred?
-
-Record the answer in the relevant README section when storage affects the active product surface.
+The product-level questions live in [CHECKLIST.md](../CHECKLIST.md) under files, images, and media, and the answers are recorded there. Ask them before implementation; do not restate them here, so the intake keeps one source.
 
 ## DigitalOcean Spaces Defaults
 

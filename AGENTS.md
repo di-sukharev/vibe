@@ -24,7 +24,7 @@
 ## Repository Grounding
 
 - Start from current code, scripts, schemas, tests, runtime output, and repository structure rather than assumptions or stale docs.
-- For non-trivial work, read `README.md` and the relevant `docs/` early. Discover structure with `rg --files` or a shallow tree when needed; do not treat README as a file inventory.
+- For non-trivial work, read `README.md`, `CHECKLIST.md`, and the relevant `docs/` early. Discover structure with `rg --files` or a shallow tree when needed; do not treat README as a file inventory.
 - Use the repository's package manager, scripts, test runner, formatter, linter, build tools, generators, framework APIs, and existing utilities.
 - For local PostgreSQL work, follow `docs/LOCAL_DATABASE.md` and `docker-compose.yml`. The supported cross-platform default is Docker Compose, not native PostgreSQL.
 - For web or mobile E2E work, read `docs/TESTING.md` and use its Playwright or Maestro workflow. After changing mobile flows, runner inputs, or E2E-only behavior, run the documented Maestro audit.
@@ -34,7 +34,8 @@
 
 ## Project Context
 
-- Keep durable project choices in README files and docs, not in agent instruction files. Document architecture, setup, operations, contracts, user flows, deployment, storage, and deferred surfaces only when the knowledge is durable.
+- Use `CHECKLIST.md` as the intake questionnaire and the record of the answers. Its capability ledger governs what this product has: build nothing it marks `absent` or `removed`, and treat an unlisted capability as `absent`. Dormant code, a leftover migration, or a mention in docs is not a product requirement; confirm with the user, then record the answer in the ledger.
+- Keep durable project choices in `CHECKLIST.md`, README files, and docs, not in agent instruction files. Document architecture, setup, operations, contracts, user flows, deployment, storage, and deferred surfaces only when the knowledge is durable.
 - Prefer the modular monolithic backend described in `docs/ARCHITECTURE.md`. Add services, queues, brokers, or real-time infrastructure only for a concrete operational need.
 - Route testing, local database, deployment, storage, and provider-specific work to their existing docs rather than duplicating runbooks here.
 
@@ -52,9 +53,10 @@
 <!-- BOOTSTRAP_ONLY_START -->
 This block applies only while installing the template as a new project:
 
-- Read `README.md`, especially `Agent Repo Download Instructions`, before setup or feature work.
-- Complete the documented product intake, active/deferred surface selection, branch choice, repository remote handling, Docker/PostgreSQL setup, deployment scope, and optional Expo/EAS or Maestro setup.
-- Bootstrap is complete when project choices are recorded, template identifiers and the intended remote state are resolved, required setup for active surfaces succeeds, and validation results are reported.
+- Read `README.md`, especially `Agent Repo Download Instructions`, and `CHECKLIST.md` before setup or feature work.
+- Run the `CHECKLIST.md` intake in the user's language and record the answers there, including its capability ledger, before feature work starts. When working on the template itself, leave the answers unfilled and keep only the ledger accurate.
+- Complete the documented active/deferred surface selection, branch choice, repository remote handling, Docker/PostgreSQL setup, deployment scope, and optional Expo/EAS or Maestro setup.
+- Bootstrap is complete when project choices are recorded in `CHECKLIST.md`, template identifiers and the intended remote state are resolved, required setup for active surfaces succeeds, and validation results are reported.
 - Then delete this entire marked block from both `AGENTS.md` and `CLAUDE.md`.
 <!-- BOOTSTRAP_ONLY_END -->
 

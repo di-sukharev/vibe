@@ -42,12 +42,12 @@ const questions = [
       />
     </div>
 
-    <div class="overflow-hidden rounded-2xl border bg-background px-5 sm:px-7">
+    <div class="overflow-hidden rounded-2xl border bg-card px-5 sm:px-7">
       {questions.map(({ question, answer }, index) => (
         <details class:list={['group py-5 sm:py-6', index > 0 && 'border-t']}>
-          <summary class="flex cursor-pointer list-none items-center justify-between gap-6 font-heading text-base font-semibold focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-lg [&::-webkit-details-marker]:hidden">
+          <summary class="flex cursor-pointer list-none items-center justify-between gap-6 font-heading text-base font-bold focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-lg [&::-webkit-details-marker]:hidden">
             {question}
-            <span class="grid size-8 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground transition-transform duration-200 group-open:rotate-45">
+            <span class="grid size-8 shrink-0 place-items-center rounded-full bg-white/10 text-white/70 transition-transform duration-200 group-open:rotate-45">
               <Plus className="size-4" aria-hidden="true" />
             </span>
           </summary>

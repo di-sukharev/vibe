@@ -4,7 +4,7 @@ The CSR browser client provides authenticated, role-specific workspaces. It need
 
 ## Project Surface Status
 
-This section may be updated during first-run bootstrap. If the root `README.md` marks webapp as deferred, add a short note here explaining that browser work is intentionally paused. When the user activates webapp, remove or rewrite that note before starting browser development.
+This section may be updated during first-run bootstrap. Once [CHECKLIST.md](../CHECKLIST.md) reports an install in progress or completed and its *Active surfaces* section leaves webapp unmarked, add a short note here explaining that browser work is intentionally paused. When the user activates webapp, mark it there, then remove or rewrite that note before starting browser development.
 
 ## Stack
 

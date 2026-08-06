@@ -17,14 +17,13 @@ DigitalOcean remains the default provider in this template. Do not ask the user 
 
 ## Intake
 
-Ask only product and release questions:
+Active surfaces, media visibility, and release targets are recorded in [CHECKLIST.md](../CHECKLIST.md); confirm them there instead of asking again. Rows left `_unanswered_` were never decided - ask for those now and write the answers back into the checklist. Then ask only the product and release questions this path adds:
 
-- which surfaces are being deployed now: backend/API, webapp, website, mobile, or full-stack;
-- production domains for API, webapp, website, media/CDN, and the mobile API endpoint;
 - whether backend/database traffic may stay private inside a Yandex Cloud network or must be reachable from the internet;
-- whether uploads/media are public, private, or mixed;
 - whether real-time chat, presence, collaboration, live notifications, or WebSocket-style updates must work across multiple backend instances;
-- whether images need fixed-size generated variants, dynamic transformations, compression, cropping, or moderation.
+- whether the recorded image processing needs Yandex-side dynamic transformations or fixed-size variants generated on upload.
+
+If mobile is active, switch to the `mobile` branch before mobile release planning.
 
 ## Prerequisites
 

@@ -58,13 +58,10 @@ test('registers, restores the session, opens protected UI, and logs out', async 
   await expect(page.getByRole('link', { name: 'Dashboard' })).toHaveCount(0)
   await expect(page.getByRole('link', { name: 'Users' })).toHaveCount(0)
   await expect(page.getByRole('main').getByText(email, { exact: true })).toBeVisible()
-  await expect(page.getByRole('main').getByText('Subscription', { exact: true })).toBeVisible()
-  await expect(page.getByRole('main').getByText('Premium · Inactive', { exact: true })).toBeVisible()
-  await expect(
-    page.getByRole('main').getByText('No store subscription is currently linked.', {
-      exact: true,
-    }),
-  ).toBeVisible()
+  await expect(page.getByRole('main').getByText('Member since', { exact: true })).toBeVisible()
+  // The browser client does not own billing: store subscriptions belong to the mobile app,
+  // so the account surface must not advertise a subscription the webapp cannot manage.
+  await expect(page.getByRole('main').getByText('Subscription', { exact: true })).toHaveCount(0)
   await expect
     .poll(async () =>
       (await page.context().cookies()).some(

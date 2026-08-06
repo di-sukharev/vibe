@@ -36,12 +36,12 @@ const roles = [
     </div>
     <div class="mt-12 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
       {roles.map(({ icon: Icon, title, description }) => (
-        <Card className="h-full transition-transform duration-200 hover:-translate-y-1 hover:shadow-md">
+        <Card className="h-full transition-all duration-200 hover:-translate-y-1 hover:ring-white/25">
           <CardHeader>
-            <span class="mb-3 grid size-10 place-items-center rounded-xl bg-emerald-100 text-emerald-800">
+            <span class="mb-3 grid size-10 place-items-center rounded-xl bg-white/10 text-white">
               <Icon className="size-5" aria-hidden="true" />
             </span>
-            <CardTitle className="text-lg">{title}</CardTitle>
+            <CardTitle className="text-lg font-bold">{title}</CardTitle>
           </CardHeader>
           <CardContent>
             <p class="leading-6 text-muted-foreground">{description}</p>

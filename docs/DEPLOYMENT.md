@@ -1,15 +1,15 @@
 # Deployment
 
-Use this document only after the user has asked for deployment. Read the root [README.md](../README.md) and active surface READMEs first; they record the installed project's active surfaces, deferred surfaces, release targets, and validation scope.
+Use this document only after the user has asked for deployment. Read [CHECKLIST.md](../CHECKLIST.md) first; it records the installed project's active surfaces, deferred surfaces, capabilities, and release targets. Surface READMEs carry the longer explanations behind those answers.
 
-The default production path is DigitalOcean App Platform plus DigitalOcean Managed PostgreSQL. Do not ask the user to choose a cloud provider during first-run setup. Ask for product-facing release details instead:
+The default production path is DigitalOcean App Platform plus DigitalOcean Managed PostgreSQL. Do not ask the user to choose a cloud provider during first-run setup. Confirm the recorded release scope and production domains; when deployment was deferred at install time those rows are still `_unanswered_`, so ask for them now and write the answers back into the checklist. Then ask only the release details the checklist does not cover:
 
-- which active surfaces should be released now: backend/API, webapp, website, mobile, or full-stack;
-- production domains/URLs for API, webapp, website, and the mobile API endpoint;
 - whether uploads, images, media, exports, or downloads need DigitalOcean Spaces in this release;
 - whether real-time chat, presence, collaboration, live notifications, or WebSocket-style updates must work across multiple backend instances;
-- whether mobile work includes EAS builds only or App Store / Google Play submission;
+- when mobile is active, whether this release covers EAS builds only or App Store / Google Play submission, and which API endpoint the app should point at;
 - whether an external CDN is required for advanced bot, rate-limit, or geographic traffic controls.
+
+If mobile is active, switch to the `mobile` branch before mobile release planning.
 
 Local setup from `README.md` and [LOCAL_DATABASE.md](LOCAL_DATABASE.md) does not require cloud credentials.
 

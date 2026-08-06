@@ -51,11 +51,11 @@ const firstSetup = [
       <div class="mt-10 grid gap-x-8 gap-y-7 sm:grid-cols-2">
         {kitItems.map(({ icon: Icon, title, description }) => (
           <div class="grid grid-cols-[auto_1fr] gap-3">
-            <span class="mt-0.5 grid size-9 place-items-center rounded-lg bg-emerald-100 text-emerald-800">
+            <span class="mt-0.5 grid size-9 place-items-center rounded-lg bg-white/10 text-white">
               <Icon className="size-4.5" aria-hidden="true" />
             </span>
             <div>
-              <h3 class="font-heading font-semibold">{title}</h3>
+              <h3 class="font-heading font-bold">{title}</h3>
               <p class="mt-1.5 text-sm leading-6 text-muted-foreground">{description}</p>
             </div>
           </div>
@@ -64,14 +64,14 @@ const firstSetup = [
     </div>
 
     <div class="relative mx-auto w-full max-w-lg">
-      <div class="absolute -inset-6 -z-10 rounded-[2.5rem] bg-emerald-200/35 blur-3xl" aria-hidden="true"></div>
-      <Card className="gap-0 overflow-hidden rounded-2xl bg-primary py-0 text-primary-foreground shadow-2xl shadow-emerald-950/15 ring-0">
+      <div class="glow-halo absolute -inset-6 -z-10 rounded-[2.5rem] blur-3xl" aria-hidden="true"></div>
+      <Card className="glow-surface gap-0 overflow-hidden rounded-2xl bg-[#0d0d0d] py-0 text-white ring-1 ring-white/12">
         <CardHeader className="flex flex-row items-center justify-between border-b border-white/10 px-6 py-5">
           <div>
-            <p class="text-xs text-primary-foreground/60">Перед первой задачей</p>
-            <p class="mt-1 font-heading text-lg font-semibold">Что настроить под себя</p>
+            <p class="text-xs text-white/55">Перед первой задачей</p>
+            <p class="mt-1 font-heading text-lg font-bold">Что настроить под себя</p>
           </div>
-          <Badge className="bg-emerald-300 text-emerald-950">4 пункта</Badge>
+          <Badge className="font-bold">4 пункта</Badge>
         </CardHeader>
         <CardContent className="p-6">
           <ul class="space-y-3">
@@ -83,7 +83,7 @@ const firstSetup = [
                   </span>
                   {label}
                 </span>
-                <span class="text-xs font-medium text-emerald-300">{action}</span>
+                <span class="text-xs font-bold text-white/60">{action}</span>
               </li>
             ))}
           </ul>

@@ -10,7 +10,7 @@ const prisma = createPrisma(config.databaseUrl)
 try {
   const result = await bootstrapDevelopmentData(prisma, config.accounts)
   console.log(`Seeded development administrator ${result.admin.email}.`)
-  console.log(`Seeded premium development user ${result.user.email}.`)
+  console.log(`Seeded development user ${result.user.email}.`)
 } finally {
   await prisma.$disconnect()
 }

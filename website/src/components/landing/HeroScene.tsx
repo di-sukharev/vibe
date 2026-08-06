@@ -4,8 +4,9 @@ import * as THREE from 'three'
 
 type Point3 = [number, number, number]
 
-const STROKE = '#edf7f1'
-const ACCENT = '#6ee7b7'
+// Monochrome scene: depth comes from two grey levels, not from hue.
+const STROKE = '#ffffff'
+const ACCENT = '#8a8a8a'
 const DESIGN_WIDTH = 7.8
 const DESIGN_HEIGHT = 7.2
 
@@ -210,13 +211,13 @@ export default function HeroScene() {
   const prefersReducedMotion = usePrefersReducedMotion()
 
   return (
-    <div className="relative h-full min-h-[25rem] w-full overflow-hidden bg-[#171c1a]" data-hero-scene>
+    <div className="relative h-full min-h-[25rem] w-full overflow-hidden bg-[#0d0d0d]" data-hero-scene>
       <div
-        className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_48%,rgba(52,211,153,0.12),transparent_44%),linear-gradient(145deg,rgba(30,37,34,0.98),rgba(18,23,21,1))]"
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_48%,rgba(255,255,255,0.13),transparent_46%),linear-gradient(145deg,rgba(23,23,23,0.98),rgba(7,7,7,1))]"
         aria-hidden="true"
       />
       <div
-        className="pointer-events-none absolute inset-0 opacity-45 [background-image:linear-gradient(rgba(167,243,208,0.055)_1px,transparent_1px),linear-gradient(90deg,rgba(167,243,208,0.055)_1px,transparent_1px)] [background-size:2.4rem_2.4rem] [mask-image:radial-gradient(circle_at_center,black,transparent_82%)]"
+        className="pointer-events-none absolute inset-0 opacity-45 [background-image:linear-gradient(rgba(255,255,255,0.055)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.055)_1px,transparent_1px)] [background-size:2.4rem_2.4rem] [mask-image:radial-gradient(circle_at_center,black,transparent_82%)]"
         aria-hidden="true"
       />
       <Canvas

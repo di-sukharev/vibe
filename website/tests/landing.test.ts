@@ -43,7 +43,7 @@ async function buildLanding(publicWebappUrl?: string) {
 }
 
 test('landing build keeps SEO-critical content in semantic static HTML', () => {
-  assert.match(html, /<html lang="ru">/)
+  assert.match(html, /<html[^>]*\blang="ru"/)
   assert.match(html, /<title>ЙЙ — шаблон для создания сайтов и приложений с ИИ<\/title>/)
   assert.match(html, /href="https:\/\/sukharev\.dev"/)
   assert.ok(html.includes(`<meta name="description" content="${description}">`))
