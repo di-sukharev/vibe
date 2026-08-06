@@ -57,18 +57,25 @@ Keep an explicit username and password in Prisma connection URLs even on local n
 
 `JWT_SECRET` must be at least 32 characters locally. Production accepts the 64-or-more-character hexadecimal output of `openssl rand -hex 32`; do not use the `.env.example` placeholder, repeated characters, or human phrases.
 
-`ADMIN_SEED_EMAIL` defaults to `admin@example.com` for local seeding.
-`ADMIN_SEED_PASSWORD` is optional locally: without it, `bun run prisma:seed`
-creates a new locked account with `passwordHash = null`; promoting an existing
-account preserves its current password credential. With a password, the seed
-hashes it with Argon2id and creates or unlocks the account. The seed is
-idempotent and an empty password never erases an
-existing hash; reusing the already configured password also preserves the hash,
-active sessions, and push registrations. Production uses `bun run db:deploy`: it applies migrations,
-optionally bootstraps the first administrator from a paired email/password, then
-fails unless at least one administrator has a password credential.
-Production bootstrap also rejects blank, known-placeholder, and repeated-pattern
-passwords in addition to enforcing the 12–128 character limit.
+`bun run prisma:seed` (or `bun run dev:seed` from the repository root) is the
+explicit local development seed. It requires the paired `DEV_SEED_ADMIN_*` and
+`DEV_SEED_USER_*` email/password values from `backend/.env`, creates login-ready
+administrator and ordinary-user accounts, and gives only the ordinary user a
+non-expiring `DevelopmentSeed` premium entitlement for mobile exploration. The
+command rejects `NODE_ENV=production` and any non-loopback PostgreSQL URL.
+
+The development seed is idempotent: unchanged passwords preserve their hashes,
+active sessions, and push registrations. Replacing a configured credential
+updates its Argon2id hash and revokes stale authentication and push authority.
+The committed values are public local defaults and must never be reused in a
+deployed environment.
+
+Production remains a separate path. `bun run db:deploy` applies migrations,
+optionally bootstraps only the first administrator from paired
+`ADMIN_SEED_EMAIL` and `ADMIN_SEED_PASSWORD`, then fails unless at least one
+administrator has a password credential. Production bootstrap rejects blank,
+known-placeholder, and repeated-pattern passwords in addition to enforcing the
+12–128 character limit; it never creates the local demo user or entitlement.
 
 `COOKIE_SECURE=false` is appropriate for local HTTP; production requires `COOKIE_SECURE=true` with exact HTTPS origins in `CORS_ORIGINS`. Production browser auth uses `SameSite=None; Secure` refresh cookies, so wildcard, empty, HTTP, or path-bearing CORS origins are invalid. Every cookie-backed auth write (`register`, `login`, `refresh`, and `logout`) also requires a trusted `Origin` in production cookie mode.
 

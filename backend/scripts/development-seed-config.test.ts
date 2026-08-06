@@ -44,6 +44,12 @@ describe('development seed configuration', () => {
       }),
     ).toThrow('loopback PostgreSQL')
     expect(() =>
+      parseDevelopmentSeedConfig({
+        ...validSource,
+        DATABASE_URL: `${validSource.DATABASE_URL}&host=database.example.com`,
+      }),
+    ).toThrow('loopback PostgreSQL')
+    expect(() =>
       parseDevelopmentSeedConfig({ ...validSource, DEV_SEED_USER_PASSWORD: '' }),
     ).toThrow('DEV_SEED_USER_PASSWORD')
     expect(() =>

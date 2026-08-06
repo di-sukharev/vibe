@@ -9,12 +9,14 @@ describe('development seed command', () => {
     const credentialCases = [
       {},
       {
-        ADMIN_SEED_EMAIL: 'admin@example.com',
-        ADMIN_SEED_PASSWORD: 'short',
+        DEV_SEED_ADMIN_EMAIL: 'admin@example.com',
+        DEV_SEED_ADMIN_PASSWORD: 'short',
       },
       {
-        ADMIN_SEED_EMAIL: 'admin@example.com',
-        ADMIN_SEED_PASSWORD: 'aaaaaaaaaaaa',
+        DEV_SEED_ADMIN_EMAIL: 'admin@example.com',
+        DEV_SEED_ADMIN_PASSWORD: 'local-admin-password',
+        DEV_SEED_USER_EMAIL: 'user@example.com',
+        DEV_SEED_USER_PASSWORD: 'local-user-password',
       },
     ]
 
@@ -22,9 +24,11 @@ describe('development seed command', () => {
       const result = spawnSync('bun', [scriptPath], {
         env: {
           ...process.env,
-          ADMIN_SEED_EMAIL: undefined,
-          ADMIN_SEED_PASSWORD: undefined,
           DATABASE_URL: 'postgresql://unused:unused@127.0.0.1:1/unused',
+          DEV_SEED_ADMIN_EMAIL: '',
+          DEV_SEED_ADMIN_PASSWORD: '',
+          DEV_SEED_USER_EMAIL: '',
+          DEV_SEED_USER_PASSWORD: '',
           NODE_ENV: 'production',
           ...credentials,
         },

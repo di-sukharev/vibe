@@ -29,7 +29,8 @@ export function parseDevelopmentSeedConfig(
   }
   if (
     !['postgres:', 'postgresql:'].includes(parsedDatabaseUrl.protocol) ||
-    !loopbackHosts.has(parsedDatabaseUrl.hostname)
+    !loopbackHosts.has(parsedDatabaseUrl.hostname) ||
+    parsedDatabaseUrl.searchParams.has('host')
   ) {
     throw new Error('Development seed requires a loopback PostgreSQL DATABASE_URL')
   }
