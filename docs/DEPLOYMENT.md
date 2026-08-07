@@ -13,7 +13,91 @@ If mobile is active, switch to the `mobile` branch before mobile release plannin
 
 Local setup from `README.md` and [LOCAL_DATABASE.md](LOCAL_DATABASE.md) does not require cloud credentials.
 
-If the user explicitly asks for Yandex Cloud, use [YANDEX_CLOUD.md](YANDEX_CLOUD.md) as the provider runbook. The supported Yandex Cloud alternative is Serverless Containers for backend/API, Managed Service for PostgreSQL for production data, Object Storage for files and static websites, and Cloud CDN for public static/media delivery.
+This document covers the DigitalOcean path. If `CHECKLIST.md` records Yandex Cloud, use [YANDEX_CLOUD.md](YANDEX_CLOUD.md) instead. The supported Yandex Cloud alternative is Serverless Containers for backend/API, Managed Service for PostgreSQL for production data, Object Storage for files and static websites, and Cloud CDN for public static/media delivery.
+
+## If You Chose Another Hosting
+
+The hosting choice is recorded in [CHECKLIST.md](../CHECKLIST.md) and only one path is kept. If the
+project runs on Yandex Cloud or an own server, delete the DigitalOcean tooling in one pass.
+
+**Delete these files**
+
+- `scripts/prepare-do-specs.mjs`, `scripts/do-cron.mjs`, `scripts/runner-collections.mjs`, and their
+  tests - only the DigitalOcean generator reads runner collections
+- `.do/`
+
+**Edit these files** - one bullet each, so nothing is left half-removed:
+
+- root `package.json`: drop the `deploy:do:specs` script. Leaving it behind points at a deleted
+  generator, and `scripts/repo-env.test.mjs` fails on exactly that half-removal.
+- **this file**: delete every section except the seven below, then clean those seven.
+  - "Release Source Preflight" - drop the App Platform paragraph.
+  - "Secrets And Backend Env" - `TRUSTED_PROXY_CLIENT_IP_HEADER=do-connecting-ip` is wrong on any
+    other ingress, `SPACES_ENDPOINT` names a DigitalOcean host, and the storage paragraph mentions
+    a `deploy:do:specs` command that no longer exists.
+  - "Own Server" - keep as is; on the Yandex path, delete it too.
+  - "Production Auth And CORS" - drop the `DO_AUTH_SITE_DOMAIN` sentence.
+  - "Real-Time And Horizontal Scaling" - keep the monolith-first and Pub/Sub guidance, drop the
+    Managed Valkey provisioning.
+  - "Validation" - keep the local checks and the post-deploy list, minus the `deploy:do:specs` and
+    `doctl apps spec validate` lines.
+  - "Mobile Releases" - keep as is.
+  - Then rewrite the opening paragraphs above, which announce DigitalOcean as the default path.
+- `docs/BACKGROUND_JOBS.md`: the DigitalOcean bullet under "Provider specifics", the App Platform
+  half of the cadence sentence, and the two App Platform links. If the Yandex bullet is gone too, delete the
+  now-empty "Provider specifics" heading.
+- `docs/YANDEX_CLOUD.md`, when that is the chosen path: the opening sentence comparing the two
+  providers, the Dockerfile line that says "the same as the DigitalOcean path", and the storage
+  paragraph's note that the service is named around the DigitalOcean default. Keep everything
+  else, including "Two details of the timer trigger cost people time" - those are Yandex traps,
+  not a comparison.
+- `docs/STORAGE.md`: the DigitalOcean provider specifics. Keep the upload flow, the private/public
+  rules, and the storage-service guidance - they are about S3 and about this codebase, not about
+  DigitalOcean.
+- `webapp/README.md` and the root `README.md`: the DigitalOcean deployment guidance and every
+  `bun run deploy:do:specs` mention, including the setup instructions near the top of `README.md`
+  that name DigitalOcean as the supported production path.
+- `backend/README.md`: the DigitalOcean part of "Deployment", and - in "Runtime Entrypoints" - the
+  sentence about deployment generation refusing a runner whose list is empty.
+- `website/README.md`: the `.do/backend-app.yaml.example` link and the
+  `bun run deploy:do:specs website` command.
+- `docs/ARCHITECTURE.md`: the App Platform sizing and component guidance, the DigitalOcean half of
+  the Valkey broker sentence, and the Managed Valkey link. Agents are told to read this file for
+  non-trivial work, so a leftover here misdirects every future session.
+- `AGENTS.md` and `CLAUDE.md`: the App Platform spec-defaults rule and the "anything else means
+  DigitalOcean" half of the hosting rule. Keep the two files identical.
+- `CHECKLIST.md`: the DigitalOcean row in the hosting table, the option in the recorded-hosting row,
+  the DigitalOcean half of the hosting rule, and the App Platform defaults and Spaces env entries in
+  the agent-owned decisions section.
+- `backend/src/env.ts` and `backend/.env.example`: the `SPACES_*` naming, if the project also moves
+  object storage. `backend/src/storage/service.ts` hardcodes the DigitalOcean endpoint shape and
+  needs a provider pass either way.
+
+Finally, sweep for what no list can enumerate:
+
+```bash
+rg -n 'DigitalOcean|App Platform|deploy:do:specs|doctl|Spaces|\.do/' --glob '!node_modules'
+```
+
+Every hit must either go or become provider-neutral, with four exceptions to leave alone:
+
+- `scripts/repo-env.test.mjs` - its DigitalOcean block is the half-removal guard, and both removal
+  lists rely on it;
+- `backend/src/jobs.ts` - both comments are already provider-neutral: one names all three
+  hostings to explain what a job is, the other explains the type-only-import rule;
+- `website/astro.config.mjs` - a comment naming both providers next to the static output path;
+- `backend/src/db.test.ts`, `backend/src/env.test.ts`, `backend/src/storage/service.test.ts` -
+  "DigitalOcean" appears only in test titles about connection strings and S3 URL shapes.
+
+Everything else goes. Keep the storage guidance that is really about S3 and uploads; only the
+DigitalOcean specifics go.
+
+When you are done, delete **both** "If You Chose Another Hosting" sections - this one, and the one
+in the hosting document you kept. The choice is made; a surviving section tells the project to
+delete the tooling it actually uses.
+
+`bun run test:deploy` runs whatever is left in `scripts/`, so no test list needs editing. Run
+`bun run typecheck` and `bun run test` afterwards to confirm.
 
 ## Release Source Preflight
 
@@ -63,7 +147,7 @@ COOKIE_SECURE=true
 
 `JWT_SECRET` belongs in the production backend runtime env. Generate it with `openssl rand -hex 32`; that command creates 32 random bytes encoded as 64 hex characters. Do not use the placeholder from `backend/.env.example`, repeated characters, or human phrases.
 
-DigitalOcean App Platform puts the real client address in `do-connecting-ip`; its `X-Forwarded-For` identifies the ingress server. Keep `INGRESS_RATE_LIMIT_PROVIDER=local` and `TRUSTED_PROXY_CLIENT_IP_HEADER=do-connecting-ip` on this deployment path so auth/webhook ingress limits and session metadata are scoped to the actual client.
+`TRUSTED_PROXY_CLIENT_IP_HEADER` must name the header your ingress actually sets, otherwise auth/webhook ingress limits and session metadata are scoped to the ingress instead of the client. DigitalOcean App Platform puts the real client address in `do-connecting-ip` and uses `X-Forwarded-For` for the ingress server itself, so keep `INGRESS_RATE_LIMIT_PROVIDER=local` and `TRUSTED_PROXY_CLIENT_IP_HEADER=do-connecting-ip` on this path. Behind Yandex Serverless Containers or your own reverse proxy the value is `x-forwarded-for`; change it together with the hosting, and set `TRUST_PROXY=false` if nothing trustworthy sits in front of the backend.
 
 With `INGRESS_RATE_LIMIT_PROVIDER=local`, `AUTH_RATE_LIMIT_*`, `IAP_RATE_LIMIT_*`, `WEBHOOK_RATE_LIMIT_*`, and `ADMIN_USERS_READ_RATE_LIMIT_*` use bounded in-process maps. The admin directory budget is shared by all sessions and search filters for the same administrator, but none of these budgets is global across multiple backend processes. Replace the ingress budgets with a trusted edge/WAF policy or shared state before scaling the API to multiple instances. `yandex-sws` is reserved for the Yandex Cloud path documented in [YANDEX_CLOUD.md](YANDEX_CLOUD.md); it disables only the backend's IP-keyed ingress budgets after Smart Web Security is active, while body limits and the administrator-keyed directory budget remain enabled.
 
@@ -82,7 +166,7 @@ SPACES_DOWNLOAD_URL_TTL_SECONDS=300
 SPACES_PUBLIC_CACHE_CONTROL="public, max-age=31536000, immutable"
 ```
 
-Export the complete group before `bun run deploy:do:specs backend-final`. The generator rejects partial storage configuration, writes access credentials as `SECRET`, and gives the group to the API service only. Current notification, billing, and maintenance background commands do not consume Spaces, so their worker/cron components do not receive storage credentials. Add an explicit command-to-env mapping and tests before a future storage-consuming background command is deployed.
+Export the complete group before generating specs. On DigitalOcean, `bun run deploy:do:specs backend-final` rejects partial storage configuration, writes access credentials as `SECRET`, and gives the group to the API service only. Current notification, billing, and maintenance background commands do not consume Spaces, so their worker/cron components do not receive storage credentials. Add an explicit command-to-env mapping and tests before a future storage-consuming background command is deployed.
 
 If native subscriptions are active, export the complete group for each enabled store before generating
 the production backend spec:
@@ -108,6 +192,30 @@ root certificates bundled in the backend image. App Store credentials stay on th
 credentials also go to `maintenance:process` when Google Play is configured (and to
 `billing:google-play:reconcile` once subscriptions are turned on), but never to workers, unrelated cron jobs, static sites, or any `EXPO_PUBLIC_*`
 variable.
+
+## Own Server
+
+Chosen when the project wants full control and no vendor lock-in. There is no generator and no
+managed platform here: every step below is yours to run and to keep running.
+
+- **Backend.** Build `backend/Dockerfile` from the repository root and run it with the env group
+  from "Secrets And Backend Env". Behind a reverse proxy set `TRUST_PROXY=true` and
+  `TRUSTED_PROXY_CLIENT_IP_HEADER=x-forwarded-for`; with the container exposed directly, set
+  `TRUST_PROXY=false`.
+- **Database.** PostgreSQL 18 or newer, because primary keys use `uuidv7()`. Apply migrations with
+  `bun run --cwd backend db:deploy` as a step before the new container starts serving, never with
+  `prisma migrate dev`. Take backups yourself and restore-test them; nobody else will.
+- **TLS and domains.** Terminate TLS at the proxy (Caddy or nginx with certbot) and keep the API
+  and the browser app under one registrable domain, as "Production Auth And CORS" requires.
+- **Static surfaces.** `bun run build:webapp` and `bun run build:website` produce plain directories;
+  serve them from the same proxy with `index.html` as the SPA catch-all for the webapp.
+- **Background jobs.** Run `bun run --cwd backend start:scheduler` as its own service - see
+  [BACKGROUND_JOBS.md](BACKGROUND_JOBS.md) for the systemd and Docker recipes.
+- **Uploads.** `backend/src/storage/service.ts` speaks S3, so any S3-compatible object storage
+  works; see [STORAGE.md](STORAGE.md).
+
+Alert on the backend health endpoint and on "the scheduled job has not reported success recently".
+A managed platform surfaces a crash loop for you; here, silence looks exactly like success.
 
 ## DigitalOcean App Platform
 
@@ -263,12 +371,21 @@ migrate dev` in production and do not hand-write migration SQL.
 
 ## Backend Worker And Cron
 
+Jobs themselves are provider-neutral and documented in [BACKGROUND_JOBS.md](BACKGROUND_JOBS.md):
+they are declared once in `backend/src/jobs.ts` and run by whichever process fits. This section
+covers only the DigitalOcean side of that choice.
+
 The backend ships as one Docker image with separate entrypoints:
 
 - API service: `bun run start:api`
-- placeholder worker: `bun run start:worker`
-- push notification worker: `bun run start:worker:notifications`
-- one-shot cron runner: `bun run start:cron -- <task>`
+- one-shot job runner for a scheduled component: `bun run start:cron -- <job>`
+- in-repo scheduler, if you would rather keep schedules in the repository than in App Platform:
+  `bun run start:scheduler` as the worker component's run command
+- loop worker, for work that must run more often than once a minute or continuously:
+  `bun run start:worker`. Between one and fifteen minutes, use the scheduler instead - App
+  Platform's own minimum cadence is 15 minutes, but a loop is the wrong shape for that gap
+- push notification worker: `bun run start:worker:notifications`, the one long-running handler this
+  branch ships ready to deploy
 
 Keep API, worker, and cron in the same backend workspace so they share Prisma schema, generated Prisma client, env validation, contracts, and feature services. Do not create a second backend package or repository just to run background code.
 
@@ -278,6 +395,8 @@ DigitalOcean App Platform supports non-routable worker components and scheduled 
 # Add the push notification worker after Expo Push is active.
 export DO_BACKEND_WORKER_ENABLED=true
 export DO_BACKEND_WORKER_RUN_COMMAND="bun run start:worker:notifications"
+# Or run the in-repo scheduler instead - but only once `schedules` in backend/src/scheduler.ts has
+# an entry, otherwise the process exits immediately and the generator refuses the command.
 
 # Add the combined maintenance job for production. With Google Play configured,
 # it also refreshes stale stored purchases; otherwise it only cleans auth sessions.
@@ -295,7 +414,7 @@ export DO_BACKEND_NOTIFICATION_CRON_TIME_ZONE=UTC
 bun run deploy:do:specs backend-final
 ```
 
-Use worker components only after a real long-running handler exists. The notification worker is a real handler once the app sends push notifications; the generator still refuses the template placeholder `bun run start:worker`, because that placeholder exits immediately and should not be deployed as an App Platform worker. Production should normally schedule `maintenance:process`; it removes stale auth sessions and expired password-reset tokens, redacts legacy terminal notification content, and - once subscriptions are turned on and the complete Google Play group is configured - reconciles stale stored purchase tokens in bounded batches. `auth:sessions:cleanup` remains available as a dedicated task and covers both sessions and reset tokens. `billing:google-play:reconcile` exists only after subscriptions are turned on (docs/IAP.md); spec generation rejects it until then, because scheduling an unregistered task deploys a job that fails on every run.
+Use worker components only after the process has work to do. The notification worker qualifies once the app sends push notifications. For the two generic runners the generator reads `backend/src/scheduler.ts` and `backend/src/worker.ts` before accepting `bun run start:scheduler` or `bun run start:worker`: while `schedules` or `workerLoops` is still the empty list the process exits immediately and App Platform would restart it forever. Fill the list in and the same command is accepted; any other command is passed through as-is. Production should normally schedule `maintenance:process`; it removes stale auth sessions and expired password-reset tokens, redacts legacy terminal notification content, and - once subscriptions are turned on and the complete Google Play group is configured - reconciles stale stored purchase tokens in bounded batches. `auth:sessions:cleanup` remains available as a dedicated task and covers both sessions and reset tokens. `billing:google-play:reconcile` exists only after subscriptions are turned on (docs/IAP.md); spec generation rejects it until then, because scheduling an unregistered task deploys a job that fails on every run.
 
 Choose one notification-processing topology explicitly:
 
@@ -384,7 +503,7 @@ DigitalOcean Managed PostgreSQL uses TLS. The backend normalizes `sslmode=requir
 
 Production browser auth may be cross-origin, but it must remain same-site: use custom hosts under one registrable domain, such as `app.example.com` and `api.example.com`. Independent App Platform default hosts such as `app-abc.ondigitalocean.app` and `api-xyz.ondigitalocean.app` are different browser sites because `ondigitalocean.app` is a public suffix. A `SameSite=None` cookie can still be blocked by browser third-party-cookie policy, so default ingress hosts are supported only for initial provisioning and non-cookie health checks, not production browser auth.
 
-Set `DO_AUTH_SITE_DOMAIN` to the registrable site (`example.com` in the example), not to either host. The deploy generator verifies that `DO_BACKEND_URL`, `DO_WEBAPP_URL`, and any additional credentialed CORS origins belong to it. The required runtime shape is:
+Both hosts must sit under one registrable site (`example.com` in the example). On DigitalOcean, set `DO_AUTH_SITE_DOMAIN` to that site, not to either host, and the deploy generator verifies that `DO_BACKEND_URL`, `DO_WEBAPP_URL`, and any additional credentialed CORS origins belong to it; on another hosting, check it yourself. The required runtime shape is:
 
 - backend cookies: `HttpOnly`, `Secure`, `SameSite=None`, scoped to `/api/auth`;
 - backend CORS: exact HTTPS origins only, `credentials: true`, no wildcard fallback;

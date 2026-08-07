@@ -40,6 +40,15 @@ bun run --cwd backend prisma:validate
 bun run smoke:backend:docker
 ```
 
+Backend test files are discovered, not listed, and the filename decides which runner picks them
+up: anything under `backend/src` or `backend/scripts` named `*.integration.test.ts` needs the Docker
+Postgres and runs in `test:integration`; every other `*.test.ts` or `*.test.mjs` there runs in
+`test:unit` without a database. Name a database-backed test accordingly - `backend/scripts/test-files.mjs`
+owns the split and `backend/scripts/test-files.test.mjs` fails if the two runners stop being
+complementary. A suite belonging to a capability that ships switched off marks itself
+`@parked-test` in its opening comment and runs in neither runner until that line is deleted;
+`backend/src/modules/billing/billing.integration.test.ts` is the example.
+
 Contract tests live in `packages/contracts/src/*.test.ts` and protect shared request/response/error schemas used by backend, webapp, and mobile. Webapp and mobile unit tests live in each client `tests/` directory and cover API refresh/retry behavior that would be too expensive and brittle to fully exercise in E2E.
 
 Backend tests live next to their owning product modules. Integration tests exercise auth, users/admin RBAC, and notifications through application/transport boundaries and real PostgreSQL persistence. The billing suite is parked with its capability (docs/IAP.md) and runs again once the tables are uncommented. The integration runner starts `postgres_test`, applies migrations, and covers session rotation, role guards, profile validation, last-admin/concurrent-demotion safety, role-change session revocation, seed idempotence, ownership, outbox retries, receipts, and stable error shapes. By default, the test database port is derived from the absolute repository path so parallel checkouts do not collide, and `TEST_DATABASE_URL` is derived from that port. Set `POSTGRES_TEST_PORT` and `TEST_DATABASE_URL` only when a fixed test database is required. Local database startup, credentials, and reset behavior are documented in [LOCAL_DATABASE.md](LOCAL_DATABASE.md).

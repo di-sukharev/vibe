@@ -95,10 +95,27 @@ Whatever this project ends up with, the ledger below is what states it. App Stor
 | Question | Answer |
 | --- | --- |
 | Is deployment needed now, or local-only for the moment? | _unanswered_ |
+| Where are your users, and must the data stay in Russia? | _unanswered_ |
+| Hosting, picked by the agent from the answer above: DigitalOcean / Yandex Cloud / own server | _unanswered_ |
 | Production domains / URLs, per surface (API, webapp, website, media/CDN) | _unanswered_ |
 | Which surfaces are released first | _unanswered_ |
 
-DigitalOcean is the default and the agent does not ask the user to compare cloud providers. Yandex Cloud is used only on explicit request. Local development never requires cloud credentials.
+**Ask the audience question, not the provider question.** A product owner knows where their users
+are and whether data must stay in Russia; they should not be asked to compare clouds. The agent
+picks the hosting from that answer:
+
+| Hosting | Chosen when | What the template gives you |
+| --- | --- | --- |
+| DigitalOcean | Default for an audience outside Russia. | `bun run deploy:do:specs` generates validated App Platform specs; managed PostgreSQL, static sites, CDN, scheduled jobs and workers are all covered. |
+| Yandex Cloud | Users in Russia, or data must stay there. | Serverless Containers, Managed PostgreSQL, Object Storage, API Gateway. Provisioning follows `docs/YANDEX_CLOUD.md` step by step - there is no generator. |
+| Own server | Full control wanted, no vendor lock-in, and someone is willing to run the machine. | The same Docker image plus the in-repo scheduler, with a short runbook in the "Own Server" section of `docs/DEPLOYMENT.md`. No generator: you own TLS, backups, updates, and monitoring. |
+
+Pick exactly one and record it above. The other paths are not kept "just in case": their scripts,
+spec templates, and docs are deleted during setup. Follow the "If You Chose Another Hosting" list in
+the document for each path you did **not** pick - so a Yandex project runs the one in
+`docs/DEPLOYMENT.md`, a DigitalOcean project the one in `docs/YANDEX_CLOUD.md`, and an own-server
+project both. Local development never requires cloud credentials
+regardless of the choice.
 
 Deployment is often deferred at install time, which leaves these rows `_unanswered_`. When the user later asks to deploy, ask the unanswered questions then and write the answers back here before following `docs/DEPLOYMENT.md`.
 
@@ -111,6 +128,7 @@ The user is a product owner, not an engineer. These are engineering decisions th
 - Docker Compose for local PostgreSQL on every OS; never a native install unless the user insists.
 - Astro for `website`; Next.js only if Vercel-style ISR is a stated product requirement.
 - DigitalOcean App Platform defaults, machine sizes, and static-site vs service choices.
+- Which hosting the recorded audience implies: Russia means Yandex Cloud, elsewhere means DigitalOcean, and an explicit wish for full control means an own server. Explain the pick in product terms; never ask the owner to compare providers.
 - Managed Redis-compatible Pub/Sub only when real-time needs to scale across instances.
 - Test boundaries: E2E for important user journeys, integration for API/auth/persistence, unit for pure rules.
 - Libraries, file layout, naming, refactors, and validation scope.
@@ -136,7 +154,7 @@ A capability with no row is `absent` by default. Add the row instead of assuming
 | Push notifications | available | Expo Push is wired but inert until the project has an EAS project id and configured credentials. |
 | Social sign-in (Apple / Google) | available | Implemented but switched off: the route is not mounted and the buttons are not rendered. Turn on or delete per `docs/SOCIAL_AUTH.md`. |
 | Real-time / WebSockets | absent | Requires an explicit product need. |
-| Scheduled background jobs | available | `backend/src/cron.ts` runs `auth:sessions:cleanup` when invoked, but nothing schedules it: export `DO_BACKEND_CRON_*` before `bun run deploy:do:specs`, or add a trigger per `docs/YANDEX_CLOUD.md`. Until then stale sessions and expired reset tokens are never deleted. |
+| Background jobs | available | Jobs live in `backend/src/jobs.ts` and already include `auth:sessions:cleanup`, but nothing runs them on a schedule yet. Pick a runner per `docs/BACKGROUND_JOBS.md`; until then stale sessions and expired reset tokens are never deleted. |
 
 ## 10. Environment checks
 

@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test'
-import { readFile, readdir } from 'node:fs/promises'
+import { access, readFile, readdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 import {
@@ -67,8 +67,60 @@ test('documented manual Compose commands load the backend-owned env file', async
   expect(commandsMissingBackendEnv).toEqual([])
 })
 
-// This documentation contract lives here rather than in its own file because `test:deploy`
-// enumerates its test files explicitly, so a new file would silently never run.
+test('the background job registry can be read without a database', async () => {
+  // Tooling outside the backend imports backend/src/jobs.ts for the list of job names, and may
+  // run before `prisma:generate` has. A runtime import in that file would pull the Prisma client
+  // and the env schema into a process that must not need either.
+  const runtimeImports = (await readFile(resolve(repositoryRoot, 'backend/src/jobs.ts'), 'utf8'))
+    .split('\n')
+    .filter((line) => /^import\s/.test(line) && !/^import type\s/.test(line))
+
+  expect(runtimeImports).toEqual([])
+})
+
+test('hosting tooling and the command that drives it are removed together', async () => {
+  // A project keeps one hosting path and deletes the others during setup. The failure that hurts
+  // is a half-removal: a script entry that points at a deleted generator, or a generator with no
+  // way to run it.
+  const [hasGenerator, hasSpecTemplates, rootPackageJson] = await Promise.all([
+    exists('scripts/prepare-do-specs.mjs'),
+    exists('.do'),
+    readFile(resolve(repositoryRoot, 'package.json'), 'utf8'),
+  ])
+  const hasCommand = JSON.parse(rootPackageJson).scripts['deploy:do:specs'] !== undefined
+
+  const digitalOceanTooling = {
+    'the deploy:do:specs script': hasCommand,
+    'scripts/prepare-do-specs.mjs': hasGenerator,
+    '.do/': hasSpecTemplates,
+  }
+  const kept = Object.keys(digitalOceanTooling).filter((part) => digitalOceanTooling[part])
+  const removed = Object.keys(digitalOceanTooling).filter((part) => !digitalOceanTooling[part])
+
+  // All three or none. A mixed result names exactly what the half-removal left behind.
+  expect(kept.length > 0 && removed.length > 0 ? { kept, removed } : null).toBeNull()
+
+  // Both provider documents are on each other's removal lists, so a setup that followed both
+  // would leave the project with nowhere documented to deploy. (docs/BACKGROUND_JOBS.md is
+  // deliberately not counted here: it is provider-neutral and no list deletes it, so including
+  // it would make this assertion impossible to fail.)
+  const providerDocs = await Promise.all([
+    exists('docs/DEPLOYMENT.md'),
+    exists('docs/YANDEX_CLOUD.md'),
+  ])
+
+  expect(providerDocs.some(Boolean)).toBe(true)
+})
+
+async function exists(relativePath) {
+  try {
+    await access(resolve(repositoryRoot, relativePath))
+    return true
+  } catch {
+    return false
+  }
+}
+
 test('intake documentation keeps pointing at the install checklist it delegates to', async () => {
   // Installed projects delete documentation they do not use, so only the always-present
   // entry points are required; the optional runbooks are checked when they still exist.

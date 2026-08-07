@@ -94,15 +94,57 @@ describe('prepare-do-specs', () => {
     }
   });
 
-  test('rejects the placeholder backend worker command', () => {
-    const result = runPrepareSpecs({
-      DO_BACKEND_WORKER_ENABLED: 'true',
-      DO_BACKEND_WORKER_RUN_COMMAND: 'bun run start:worker',
+  test('refuses a runner whose configuration is still empty', () => {
+    // Both template runners exit immediately while their lists are empty, and App Platform
+    // restarts an exited worker forever. The check reads the source, so the same command is
+    // accepted once the project adds work to it - see scripts/runner-collections.test.mjs for
+    // the accepting direction.
+    for (const command of ['bun run start:worker', 'bun run start:scheduler']) {
+      const result = runPrepareSpecs({
+        DO_BACKEND_WORKER_ENABLED: 'true',
+        DO_BACKEND_WORKER_NAME: 'worker',
+        DO_BACKEND_WORKER_RUN_COMMAND: command,
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(`${result.stdout}\n${result.stderr}`).toContain('is still empty');
+    }
+  });
+
+  test('rejects a scheduled job whose name is not in the registry', () => {
+    // Shape validation alone let a typo through: the component deploys, runs nightly, and fails
+    // every tick. The name has to exist in backend/src/jobs.ts.
+    const typo = runPrepareSpecs({
+      DO_BACKEND_CRON_NAME: 'auth-session-cleanup',
+      DO_BACKEND_CRON_TASK: 'auth:session:cleanup',
+      DO_BACKEND_CRON_SCHEDULE: '0 3 * * *',
     });
 
-    expect(result.status).not.toBe(0);
-    expect(`${result.stdout}\n${result.stderr}`).toContain(
-      'must point at a real long-running worker command',
+    expect(typo.status).not.toBe(0);
+    expect(`${typo.stdout}\n${typo.stderr}`).toContain('auth:sessions:cleanup');
+
+    const registered = runPrepareSpecs({
+      DO_BACKEND_CRON_NAME: 'auth-session-cleanup',
+      DO_BACKEND_CRON_TASK: 'auth:sessions:cleanup',
+      DO_BACKEND_CRON_SCHEDULE: '0 3 * * *',
+    });
+
+    expect(registered.status).toBe(0);
+    expect(readFileSync(backendSpecPath, 'utf8')).toContain(
+      'bun run start:cron -- auth:sessions:cleanup',
+    );
+  });
+
+  test('accepts a worker command that runs something of its own', () => {
+    const result = runPrepareSpecs({
+      DO_BACKEND_WORKER_ENABLED: 'true',
+      DO_BACKEND_WORKER_NAME: 'worker',
+      DO_BACKEND_WORKER_RUN_COMMAND: 'bun run start:worker:orders',
+    });
+
+    expect(result.status).toBe(0);
+    expect(readFileSync(backendSpecPath, 'utf8')).toContain(
+      'run_command: "bun run start:worker:orders"',
     );
   });
 
@@ -606,7 +648,7 @@ describe('prepare-do-specs', () => {
 
     expect(unknown.status).not.toBe(0);
     expect(`${unknown.stdout}\n${unknown.stderr}`).toContain(
-      'must name a task registered in backend/src/cron.ts',
+      'is not a job in backend/src/jobs.ts',
     );
   });
 
@@ -637,34 +679,6 @@ describe('prepare-do-specs', () => {
   //   const spec = readFileSync(backendSpecPath, 'utf8');
   //   expect(spec.match(/key: GOOGLE_PLAY_PACKAGE_NAME/g)).toHaveLength(2);
   // });
-
-  test('the registered cron task list matches backend/src/cron.ts', () => {
-    // Read both sources instead of importing the generator: it runs its CLI on import.
-    const generatorSource = readFileSync(
-      new URL('./prepare-do-specs.mjs', import.meta.url),
-      'utf8',
-    );
-    const registeredCronTasks = generatorSource
-      .slice(
-        generatorSource.indexOf('const registeredCronTasks = ['),
-        generatorSource.indexOf(']', generatorSource.indexOf('const registeredCronTasks = [')),
-      )
-      .split('\n')
-      .flatMap((line) => line.match(/'([A-Za-z0-9:._-]+)'/)?.slice(1, 2) ?? []);
-    const cronSource = readFileSync(
-      new URL('../backend/src/cron.ts', import.meta.url),
-      'utf8',
-    );
-    const declared = cronSource
-      .slice(cronSource.indexOf('const cronTasks = {'), cronSource.indexOf('} satisfies Record'))
-      .split('\n')
-      .filter((line) => !line.trim().startsWith('//'))
-      .flatMap((line) => line.match(/^\s{2}'?([A-Za-z0-9:._-]+)'?:/)?.slice(1, 2) ?? []);
-
-    // Both sides are parsed from source, so an empty parse would pass vacuously.
-    expect(declared.length).toBeGreaterThan(0);
-    expect([...registeredCronTasks].sort()).toEqual([...declared].sort());
-  });
 
   test('keeps maintenance usable without billing and injects Google Play credentials when enabled', () => {
     const withoutBilling = runPrepareSpecs({

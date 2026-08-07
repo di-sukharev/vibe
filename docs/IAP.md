@@ -25,18 +25,19 @@ Most steps below are commented-out blocks waiting for you, and `rg -l 'docs/IAP.
 4. Uncomment the billing wiring in `backend/src/app.ts`: the module import, the two verifier
    options, `createBillingModule`, the `/api/iap` and `/api/webhooks` routes, their ingress groups,
    and the webhook limit constants.
-5. Uncomment the billing task, its two helpers, and the `maintenance:process` rows in
-   `backend/src/cron.ts`.
+5. Uncomment the billing job, its two helpers, and the `maintenance:process` rows in
+   `backend/src/jobs.ts`. Keep the module import inside the job body: `jobs.ts` must stay
+   type-only at the top level, and `scripts/repo-env.test.mjs` fails if it does not.
 6. Restore the tests: the parked cases in `backend/src/app.test.ts` (ingress and the OpenAPI paths),
-   `backend/src/cron.test.ts` (the reconcile counter, its mock, and the two env keys), and the
-   entitlement assertion in `backend/src/modules/users/users.integration.test.ts`; then put the
-   billing integration suite back into `backend/scripts/test-integration.mjs` (it already
-   typechecks, so nothing else is needed to run it).
-7. Register the cron task for deployment: add `billing:google-play:reconcile` to
-   `registeredCronTasks` in `scripts/prepare-do-specs.mjs`, uncomment the `providerEnv` branch that
-   gives it the Google Play group, and restore the parked assertion in
-   `scripts/prepare-do-specs.test.mjs`. Without this, `bun run deploy:do:specs` keeps refusing the
-   task and the registry drift test fails.
+   `backend/src/jobs.test.ts` (the reconcile counter, its mock, and the two env keys), and the
+   entitlement assertion in `backend/src/modules/users/users.integration.test.ts`; then delete the
+   `@parked-test` line at the top of `backend/src/modules/billing/billing.integration.test.ts` so
+   both test runners pick it up again (it already typechecks, so nothing else is needed).
+7. Allow the job in deployment specs: uncomment the `providerEnv` branch in
+   `scripts/prepare-do-specs.mjs` that gives `billing:google-play:reconcile` the Google Play group,
+   and restore the parked assertion in `scripts/prepare-do-specs.test.mjs`. The generator validates
+   job names against `backend/src/jobs.ts` directly, so step 5 is what makes the job schedulable -
+   there is no second list to update.
 8. Uncomment `<IapProvider>` in `mobile/src/composition/AppProviders.tsx`, then in
    `mobile/src/app/(tabs)/profile.tsx` uncomment all three parked pieces: the `@/features/billing`
    imports, the `const iap = useSubscriptionIap()` line, and the `SubscriptionSummary` block.
@@ -59,12 +60,11 @@ reference them. Remove all of it in one pass:
   `mobile/src/types/env.d.ts`, and the billing globs in `mobile/eslint.config.js`
 - `packages/contracts/src/iap.ts`, `iap.test.ts`, the `export * from './iap'` line in
   `packages/contracts/src/index.ts`, and the `IAP_*` codes in `packages/contracts/src/errors.ts`
-- the commented wiring in `backend/src/app.ts`, `backend/src/cron.ts`, and
-  `backend/scripts/test-integration.mjs`, plus the billing entries in `backend/package.json`
-  (`test:unit` paths and the `@apple/app-store-server-library` dependency)
+- the commented wiring in `backend/src/app.ts` and `backend/src/jobs.ts`, plus the
+  `@apple/app-store-server-library` dependency in `backend/package.json`
 - the parked comment blocks that would otherwise point at deleted code: the ingress and OpenAPI
   cases plus the Yandex rows in `backend/src/app.test.ts`, the reconcile case in
-  `backend/src/cron.test.ts`, the entitlement assertion in
+  `backend/src/jobs.test.ts`, the entitlement assertion in
   `backend/src/modules/users/users.integration.test.ts`, the `IapProvider` lines in
   `mobile/src/composition/AppProviders.tsx`, and the billing block in
   `mobile/src/app/(tabs)/profile.tsx`

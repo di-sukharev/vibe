@@ -19,8 +19,9 @@ transport -> application -> domain/ports -> infrastructure -> DTO
 ```
 
 - `src/index.ts` is the API runtime entrypoint.
-- `src/worker.ts` is the long-running worker entrypoint. Keep it disabled in deployment specs until a real background handler is registered.
-- `src/cron.ts` is the one-shot scheduled-job entrypoint. Add concrete tasks to its registry and deploy scheduled jobs only for named product tasks.
+- `src/jobs.ts` is the background-job registry: one declaration per job, shared by all three runners below. Do not declare a job inside a runner.
+- `src/cron.ts` runs one job and exits, for a provider timer to trigger.
+- `src/scheduler.ts` is the long-running timer process; `src/worker.ts` is the long-running loop process. Both ship with empty collections, and deployment specs refuse them until one has entries. See [BACKGROUND_JOBS.md](BACKGROUND_JOBS.md).
 - `src/runtime.ts` owns shared env loading, Prisma creation, and runtime cleanup for all backend entrypoints.
 - `src/background-tasks.ts` defers response-independent best-effort work and lets the API drain accepted tasks before graceful shutdown. Tasks receive an `AbortSignal`; a task deadline aborts work but keeps its cleanup tracked until settlement, while server draining and task cleanup consume one shared absolute shutdown deadline. Password-reset account lookup and email delivery use this boundary so the public response path has the same account-independent timing without letting a provider stall API responses or shutdown indefinitely.
 - `src/app.ts` is the composition root. It owns the Hono app, CORS, secure headers, error handling, module construction, route mounting, and OpenAPI output.
@@ -55,7 +56,7 @@ On the default DigitalOcean production path, run the backend/API as one `apps-s-
 
 For real-time features such as chat, presence, collaboration, live notifications, or activity feeds, start with the same backend service. A single instance can keep an in-memory registry of its own WebSocket connections. Once the backend runs multiple instances, in-memory fanout is no longer enough: one user may be connected to instance A while another is connected to instance B. At that point, add a managed Redis-compatible Pub/Sub broker between backend instances so each instance can publish domain events and subscribe to events it must deliver to its local sockets.
 
-On the default DigitalOcean path, use DigitalOcean Managed Valkey for this broker. On the optional Yandex Cloud path, use Yandex Managed Service for Valkey. Add this infrastructure only when horizontal scaling and cross-instance WebSocket/SSE delivery are actually required; it is not part of the baseline local setup.
+Use DigitalOcean Managed Valkey or Yandex Managed Service for Valkey, whichever hosting `CHECKLIST.md` records; on an own server, run a Valkey or Redis container next to the backend. Add this infrastructure only when horizontal scaling and cross-instance WebSocket/SSE delivery are actually required; it is not part of the baseline local setup.
 
 Valkey Pub/Sub is only a fanout mechanism. Keep durable chat messages, notifications, collaboration state, and audit-relevant events in PostgreSQL; publish compact event identifiers after commits; and make clients recover by reconnecting and refetching from the API after missed realtime messages.
 

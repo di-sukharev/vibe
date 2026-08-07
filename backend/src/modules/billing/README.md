@@ -24,8 +24,8 @@ tables are commented out in `../../../prisma/schema/billing.prisma`, and the rou
 
 The full checklist lives in `docs/IAP.md` under "How To Turn Subscriptions On". In short: uncomment
 the schema and migrate, delete `infrastructure/prisma-billing-types.ts` and restore the imports it
-replaced, uncomment the wiring in `src/app.ts` and `src/cron.ts`, put the integration suite back
-into `scripts/test-integration.mjs`, then mount `IapProvider` on mobile.
+replaced, uncomment the wiring in `src/app.ts` and `src/jobs.ts`, delete the `@parked-test` line
+at the top of `billing.integration.test.ts`, then mount `IapProvider` on mobile.
 
 ## Type stand-ins
 

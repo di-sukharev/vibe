@@ -1,8 +1,55 @@
 # Yandex Cloud Alternative
 
-Use this document only when the user explicitly asks for Yandex Cloud or the product has a clear regional, compliance, or commercial reason to avoid the default DigitalOcean path.
+Use this document when `CHECKLIST.md` records Yandex Cloud as the hosting - which is what an audience in Russia or a data-residency requirement implies.
 
-DigitalOcean remains the default provider in this template. Do not ask the user to compare providers during first-run setup.
+DigitalOcean is the choice for audiences outside Russia. Either way the decision comes from the audience question in `CHECKLIST.md`, never from asking the owner to compare providers, and the tooling of the path not chosen is deleted during setup.
+
+## If You Chose Another Hosting
+
+The hosting choice is recorded in [CHECKLIST.md](../CHECKLIST.md) and only one path is kept. If the
+project runs on DigitalOcean or an own server, delete the Yandex tooling in one pass.
+
+**Delete this file.** Nothing in `backend/` or `scripts/` is Yandex-specific, so there is no code to
+remove; the two mentions that remain (a comment in `backend/src/jobs.ts` and the provider-doc check
+in `scripts/repo-env.test.mjs`) are deliberately provider-neutral and stay.
+
+**Then edit these files** - one bullet each, so no link is left dangling:
+
+- `docs/STORAGE.md`: the "Yandex Cloud Alternative" section and the Yandex upstream links.
+- `docs/ARCHITECTURE.md`: the Yandex half of the Valkey broker sentence and the Managed Service for
+  Valkey link.
+- `docs/BACKGROUND_JOBS.md`: the Yandex bullet under "Provider specifics", the six-field-expression
+  half of the cadence sentence, and the timer-trigger link. If the DigitalOcean bullet is gone too,
+  delete the now-empty "Provider specifics" heading.
+- `docs/DEPLOYMENT.md`: the links to this file, including the "use YANDEX_CLOUD.md instead" sentence
+  in the opening paragraphs, the Yandex ingress header in "Secrets And Backend Env", and the
+  `docs/YANDEX_CLOUD.md` bullet in its own removal list.
+- the root `README.md`, `backend/README.md`, `webapp/README.md`, and `website/README.md`: the Yandex
+  pointers and the Yandex upstream-documentation list.
+- `AGENTS.md` and `CLAUDE.md`: the Yandex half of the hosting rule and the mention of this file in
+  their "Deployment and infrastructure policy belongs in" rule. Keep the two files identical.
+- `CHECKLIST.md`: the Yandex row in the hosting table, the option in the recorded-hosting row, the
+  pointer to this file under the table, and the Yandex half of the hosting rule in the agent-owned
+  decisions section.
+
+Finally, sweep for what no list can enumerate:
+
+```bash
+rg -n 'Yandex|yandexcloud|yc serverless' --glob '!node_modules'
+```
+
+Every hit must go, except two deliberate provider-neutral comments: the one naming all three
+hostings in `backend/src/jobs.ts`, and the one next to the static output path in
+`website/astro.config.mjs`. (`scripts/repo-env.test.mjs` names this file too, in the uppercase
+path `docs/YANDEX_CLOUD.md`, which the case-sensitive pattern above does not match. It stays: that
+is the guard the closing line below relies on.)
+
+When you are done, delete **both** "If You Chose Another Hosting" sections - this one, and the one
+in `docs/DEPLOYMENT.md`. The choice is made; a surviving section tells the project to delete the
+tooling it actually uses.
+
+Run `bun run test` afterwards; `scripts/repo-env.test.mjs` checks that at least one of the two
+provider documents survives.
 
 ## Service Map
 
@@ -254,7 +301,23 @@ bun run --cwd backend prisma:deploy
 
 Do not run `prisma migrate dev` in production and do not hand-write Prisma migration SQL.
 
-## Auth Session Cleanup Timer
+## Background Jobs And The Cleanup Timer
+
+Jobs are provider-neutral and documented in [BACKGROUND_JOBS.md](BACKGROUND_JOBS.md); this section
+covers the Yandex side. Two shapes are available: a timer trigger that starts a task container per
+run (below), or the in-repo scheduler (`bun run start:scheduler`) when you prefer schedules to live
+in the repository. The scheduler needs a process that stays up, so it belongs on a Compute Cloud VM
+or in Managed Kubernetes - not in a Serverless Container, which is invocation-driven and scales to
+zero, where it would simply never tick.
+
+Two details of the timer trigger cost people time:
+
+- The trigger expression has **six fields and is UTC only** — `'0 3 ? * * *'`, not the five-field
+  form. Nothing validates it before you create the trigger, so a five-field habit fails at `yc`.
+- `--environment` takes one comma-separated string, so a value that itself contains a comma, such
+  as a multi-origin `CORS_ORIGINS`, is split into bogus variables. Pass such values through the
+  console, Terraform, or Lockbox instead.
+
 
 Production must run `auth:sessions:cleanup` on a schedule; setting `SESSION_RETENTION_DAYS` alone does not delete rows. Use a separate private Serverless Container from the same immutable backend image in **task** runtime mode. This keeps the public API process monolithic while giving the timer a one-shot command that exits non-zero on failure.
 
@@ -303,7 +366,7 @@ yc serverless trigger create timer \
   --retry-interval 30s
 ```
 
-After deployment, invoke the private cleanup container once with an IAM token and verify HTTP 200 plus `X-Task-Exit-Code: 0`. Then confirm `yc serverless trigger get --name <project>-auth-cleanup-daily` reports an active trigger. After the first scheduled window, inspect the cleanup container's invocation logs and require a recent `Cron auth:sessions:cleanup removed ... stale sessions and ... expired password reset tokens.` entry; absence of a recent successful entry is an operational failure, not proof that there were zero stale auth artifacts.
+After deployment, invoke the private cleanup container once with an IAM token and verify HTTP 200 plus `X-Task-Exit-Code: 0`. Then confirm `yc serverless trigger get --name <project>-auth-cleanup-daily` reports an active trigger. After the first scheduled window, inspect the cleanup container's invocation logs and require a recent `Job auth:sessions:cleanup removed ... stale sessions and ... expired password reset tokens.` entry; absence of a recent successful entry is an operational failure, not proof that there were zero stale auth artifacts.
 
 ## Real-Time Pub/Sub
 

@@ -1,4 +1,6 @@
 import { spawnSync } from 'node:child_process'
+
+import { backendTestFiles } from './test-files.mjs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -69,15 +71,13 @@ if (process.env.TEST_SKIP_DOCKER !== '1') {
 
 run('bun', ['run', 'prisma:generate'], { env })
 run('bun', ['run', 'prisma:deploy'], { env })
-run(
-  'bun',
-  [
-    'test',
-    'src/modules/auth/auth.integration.test.ts',
-    'src/modules/users/users.integration.test.ts',
-    // Needs the billing tables; uncomment with prisma/schema/billing.prisma (docs/IAP.md).
-    // 'src/modules/billing/billing.integration.test.ts',
-    'src/modules/notifications/notifications.integration.test.ts',
-  ],
-  { env },
-)
+// Shared with `test-unit.mjs`, so a new test cannot be forgotten here and silently skipped
+// there at the same time.
+const { integration: integrationTestFiles } = backendTestFiles(backendRoot)
+
+if (integrationTestFiles.length === 0) {
+  process.stderr.write('No *.integration.test.* files found under backend/src or backend/scripts\n')
+  process.exit(1)
+}
+
+run('bun', ['test', ...integrationTestFiles], { env })

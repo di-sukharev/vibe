@@ -14,7 +14,7 @@
     "build": "bun run prisma:generate && tsc --noEmit",
     "typecheck": "bun run prisma:generate && tsc --noEmit",
     "test": "bun run test:unit && bun run test:integration",
-    "test:unit": "bun run prisma:generate && bun test scripts/deploy-database.test.ts scripts/development-seed-config.test.ts scripts/seed-development.test.ts src/app.test.ts src/background-tasks.test.ts src/env.test.ts src/db.test.ts src/contracts.test.ts src/cron.test.ts src/runtime.test.ts src/shutdown.test.ts src/http/security.test.ts src/worker.test.ts src/modules/auth/application/auth-service.test.ts src/modules/auth/infrastructure/access-tokens.test.ts src/modules/auth/infrastructure/auth-repository.test.ts src/modules/auth/infrastructure/passwords.test.ts src/modules/auth/infrastructure/refresh-tokens.test.ts src/modules/auth/transport/middleware.test.ts src/modules/auth/auth-routes.test.ts src/modules/users/application/users-service.test.ts src/modules/users/infrastructure/admin-bootstrap.test.ts src/modules/billing/application/billing-service.test.ts src/modules/billing/domain/subscription.test.ts src/modules/billing/infrastructure/apple-verifier.test.ts src/modules/billing/infrastructure/google-play-verifier.test.ts src/modules/billing/transport/errors.test.ts src/modules/billing/billing-routes.test.ts src/modules/billing/infrastructure/billing-operations.test.ts src/modules/notifications/application/notification-service.test.ts src/modules/notifications/domain/retry-policy.test.ts src/modules/notifications/infrastructure/expo-client.test.ts src/storage/service.test.ts",
+    "test:unit": "bun scripts/test-unit.mjs",
     "test:integration": "bun scripts/test-integration.mjs",
     "smoke:docker": "bun scripts/docker-smoke.mjs",
     "prisma": "prisma",
@@ -24,7 +24,8 @@
     "prisma:deploy": "prisma migrate deploy",
     "prisma:seed": "prisma db seed",
     "db:deploy": "bun scripts/deploy-database.ts",
-    "prisma:validate": "prisma validate"
+    "prisma:validate": "prisma validate",
+    "start:scheduler": "bun src/scheduler.ts"
   },
   "dependencies": {
     "@apple/app-store-server-library": "^3.1.0",
@@ -35,6 +36,7 @@
     "@prisma/adapter-pg": "^7.9.1",
     "@prisma/client": "^7.9.1",
     "@web-app-demo/contracts": "workspace:*",
+    "croner": "^10.0.1",
     "dotenv": "^17.4.2",
     "google-auth-library": "^10.9.1",
     "hono": "^4.12.34",

@@ -30,6 +30,7 @@ bun run --cwd backend test:integration
 bun run --cwd backend start:api
 bun run --cwd backend start:worker
 bun run --cwd backend start:worker:notifications
+bun run --cwd backend start:scheduler
 bun run --cwd backend start:cron -- noop
 bun run --cwd backend start:cron -- notifications:process
 bun run --cwd backend smoke:docker
@@ -102,9 +103,11 @@ Native IAP ships switched off - the module is complete, its tables are commented
 The backend is one workspace with one Prisma schema and one Dockerfile, but it has separate runtime entrypoints:
 
 - API: `bun run start:api`, backed by `src/index.ts`.
-- Worker: `bun run start:worker`, backed by `src/worker.ts`. It is intentionally empty until a real long-running background handler is added, and deployment generation refuses to deploy this placeholder command as an App Platform worker.
-- Notification worker: `bun run start:worker:notifications`, backed by `src/worker.ts notifications`, drains pending push outbox rows and checks Expo receipts continuously. Shutdown aborts active Expo HTTP calls, stops before the receipt phase or another claim, and caps an outbox pass below `SHUTDOWN_GRACE_SECONDS` so runtime termination still has time to persist the fenced retry state. It logs non-zero delivery/receipt activity and failures, plus a sparse five-minute heartbeat while idle rather than one log per poll.
-- Cron: `bun run start:cron -- <task>`, backed by `src/cron.ts`. Available tasks are `noop`, `db:ping`, `notifications:process`, `auth:sessions:cleanup`, and the recommended combined `maintenance:process`. `billing:google-play:reconcile` is registered only after subscriptions are turned on (see [../docs/IAP.md](../docs/IAP.md)); until then `bun run deploy:do:specs` refuses to schedule it.
+- Jobs: declared once in `src/jobs.ts` and shared by the runners below. `noop`, `db:ping`, `notifications:process`, `auth:sessions:cleanup`, and the recommended combined `maintenance:process` ship with the template; see [../docs/BACKGROUND_JOBS.md](../docs/BACKGROUND_JOBS.md). `billing:google-play:reconcile` is registered only after subscriptions are turned on (see [../docs/IAP.md](../docs/IAP.md)); until then `bun run deploy:do:specs` refuses to schedule it.
+- Cron: `bun run start:cron -- <job>`, backed by `src/cron.ts`. Runs one job and exits, for a provider timer to call.
+- Scheduler: `bun run start:scheduler`, backed by `src/scheduler.ts`. Keeps schedules in the repository instead of a cloud console. Ships with no schedules, and deployment generation refuses to deploy it as an App Platform worker until it has one.
+- Worker: `bun run start:worker`, backed by `src/worker.ts`. A loop over `workerLoops`, for work that must run more often than once a minute. Also ships empty, with the same deployment guard.
+- Notification worker: `bun run start:worker:notifications`, backed by `src/worker.ts notifications`, drains pending push outbox rows and checks Expo receipts continuously. It is not a `workerLoop` because it needs more than an interval: shutdown aborts active Expo HTTP calls, stops before the receipt phase or another claim, and caps an outbox pass below `SHUTDOWN_GRACE_SECONDS` so runtime termination still has time to persist the fenced retry state. It logs non-zero delivery/receipt activity and failures, plus a sparse five-minute heartbeat while idle rather than one log per poll.
 
 All entrypoints use `src/runtime.ts` for env loading, Prisma creation, and cleanup, so backend services can be shared without duplicating Prisma schema or database setup. Worker and cron entrypoints use the background loader, which deliberately replaces any inherited `JWT_SECRET` with a public non-signing placeholder; their deployment components receive no API signing key.
 
@@ -122,7 +125,7 @@ Primary keys use database-generated UUIDv7 values in PostgreSQL (`@default(dbgen
 
 ## Deployment
 
-Production deployment for the backend uses DigitalOcean App Platform with DigitalOcean Managed PostgreSQL by default. Follow the shared runbook in [../docs/DEPLOYMENT.md](../docs/DEPLOYMENT.md) instead of duplicating provider-specific steps here. The root `bun run deploy:do:specs` command generates concrete App Platform specs safely under `.scratch/deploy`; do not hand-substitute secrets or URLs into specs. If the user explicitly chooses Yandex Cloud, use [../docs/YANDEX_CLOUD.md](../docs/YANDEX_CLOUD.md).
+Production deployment for the backend uses DigitalOcean App Platform with DigitalOcean Managed PostgreSQL by default. Follow the shared runbook in [../docs/DEPLOYMENT.md](../docs/DEPLOYMENT.md) instead of duplicating provider-specific steps here. The root `bun run deploy:do:specs` command generates concrete App Platform specs safely under `.scratch/deploy`; do not hand-substitute secrets or URLs into specs. If `CHECKLIST.md` records Yandex Cloud, use [../docs/YANDEX_CLOUD.md](../docs/YANDEX_CLOUD.md) instead.
 
 ## Auth API
 

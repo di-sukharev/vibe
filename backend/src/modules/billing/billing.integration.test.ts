@@ -1,6 +1,9 @@
+// @parked-test
+//
 // This suite needs the billing tables, which are commented out in prisma/schema/billing.prisma.
-// It still typechecks, so it cannot rot while parked, but it is dropped from
-// scripts/test-integration.mjs until the tables come back; docs/IAP.md lists what to restore.
+// It still typechecks, so it cannot rot while parked, but the marker above keeps both test runners
+// from executing it until the tables come back. Delete that line together with the schema
+// comments; docs/IAP.md lists what to restore.
 import { createHash, randomUUID } from 'node:crypto'
 
 import { Environment, OfferType, Status, Type, type JWSRenewalInfoDecodedPayload, type JWSTransactionDecodedPayload, type ResponseBodyV2DecodedPayload } from '@apple/app-store-server-library'

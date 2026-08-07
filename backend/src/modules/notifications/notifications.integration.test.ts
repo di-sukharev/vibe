@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 
 import { createApp } from '../../app'
-import { runCronTask } from '../../cron'
+import { runBackgroundJob } from '../../jobs'
 import { acquirePushTokenUserLock, createPrisma, type DbClient } from '../../db'
 import type { AppEnv } from '../../env'
 import { PushDeliveryStatus, PushNotificationOutboxStatus } from '../../generated/prisma/enums'
@@ -1670,7 +1670,7 @@ maybeDescribe('push notification API and outbox', () => {
       ],
     })
 
-    await runCronTask(
+    await runBackgroundJob(
       'auth:sessions:cleanup',
       { env, prisma } as BackendRuntime,
       now,

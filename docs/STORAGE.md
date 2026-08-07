@@ -134,7 +134,7 @@ Operational rules:
 
 ## Yandex Cloud Alternative
 
-Use Yandex Object Storage only when the user explicitly chooses Yandex Cloud. Follow [YANDEX_CLOUD.md](YANDEX_CLOUD.md) for the full provider runbook.
+Use Yandex Object Storage when `CHECKLIST.md` records Yandex Cloud as the hosting. Follow [YANDEX_CLOUD.md](YANDEX_CLOUD.md) for the full provider runbook.
 
 Yandex Object Storage is S3-compatible and uses `https://storage.yandexcloud.net` as the standard endpoint. Public media should be served through Yandex Cloud CDN when production latency, cache controls, or custom domains matter. Private files should stay private and be exposed through short-lived presigned URLs after backend permission checks.
 
