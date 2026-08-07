@@ -20,7 +20,8 @@ import {
 import { ScreenShell, ScreenState } from '@/components/dashboard';
 import { ScreenLoader } from '@/components/screen-states';
 import { Button } from '@/components/ui/button';
-import { SocialAuthButtons } from '../components/social-auth-buttons';
+// Sign in with Apple / Google is turned off; see docs/SOCIAL_AUTH.md before uncommenting.
+// import { SocialAuthButtons } from '../components/social-auth-buttons';
 import { useAuth } from '../provider';
 import { TEST_IDS } from '@/constants/testIds';
 import { ApiRequestError } from '@/platform/api';
@@ -104,7 +105,7 @@ export function AuthScreen() {
   return (
     <ScreenShell
       centered
-      description="Use email and password or continue with an available identity provider."
+      description="Sign in with your email and password."
       eyebrow="Golden path template"
       keyboardAware
       title="Welcome to your workspace.">
@@ -188,12 +189,13 @@ export function AuthScreen() {
           )}
         </form.Subscribe>
 
+        {/* Uncomment together with the backend social route (docs/SOCIAL_AUTH.md):
         <SocialAuthButtons
           disabled={auth.isTransitioning}
           getDisplayName={() => (isRegister ? form.getFieldValue('displayName') : undefined)}
           onAuthenticate={auth.socialAuth}
           onError={setError}
-        />
+        /> */}
       </AuthPanel>
     </ScreenShell>
   );

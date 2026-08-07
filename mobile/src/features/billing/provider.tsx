@@ -986,13 +986,13 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
   return <SubscriptionContext.Provider value={value}>{children}</SubscriptionContext.Provider>;
 }
 
+/**
+ * Returns `null` when `IapProvider` is not mounted, which is the shipped state: subscriptions are
+ * turned off in the template (see docs/IAP.md). Screens render their "billing is off" branch
+ * instead of crashing, and turning billing on needs no change here.
+ */
 export function useSubscriptionIap() {
-  const context = useContext(SubscriptionContext);
-  if (!context) {
-    throw new Error('useSubscriptionIap must be used inside IapProvider');
-  }
-
-  return context;
+  return useContext(SubscriptionContext);
 }
 
 function unsupportedSubscriptionValue(subscription: SubscriptionSnapshot | null): SubscriptionContextValue {

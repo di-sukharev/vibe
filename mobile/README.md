@@ -13,8 +13,9 @@ This section may be updated during first-run bootstrap. If the root `README.md` 
   administrator account belong to the browser webapp, not the mobile UI.
 - Authenticated users land on `/components`, which lives in the bottom tab shell with `/profile`.
 - `/details/[id]` is a stack screen outside the tabs and uses an in-screen back button at the top left.
-- `/paywall` is a working subscription screen, but nothing is gated behind it by default: the template does not assume the product sells anything. A product that needs paid access adds its own gate around `useSubscriptionIap().subscription`; a product that does not removes billing entirely (see `docs/IAP.md`).
-- App Store and Google Play subscriptions are active purchase paths. App Store offer-code redemption is supported on iOS. Google Play code redemption, signed promotional-offer purchase flows, alternative billing, and external purchase links are deferred.
+- `/paywall` renders the subscription flow, which ships **switched off**: `IapProvider` is not mounted, so the screen states that subscriptions are not enabled instead of offering a purchase. Turning it on is documented in `docs/IAP.md`.
+- Once enabled, App Store and Google Play subscriptions are working purchase paths, with App Store offer-code redemption on iOS. Google Play code redemption, signed promotional-offer purchases, alternative billing, and external purchase links are deferred.
+- Sign in with Apple / Google is implemented and also switched off: the buttons are not rendered and the backend route is not mounted (see `docs/SOCIAL_AUTH.md`).
 - Product screens compose `src/components/dashboard/ScreenShell.tsx`, which owns the shared native site header and delegates safe-area, scrolling, keyboard avoidance, and back navigation to the low-level `Screen` layout primitive.
 - Phones use the native bottom-tab shell. Expo Web switches to the same compact side-rail/inset composition at the shared wide-layout breakpoint.
 

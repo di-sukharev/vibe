@@ -2,19 +2,93 @@
 
 This template implements premium subscriptions through `expo-iap` on iOS and Android. The mobile app is only the store transport; the backend is the entitlement source of truth.
 
-## If The Product Does Not Sell Anything
+## Status: Off By Default
 
-Billing is an optional capability, not a baseline. Nothing in the template is gated behind a subscription: `/paywall` is a working purchase screen, but no route redirects to it and signing in never depends on an entitlement. A product that sells access adds its own gate and its own navigation into `/paywall`, reading `useSubscriptionIap().subscription`.
+The whole implementation is here and it works, but it is switched off: the billing tables are
+commented out in `backend/prisma/schema/billing.prisma`, the IAP routes are not mounted, and the
+mobile app does not mount `IapProvider`. A project that never sells anything pays nothing for it,
+and a project that does sell turns it on without writing the hard parts again.
 
-If subscriptions are not part of the product, remove them instead of leaving them dormant:
+Reference implementation, if this copy ever drifts: `github.com/di-sukharev/vibe`, branch `mobile`,
+directories `backend/src/modules/billing` and `mobile/src/features/billing`.
 
-```bash
-bun run feature:billing:remove
-```
+### How To Turn Subscriptions On
 
-The script deletes the billing module, the mobile billing feature, the IAP contracts, `prisma/schema/billing.prisma`, the billing migrations, and every marked `capability:billing` seam. On a project whose database is already deployed, pass `--keep-migrations` and generate a migration that drops the billing tables instead. It then prints the wiring that must be edited by hand, because those places need rewriting rather than deleting. Finish with `bun install`, `bun run typecheck`, `bun run architecture:check`, and `bun run test`, then record `removed` in the `CHECKLIST.md` capability ledger so a future agent does not rebuild billing from a leftover reference.
+Most steps below are commented-out blocks waiting for you, and `rg -l 'docs/IAP.md'` finds them.
 
-If the database is already deployed, keep the migrations and generate a new one that drops the billing tables instead.
+1. Uncomment the models in `backend/prisma/schema/billing.prisma` and the three billing relations
+   on `User` in `backend/prisma/schema/base.prisma`.
+2. Run `bun run --cwd backend prisma:migrate` to create the tables.
+3. Delete `backend/src/modules/billing/infrastructure/prisma-billing-types.ts`, restore the imports
+   it replaced (its header lists all six importing files), and drop the `createBillingTestApp`
+   helper in `billing.integration.test.ts` in favour of calling `createApp` directly.
+4. Uncomment the billing wiring in `backend/src/app.ts`: the module import, the two verifier
+   options, `createBillingModule`, the `/api/iap` and `/api/webhooks` routes, their ingress groups,
+   and the webhook limit constants.
+5. Uncomment the billing task, its two helpers, and the `maintenance:process` rows in
+   `backend/src/cron.ts`.
+6. Restore the tests: the parked cases in `backend/src/app.test.ts` (ingress and the OpenAPI paths),
+   `backend/src/cron.test.ts` (the reconcile counter, its mock, and the two env keys), and the
+   entitlement assertion in `backend/src/modules/users/users.integration.test.ts`; then put the
+   billing integration suite back into `backend/scripts/test-integration.mjs` (it already
+   typechecks, so nothing else is needed to run it).
+7. Register the cron task for deployment: add `billing:google-play:reconcile` to
+   `registeredCronTasks` in `scripts/prepare-do-specs.mjs`, uncomment the `providerEnv` branch that
+   gives it the Google Play group, and restore the parked assertion in
+   `scripts/prepare-do-specs.test.mjs`. Without this, `bun run deploy:do:specs` keeps refusing the
+   task and the registry drift test fails.
+8. Uncomment `<IapProvider>` in `mobile/src/composition/AppProviders.tsx`, then in
+   `mobile/src/app/(tabs)/profile.tsx` uncomment all three parked pieces: the `@/features/billing`
+   imports, the `const iap = useSubscriptionIap()` line, and the `SubscriptionSummary` block.
+9. Configure the store credentials described below, then decide what your product gates behind
+   `useSubscriptionIap()?.subscription` - the hook returns `null` while `IapProvider` is not
+   mounted, and the template gates nothing on its own.
+
+Then run `bun run typecheck`, `bun run test`, and `bun run architecture:check`. The paywall stops
+showing its "not enabled" notice as soon as the provider is mounted.
+
+### If Subscriptions Are Not Wanted
+
+Deleting is safe but touches more than the billing directories, because a few neutral files
+reference them. Remove all of it in one pass:
+
+- `backend/prisma/schema/billing.prisma` and the commented relations in `base.prisma`
+- `backend/src/modules/billing/` (module, tests, Apple root certificates)
+- `mobile/src/features/billing/`, `mobile/src/app/paywall.tsx`, the paywall entries in
+  `mobile/src/constants/testIds.ts`, the `EXPO_PUBLIC_IAP_*` declarations in
+  `mobile/src/types/env.d.ts`, and the billing globs in `mobile/eslint.config.js`
+- `packages/contracts/src/iap.ts`, `iap.test.ts`, the `export * from './iap'` line in
+  `packages/contracts/src/index.ts`, and the `IAP_*` codes in `packages/contracts/src/errors.ts`
+- the commented wiring in `backend/src/app.ts`, `backend/src/cron.ts`, and
+  `backend/scripts/test-integration.mjs`, plus the billing entries in `backend/package.json`
+  (`test:unit` paths and the `@apple/app-store-server-library` dependency)
+- the parked comment blocks that would otherwise point at deleted code: the ingress and OpenAPI
+  cases plus the Yandex rows in `backend/src/app.test.ts`, the reconcile case in
+  `backend/src/cron.test.ts`, the entitlement assertion in
+  `backend/src/modules/users/users.integration.test.ts`, the `IapProvider` lines in
+  `mobile/src/composition/AppProviders.tsx`, and the billing block in
+  `mobile/src/app/(tabs)/profile.tsx`
+- the billing entry in `mobile/src/composition/api.ts`, plus the paywall checks and `paywallPath`
+  constants in `mobile/scripts/e2e/maestro-policy-audit.mjs` and `mobile/tests/maestro-policy-audit.test.ts`
+- the billing cases in `mobile/tests/api.test.ts` and `mobile/tests/select-registration.test.tsx`;
+  the whole of `mobile/tests/iap*.test.*`, `mobile/tests/offer-code-controller.test.ts`,
+  `mobile/tests/paywall-view-state.test.ts`, and `mobile/tests/workspace-surfaces.test.ts`
+  (entirely billing)
+- the store credential groups in `scripts/prepare-do-specs.mjs` (including `optionalIapEnvBlock`
+  with its `maintenance:process` caller, the Apple certificates path, and the
+  `billing:google-play:reconcile` scheduled-job branch) with their assertions in
+  `scripts/prepare-do-specs.test.mjs`, and the `IAP_*` entries in `.do/backend-app.yaml.example`
+- the `APPLE_IAP_*`, `GOOGLE_PLAY_*`, `IAP_*`, and `WEBHOOK_*` entries in `backend/src/env.ts`
+  (the webhook limits exist only for App Store notifications) with their
+  validators, their assertions in `backend/src/env.test.ts`, the same keys in every backend test
+  env fixture, and `backend/.env.example` (removing them from `env.ts` narrows `AppEnv`, so
+  anything still naming them fails typecheck)
+- `expo-iap` in `mobile/package.json`, its plugin entry in `mobile/app.config.js`, the
+  `EXPO_PUBLIC_IAP_*` keys in `mobile/.env.example`, and the subscription bullets in
+  `mobile/README.md`
+
+Then record `removed` in the `CHECKLIST.md` capability ledger and run `bun run typecheck`,
+`bun run test`, and `bun run --cwd mobile e2e:maestro:audit`.
 
 ## Runtime Shape
 
@@ -132,7 +206,7 @@ The paywall exposes restore on both stores.
 
 The backend includes a bounded scheduled safety net for already stored Google Play purchase tokens. `maintenance:process` selects only `pending`, active, grace-period, and billing-retry rows whose last reconcile attempt is at least 15 minutes old, then atomically advances that timestamp before the provider call so overlapping cron/manual runs cannot process the same purchase. It processes at most 100 rows per run and gives each Android Publisher request a 15-second timeout. It admits another purchase only while at least 31 seconds remain in the 50-second task budget, covering the worst-case verification plus acknowledgement calls. Every claimed attempt advances the separate reconcile timestamp, including provider failures, so permanently failing rows cannot starve newer purchases. Failures do not block the remaining admitted batch, but any failures make the scheduled job exit non-zero after reporting aggregate counts. Cron metrics also report the total due backlog and the oldest due age, so a batch that succeeds but remains persistently undersized is visible. Terminal purchases leave the polling set.
 
-Schedule `maintenance:process` at least every 15 minutes in production. It combines Google Play reconcile with auth-session cleanup and skips billing when Google Play is not configured. `billing:google-play:reconcile` is also available as a dedicated task and requires the complete Google Play environment group. The DigitalOcean spec generator places Google credentials in the API and the applicable scheduled job, not unrelated workers.
+Schedule `maintenance:process` at least every 15 minutes in production. Once subscriptions are turned on it combines Google Play reconcile with auth-session cleanup and skips billing when Google Play is not configured; while they are off it performs the auth and notification maintenance only. `billing:google-play:reconcile` is also available as a dedicated task once subscriptions are turned on and requires the complete Google Play environment group. The DigitalOcean spec generator places Google credentials in the API and the applicable scheduled job, not unrelated workers.
 
 This polling path does not replace Google RTDN: it can refresh only tokens that the app has already ingested. Add RTDN when the product must discover out-of-app purchases or react closer to real time; route RTDN through the same backend ingest/reconcile application service.
 

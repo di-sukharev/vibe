@@ -12,9 +12,8 @@ import {
   markPendingLogout,
   setStoredRefreshToken,
 } from '@/features/auth';
-// capability:billing:start
-import { IapProvider } from '@/features/billing';
-// capability:billing:end
+// Subscriptions are turned off; see docs/IAP.md before uncommenting.
+// import { IapProvider } from '@/features/billing';
 import {
   PushNotificationsProvider,
   PushRegistrationCoordinator,
@@ -67,13 +66,12 @@ export function AppProviders({ children }: PropsWithChildren) {
         logoutSupport={logoutSupport}
         session={session}
       >
-        <IapProvider api={apis.billing}>
-          <PushNotificationsProvider
-            api={apis.notifications}
-            registrationCoordinator={pushRegistrationCoordinator}>
-            {children}
-          </PushNotificationsProvider>
-        </IapProvider>
+        {/* Wrap this in <IapProvider api={apis.billing}> when turning subscriptions on. */}
+        <PushNotificationsProvider
+          api={apis.notifications}
+          registrationCoordinator={pushRegistrationCoordinator}>
+          {children}
+        </PushNotificationsProvider>
       </AuthProvider>
     </QueryClientProvider>
   );

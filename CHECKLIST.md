@@ -88,7 +88,7 @@ Answer these only when payments are active above; otherwise mark the rows `n/a`.
 | Recurring subscription, one-off purchase, or both? | _unanswered_ |
 | What stops working when someone does not pay? | _unanswered_ |
 
-Whatever this project ends up with, the ledger below is what states it. App Store and Google Play subscriptions ship here as working code, but nothing is gated behind them: the template does not assume the product sells anything. If payments are not needed, run `bun run feature:billing:remove`, follow the manual steps it prints, and set the ledger row to `removed`. Browser payments (Stripe and similar) are built as a new module against the answers above. Payments are never half-present, and are never reintroduced on a guess.
+Whatever this project ends up with, the ledger below is what states it. App Store and Google Play subscriptions ship here as working code that is switched off: the tables are commented out, the routes are not mounted, and the paywall says so on screen. `docs/IAP.md` has both paths - how to turn them on, and what to delete if the product will never sell anything. Browser payments (Stripe and similar) are built as a new module against the answers above.
 
 ## 7. Deployment
 
@@ -132,9 +132,9 @@ A capability with no row is `absent` by default. Add the row instead of assuming
 | Admin roles | included | Roles and seeding in `backend`; admin UI in `webapp`. |
 | Password reset email delivery | available | The flow is built, but no adapter is passed to `createApp` in `backend/src/index.ts`, so the disabled one is used and no email is ever sent. |
 | File/media storage | available | Service layer only. Needs DigitalOcean Spaces env, plus routes, contracts, and UI before users can upload anything. |
-| Payments / subscriptions | included | App Store + Google Play subscriptions. Nothing is gated behind them by default. If the product does not sell anything, run `bun run feature:billing:remove` and set this row to `removed`. |
+| Payments / subscriptions | available | App Store + Google Play subscriptions are implemented but switched off: tables commented out, routes unmounted. Turn on or delete per `docs/IAP.md`. |
 | Push notifications | available | Expo Push is wired but inert until the project has an EAS project id and configured credentials. |
-| Social sign-in (Apple / Google) | available | Code is present; needs Apple/Google client configuration before it works. |
+| Social sign-in (Apple / Google) | available | Implemented but switched off: the route is not mounted and the buttons are not rendered. Turn on or delete per `docs/SOCIAL_AUTH.md`. |
 | Real-time / WebSockets | absent | Requires an explicit product need. |
 | Scheduled background jobs | available | `backend/src/cron.ts` runs `auth:sessions:cleanup` when invoked, but nothing schedules it: export `DO_BACKEND_CRON_*` before `bun run deploy:do:specs`, or add a trigger per `docs/YANDEX_CLOUD.md`. Until then stale sessions and expired reset tokens are never deleted. |
 

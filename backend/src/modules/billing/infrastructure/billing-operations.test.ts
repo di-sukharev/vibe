@@ -1,9 +1,11 @@
+// While the billing tables are commented out in prisma/schema/billing.prisma, this module
+// types the client through its own stand-ins; see infrastructure/prisma-billing-types.ts.
 import { Environment, OfferType, Status, Type, type JWSTransactionDecodedPayload, type ResponseBodyV2DecodedPayload } from '@apple/app-store-server-library'
 import { expect, mock, test } from 'bun:test'
 
-import type { DbClient } from '../../../db'
+import type { BillingDbClient } from './prisma-billing-types'
 import type { AppEnv } from '../../../env'
-import { SubscriptionState } from '../../../generated/prisma/enums'
+import { SubscriptionState } from './prisma-billing-types'
 import { BillingService } from '../application/billing-service'
 import type { AppStoreSubscriptionVerifier } from './apple-verifier'
 import { createBillingDependencies } from './billing-adapters'
@@ -86,7 +88,7 @@ test('releases webhook claims when final processed marker write fails', async ()
     },
     $executeRaw: mock(async () => 1),
     $transaction: async (callback: (tx: unknown) => unknown) => callback(db),
-  } as unknown as DbClient
+  } as unknown as BillingDbClient
 
   await expect(
     billingService({ db, appStoreVerifier: fakeVerifier() }).processAppStoreWebhook(
@@ -109,7 +111,7 @@ test('uses the configured production App Store environment for original transact
     subscriptionEntitlement: {
       findUnique: mock(async () => null),
     },
-  } as unknown as DbClient
+  } as unknown as BillingDbClient
 
   await billingService({
     db,
@@ -149,7 +151,7 @@ test('does not reuse a stored sandbox environment for production App Store recon
         willAutoRenew: null,
       })),
     },
-  } as unknown as DbClient
+  } as unknown as BillingDbClient
 
   await billingService({
     db,
@@ -202,7 +204,7 @@ test('keeps billing grace period entitlements active until Apple grace expiratio
     },
     $executeRaw: mock(async () => 1),
     $transaction: async (callback: (tx: unknown) => unknown) => callback(db),
-  } as unknown as DbClient
+  } as unknown as BillingDbClient
 
   const subscription = await billingService({
     db,
@@ -293,7 +295,7 @@ test('status-only revoked transactions override future active entitlements for t
     },
     $executeRaw: mock(async () => 1),
     $transaction: async (callback: (tx: unknown) => unknown) => callback(db),
-  } as unknown as DbClient
+  } as unknown as BillingDbClient
 
   const subscription = await billingService({
     db,
@@ -343,7 +345,7 @@ test('status-only revoked transactions override future active entitlements for t
 
 test('allows tokenless first App Store claims only with a valid offer-code redemption token', async () => {
   const userId = '018fd4f2-1f3a-7c88-bc49-333333333333'
-  const token = await billingService({ db: {} as DbClient, env }).createOfferCodeRedemption(userId)
+  const token = await billingService({ db: {} as BillingDbClient, env }).createOfferCodeRedemption(userId)
   const createDb = () => {
     const db = {
       appStoreTransaction: {
@@ -365,7 +367,7 @@ test('allows tokenless first App Store claims only with a valid offer-code redem
       },
       $executeRaw: mock(async () => 1),
       $transaction: async (callback: (tx: unknown) => unknown) => callback(db),
-    } as unknown as DbClient
+    } as unknown as BillingDbClient
     return db
   }
   let db = createDb()
@@ -438,7 +440,7 @@ test('rejects verified App Store transactions that are not auto-renewable subscr
     },
     $executeRaw: mock(async () => 1),
     $transaction: async (callback: (tx: unknown) => unknown) => callback(db),
-  } as unknown as DbClient
+  } as unknown as BillingDbClient
 
   await expect(
     billingService({ db, env, appStoreVerifier: nonSubscriptionVerifier() }).ingestAppStore({
@@ -465,7 +467,7 @@ test('rejects sandbox App Store transactions in a production billing environment
     },
     $executeRaw: mock(async () => 1),
     $transaction: async (callback: (tx: unknown) => unknown) => callback(db),
-  } as unknown as DbClient
+  } as unknown as BillingDbClient
 
   await expect(
     billingService({
@@ -744,7 +746,7 @@ function billingService({
   googlePlayVerifier: googleVerifier = googlePlayVerifier(),
 }: {
   appStoreVerifier?: AppStoreSubscriptionVerifier
-  db: DbClient
+  db: BillingDbClient
   env?: AppEnv
   googlePlayVerifier?: GooglePlaySubscriptionVerifier
 }) {
@@ -826,7 +828,7 @@ function googlePlayDb({
     $executeRaw: executeRaw,
     $transaction: async (callback: (tx: unknown) => unknown) => callback(db),
   }
-  return db as unknown as DbClient
+  return db as unknown as BillingDbClient
 }
 
 function fakeVerifier(): AppStoreSubscriptionVerifier {

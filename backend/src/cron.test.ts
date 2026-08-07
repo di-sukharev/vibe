@@ -59,72 +59,73 @@ describe('runCronTask', () => {
     }])
   })
 
-  test('selects stale Google Play purchases through the bounded reconcile task', async () => {
-    const calls: unknown[] = []
-    const log = spyOn(console, 'log').mockImplementation(() => {})
-    const reconcileRuntime = {
-      env: { APPLE_IAP_ENVIRONMENT: 'Sandbox' },
-      prisma: {
-        $queryRaw: async () => [{
-          dueCount: 7n,
-          oldestDueAt: new Date('2026-07-17T08:00:00.000Z'),
-        }],
-        googlePlaySubscriptionPurchase: {
-          findMany: async (input: unknown) => {
-            calls.push(input)
-            return []
-          },
-        },
-      },
-    } as unknown as BackendRuntime
+  // Uncomment with the billing cron task (docs/IAP.md):
+  // test('selects stale Google Play purchases through the bounded reconcile task', async () => {
+  //   const calls: unknown[] = []
+  //   const log = spyOn(console, 'log').mockImplementation(() => {})
+  //   const reconcileRuntime = {
+  //     env: { APPLE_IAP_ENVIRONMENT: 'Sandbox' },
+  //     prisma: {
+  //       $queryRaw: async () => [{
+  //         dueCount: 7n,
+  //         oldestDueAt: new Date('2026-07-17T08:00:00.000Z'),
+  //       }],
+  //       googlePlaySubscriptionPurchase: {
+  //         findMany: async (input: unknown) => {
+  //           calls.push(input)
+  //           return []
+  //         },
+  //       },
+  //     },
+  //   } as unknown as BackendRuntime
+  //
+  //   try {
+  //     await runCronTask(
+  //       'billing:google-play:reconcile',
+  //       reconcileRuntime,
+  //       new Date('2026-07-17T10:00:00.000Z'),
+  //     )
+  //
+  //     expect(calls).toHaveLength(1)
+  //     expect(calls[0]).toMatchObject({
+  //       where: {
+  //         OR: [
+  //           { reconcileAttemptedAt: null },
+  //           { reconcileAttemptedAt: { lt: new Date('2026-07-17T09:45:00.000Z') } },
+  //         ],
+  //       },
+  //       orderBy: [
+  //         { reconcileAttemptedAt: { sort: 'asc', nulls: 'first' } },
+  //         { id: 'asc' },
+  //       ],
+  //       take: 100,
+  //     })
+  //     expect(log).toHaveBeenCalledWith(
+  //       'Cron billing:google-play:reconcile task completed.',
+  //       expect.objectContaining({
+  //         backlogDue: 7,
+  //         backlogOldestAgeSeconds: 7_200,
+  //         backlogOldestDueAt: new Date('2026-07-17T08:00:00.000Z'),
+  //       }),
+  //     )
+  //   } finally {
+  //     log.mockRestore()
+  //   }
+  // })
 
-    try {
-      await runCronTask(
-        'billing:google-play:reconcile',
-        reconcileRuntime,
-        new Date('2026-07-17T10:00:00.000Z'),
-      )
-
-      expect(calls).toHaveLength(1)
-      expect(calls[0]).toMatchObject({
-        where: {
-          OR: [
-            { reconcileAttemptedAt: null },
-            { reconcileAttemptedAt: { lt: new Date('2026-07-17T09:45:00.000Z') } },
-          ],
-        },
-        orderBy: [
-          { reconcileAttemptedAt: { sort: 'asc', nulls: 'first' } },
-          { id: 'asc' },
-        ],
-        take: 100,
-      })
-      expect(log).toHaveBeenCalledWith(
-        'Cron billing:google-play:reconcile task completed.',
-        expect.objectContaining({
-          backlogDue: 7,
-          backlogOldestAgeSeconds: 7_200,
-          backlogOldestDueAt: new Date('2026-07-17T08:00:00.000Z'),
-        }),
-      )
-    } finally {
-      log.mockRestore()
-    }
-  })
-
-  test('runs session cleanup and configured Google Play reconcile in one maintenance task', async () => {
+  test('maintenance runs session cleanup, push-token upkeep, and terminal redaction in one task', async () => {
     const calls = {
       cleanup: 0,
       passwordResetCleanup: 0,
       pushTokenMaintenanceQueries: 0,
-      reconcile: 0,
       terminalRedactionSelection: 0,
     }
     const log = spyOn(console, 'log').mockImplementation(() => {})
     const maintenanceRuntime = {
       env: {
-        APPLE_IAP_ENVIRONMENT: 'Sandbox',
-        GOOGLE_PLAY_PACKAGE_NAME: 'com.example.app',
+        // Uncomment with the billing task to cover the Google Play branch (docs/IAP.md):
+        // APPLE_IAP_ENVIRONMENT: 'Sandbox',
+        // GOOGLE_PLAY_PACKAGE_NAME: 'com.example.app',
         SESSION_ABSOLUTE_TTL_DAYS: 90,
         SESSION_RETENTION_DAYS: 7,
       },
@@ -146,12 +147,12 @@ describe('runCronTask', () => {
             return { count: 0 }
           },
         },
-        googlePlaySubscriptionPurchase: {
-          findMany: async () => {
-            calls.reconcile += 1
-            return []
-          },
-        },
+        // googlePlaySubscriptionPurchase: {
+        //   findMany: async () => {
+        //     calls.reconcile += 1
+        //     return []
+        //   },
+        // },
         pushNotificationOutbox: {
           findMany: async () => {
             calls.terminalRedactionSelection += 1
@@ -168,11 +169,13 @@ describe('runCronTask', () => {
         new Date('2026-07-17T10:00:00.000Z'),
       )
 
+      // Google Play reconciliation belongs to the parked billing task; everything asserted here
+      // is capability-neutral upkeep that runs in every project.
       expect(calls).toEqual({
         cleanup: 1,
         passwordResetCleanup: 1,
         pushTokenMaintenanceQueries: 2,
-        reconcile: 1,
+        // reconcile: 1,
         terminalRedactionSelection: 1,
       })
       expect(log).toHaveBeenCalledWith(

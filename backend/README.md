@@ -85,9 +85,9 @@ Invalid webhook signatures release and delete their provisional idempotency clai
 
 `WEBAPP_ORIGIN` is the public browser-app origin used to compose transactional links such as password reset. It defaults to the first `CORS_ORIGINS` entry. Email delivery is provider-neutral: `createApp` accepts an `EmailDelivery` adapter, while the committed runtime uses a disabled adapter until a project wires its chosen provider. With delivery disabled, password-reset requests still return the same generic accepted response and do not create tokens.
 
-`REFRESH_TOKEN_TTL_DAYS` is the sliding credential lifetime, while `SESSION_ABSOLUTE_TTL_DAYS` limits the total logical session lifetime. `REFRESH_REUSE_GRACE_SECONDS` tolerates a short concurrent refresh race; replaying the immediately previous credential after that window revokes the logical session. Keep the grace window short (the default is 10 seconds). Run `maintenance:process` on a schedule to delete revoked, sliding-expired, and absolute-expired rows after `SESSION_RETENTION_DAYS`, remove expired password-reset tokens, and perform the configured billing/notification maintenance; `auth:sessions:cleanup` remains available when auth cleanup needs its own schedule.
+`REFRESH_TOKEN_TTL_DAYS` is the sliding credential lifetime, while `SESSION_ABSOLUTE_TTL_DAYS` limits the total logical session lifetime. `REFRESH_REUSE_GRACE_SECONDS` tolerates a short concurrent refresh race; replaying the immediately previous credential after that window revokes the logical session. Keep the grace window short (the default is 10 seconds). Run `maintenance:process` on a schedule to delete revoked, sliding-expired, and absolute-expired rows after `SESSION_RETENTION_DAYS`, remove expired password-reset tokens, and redact terminal notification payloads (it also reconciles Google Play purchases once subscriptions are turned on); `auth:sessions:cleanup` remains available when auth cleanup needs its own schedule.
 
-Mobile social auth is optional. Configure `APPLE_AUTH_BUNDLE_ID`, `APPLE_AUTH_JWKS_TIMEOUT_MS`, and `GOOGLE_AUTH_CLIENT_IDS` only when the Expo app should offer Apple or Google sign-in. These values are provider identifiers, not secrets. Full setup: [../docs/SOCIAL_AUTH.md](../docs/SOCIAL_AUTH.md).
+Mobile social auth ships switched off: the route is defined but not mounted and the buttons are not rendered (see [../docs/SOCIAL_AUTH.md](../docs/SOCIAL_AUTH.md)). Once enabled, configure `APPLE_AUTH_BUNDLE_ID`, `APPLE_AUTH_JWKS_TIMEOUT_MS`, and `GOOGLE_AUTH_CLIENT_IDS` only when the Expo app should offer Apple or Google sign-in. These values are provider identifiers, not secrets. Full setup: [../docs/SOCIAL_AUTH.md](../docs/SOCIAL_AUTH.md).
 
 DigitalOcean Spaces env is optional. Leave `SPACES_*` blank until the product needs uploads, media, exports, or downloads. When storage is active, configure the complete Spaces group in `backend/.env` and follow [../docs/STORAGE.md](../docs/STORAGE.md).
 
@@ -95,7 +95,7 @@ Expo Push is optional at first run, but the backend foundation is ready. APNs an
 Registration rechecks the authenticated session inside the same per-user database fence used by every terminal session revocation, so a late mobile registration cannot recreate a token after logout or refresh-token replay detection. Immediately before an Expo send, the worker acquires the same account, token, and installation fences, rechecks session-bound authority, and holds admission until the bounded provider call finishes. Therefore a completed terminal revocation or authorized account transfer cannot be followed by a send admitted from an older snapshot; if the provider already returned a ticket, the worker persists it before honoring shutdown to avoid duplicate delivery. Legacy unbound registrations are fail-closed until the current app re-registers them with installation and session authority. Session maintenance removes unbound, expired, revoked, orphaned, and cross-user registrations before applying the configured auth-session retention window.
 Once every delivery reaches a terminal state, the backend removes the raw Expo token and redacts the outbox title, body, and data. Delivery status and provider metadata remain available for operational diagnosis without retaining notification content indefinitely.
 
-Native IAP is optional. App Store and Google Play verification require complete credential and product/base-plan allowlist groups; the default Docker image already includes Apple's public root certificates. Production App Store verification is environment-pinned. When Google Play is configured, scheduled `maintenance:process` also refreshes stale stored purchase tokens in bounded batches. Follow [../docs/IAP.md](../docs/IAP.md), and let `scripts/prepare-do-specs.mjs` validate and emit production store env rather than editing generated specs.
+Native IAP ships switched off - the module is complete, its tables are commented out, and its routes are not mounted (see [../docs/IAP.md](../docs/IAP.md)). Once enabled, App Store and Google Play verification require complete credential and product/base-plan allowlist groups; the default Docker image already includes Apple's public root certificates. Production App Store verification is environment-pinned. When Google Play is configured, scheduled `maintenance:process` also refreshes stale stored purchase tokens in bounded batches. Follow [../docs/IAP.md](../docs/IAP.md), and let `scripts/prepare-do-specs.mjs` validate and emit production store env rather than editing generated specs.
 
 ## Runtime Entrypoints
 
@@ -104,7 +104,7 @@ The backend is one workspace with one Prisma schema and one Dockerfile, but it h
 - API: `bun run start:api`, backed by `src/index.ts`.
 - Worker: `bun run start:worker`, backed by `src/worker.ts`. It is intentionally empty until a real long-running background handler is added, and deployment generation refuses to deploy this placeholder command as an App Platform worker.
 - Notification worker: `bun run start:worker:notifications`, backed by `src/worker.ts notifications`, drains pending push outbox rows and checks Expo receipts continuously. Shutdown aborts active Expo HTTP calls, stops before the receipt phase or another claim, and caps an outbox pass below `SHUTDOWN_GRACE_SECONDS` so runtime termination still has time to persist the fenced retry state. It logs non-zero delivery/receipt activity and failures, plus a sparse five-minute heartbeat while idle rather than one log per poll.
-- Cron: `bun run start:cron -- <task>`, backed by `src/cron.ts`. Available tasks are `noop`, `db:ping`, `notifications:process`, `auth:sessions:cleanup`, `billing:google-play:reconcile`, and the recommended combined `maintenance:process`.
+- Cron: `bun run start:cron -- <task>`, backed by `src/cron.ts`. Available tasks are `noop`, `db:ping`, `notifications:process`, `auth:sessions:cleanup`, and the recommended combined `maintenance:process`. `billing:google-play:reconcile` is registered only after subscriptions are turned on (see [../docs/IAP.md](../docs/IAP.md)); until then `bun run deploy:do:specs` refuses to schedule it.
 
 All entrypoints use `src/runtime.ts` for env loading, Prisma creation, and cleanup, so backend services can be shared without duplicating Prisma schema or database setup. Worker and cron entrypoints use the background loader, which deliberately replaces any inherited `JWT_SECRET` with a public non-signing placeholder; their deployment components receive no API signing key.
 
@@ -133,8 +133,8 @@ Production deployment for the backend uses DigitalOcean App Platform with Digita
 - `POST /api/auth/logout`
 - `POST /api/auth/token/register`
 - `POST /api/auth/token/login`
-- `POST /api/auth/token/social/apple`
-- `POST /api/auth/token/social/google`
+- `POST /api/auth/token/social/apple` (mounted only when social sign-in is turned on)
+- `POST /api/auth/token/social/google` (mounted only when social sign-in is turned on)
 - `POST /api/auth/token/refresh`
 - `POST /api/auth/token/logout`
 - `POST /api/auth/password-reset/request`

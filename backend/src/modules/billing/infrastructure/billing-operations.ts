@@ -3,10 +3,9 @@ import { createHash, randomUUID } from 'node:crypto'
 import { AutoRenewStatus, Environment, OfferType, Status, Type, type JWSRenewalInfoDecodedPayload, type JWSTransactionDecodedPayload } from '@apple/app-store-server-library'
 import type { SubscriptionSnapshot } from '@web-app-demo/contracts'
 
-import type { DbClient } from '../../../db'
 import type { AppEnv } from '../../../env'
 import { Prisma } from '../../../generated/prisma/client'
-import { SubscriptionState } from '../../../generated/prisma/enums'
+import { SubscriptionState, type BillingDbClient } from './prisma-billing-types'
 import { BillingFailure } from '../domain/errors'
 import type {
   AppStoreNotificationDetails,
@@ -51,7 +50,7 @@ export type GooglePlayPurchaseReferenceInput = {
 
 const APP_STORE_WEBHOOK_CLAIM_LEASE_MS = 5 * 60 * 1000
 
-export async function getSubscriptionSnapshot(db: DbClient, userId: string): Promise<SubscriptionSnapshot> {
+export async function getSubscriptionSnapshot(db: BillingDbClient, userId: string): Promise<SubscriptionSnapshot> {
   const entitlement = await db.subscriptionEntitlement.findUnique({
     where: { userId },
   })
@@ -62,7 +61,7 @@ export async function getSubscriptionSnapshot(db: DbClient, userId: string): Pro
 export async function resolveStatusLookupEnvironment({
   env,
 }: {
-  db: DbClient
+  db: BillingDbClient
   env: AppEnv
   userId: string
   originalTransactionId: string
@@ -70,7 +69,7 @@ export async function resolveStatusLookupEnvironment({
   return toAppStoreEnvironment(env.APPLE_IAP_ENVIRONMENT)
 }
 
-export async function claimAppStoreWebhook(db: DbClient, signedPayload: string) {
+export async function claimAppStoreWebhook(db: BillingDbClient, signedPayload: string) {
   const signedPayloadHash = hashToken(signedPayload)
   const claimToken = randomUUID()
   const claimedAt = new Date()
@@ -112,7 +111,7 @@ export async function claimAppStoreWebhook(db: DbClient, signedPayload: string) 
 }
 
 export async function claimVerifiedAppStoreWebhook(
-  db: DbClient,
+  db: BillingDbClient,
   input: {
     claimToken: string
     details: AppStoreNotificationDetails
@@ -205,7 +204,7 @@ export async function claimVerifiedAppStoreWebhook(
 }
 
 export async function markAppStoreWebhookProcessed(
-  db: DbClient,
+  db: BillingDbClient,
   claim: { claimToken: string; id: string },
 ) {
   const result = await db.appStoreWebhook.updateMany({
@@ -217,7 +216,7 @@ export async function markAppStoreWebhookProcessed(
 }
 
 export async function releaseFailedAppStoreWebhookClaim(
-  db: DbClient,
+  db: BillingDbClient,
   claim: { claimToken: string; id: string },
 ) {
   await db.appStoreWebhook.deleteMany({
@@ -244,7 +243,7 @@ export async function applyVerifiedGooglePlayPurchase({
   verifier,
   verifiedPurchase,
 }: {
-  db: DbClient
+  db: BillingDbClient
   env: AppEnv
   input: GooglePlayPurchaseReferenceInput
   userId: string
@@ -440,7 +439,7 @@ export async function applyVerifiedAppStoreTransaction({
   offerCodeRedemption,
   input,
 }: {
-  db: DbClient
+  db: BillingDbClient
   env: AppEnv
   offerCodeRedemption?: OfferCodeRedemptionProof | null
   input: ApplyTransactionInput
@@ -607,7 +606,7 @@ export async function applyVerifiedAppStoreTransaction({
 }
 
 async function acquireAppStoreTransactionLocks(
-  db: Pick<DbClient, '$executeRaw'>,
+  db: Pick<BillingDbClient, '$executeRaw'>,
   originalTransactionId: string,
   transactionId: string,
 ) {
@@ -620,7 +619,7 @@ async function acquireAppStoreTransactionLocks(
 }
 
 async function acquireEntitlementLock(
-  db: Pick<DbClient, '$executeRaw'>,
+  db: Pick<BillingDbClient, '$executeRaw'>,
   userId: string,
 ) {
   await db.$executeRaw(
@@ -629,7 +628,7 @@ async function acquireEntitlementLock(
 }
 
 async function acquireGooglePlayPurchaseLocks(
-  db: Pick<DbClient, '$executeRaw'>,
+  db: Pick<BillingDbClient, '$executeRaw'>,
   purchaseTokenHashes: Array<string | null>,
 ) {
   const uniqueHashes = [...new Set(purchaseTokenHashes.filter((hash): hash is string => hash != null))]
@@ -676,7 +675,7 @@ async function assertTransactionOwnership({
 }: {
   allowTokenlessFirstClaim?: boolean
   appAccountToken: string | null | undefined
-  db: Pick<DbClient, 'appStoreTransaction' | 'subscriptionEntitlement'>
+  db: Pick<BillingDbClient, 'appStoreTransaction' | 'subscriptionEntitlement'>
   originalTransactionId: string
   transactionId: string
   userId: string
@@ -732,7 +731,7 @@ async function assertGooglePlayPurchaseOwnership({
   purchaseTokenHash,
   userId,
 }: {
-  db: Pick<DbClient, 'googlePlaySubscriptionPurchase'>
+  db: Pick<BillingDbClient, 'googlePlaySubscriptionPurchase'>
   externalAccountId: string | null
   externalProfileId: string | null
   linkedPurchaseTokenHash: string | null
@@ -918,7 +917,7 @@ export async function resolveWebhookUserId({
   db,
   transaction,
 }: {
-  db: DbClient
+  db: BillingDbClient
   transaction: JWSTransactionDecodedPayload
 }) {
   if (transaction.appAccountToken) {

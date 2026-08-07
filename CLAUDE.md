@@ -34,7 +34,8 @@
 
 ## Project Context
 
-- Use `CHECKLIST.md` as the intake questionnaire and the record of the answers. Its capability ledger governs what this product has: build nothing it marks `absent` or `removed`, and treat an unlisted capability as `absent`. Dormant code, a leftover migration, or a mention in docs is not a product requirement; confirm with the user, then record the answer in the ledger.
+- Use `CHECKLIST.md` as the intake questionnaire and the record of the answers. Its capability ledger governs what this product has: build nothing it marks `absent` or `removed`, and treat an unlisted capability as `absent`. A leftover migration or a mention in docs is not a product requirement; confirm with the user, then record the answer in the ledger.
+- Some capabilities ship switched off: complete code whose tables are commented out and whose routes are not mounted, currently subscriptions and social sign-in. Do not switch one on because it looks unfinished, and do not delete it as dead code. Each carries a `Status: Off By Default` section in its doc with both paths; the product owner chooses.
 - Keep durable project choices in `CHECKLIST.md`, README files, and docs, not in agent instruction files. Document architecture, setup, operations, contracts, user flows, deployment, storage, and deferred surfaces only when the knowledge is durable.
 - Prefer the modular monolithic backend described in `docs/ARCHITECTURE.md`. Add services, queues, brokers, or real-time infrastructure only for a concrete operational need.
 - Route testing, local database, deployment, storage, and provider-specific work to their existing docs rather than duplicating runbooks here.

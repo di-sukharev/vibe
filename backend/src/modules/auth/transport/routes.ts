@@ -381,17 +381,20 @@ export function createAuthRoutes({ env, requireAuth, service }: CreateAuthRoutes
     return c.json(result, 200)
   })
 
-  routes.openapi(tokenSocialAuthRoute, async (c) => {
-    const result = await executeAuth(() =>
-      service.socialAuth(
-        c.req.valid('param').provider,
-        c.req.valid('json'),
-        requestMetadata(c, env),
-      ),
-    )
-    const { created, ...session } = result
-    return c.json(session, created ? 201 : 200)
-  })
+  // Sign in with Apple / Google is turned off: the route is defined but not mounted.
+  // Uncomment this block and the buttons in the mobile AuthScreen to enable it, then follow
+  // docs/SOCIAL_AUTH.md for the provider credentials.
+  // routes.openapi(tokenSocialAuthRoute, async (c) => {
+  //   const result = await executeAuth(() =>
+  //     service.socialAuth(
+  //       c.req.valid('param').provider,
+  //       c.req.valid('json'),
+  //       requestMetadata(c, env),
+  //     ),
+  //   )
+  //   const { created, ...session } = result
+  //   return c.json(session, created ? 201 : 200)
+  // })
 
   routes.openapi(cookieRefreshRoute, async (c) => {
     const cookieRefreshToken = getRefreshCookie(c)

@@ -1,123 +1,140 @@
-// Store subscriptions (App Store + Google Play). Optional capability: delete this file and the
-// matching marked block in base.prisma to remove billing persistence entirely.
+// =============================================================================
+// APP STORE / GOOGLE PLAY SUBSCRIPTIONS - TURNED OFF
+//
+// These tables are commented out on purpose. They are not created by any
+// migration and no code touches them, so a product that never sells anything
+// carries no billing schema at all.
+//
+// Need subscriptions?
+//   1. Uncomment everything below.
+//   2. bun run --cwd backend prisma:migrate
+//   3. Follow "How To Turn Subscriptions On" in docs/IAP.md - it lists the
+//      remaining steps (delete the type stand-ins, mount the routes).
+//
+// Sure you will never need them?
+//   Follow "If Subscriptions Are Not Wanted" in docs/IAP.md - a few neutral files
+//   reference billing and have to be cleaned up in the same pass.
+//
+// Reference implementation: github.com/di-sukharev/vibe, branch `mobile`.
+// =============================================================================
 
-enum SubscriptionPlatform {
-  android
-  ios
-
-  @@map("subscription_platform")
-}
-
-enum SubscriptionState {
-  inactive
-  pending
-  active
-  billing_grace_period
-  billing_retry
-  expired
-  revoked
-
-  @@map("subscription_state")
-}
-
-model SubscriptionEntitlement {
-  id                    String                @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  userId                String                @unique @map("user_id") @db.Uuid
-  entitlementKey        String                @default("premium") @map("entitlement_key")
-  platform              SubscriptionPlatform?
-  state                 SubscriptionState     @default(inactive)
-  productId             String?               @map("product_id")
-  originalTransactionId String?               @unique @map("original_transaction_id")
-  transactionId         String?               @map("transaction_id")
-  webOrderLineItemId    String?               @map("web_order_line_item_id")
-  expiresAt             DateTime?             @map("expires_at")
-  willAutoRenew         Boolean?              @map("will_auto_renew")
-  environment           String?
-  createdAt             DateTime              @default(now()) @map("created_at")
-  updatedAt             DateTime              @updatedAt @map("updated_at")
-  user                  User                  @relation(fields: [userId], references: [id], onDelete: Cascade, map: "subscription_entitlements_user_id_fkey")
-
-  @@index([state], map: "subscription_entitlements_state_idx")
-  @@index([expiresAt], map: "subscription_entitlements_expires_at_idx")
-  @@map("subscription_entitlements")
-}
-
-model AppStoreTransaction {
-  id                    String            @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  userId                String            @map("user_id") @db.Uuid
-  originalTransactionId String            @map("original_transaction_id")
-  transactionId         String            @unique @map("transaction_id")
-  webOrderLineItemId    String?           @map("web_order_line_item_id")
-  productId             String            @map("product_id")
-  state                 SubscriptionState
-  environment           String?
-  appAccountToken       String?           @map("app_account_token")
-  purchaseDate          DateTime?         @map("purchase_date")
-  expiresAt             DateTime?         @map("expires_at")
-  revokedAt             DateTime?         @map("revoked_at")
-  willAutoRenew         Boolean?          @map("will_auto_renew")
-  signedTransactionHash String            @unique @map("signed_transaction_hash")
-  signedRenewalHash     String?           @map("signed_renewal_hash")
-  createdAt             DateTime          @default(now()) @map("created_at")
-  updatedAt             DateTime          @updatedAt @map("updated_at")
-  user                  User              @relation(fields: [userId], references: [id], onDelete: Cascade, map: "app_store_transactions_user_id_fkey")
-
-  @@index([userId], map: "app_store_transactions_user_id_idx")
-  @@index([originalTransactionId], map: "app_store_transactions_original_transaction_id_idx")
-  @@index([state], map: "app_store_transactions_state_idx")
-  @@map("app_store_transactions")
-}
-
-model AppStoreWebhook {
-  id                    String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  notificationUuid      String?   @unique @map("notification_uuid")
-  signedPayloadHash     String    @unique @map("signed_payload_hash")
-  notificationType      String?   @map("notification_type")
-  subtype               String?
-  environment           String?
-  originalTransactionId String?   @map("original_transaction_id")
-  transactionId         String?   @map("transaction_id")
-  claimToken             String?   @map("claim_token") @db.Uuid
-  claimedAt              DateTime? @map("claimed_at")
-  processedAt           DateTime? @map("processed_at")
-  createdAt             DateTime  @default(now()) @map("created_at")
-  updatedAt             DateTime  @updatedAt @map("updated_at")
-
-  @@index([originalTransactionId], map: "app_store_webhooks_original_transaction_id_idx")
-  @@index([processedAt], map: "app_store_webhooks_processed_at_idx")
-  @@index([processedAt, claimedAt], map: "app_store_webhooks_claim_lease_idx")
-  @@map("app_store_webhooks")
-}
-
-model GooglePlaySubscriptionPurchase {
-  id                      String            @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  userId                  String            @map("user_id") @db.Uuid
-  purchaseToken           String            @map("purchase_token") @db.Text
-  purchaseTokenHash       String            @unique @map("purchase_token_hash")
-  linkedPurchaseToken     String?           @map("linked_purchase_token") @db.Text
-  linkedPurchaseTokenHash String?           @map("linked_purchase_token_hash")
-  productId               String            @map("product_id")
-  basePlanId              String?           @map("base_plan_id")
-  latestOrderId           String?           @map("latest_order_id")
-  state                   SubscriptionState
-  environment             String?
-  acknowledgementState    String?           @map("acknowledgement_state")
-  externalAccountId       String?           @map("external_account_id")
-  externalProfileId       String?           @map("external_profile_id")
-  expiresAt               DateTime?         @map("expires_at")
-  willAutoRenew           Boolean?          @map("will_auto_renew")
-  acknowledgedAt          DateTime?         @map("acknowledged_at")
-  reconcileAttemptedAt    DateTime?         @map("reconcile_attempted_at")
-  createdAt               DateTime          @default(now()) @map("created_at")
-  updatedAt               DateTime          @updatedAt @map("updated_at")
-  user                    User              @relation(fields: [userId], references: [id], onDelete: Cascade, map: "google_play_subscription_purchases_user_id_fkey")
-
-  @@index([userId], map: "google_play_subs_user_id_idx")
-  @@index([linkedPurchaseTokenHash], map: "google_play_subs_linked_token_hash_idx")
-  @@index([productId], map: "google_play_subs_product_id_idx")
-  @@index([state], map: "google_play_subs_state_idx")
-  @@index([state, reconcileAttemptedAt], map: "google_play_subs_state_reconcile_attempted_at_idx")
-  @@index([expiresAt], map: "google_play_subs_expires_at_idx")
-  @@index([latestOrderId], map: "google_play_subs_latest_order_id_idx")
-  @@map("google_play_subscription_purchases")
-}
+// enum SubscriptionPlatform {
+//   android
+//   ios
+//
+//   @@map("subscription_platform")
+// }
+//
+// enum SubscriptionState {
+//   inactive
+//   pending
+//   active
+//   billing_grace_period
+//   billing_retry
+//   expired
+//   revoked
+//
+//   @@map("subscription_state")
+// }
+//
+// model SubscriptionEntitlement {
+//   id                    String                @id @default(dbgenerated("uuidv7()")) @db.Uuid
+//   userId                String                @unique @map("user_id") @db.Uuid
+//   entitlementKey        String                @default("premium") @map("entitlement_key")
+//   platform              SubscriptionPlatform?
+//   state                 SubscriptionState     @default(inactive)
+//   productId             String?               @map("product_id")
+//   originalTransactionId String?               @unique @map("original_transaction_id")
+//   transactionId         String?               @map("transaction_id")
+//   webOrderLineItemId    String?               @map("web_order_line_item_id")
+//   expiresAt             DateTime?             @map("expires_at")
+//   willAutoRenew         Boolean?              @map("will_auto_renew")
+//   environment           String?
+//   createdAt             DateTime              @default(now()) @map("created_at")
+//   updatedAt             DateTime              @updatedAt @map("updated_at")
+//   user                  User                  @relation(fields: [userId], references: [id], onDelete: Cascade, map: "subscription_entitlements_user_id_fkey")
+//
+//   @@index([state], map: "subscription_entitlements_state_idx")
+//   @@index([expiresAt], map: "subscription_entitlements_expires_at_idx")
+//   @@map("subscription_entitlements")
+// }
+//
+// model AppStoreTransaction {
+//   id                    String            @id @default(dbgenerated("uuidv7()")) @db.Uuid
+//   userId                String            @map("user_id") @db.Uuid
+//   originalTransactionId String            @map("original_transaction_id")
+//   transactionId         String            @unique @map("transaction_id")
+//   webOrderLineItemId    String?           @map("web_order_line_item_id")
+//   productId             String            @map("product_id")
+//   state                 SubscriptionState
+//   environment           String?
+//   appAccountToken       String?           @map("app_account_token")
+//   purchaseDate          DateTime?         @map("purchase_date")
+//   expiresAt             DateTime?         @map("expires_at")
+//   revokedAt             DateTime?         @map("revoked_at")
+//   willAutoRenew         Boolean?          @map("will_auto_renew")
+//   signedTransactionHash String            @unique @map("signed_transaction_hash")
+//   signedRenewalHash     String?           @map("signed_renewal_hash")
+//   createdAt             DateTime          @default(now()) @map("created_at")
+//   updatedAt             DateTime          @updatedAt @map("updated_at")
+//   user                  User              @relation(fields: [userId], references: [id], onDelete: Cascade, map: "app_store_transactions_user_id_fkey")
+//
+//   @@index([userId], map: "app_store_transactions_user_id_idx")
+//   @@index([originalTransactionId], map: "app_store_transactions_original_transaction_id_idx")
+//   @@index([state], map: "app_store_transactions_state_idx")
+//   @@map("app_store_transactions")
+// }
+//
+// model AppStoreWebhook {
+//   id                    String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+//   notificationUuid      String?   @unique @map("notification_uuid")
+//   signedPayloadHash     String    @unique @map("signed_payload_hash")
+//   notificationType      String?   @map("notification_type")
+//   subtype               String?
+//   environment           String?
+//   originalTransactionId String?   @map("original_transaction_id")
+//   transactionId         String?   @map("transaction_id")
+//   claimToken             String?   @map("claim_token") @db.Uuid
+//   claimedAt              DateTime? @map("claimed_at")
+//   processedAt           DateTime? @map("processed_at")
+//   createdAt             DateTime  @default(now()) @map("created_at")
+//   updatedAt             DateTime  @updatedAt @map("updated_at")
+//
+//   @@index([originalTransactionId], map: "app_store_webhooks_original_transaction_id_idx")
+//   @@index([processedAt], map: "app_store_webhooks_processed_at_idx")
+//   @@index([processedAt, claimedAt], map: "app_store_webhooks_claim_lease_idx")
+//   @@map("app_store_webhooks")
+// }
+//
+// model GooglePlaySubscriptionPurchase {
+//   id                      String            @id @default(dbgenerated("uuidv7()")) @db.Uuid
+//   userId                  String            @map("user_id") @db.Uuid
+//   purchaseToken           String            @map("purchase_token") @db.Text
+//   purchaseTokenHash       String            @unique @map("purchase_token_hash")
+//   linkedPurchaseToken     String?           @map("linked_purchase_token") @db.Text
+//   linkedPurchaseTokenHash String?           @map("linked_purchase_token_hash")
+//   productId               String            @map("product_id")
+//   basePlanId              String?           @map("base_plan_id")
+//   latestOrderId           String?           @map("latest_order_id")
+//   state                   SubscriptionState
+//   environment             String?
+//   acknowledgementState    String?           @map("acknowledgement_state")
+//   externalAccountId       String?           @map("external_account_id")
+//   externalProfileId       String?           @map("external_profile_id")
+//   expiresAt               DateTime?         @map("expires_at")
+//   willAutoRenew           Boolean?          @map("will_auto_renew")
+//   acknowledgedAt          DateTime?         @map("acknowledged_at")
+//   reconcileAttemptedAt    DateTime?         @map("reconcile_attempted_at")
+//   createdAt               DateTime          @default(now()) @map("created_at")
+//   updatedAt               DateTime          @updatedAt @map("updated_at")
+//   user                    User              @relation(fields: [userId], references: [id], onDelete: Cascade, map: "google_play_subscription_purchases_user_id_fkey")
+//
+//   @@index([userId], map: "google_play_subs_user_id_idx")
+//   @@index([linkedPurchaseTokenHash], map: "google_play_subs_linked_token_hash_idx")
+//   @@index([productId], map: "google_play_subs_product_id_idx")
+//   @@index([state], map: "google_play_subs_state_idx")
+//   @@index([state, reconcileAttemptedAt], map: "google_play_subs_state_reconcile_attempted_at_idx")
+//   @@index([expiresAt], map: "google_play_subs_expires_at_idx")
+//   @@index([latestOrderId], map: "google_play_subs_latest_order_id_idx")
+//   @@map("google_play_subscription_purchases")
+// }

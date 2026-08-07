@@ -19,18 +19,16 @@ model User {
   updatedAt               DateTime                 @updatedAt @map("updated_at")
   sessions                AuthSession[]
 
-  // capability:billing:start - removed together with prisma/schema/billing.prisma
-  subscriptionEntitlement SubscriptionEntitlement?
-  appStoreTransactions    AppStoreTransaction[]
-  googlePlaySubscriptions GooglePlaySubscriptionPurchase[]
-  // capability:billing:end
+  // Uncomment together with prisma/schema/billing.prisma (docs/IAP.md step 1):
+  // subscriptionEntitlement SubscriptionEntitlement?
+  // appStoreTransactions    AppStoreTransaction[]
+  // googlePlaySubscriptions GooglePlaySubscriptionPurchase[]
 
-  // capability:notifications:start - removed together with prisma/schema/notifications.prisma
+  // Push delivery tables; remove together with prisma/schema/notifications.prisma.
   pushInstallations       PushInstallation[]
   pushTokens              PushToken[]
   pushNotificationOutbox  PushNotificationOutbox[]
   pushDeliveries          PushDelivery[]
-  // capability:notifications:end
   passwordResetTokens PasswordResetToken[]
 
   @@index([role], map: "users_role_idx")

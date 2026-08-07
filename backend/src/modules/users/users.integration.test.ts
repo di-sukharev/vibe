@@ -468,10 +468,8 @@ maybeDescribe('users and admin API integration', () => {
       expect(body.user.role).toBe(role)
     }
 
-    // capability:billing:start
-    // The demo login must not depend on billing: seeding grants no entitlement at all.
-    expect(await prisma.subscriptionEntitlement.count()).toBe(0)
-    // capability:billing:end
+    // Uncomment with the billing tables (docs/IAP.md): the demo seed must grant no entitlement.
+    // expect(await prisma.subscriptionEntitlement.count()).toBe(0)
   })
 
   test('concurrent first development seeds converge on one admin and user', async () => {

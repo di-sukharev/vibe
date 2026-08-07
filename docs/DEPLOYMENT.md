@@ -105,8 +105,8 @@ GOOGLE_PLAY_BASE_PLAN_IDS=monthly,yearly
 The generator treats each store as an atomic configuration group, rejects App Store Sandbox in a
 production spec, marks credential payloads as `SECRET`, and points Apple verification at the public
 root certificates bundled in the backend image. App Store credentials stay on the API. Google Play
-credentials also go to `billing:google-play:reconcile` and to `maintenance:process` when Google Play
-is configured, but never to workers, unrelated cron jobs, static sites, or any `EXPO_PUBLIC_*`
+credentials also go to `maintenance:process` when Google Play is configured (and to
+`billing:google-play:reconcile` once subscriptions are turned on), but never to workers, unrelated cron jobs, static sites, or any `EXPO_PUBLIC_*`
 variable.
 
 ## DigitalOcean App Platform
@@ -295,7 +295,7 @@ export DO_BACKEND_NOTIFICATION_CRON_TIME_ZONE=UTC
 bun run deploy:do:specs backend-final
 ```
 
-Use worker components only after a real long-running handler exists. The notification worker is a real handler once the app sends push notifications; the generator still refuses the template placeholder `bun run start:worker`, because that placeholder exits immediately and should not be deployed as an App Platform worker. Production should normally schedule `maintenance:process`; it removes stale auth sessions and expired password-reset tokens, redacts legacy terminal notification content, and, when the complete Google Play group is configured, reconciles stale stored purchase tokens in bounded batches. `auth:sessions:cleanup` and `billing:google-play:reconcile` remain available as dedicated tasks; auth cleanup covers both sessions and reset tokens, while the dedicated billing task fails spec generation without complete Google credentials.
+Use worker components only after a real long-running handler exists. The notification worker is a real handler once the app sends push notifications; the generator still refuses the template placeholder `bun run start:worker`, because that placeholder exits immediately and should not be deployed as an App Platform worker. Production should normally schedule `maintenance:process`; it removes stale auth sessions and expired password-reset tokens, redacts legacy terminal notification content, and - once subscriptions are turned on and the complete Google Play group is configured - reconciles stale stored purchase tokens in bounded batches. `auth:sessions:cleanup` remains available as a dedicated task and covers both sessions and reset tokens. `billing:google-play:reconcile` exists only after subscriptions are turned on (docs/IAP.md); spec generation rejects it until then, because scheduling an unregistered task deploys a job that fails on every run.
 
 Choose one notification-processing topology explicitly:
 
@@ -308,7 +308,7 @@ The generator enforces the current optional-env ownership explicitly:
 
 - API service: configured App Store, Google Play, Spaces, and temporary `ENABLE_TEST_PUSH` values.
 - `bun run start:worker:notifications` and `notifications:process`: configured `EXPO_PUSH_ACCESS_TOKEN`, because these components call Expo's delivery API.
-- `billing:google-play:reconcile` and Google-enabled `maintenance:process`: the complete Google Play group.
+- Google-enabled `maintenance:process`, and `billing:google-play:reconcile` once subscriptions are on: the complete Google Play group.
 - Other worker/cron commands: none of the Expo, store, Spaces, or test-route env above.
 
 Worker and cron components receive neither `JWT_SECRET` nor cookie/CORS settings. Their background runtime loader uses a public non-signing compatibility value internally for shared module typing, so compromise of a background component cannot disclose the API key used to mint access or offer-code tokens.

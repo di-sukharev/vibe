@@ -4,9 +4,8 @@ import type {
   ResponseBodyV2DecodedPayload,
 } from '@apple/app-store-server-library'
 
-import type { DbClient } from '../../../db'
 import type { AppEnv } from '../../../env'
-import { SubscriptionState } from '../../../generated/prisma/enums'
+import { SubscriptionState, type BillingDbClient } from './prisma-billing-types'
 import type { BillingServiceDependencies } from '../application/ports'
 import type { AppStoreVerificationResult, AppStoreSubscriptionVerifier } from './apple-verifier'
 import {
@@ -29,7 +28,7 @@ import { signOfferCodeRedemptionToken, verifyOfferCodeRedemptionToken } from './
 
 export function createBillingDependencies(input: {
   appStoreVerifier: AppStoreSubscriptionVerifier
-  db: DbClient
+  db: BillingDbClient
   env: AppEnv
   googlePlayVerifier: GooglePlaySubscriptionVerifier
 }): BillingServiceDependencies {

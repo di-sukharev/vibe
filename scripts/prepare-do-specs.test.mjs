@@ -594,37 +594,76 @@ describe('prepare-do-specs', () => {
     expect(spec).toContain('key: GOOGLE_PLAY_BASE_PLAN_IDS');
   });
 
-  test('requires Google Play credentials for its reconcile cron and scopes them to API and cron', () => {
-    const missing = runPrepareSpecs({
-      DO_BACKEND_CRON_NAME: 'google-play-reconcile',
-      DO_BACKEND_CRON_TASK: 'billing:google-play:reconcile',
+  test('refuses to schedule a cron task the runtime does not register', () => {
+    // Scheduling a task cron.ts does not register deploys a job that exits non-zero every run.
+    // The example name is deliberately one no capability ever registers, so turning a switched-off
+    // capability on never turns this guard into a contradiction.
+    const unknown = runPrepareSpecs({
+      DO_BACKEND_CRON_NAME: 'unknown-task',
+      DO_BACKEND_CRON_TASK: 'does:not:exist',
       DO_BACKEND_CRON_SCHEDULE: '*/15 * * * *',
     });
-    expect(missing.status).not.toBe(0);
-    expect(`${missing.stdout}\n${missing.stderr}`).toContain(
-      'Google Play IAP settings are required',
+
+    expect(unknown.status).not.toBe(0);
+    expect(`${unknown.stdout}\n${unknown.stderr}`).toContain(
+      'must name a task registered in backend/src/cron.ts',
     );
+  });
 
-    const complete = runPrepareSpecs({
-      DO_BACKEND_WORKER_ENABLED: 'true',
-      DO_BACKEND_WORKER_NAME: 'notifications',
-      DO_BACKEND_WORKER_RUN_COMMAND: 'bun run start:worker:notifications',
-      DO_BACKEND_CRON_NAME: 'google-play-reconcile',
-      DO_BACKEND_CRON_TASK: 'billing:google-play:reconcile',
-      DO_BACKEND_CRON_SCHEDULE: '*/15 * * * *',
-      GOOGLE_PLAY_PACKAGE_NAME: 'com.example.app',
-      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64: 'service-account-json',
-      GOOGLE_PLAY_PRODUCT_IDS: 'com.example.app.premium',
-      GOOGLE_PLAY_BASE_PLAN_IDS: 'monthly,yearly',
-    });
-    expect(complete.status).toBe(0);
+  // Parked with the billing cron task (docs/IAP.md step 7). Restore it together with the
+  // `requireGoogle` branch in prepare-do-specs.mjs, which is otherwise uncovered on turn-on.
+  // test('requires Google Play credentials for its reconcile cron', () => {
+  //   const missing = runPrepareSpecs({
+  //     DO_BACKEND_CRON_NAME: 'google-play-reconcile',
+  //     DO_BACKEND_CRON_TASK: 'billing:google-play:reconcile',
+  //     DO_BACKEND_CRON_SCHEDULE: '*/15 * * * *',
+  //   });
+  //   expect(missing.status).not.toBe(0);
+  //   expect(`${missing.stdout}\n${missing.stderr}`).toContain(
+  //     'Google Play IAP settings are required',
+  //   );
+  //
+  //   const complete = runPrepareSpecs({
+  //     DO_BACKEND_CRON_NAME: 'google-play-reconcile',
+  //     DO_BACKEND_CRON_TASK: 'billing:google-play:reconcile',
+  //     DO_BACKEND_CRON_SCHEDULE: '*/15 * * * *',
+  //     GOOGLE_PLAY_PACKAGE_NAME: 'com.example.app',
+  //     GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64: 'service-account-json',
+  //     GOOGLE_PLAY_PRODUCT_IDS: 'com.example.app.premium',
+  //     GOOGLE_PLAY_BASE_PLAN_IDS: 'monthly,yearly',
+  //   });
+  //   expect(complete.status).toBe(0);
+  //
+  //   const spec = readFileSync(backendSpecPath, 'utf8');
+  //   expect(spec.match(/key: GOOGLE_PLAY_PACKAGE_NAME/g)).toHaveLength(2);
+  // });
 
-    const spec = readFileSync(backendSpecPath, 'utf8');
-    expect(spec.match(/key: GOOGLE_PLAY_PACKAGE_NAME/g)).toHaveLength(2);
-    expect(spec.match(/key: GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64/g)).toHaveLength(2);
+  test('the registered cron task list matches backend/src/cron.ts', () => {
+    // Read both sources instead of importing the generator: it runs its CLI on import.
+    const generatorSource = readFileSync(
+      new URL('./prepare-do-specs.mjs', import.meta.url),
+      'utf8',
+    );
+    const registeredCronTasks = generatorSource
+      .slice(
+        generatorSource.indexOf('const registeredCronTasks = ['),
+        generatorSource.indexOf(']', generatorSource.indexOf('const registeredCronTasks = [')),
+      )
+      .split('\n')
+      .flatMap((line) => line.match(/'([A-Za-z0-9:._-]+)'/)?.slice(1, 2) ?? []);
+    const cronSource = readFileSync(
+      new URL('../backend/src/cron.ts', import.meta.url),
+      'utf8',
+    );
+    const declared = cronSource
+      .slice(cronSource.indexOf('const cronTasks = {'), cronSource.indexOf('} satisfies Record'))
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('//'))
+      .flatMap((line) => line.match(/^\s{2}'?([A-Za-z0-9:._-]+)'?:/)?.slice(1, 2) ?? []);
 
-    const workerBlock = spec.slice(spec.indexOf('workers:'), spec.indexOf('jobs:'));
-    expect(workerBlock).not.toContain('GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64');
+    // Both sides are parsed from source, so an empty parse would pass vacuously.
+    expect(declared.length).toBeGreaterThan(0);
+    expect([...registeredCronTasks].sort()).toEqual([...declared].sort());
   });
 
   test('keeps maintenance usable without billing and injects Google Play credentials when enabled', () => {

@@ -70,7 +70,7 @@ If mobile is active, ask whether Expo/EAS builds, Expo Push notifications, and M
 - `docs/LOCAL_DATABASE.md` - cross-platform local PostgreSQL setup for Windows, macOS, and Linux.
 - `docs/STORAGE.md` - DigitalOcean Spaces, CDN, uploads, and image/media storage rules.
 - `docs/SOCIAL_AUTH.md` - Apple and Google social auth setup for the Expo mobile app.
-- `docs/IAP.md` - App Store and Google Play subscription setup, backend verification, sandbox/internal testing, restore, and production freshness notes.
+- `docs/IAP.md` - App Store and Google Play subscriptions: how the implementation works, and how to switch it on (it ships off) or delete it.
 - `docs/YANDEX_CLOUD.md` - optional Yandex Cloud deployment path when the user explicitly chooses it.
 
 ## Choosing `webapp` vs `website`

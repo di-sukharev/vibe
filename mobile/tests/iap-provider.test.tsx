@@ -2040,6 +2040,29 @@ async function rerenderProvider(root: Root) {
   await renderProviderTree(root);
 }
 
+test('useSubscriptionIap returns null outside a provider, which is the shipped state', async () => {
+  // Subscriptions ship switched off: AppProviders does not mount IapProvider, so the hook must
+  // answer null instead of throwing. Restoring the conventional throw would red-screen /paywall,
+  // which stays a reachable route, so this contract needs its own test.
+  const { useSubscriptionIap } = await import('../src/features/billing/provider');
+  const container = fakeDocument.createElement('div');
+  const root = createRoot(container);
+  let observed: unknown = 'not rendered';
+
+  function Probe() {
+    observed = useSubscriptionIap();
+    return null;
+  }
+
+  await act(async () => {
+    root.render(<Probe />);
+    await waitForEffects();
+  });
+
+  expect(observed).toBeNull();
+  await unmount(root);
+});
+
 async function renderProviderTree(root: Root) {
   const { IapProvider, useSubscriptionIap } = await import('../src/features/billing/provider');
 

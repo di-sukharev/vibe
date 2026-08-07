@@ -58,6 +58,7 @@ async function createAdminDirectoryTestApp({
         return session?.userId === where.userId ? session : null
       },
     },
+    // Unused while billing is parked; kept so the restored suites need no extra edit.
     subscriptionEntitlement: {
       findUnique: async () => null,
     },
@@ -152,67 +153,71 @@ test('CORS preflight allows the standard mutation methods exposed by the client 
   expect(response.headers.get('access-control-allow-methods')).toContain('PATCH')
 })
 
-test('App Store webhook ingress rejects oversized bodies before billing work', async () => {
-  const app = createApp({
-    env: { ...env, WEBHOOK_BODY_LIMIT_BYTES: 32 },
-    prisma: {} as DbClient,
-  })
-  const response = await app.request('/api/webhooks/app-store', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ signedPayload: 'x'.repeat(64) }),
-  })
+// Uncomment with the billing routes in src/app.ts (docs/IAP.md):
+// test('App Store webhook ingress rejects oversized bodies before billing work', async () => {
+//   const app = createApp({
+//     env: { ...env, WEBHOOK_BODY_LIMIT_BYTES: 32 },
+//     prisma: {} as DbClient,
+//   })
+//   const response = await app.request('/api/webhooks/app-store', {
+//     method: 'POST',
+//     headers: { 'Content-Type': 'application/json' },
+//     body: JSON.stringify({ signedPayload: 'x'.repeat(64) }),
+//   })
+//
+//   expect(response.status).toBe(413)
+// })
 
-  expect(response.status).toBe(413)
-})
+// Uncomment with the billing routes in src/app.ts (docs/IAP.md):
+// test('App Store webhook ingress has an independent bounded request rate', async () => {
+//   const app = createApp({
+//     env: { ...env, WEBHOOK_RATE_LIMIT_MAX: 1 },
+//     prisma: {} as DbClient,
+//   })
+//   const request = () => app.request('/api/webhooks/app-store', {
+//     method: 'POST',
+//     headers: { 'Content-Type': 'application/json' },
+//     body: JSON.stringify({}),
+//   })
+//
+//   expect((await request()).status).not.toBe(429)
+//   const limited = await request()
+//   expect(limited.status).toBe(429)
+//   expect(limited.headers.get('retry-after')).toBeTruthy()
+// })
 
-test('App Store webhook ingress has an independent bounded request rate', async () => {
-  const app = createApp({
-    env: { ...env, WEBHOOK_RATE_LIMIT_MAX: 1 },
-    prisma: {} as DbClient,
-  })
-  const request = () => app.request('/api/webhooks/app-store', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({}),
-  })
+// Uncomment with the billing routes in src/app.ts (docs/IAP.md):
+// test('IAP ingress rejects oversized bodies before authentication and validation', async () => {
+//   const app = createApp({
+//     env: { ...env, IAP_BODY_LIMIT_BYTES: 32 },
+//     prisma: {} as DbClient,
+//   })
+//   const response = await app.request('/api/iap/app-store/transactions', {
+//     method: 'POST',
+//     headers: { 'Content-Type': 'application/json' },
+//     body: JSON.stringify({ signedTransactionInfo: 'x'.repeat(64) }),
+//   })
+//
+//   expect(response.status).toBe(413)
+// })
 
-  expect((await request()).status).not.toBe(429)
-  const limited = await request()
-  expect(limited.status).toBe(429)
-  expect(limited.headers.get('retry-after')).toBeTruthy()
-})
-
-test('IAP ingress rejects oversized bodies before authentication and validation', async () => {
-  const app = createApp({
-    env: { ...env, IAP_BODY_LIMIT_BYTES: 32 },
-    prisma: {} as DbClient,
-  })
-  const response = await app.request('/api/iap/app-store/transactions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ signedTransactionInfo: 'x'.repeat(64) }),
-  })
-
-  expect(response.status).toBe(413)
-})
-
-test('IAP ingress has an independent bounded request rate', async () => {
-  const app = createApp({
-    env: { ...env, IAP_RATE_LIMIT_MAX: 1 },
-    prisma: {} as DbClient,
-  })
-  const request = () => app.request('/api/iap/app-store/transactions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ signedTransactionInfo: 'signed-transaction' }),
-  })
-
-  expect((await request()).status).not.toBe(429)
-  const limited = await request()
-  expect(limited.status).toBe(429)
-  expect(limited.headers.get('retry-after')).toBeTruthy()
-})
+// Uncomment with the billing routes in src/app.ts (docs/IAP.md):
+// test('IAP ingress has an independent bounded request rate', async () => {
+//   const app = createApp({
+//     env: { ...env, IAP_RATE_LIMIT_MAX: 1 },
+//     prisma: {} as DbClient,
+//   })
+//   const request = () => app.request('/api/iap/app-store/transactions', {
+//     method: 'POST',
+//     headers: { 'Content-Type': 'application/json' },
+//     body: JSON.stringify({ signedTransactionInfo: 'signed-transaction' }),
+//   })
+//
+//   expect((await request()).status).not.toBe(429)
+//   const limited = await request()
+//   expect(limited.status).toBe(429)
+//   expect(limited.headers.get('retry-after')).toBeTruthy()
+// })
 
 test('account mutations reject oversized bodies before authentication', async () => {
   const app = createApp({
@@ -252,6 +257,7 @@ test('account mutations share bounded write-rate protection', async () => {
 test('Yandex SWS ingress delegates IP request limits while retaining body limits', async () => {
   const externalEnv = {
     ...env,
+    AUTH_BODY_LIMIT_BYTES: 32,
     AUTH_RATE_LIMIT_MAX: 1,
     IAP_RATE_LIMIT_MAX: 1,
     WEBHOOK_RATE_LIMIT_MAX: 1,
@@ -273,16 +279,17 @@ test('Yandex SWS ingress delegates IP request limits while retaining body limits
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     }) },
-    { expectedStatus: 400, send: () => app.request('/api/iap/app-store/transactions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    }) },
-    { expectedStatus: 400, send: () => app.request('/api/webhooks/app-store', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    }) },
+    // Billing rows, uncomment with the routes:
+    // { expectedStatus: 400, send: () => app.request('/api/iap/app-store/transactions', {
+    //   method: 'POST',
+    //   headers: { 'Content-Type': 'application/json' },
+    //   body: JSON.stringify({}),
+    // }) },
+    // { expectedStatus: 400, send: () => app.request('/api/webhooks/app-store', {
+    //   method: 'POST',
+    //   headers: { 'Content-Type': 'application/json' },
+    //   body: JSON.stringify({}),
+    // }) },
   ]
 
   for (const request of requests) {
@@ -290,11 +297,15 @@ test('Yandex SWS ingress delegates IP request limits while retaining body limits
     expect((await request.send()).status).toBe(request.expectedStatus)
   }
 
-  const oversized = await app.request('/api/webhooks/app-store', {
-    method: 'POST',
+  // Delegating IP budgets to the edge must not delegate body limits with them. This used to be
+  // proven through the App Store webhook route; that route is parked, so prove it on an account
+  // mutation, which is capability-neutral and stays mounted.
+  const oversized = await app.request('/api/users/me', {
+    method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ signedPayload: 'x'.repeat(64) }),
+    body: JSON.stringify({ displayName: 'x'.repeat(64) }),
   })
+
   expect(oversized.status).toBe(413)
 })
 
@@ -390,7 +401,7 @@ test('admin user reads and account mutations use independent budgets', async () 
   })).status).toBe(200)
 })
 
-test('OpenAPI documents account and billing mutation ingress failures', async () => {
+test('OpenAPI documents account mutation ingress failures', async () => {
   const prisma = { $queryRaw: async () => [{ '?column?': 1 }] } as unknown as DbClient
   const app = createApp({ env, prisma })
   const response = await app.request('/openapi.json')
@@ -432,7 +443,8 @@ test('OpenAPI documents account and billing mutation ingress failures', async ()
     '/api/auth/token/register',
     '/api/auth/login',
     '/api/auth/token/login',
-    '/api/auth/token/social/{provider}',
+    // Uncomment with the social sign-in route (docs/SOCIAL_AUTH.md):
+    // '/api/auth/token/social/{provider}',
     '/api/auth/refresh',
     '/api/auth/token/refresh',
     '/api/auth/logout',
@@ -450,20 +462,21 @@ test('OpenAPI documents account and billing mutation ingress failures', async ()
     .toHaveProperty('Retry-After')
   expect(document.paths['/api/admin/users']?.get?.responses?.['429']?.headers)
     .toHaveProperty('Retry-After')
-  const billingPostPaths = [
-    '/api/iap/app-store/transactions',
-    '/api/iap/google-play/transactions',
-    '/api/iap/app-store/offer-code-redemption',
-    '/api/iap/app-store/reconcile',
-    '/api/iap/google-play/reconcile',
-    '/api/webhooks/app-store',
-  ]
-  for (const path of billingPostPaths) {
-    const responses = document.paths[path]?.post?.responses
-    expect(responses).toHaveProperty('413')
-    expect(responses).toHaveProperty('429')
-    expect(responses?.['429']?.headers).toHaveProperty('Retry-After')
-  }
+  // Uncomment with the billing routes (docs/IAP.md):
+  // const billingPostPaths = [
+  //   '/api/iap/app-store/transactions',
+  //   '/api/iap/google-play/transactions',
+  //   '/api/iap/app-store/offer-code-redemption',
+  //   '/api/iap/app-store/reconcile',
+  //   '/api/iap/google-play/reconcile',
+  //   '/api/webhooks/app-store',
+  // ]
+  // for (const path of billingPostPaths) {
+  //   const responses = document.paths[path]?.post?.responses
+  //   expect(responses).toHaveProperty('413')
+  //   expect(responses).toHaveProperty('429')
+  //   expect(responses?.['429']?.headers).toHaveProperty('Retry-After')
+  // }
   expect(document.paths['/api/admin/users/{userId}/role']?.patch?.security).toEqual([
     { BearerAuth: [] },
   ])

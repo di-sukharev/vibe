@@ -1,4 +1,4 @@
-// Expo push delivery. Optional capability: delete this file and the matching marked block in
+// Expo push delivery. Optional capability: delete this file and the matching block in
 // base.prisma to remove push persistence entirely.
 
 enum PushTokenPlatform {

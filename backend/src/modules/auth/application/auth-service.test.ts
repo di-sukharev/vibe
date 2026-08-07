@@ -408,3 +408,114 @@ test('password reset confirmation rejects invalid tokens before hashing and defe
   await deferredTasks[0]!(new AbortController().signal)
   expect(changedEmails).toEqual([user.email])
 })
+
+// Sign in with Apple / Google ships switched off: the HTTP route is not mounted, so the
+// integration suite that used to cover it is parked. These service-level cases keep the parked
+// capability honest - they need no route and would catch a refactor breaking it silently.
+function socialAuthService(overrides: {
+  repository: Partial<AuthRepository>
+  verify?: () => Promise<{ subject: string; email?: string; displayName?: string }>
+}) {
+  return new AuthService({
+    ...unusedPasswordResetDependencies,
+    accessTokens: {
+      sign: async () => 'access-token',
+      verify: async () => ({ sub: user.id, email: user.email, sessionId: 'session-created' }),
+    },
+    clock: { now: () => new Date('2026-01-01T00:00:00.000Z') },
+    logoutCleanup: async () => undefined,
+    passwords: {
+      hash: async () => 'password-hash',
+      verify: async () => true,
+    },
+    refreshReuseGraceSeconds: 10,
+    refreshTokenTtlDays: 30,
+    sessionAbsoluteTtlDays: 90,
+    refreshTokens: {
+      create: () => 'refresh-token',
+      hash: (token: string) => `hash:${token}`,
+      familyHash: (token: string) => `family:${token}`,
+      rotate: (token: string) => `next:${token}`,
+    },
+    repository: overrides.repository as unknown as AuthRepository,
+    socialIdentities: overrides.verify
+      ? { verify: overrides.verify }
+      : { verify: async () => ({ subject: 'provider-subject', email: 'social@example.com' }) },
+  })
+}
+
+const socialMetadata = {}
+
+test('social auth signs in a returning user by provider subject without touching email', async () => {
+  let emailLookups = 0
+  const service = socialAuthService({
+    repository: {
+      findUserByProviderSubject: async () => user,
+      findUserByEmail: async () => {
+        emailLookups += 1
+        return null
+      },
+      createSession: async () => ({ user, session: { id: 'session-created' } }),
+    },
+  })
+
+  const result = await service.socialAuth('google', { idToken: 'token', displayName: undefined }, socialMetadata)
+
+  expect(result.created).toBe(false)
+  expect(result.user.email).toBe(user.email)
+  expect(emailLookups).toBe(0)
+})
+
+test('social auth creates a social-only user when the subject is new', async () => {
+  let created: { email: string; provider: string; subject: string } | undefined
+  const service = socialAuthService({
+    repository: {
+      findUserByProviderSubject: async () => null,
+      findUserByEmail: async () => null,
+      createSocialUser: async (input) => {
+        created = { email: input.email, provider: input.provider, subject: input.subject }
+        return { created: true, user: { ...user, email: input.email, passwordHash: null } }
+      },
+      createSession: async () => ({ user, session: { id: 'session-created' } }),
+    },
+  })
+
+  const result = await service.socialAuth('apple', { idToken: 'token', displayName: undefined }, socialMetadata)
+
+  expect(result.created).toBe(true)
+  expect(created).toEqual({
+    email: 'social@example.com',
+    provider: 'apple',
+    subject: 'provider-subject',
+  })
+})
+
+test('social auth refuses to take over an existing password account by email', async () => {
+  const service = socialAuthService({
+    repository: {
+      findUserByProviderSubject: async () => null,
+      findUserByEmail: async () => user,
+      createSocialUser: async () => {
+        throw new Error('must not create a user for an existing email')
+      },
+    },
+  })
+
+  await expect(
+    service.socialAuth('google', { idToken: 'token', displayName: undefined }, socialMetadata),
+  ).rejects.toMatchObject({ kind: 'social_email_already_exists' })
+})
+
+test('social auth rejects a provider token that carries no email for a new subject', async () => {
+  const service = socialAuthService({
+    repository: {
+      findUserByProviderSubject: async () => null,
+      findUserByEmail: async () => null,
+    },
+    verify: async () => ({ subject: 'apple-subject' }),
+  })
+
+  await expect(
+    service.socialAuth('apple', { idToken: 'token', displayName: undefined }, socialMetadata),
+  ).rejects.toMatchObject({ kind: 'provider_email_required' })
+})

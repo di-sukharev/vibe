@@ -2,12 +2,9 @@ import { expect, test } from 'bun:test';
 
 import {
   authScreenUsesKeyboardAwareShell,
-  // capability:billing:start
   nativePaywallLogoutHasTestId,
-  // capability:billing:end
 } from '../scripts/e2e/maestro-policy-audit.mjs';
 
-// capability:billing:start
 const paywallAccountActionsSource = `
   function PaywallAccountActions({ onLogout }) {
     return (
@@ -19,7 +16,6 @@ const paywallAccountActionsSource = `
     )
   }
 `;
-// capability:billing:end
 
 test('Maestro keyboard audit accepts only an enabled auth-form shell', () => {
   expect(
@@ -39,8 +35,7 @@ test('Maestro keyboard audit accepts only an enabled auth-form shell', () => {
   ).toBe(true);
 });
 
-// capability:billing:start
-test('Maestro logout audit requires the supported final paywall render path', () => {
+test('Maestro logout audit requires every reachable paywall branch to offer logout', () => {
   expect(
     nativePaywallLogoutHasTestId(
       `
@@ -60,11 +55,42 @@ test('Maestro logout audit requires the supported final paywall render path', ()
     ),
   ).toBe(false);
 
+  // A branch a user can land on without logout is exactly the dead end Maestro would get stuck in.
   expect(
     nativePaywallLogoutHasTestId(
       `
         function PaywallScreen() {
-          if (!iap.isSupported) return <ScreenShell>Unsupported</ScreenShell>
+          if (!iap) return <ScreenShell>Subscriptions are off</ScreenShell>
+
+          return (
+            <ScreenShell>
+              <PaywallAccountActions
+                onLogout={() => void auth.logout()}
+              />
+            </ScreenShell>
+          )
+        }
+      `,
+      paywallAccountActionsSource,
+    ),
+  ).toBe(false);
+
+  expect(
+    nativePaywallLogoutHasTestId(
+      `
+        function PaywallScreen() {
+          if (auth.isBootstrapping) return <ScreenLoader />
+          if (!auth.user) return <Redirect href="/" />
+
+          if (!iap) {
+            return (
+              <ScreenShell>
+                <PaywallAccountActions
+                  onLogout={() => void auth.logout()}
+                />
+              </ScreenShell>
+            )
+          }
 
           return (
             <ScreenShell>
@@ -79,4 +105,3 @@ test('Maestro logout audit requires the supported final paywall render path', ()
     ),
   ).toBe(true);
 });
-// capability:billing:end

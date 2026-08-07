@@ -2,6 +2,63 @@
 
 This template includes native mobile Apple and Google authentication on top of the existing backend session model. The native `/api/auth/token/*` password and social endpoints return `{ user, accessToken, refreshToken }`. Browser password auth uses cookie-only `/api/auth/*` endpoints instead and never returns a refresh token in JSON; browser social auth is not part of this template.
 
+## Status: Off By Default
+
+The implementation is complete and switched off. `POST /api/auth/token/social/{provider}` is
+defined but not mounted in `backend/src/modules/auth/transport/routes.ts`, and the mobile sign-in
+screen does not render `SocialAuthButtons`. Unlike subscriptions, the schema stays intact: the
+`appleSubject` and `googleSubject` columns on `users` are two nullable columns that cost nothing
+and keep the auth repository compiling.
+
+Reference implementation, if this copy ever drifts: `github.com/di-sukharev/vibe`, branch `mobile`.
+
+### How To Turn Social Sign-In On
+
+1. Uncomment the `routes.openapi(tokenSocialAuthRoute, …)` handler in
+   `backend/src/modules/auth/transport/routes.ts`, and its path in the OpenAPI expectation in
+   `backend/src/app.test.ts`.
+2. Uncomment the `SocialAuthButtons` block and its import in
+   `mobile/src/features/auth/screens/AuthScreen.tsx`, and restore the screen description that
+   mentions an identity provider.
+3. Restore the parked tests: the eight social suites in
+   `backend/src/modules/auth/auth.integration.test.ts` (they cover creation semantics, concurrent
+   first-time auth, email-conflict refusal, and session issuance racing a role change - the
+   transport and persistence layers the service-level tests do not reach).
+4. Configure the provider credentials described below (`APPLE_AUTH_BUNDLE_ID`,
+   `GOOGLE_AUTH_CLIENT_IDS`, and the client-side ids in `mobile/.env`).
+5. Verify on a real development build - neither provider works in Expo Go.
+
+### If Social Sign-In Is Not Wanted
+
+Like billing, deleting reaches past the obvious files. Remove all of it in one pass:
+
+- `backend/src/modules/auth/infrastructure/social-providers.ts`, the `tokenSocialAuthRoute`
+  definition and its parked handler in `transport/routes.ts`, `AuthService.socialAuth` with the
+  `socialIdentities` port, and the `SocialAuthProvider` branches in `infrastructure/auth-repository.ts`
+- `AuthApi.socialAuth` in `mobile/src/features/auth/api.ts`, `socialAuth` in
+  `mobile/src/features/auth/provider.tsx`, and the `verifySocialIdentity` wiring in
+  `backend/src/modules/auth/index.ts`
+- `mobile/src/features/auth/components/social-auth-buttons.tsx`,
+  `mobile/src/features/auth/social-auth-config.ts`, their re-exports in
+  `mobile/src/features/auth/index.ts`, the parked block in `screens/AuthScreen.tsx`, and the
+  social entry in `mobile/eslint.config.js`
+- the social schemas and types in `packages/contracts/src/auth.ts` and `auth.test.ts`
+- `expo-apple-authentication` and `@react-native-google-signin/google-signin` in
+  `mobile/package.json` with their entries in `mobile/app.config.js`
+- `mobile/tests/social-auth-config.test.ts`, the social cases in `mobile/tests/api.test.ts` and
+  `mobile/tests/cookie-auth-coordinator.test.ts`, the four service tests at the end of
+  `backend/src/modules/auth/application/auth-service.test.ts`, the parked suites in
+  `backend/src/modules/auth/auth.integration.test.ts` with their `socialAuthProviderDeps` and
+  `gateNextSessionCreate` helpers, and the parked OpenAPI path in `backend/src/app.test.ts`
+- `APPLE_AUTH_*` and `GOOGLE_AUTH_CLIENT_IDS` in `backend/src/env.ts`, `backend/src/env.test.ts`,
+  every `.env.example`, and the same keys in every backend test env fixture (removing them from
+  `env.ts` narrows `AppEnv`, so any fixture still listing them fails typecheck)
+- the `appleSubject` / `googleSubject` columns on `users`, if you also want them out of the
+  database - that needs a migration; leaving two nullable columns is harmless
+
+Then record `removed` in the `CHECKLIST.md` capability ledger and run `bun run typecheck`,
+`bun run test`, and `bun run lint`.
+
 ## Behavior
 
 - Mobile buttons use a one-tap flow: if the provider subject already exists, the user is signed in; otherwise the backend creates a new social-only user.

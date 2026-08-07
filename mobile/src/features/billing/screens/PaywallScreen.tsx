@@ -2,6 +2,7 @@ import { Redirect, useRouter } from 'expo-router';
 
 import { ScreenShell } from '@/components/dashboard';
 import { ScreenLoader } from '@/components/screen-states';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { TEST_IDS } from '@/constants/testIds';
 import { AuthSessionErrorNotice, useAuth } from '@/features/auth';
 import { useSubscriptionIap } from '../provider';
@@ -19,10 +20,11 @@ export function PaywallScreen() {
   const iap = useSubscriptionIap();
 
   const viewState = paywallViewState({
+    isBillingMounted: Boolean(iap),
     isBootstrapping: auth.isBootstrapping,
     isSignedIn: Boolean(auth.user),
-    isStoreSupported: iap.isSupported,
-    isSubscribed: Boolean(iap.subscription?.isActive),
+    isStoreSupported: Boolean(iap?.isSupported),
+    isSubscribed: Boolean(iap?.subscription?.isActive),
   });
 
   if (viewState === 'loading') {
@@ -31,6 +33,32 @@ export function PaywallScreen() {
 
   if (viewState === 'signed-out') {
     return <Redirect href="/" />;
+  }
+
+  // The `!iap` half is not redundant: it narrows the context for the branches below.
+  if (viewState === 'billing-off' || !iap) {
+    return (
+      <ScreenShell
+        centered
+        description="This screen is the template's subscription flow, kept ready but switched off."
+        eyebrow="Premium"
+        testID={TEST_IDS.paywall.screen}
+        title="Subscriptions are not enabled.">
+        <Alert>
+          <AlertTitle>Nothing is for sale in this project yet</AlertTitle>
+          <AlertDescription>
+            The purchase flow, store verification, and receipts are implemented and waiting. Turn
+            them on by following “How To Turn Subscriptions On” in docs/IAP.md.
+          </AlertDescription>
+        </Alert>
+        <AuthSessionErrorNotice />
+        <PaywallAccountActions
+          isLoggingOut={auth.isTransitioning}
+          onLogout={() => void auth.logout().catch(() => undefined)}
+          onProfile={() => router.push('/profile')}
+        />
+      </ScreenShell>
+    );
   }
 
   if (viewState === 'subscribed') {

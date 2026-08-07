@@ -6,6 +6,13 @@ This template currently uses the official `postgres:18-alpine` image. The major 
 
 Use explicit `postgresql://user:password@host:port/db?schema=public` URLs for Prisma commands, even on native local installs. Peer-auth style URLs without a user can make Prisma schema-engine commands fail with a generic error instead of a useful connection diagnostic.
 
+## Drift After Pulling A Switched-Off Capability
+
+If a local database already applied the subscription migrations that a later template version
+removed (they ship commented out now, see `docs/IAP.md`), `prisma migrate dev` reports drift
+against those leftover tables. Reset the local database - it holds only demo data - or turn
+subscriptions back on. Deployed databases must not be reset; generate a drop migration instead.
+
 ## Prerequisites
 
 - Windows: Docker Desktop with the WSL 2 backend enabled.

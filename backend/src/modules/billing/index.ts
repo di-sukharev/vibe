@@ -1,4 +1,4 @@
-import type { DbClient } from '../../db'
+import type { BillingDbClient } from './infrastructure/prisma-billing-types'
 import type { AppEnv } from '../../env'
 import type { AuthenticatedPrincipal } from '../auth'
 import { BillingService } from './application/billing-service'
@@ -15,7 +15,7 @@ import { createAppStoreWebhookRoutes, createIapRoutes } from './transport/routes
 
 export function createBillingModule(input: {
   appStoreVerifier?: AppStoreSubscriptionVerifier
-  db: DbClient
+  db: BillingDbClient
   env: AppEnv
   googlePlayVerifier?: GooglePlaySubscriptionVerifier
 }) {

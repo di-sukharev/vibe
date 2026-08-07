@@ -8,6 +8,16 @@ import { getDomain } from 'tldts'
 import { parseAdminSeedConfig } from '../backend/src/modules/users/domain/admin-seed-config.ts'
 import { validateDigitalOceanCronSchedule } from './do-cron.mjs'
 
+// Must match the keys of `cronTasks` in backend/src/cron.ts; a test keeps the two in step.
+// Scheduling a task the runtime does not register deploys a job that exits non-zero every run.
+const registeredCronTasks = [
+  'noop',
+  'db:ping',
+  'notifications:process',
+  'auth:sessions:cleanup',
+  'maintenance:process',
+]
+
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const scratchDir = resolve(repoRoot, '.scratch/deploy')
 const targets = new Set(['backend-initial', 'backend-final', 'webapp', 'website', 'all'])
@@ -753,14 +763,17 @@ function optionalPrimaryBackendCronJobBlock() {
 
   assertSafeYamlString('DO_BACKEND_CRON_TIME_ZONE', timeZone)
 
+  // Subscriptions ship switched off, so `billing:google-play:reconcile` is not a registered cron
+  // task right now; scheduling it would deploy a job that exits non-zero on every run. Uncomment
+  // the first branch together with the billing task in backend/src/cron.ts (docs/IAP.md).
   const providerEnv =
-    task === 'billing:google-play:reconcile'
-      ? optionalIapEnvBlock('      ', { includeApple: false, requireGoogle: true })
-      : task === 'maintenance:process'
-        ? optionalIapEnvBlock('      ', { includeApple: false })
-        : task === notificationCronTask
-          ? optionalExpoPushAccessTokenEnvBlock('      ')
-          : ''
+    // task === 'billing:google-play:reconcile'
+    //   ? optionalIapEnvBlock('      ', { includeApple: false, requireGoogle: true }) :
+    task === 'maintenance:process'
+      ? optionalIapEnvBlock('      ', { includeApple: false })
+      : task === notificationCronTask
+        ? optionalExpoPushAccessTokenEnvBlock('      ')
+        : ''
 
   return backendScheduledJobBlock({ name, providerEnv, schedule, task, timeZone })
 }
@@ -885,6 +898,14 @@ function requiredSafeTaskName(name) {
 
   if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/.test(value)) {
     throw new Error(`${name} must use only letters, numbers, dots, underscores, colons, or dashes`)
+  }
+
+  if (!registeredCronTasks.includes(value)) {
+    throw new Error(
+      `${name} must name a task registered in backend/src/cron.ts (${registeredCronTasks.join(', ')}). ` +
+        'Capabilities that ship switched off, such as billing:google-play:reconcile, register their ' +
+        'tasks only after they are turned on.',
+    )
   }
 
   return value

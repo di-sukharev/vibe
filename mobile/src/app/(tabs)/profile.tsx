@@ -5,20 +5,21 @@ import {
   SessionControls,
   useAuth,
 } from '@/features/auth';
-import {
-  SubscriptionSummary,
-  useSubscriptionIap,
-} from '@/features/billing';
+// Subscriptions are turned off; see docs/IAP.md before uncommenting.
+// import {
+//   SubscriptionSummary,
+//   useSubscriptionIap,
+// } from '@/features/billing';
 
 export default function ProfileScreen() {
   const auth = useAuth();
-  const iap = useSubscriptionIap();
+  // const iap = useSubscriptionIap();
 
   if (!auth.user) return null;
 
   return (
     <ScreenShell
-      description="Review your identity, entitlement, and current device session."
+      description="Review your identity and current device session."
       eyebrow="Account"
       testID={TEST_IDS.profile.screen}
       title="Profile">
@@ -31,14 +32,16 @@ export default function ProfileScreen() {
 
       <AuthSessionErrorNotice />
 
+      {/* Uncomment with the billing provider (docs/IAP.md). The optional chaining is required:
+          useSubscriptionIap() returns null whenever IapProvider is not mounted.
       <SubscriptionSummary
-        error={iap.error}
-        isConnected={iap.isConnected}
-        isManaging={iap.isManagingSubscriptions}
-        isSupported={iap.isSupported}
-        onManage={() => void iap.manageSubscriptions()}
-        subscription={iap.subscription}
-      />
+        error={iap?.error ?? null}
+        isConnected={Boolean(iap?.isConnected)}
+        isManaging={Boolean(iap?.isManagingSubscriptions)}
+        isSupported={Boolean(iap?.isSupported)}
+        onManage={() => void iap?.manageSubscriptions()}
+        subscription={iap?.subscription ?? null}
+      /> */}
 
       <SessionControls
         isLoggingOut={auth.isTransitioning}

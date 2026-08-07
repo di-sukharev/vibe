@@ -1,11 +1,13 @@
+// While the billing tables are commented out in prisma/schema/billing.prisma, this module
+// types the client through its own stand-ins; see infrastructure/prisma-billing-types.ts.
 import { Environment, OfferType, Type, type JWSRenewalInfoDecodedPayload, type JWSTransactionDecodedPayload, type ResponseBodyV2DecodedPayload } from '@apple/app-store-server-library'
 import { OpenAPIHono } from '@hono/zod-openapi'
 import { SignJWT } from 'jose'
 import { expect, mock, test } from 'bun:test'
 
-import type { DbClient } from '../../db'
+import type { BillingDbClient } from './infrastructure/prisma-billing-types'
 import type { AppEnv } from '../../env'
-import { SubscriptionState } from '../../generated/prisma/enums'
+import { SubscriptionState } from './infrastructure/prisma-billing-types'
 import { handleError } from '../../http/errors'
 import { BillingService } from './application/billing-service'
 import { createBillingDependencies } from './infrastructure/billing-adapters'
@@ -175,7 +177,7 @@ test('Google Play transaction route verifies purchases through the Google verifi
 })
 
 function createTestIapApp(
-  db: DbClient,
+  db: BillingDbClient,
   options: {
     env?: AppEnv
     googleVerifier?: GooglePlaySubscriptionVerifier
@@ -221,7 +223,7 @@ function createFakeGoogleDb({
     $executeRaw: mock(async () => 1),
     $transaction: async (callback: (tx: unknown) => unknown) => callback(db),
   }
-  return db as unknown as DbClient
+  return db as unknown as BillingDbClient
 }
 
 function createFakeDb({
@@ -243,7 +245,7 @@ function createFakeDb({
     $executeRaw: mock(async () => 1),
     $transaction: async (callback: (tx: unknown) => unknown) => callback(db),
   }
-  return db as unknown as DbClient
+  return db as unknown as BillingDbClient
 }
 
 function fakeOfferCodeVerifier(): AppStoreSubscriptionVerifier {

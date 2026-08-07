@@ -1,3 +1,6 @@
+// This suite needs the billing tables, which are commented out in prisma/schema/billing.prisma.
+// It still typechecks, so it cannot rot while parked, but it is dropped from
+// scripts/test-integration.mjs until the tables come back; docs/IAP.md lists what to restore.
 import { createHash, randomUUID } from 'node:crypto'
 
 import { Environment, OfferType, Status, Type, type JWSRenewalInfoDecodedPayload, type JWSTransactionDecodedPayload, type ResponseBodyV2DecodedPayload } from '@apple/app-store-server-library'
@@ -5,7 +8,7 @@ import { beforeEach, afterAll, describe, expect, test } from 'bun:test'
 
 import { createApp } from '../../app'
 import { createPrisma } from '../../db'
-import type { DbClient } from '../../db'
+import type { BillingDbClient } from './infrastructure/prisma-billing-types'
 import type { AppEnv } from '../../env'
 import { BillingService } from './application/billing-service'
 import { BillingFailure } from './domain/errors'
@@ -20,6 +23,16 @@ import type {
 } from './infrastructure/google-play-verifier'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
+/**
+ * While billing is parked, `createApp` neither accepts the verifier options nor takes a client
+ * typed through the stand-ins, so this suite cannot call it directly. Keeping the suite compiling
+ * is the point - switched-off code must not rot. Delete this helper and call `createApp` directly
+ * when turning subscriptions on (docs/IAP.md).
+ */
+function createBillingTestApp(options: Record<string, unknown>) {
+  return createApp(options as unknown as Parameters<typeof createApp>[0])
+}
+
 const skippedDatabaseUrl = 'postgresql://skip:skip@localhost:5432/skip'
 const maybeDescribe = databaseUrl ? describe : describe.skip
 
@@ -58,13 +71,15 @@ maybeDescribe('iap API integration', () => {
     GOOGLE_PLAY_PRODUCT_IDS: [],
     GOOGLE_PLAY_BASE_PLAN_IDS: [],
   }
-  const prisma = createPrisma(databaseUrl ?? skippedDatabaseUrl)
+  // The tables are commented out, so the generated client has no billing delegates; this suite
+  // only runs once they are uncommented (see docs/IAP.md) and is excluded from the runner.
+  const prisma = createPrisma(databaseUrl ?? skippedDatabaseUrl) as unknown as BillingDbClient
   let verifier = new FakeAppStoreVerifier()
   let app: ReturnType<typeof createApp>
 
   beforeEach(async () => {
     verifier = new FakeAppStoreVerifier()
-    app = createApp({ env, prisma, appStoreIapVerifier: verifier })
+    app = createBillingTestApp({ env, prisma, appStoreIapVerifier: verifier })
     await prisma.appStoreWebhook.deleteMany()
     await prisma.appStoreTransaction.deleteMany()
     await prisma.googlePlaySubscriptionPurchase.deleteMany()
@@ -181,7 +196,7 @@ maybeDescribe('iap API integration', () => {
   test('rejects verified products when the backend allowlist is empty', async () => {
     const session = await registerAndAuthorize('missing-products@example.com')
     verifier.setTransaction('signed-no-products', activeTransaction(session.user.id))
-    app = createApp({
+    app = createBillingTestApp({
       env: {
         ...env,
         APPLE_IAP_PRODUCT_IDS: [],
@@ -280,10 +295,10 @@ maybeDescribe('iap API integration', () => {
         },
       },
       $transaction: (
-        callback: Parameters<DbClient['$transaction']>[0],
-        options?: Parameters<DbClient['$transaction']>[1],
+        callback: Parameters<BillingDbClient['$transaction']>[0],
+        options?: Parameters<BillingDbClient['$transaction']>[1],
       ) => prisma.$transaction(callback, options),
-    } as unknown as DbClient
+    } as unknown as BillingDbClient
     const billing = new BillingService(createBillingDependencies({
       appStoreVerifier: verifier,
       db: gatedDb,
@@ -411,10 +426,10 @@ maybeDescribe('iap API integration', () => {
           gateOwnershipRead(prisma.googlePlaySubscriptionPurchase.findMany(args)),
       },
       $transaction: (
-        callback: Parameters<DbClient['$transaction']>[0],
-        options?: Parameters<DbClient['$transaction']>[1],
+        callback: Parameters<BillingDbClient['$transaction']>[0],
+        options?: Parameters<BillingDbClient['$transaction']>[1],
       ) => prisma.$transaction(callback, options),
-    } as unknown as DbClient
+    } as unknown as BillingDbClient
     const purchaseToken = 'google-concurrent-owner-token'
     const firstClaim = googlePlayBillingService(
       gatedDb,
@@ -1164,7 +1179,7 @@ function activeRenewal(): JWSRenewalInfoDecodedPayload {
 }
 
 function googlePlayBillingService(
-  db: DbClient,
+  db: BillingDbClient,
   purchase: GooglePlaySubscriptionPurchase,
 ) {
   return new BillingService(createBillingDependencies({

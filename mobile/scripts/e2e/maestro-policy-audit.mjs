@@ -13,13 +13,11 @@ const authComponentsPath = resolve(
   'src/features/auth/components/auth-components.tsx',
 )
 const screenShellPath = resolve(mobileRoot, 'src/components/dashboard/ScreenShell.tsx')
-// capability:billing:start
 const paywallPath = resolve(mobileRoot, 'src/features/billing/screens/PaywallScreen.tsx')
 const paywallComponentsPath = resolve(
   mobileRoot,
   'src/features/billing/components/paywall-components.tsx',
 )
-// capability:billing:end
 
 const requiredEnvKeys = [
   'APP_ID',
@@ -110,7 +108,6 @@ export function authScreenUsesKeyboardAwareShell(source) {
   return usesKeyboardAwareShell
 }
 
-// capability:billing:start
 export function nativePaywallLogoutHasTestId(screenSource, componentsSource) {
   const screenFile = ts.createSourceFile(
     paywallPath,
@@ -128,22 +125,29 @@ export function nativePaywallLogoutHasTestId(screenSource, componentsSource) {
   )
   const paywallScreen = functionDeclaration(screenFile, 'PaywallScreen')
   const accountActions = functionDeclaration(componentsFile, 'PaywallAccountActions')
-  const nativeReturn = paywallScreen?.body?.statements.find(ts.isReturnStatement)
-  let screenWiresLogout = false
+  // Every branch the screen can render must offer logout, not just the last one. The screen has
+  // several early returns now (billing off, subscribed, store unsupported), and Maestro can land
+  // on any of them, so auditing a single return would green-light a dead-end screen.
+  const screenReturns = collectReturnedScreens(paywallScreen, screenFile)
   let componentExposesTestId = false
 
-  function visitScreen(node) {
-    if (
-      ts.isJsxSelfClosingElement(node) &&
-      node.tagName.getText(screenFile) === 'PaywallAccountActions'
-    ) {
-      const onLogout = jsxAttribute(screenFile, node, 'onLogout')
-      screenWiresLogout ||= Boolean(
-        onLogout?.initializer?.getText(screenFile).includes('auth.logout'),
-      )
+  function returnWiresLogout(returnedExpression) {
+    let wired = false
+
+    function visitScreen(node) {
+      if (
+        ts.isJsxSelfClosingElement(node) &&
+        node.tagName.getText(screenFile) === 'PaywallAccountActions'
+      ) {
+        const onLogout = jsxAttribute(screenFile, node, 'onLogout')
+        wired ||= Boolean(onLogout?.initializer?.getText(screenFile).includes('auth.logout'))
+      }
+
+      ts.forEachChild(node, visitScreen)
     }
 
-    ts.forEachChild(node, visitScreen)
+    visitScreen(returnedExpression)
+    return wired
   }
 
   function visitComponent(node) {
@@ -166,22 +170,60 @@ export function nativePaywallLogoutHasTestId(screenSource, componentsSource) {
     ts.forEachChild(node, visitComponent)
   }
 
-  if (nativeReturn?.expression) visitScreen(nativeReturn.expression)
   if (accountActions?.body) visitComponent(accountActions.body)
+
+  const screenWiresLogout =
+    screenReturns.length > 0 && screenReturns.every((returned) => returnWiresLogout(returned))
 
   return screenWiresLogout && componentExposesTestId
 }
-// capability:billing:end
+
+/**
+ * Returned JSX of every screen the component can render. Early returns live inside `if` blocks,
+ * so this walks the whole body; redirects and loaders are skipped by requiring a ScreenShell.
+ */
+function collectReturnedScreens(screenDeclaration, sourceFile) {
+  const returned = []
+
+  function visit(node) {
+    if (
+      ts.isReturnStatement(node) &&
+      node.expression &&
+      renders(node.expression, 'ScreenShell', sourceFile)
+    ) {
+      returned.push(node.expression)
+    }
+    ts.forEachChild(node, visit)
+  }
+
+  if (screenDeclaration?.body) visit(screenDeclaration.body)
+  return returned
+}
+
+function renders(expression, tagName, sourceFile) {
+  let found = false
+
+  function visit(node) {
+    if (ts.isJsxElement(node) && node.openingElement.tagName.getText(sourceFile) === tagName) {
+      found = true
+    }
+    if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(sourceFile) === tagName) {
+      found = true
+    }
+    ts.forEachChild(node, visit)
+  }
+
+  visit(expression)
+  return found
+}
 
 export function runMaestroPolicyAudit() {
   const flow = readRequiredFile(flowPath)
   const app = readRequiredFile(appPath)
   const authComponents = readRequiredFile(authComponentsPath)
   const screenShell = readRequiredFile(screenShellPath)
-  // capability:billing:start
   const paywall = readRequiredFile(paywallPath)
   const paywallComponents = readRequiredFile(paywallComponentsPath)
-  // capability:billing:end
   const envKeys = declaredEnvKeys(readRequiredFile(envExamplePath))
   const missingEnvKeys = requiredEnvKeys.filter((key) => !envKeys.has(key))
 
@@ -240,12 +282,10 @@ export function runMaestroPolicyAudit() {
       screenShell.includes('keyboardAvoiding={keyboardAware}'),
     'auth form must use the keyboard-aware ScreenShell with on-drag dismissal for iOS Maestro stability',
   )
-  // capability:billing:start
   assert(
     nativePaywallLogoutHasTestId(paywall, paywallComponents),
     'native PaywallScreen logout action must expose TEST_IDS.auth.logoutButton through PaywallAccountActions',
   )
-  // capability:billing:end
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
