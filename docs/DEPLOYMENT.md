@@ -53,6 +53,7 @@ project runs on Yandex Cloud or an own server, delete the DigitalOcean tooling i
   paragraph's note that the service is named around the DigitalOcean default. Keep everything
   else, including "Two details of the timer trigger cost people time" - those are Yandex traps,
   not a comparison.
+- `docs/IAP.md`: the DigitalOcean references in the store-credential and validation sections.
 - `docs/STORAGE.md`: the DigitalOcean provider specifics. Keep the upload flow, the private/public
   rules, and the storage-service guidance - they are about S3 and about this codebase, not about
   DigitalOcean.

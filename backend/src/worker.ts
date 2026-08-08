@@ -244,8 +244,8 @@ export async function runWorker(
 }
 
 export async function main(argv: string[] = Bun.argv.slice(2)) {
+  const mode = workerMode(argv[0])
   const runtime = createBackgroundRuntime()
-  const mode: WorkerMode = argv[0] === 'notifications' ? 'notifications' : 'loops'
   const shutdown = listenForWorkerShutdown()
 
   try {
@@ -258,6 +258,15 @@ export async function main(argv: string[] = Bun.argv.slice(2)) {
 
 if (import.meta.main) {
   await main()
+}
+
+/** No argument means the loops. Anything unrecognised is a typo, not a request for the default. */
+export function workerMode(argument: string | undefined): WorkerMode {
+  if (argument === undefined) return 'loops'
+  if (argument === 'notifications' || argument === 'loops') return argument
+
+  console.error(`Unknown worker mode "${argument}". Available modes: loops, notifications.`)
+  process.exit(1)
 }
 
 export function listenForWorkerShutdown(source: WorkerSignalSource = process) {

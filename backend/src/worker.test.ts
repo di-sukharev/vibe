@@ -1,7 +1,7 @@
 import { expect, spyOn, test } from 'bun:test'
 
 import type { BackendRuntime } from './runtime'
-import { listenForWorkerShutdown, runNotificationsWorker, startWorkerLoops } from './worker'
+import { listenForWorkerShutdown, runNotificationsWorker, startWorkerLoops, workerMode } from './worker'
 
 // Two runners share this process: the generic loops over the job registry, and the purpose-built
 // notifications pipeline. Both are covered here.
@@ -374,3 +374,22 @@ function emptyOutboxMetrics() {
     transientFailed: 0,
   }
 }
+
+test('an unrecognised worker mode is a typo, not the default', () => {
+  // Falling back to the loops meant `start:worker notificaitons` ran the empty loop set and exited
+  // 0 - a push worker that looks healthy and delivers nothing.
+  const error = spyOn(console, 'error').mockImplementation(() => {})
+  const exit = spyOn(process, 'exit').mockImplementation((() => {
+    throw new Error('exited')
+  }) as never)
+
+  try {
+    expect(workerMode(undefined)).toBe('loops')
+    expect(workerMode('notifications')).toBe('notifications')
+    expect(() => workerMode('notificaitons')).toThrow('exited')
+    expect(String(error.mock.calls[0]?.[0])).toContain('Available modes: loops, notifications')
+  } finally {
+    error.mockRestore()
+    exit.mockRestore()
+  }
+})

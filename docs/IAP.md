@@ -21,7 +21,10 @@ Most steps below are commented-out blocks waiting for you, and `rg -l 'docs/IAP.
 2. Run `bun run --cwd backend prisma:migrate` to create the tables.
 3. Delete `backend/src/modules/billing/infrastructure/prisma-billing-types.ts`, restore the imports
    it replaced (its header lists all six importing files), and drop the `createBillingTestApp`
-   helper in `billing.integration.test.ts` in favour of calling `createApp` directly.
+   helper in `billing.integration.test.ts` in favour of calling `createApp` directly. Then drop the
+   header comments that describe the stand-ins - `rg -l prisma-billing-types` finds them, including
+   the ones in `billing-routes.test.ts` and `infrastructure/billing-operations.test.ts`, and the
+   parked-marker note at the top of `billing.integration.test.ts`.
 4. Uncomment the billing wiring in `backend/src/app.ts`: the module import, the two verifier
    options, `createBillingModule`, the `/api/iap` and `/api/webhooks` routes, their ingress groups,
    and the webhook limit constants.
