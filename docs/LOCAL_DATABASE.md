@@ -141,6 +141,21 @@ docker compose --env-file backend/.env down -v
 
 PostgreSQL major upgrades are not automatic data migrations. If this template bumps from one PostgreSQL major version to another, either export/import the data manually or delete the local development volumes with `docker compose --env-file backend/.env down -v` when the data is disposable.
 
+### When migrations were rewritten
+
+If `prisma migrate deploy` fails with `P3018` and a message like `type "user_role" already exists`, the database still carries a migration history this repository no longer has - because the history was squashed, or because the database was migrated on the other branch. Prisma also records the failed attempt, so every later run reports `P3009` until it is cleared.
+
+Nothing is wrong with your setup and there is nothing to repair by hand. Local development data is disposable: delete the volumes, then migrate and seed again.
+
+```bash
+docker compose --env-file backend/.env down -v
+docker compose --env-file backend/.env up -d postgres
+bun run --cwd backend prisma:deploy
+bun run dev:seed
+```
+
+Switching between `master` and `mobile` needs this too, in the direction `mobile` -> `master`: `mobile` adds tables that `master`'s schema does not know about. Going `master` -> `mobile` is fine, because `mobile`'s history is `master`'s plus one migration.
+
 ## Current Upstream Documentation
 
 - Docker Compose: https://docs.docker.com/compose/
