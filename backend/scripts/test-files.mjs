@@ -49,7 +49,23 @@ export function backendTestFiles(backendRoot) {
   }
 }
 
+/**
+ * True when the marker appears in the file's leading comment block - the lines before its first
+ * statement - and nowhere else.
+ *
+ * A byte budget was the wrong rule: this file's own test suite mentions `@parked-test` in a test
+ * title and a fixture, so reordering its tests could push the marker into range and park the one
+ * suite that polices parking, silently and with a green exit code. A file that starts with an
+ * import cannot park itself no matter what it contains.
+ */
 function isParked(absolutePath) {
-  // Only the header, so the marker cannot be triggered by a string deep inside a test.
-  return readFileSync(absolutePath, 'utf8').slice(0, 600).includes('@parked-test')
+  for (const line of readFileSync(absolutePath, 'utf8').split('\n')) {
+    const text = line.trim()
+
+    if (text === '') continue
+    if (!text.startsWith('//') && !text.startsWith('/*') && !text.startsWith('*')) return false
+    if (text.includes('@parked-test')) return true
+  }
+
+  return false
 }

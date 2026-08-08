@@ -36,6 +36,20 @@ describe('backendTestFiles', () => {
     expect(split.all).toContain('src/off.integration.test.ts')
   })
 
+  test('the marker only counts in the leading comment, not in the body', async () => {
+    // Otherwise this very file - which names the marker in a test title and a fixture - could
+    // park itself after an innocent reordering, taking every guard in it out of both runners
+    // while the suite still exits 0.
+    const root = await mkdtemp(join(tmpdir(), 'backend-test-files-'))
+    await mkdir(join(root, 'src'), { recursive: true })
+    await writeFile(
+      join(root, 'src/mentions.test.ts'),
+      "import { test } from 'bun:test'\n\ntest('@parked-test is just a string here', () => {})\n",
+    )
+
+    expect(backendTestFiles(root).parked).toEqual([])
+  })
+
   test('the billing suite stays parked while its tables are commented out', () => {
     // Discovery would otherwise run it against a database that has no billing tables.
     expect(parked).toEqual(['src/modules/billing/billing.integration.test.ts'])

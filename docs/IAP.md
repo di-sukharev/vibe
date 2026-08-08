@@ -30,7 +30,9 @@ Most steps below are commented-out blocks waiting for you, and `rg -l 'docs/IAP.
    type-only at the top level, and `scripts/repo-env.test.mjs` fails if it does not.
 6. Restore the tests: the parked cases in `backend/src/app.test.ts` (ingress and the OpenAPI paths),
    `backend/src/jobs.test.ts` (the reconcile counter, its mock, and the two env keys), and the
-   entitlement assertion in `backend/src/modules/users/users.integration.test.ts`; then delete the
+   entitlement assertion in `backend/src/modules/users/users.integration.test.ts`. Nothing
+   else in the suite needs touching: the job-list assertion reads the registry rather than a copy
+   of it, so registering the reconcile job does not break it. Then delete the
    `@parked-test` line at the top of `backend/src/modules/billing/billing.integration.test.ts` so
    both test runners pick it up again (it already typechecks, so nothing else is needed).
 7. Allow the job in deployment specs: uncomment the `providerEnv` branch in

@@ -227,8 +227,7 @@ Test runners use the separate Docker Compose `postgres_test` service and the `TE
 - `bun run dev:website` - start the Astro website project.
 - `bun run dev:mobile` - start the Expo app.
 - `bun run typecheck` - run TypeScript checks across workspaces.
-- `bun run lint` - run ESLint over the webapp, the only workspace with a lint script.
-- `bun run architecture:check` - enforce the module/feature dependency boundaries.
+- `bun run lint` - run ESLint over the webapp and the mobile app.
 - `bun run build` - run production build/typecheck/export scripts for workspaces that define them.
 - `bun run architecture:check` - enforce backend module and client feature dependency boundaries.
 - `bun run test` - run contract, backend, webapp, and mobile unit/integration tests.

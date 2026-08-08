@@ -1,7 +1,7 @@
 import { describe, expect, spyOn, test } from 'bun:test'
 
 import type { BackendRuntime } from './runtime'
-import { runBackgroundJob } from './jobs'
+import { backgroundJobNames, runBackgroundJob } from './jobs'
 
 const runtime = {} as BackendRuntime
 
@@ -12,10 +12,15 @@ describe('runBackgroundJob', () => {
 
   test('rejects an unknown job and names the ones that exist', async () => {
     // All three runners take job names from user input or config, so a typo has to fail loudly
-    // with the list of real names rather than silently do nothing.
-    await expect(runBackgroundJob('missing', runtime)).rejects.toThrow(
-      'Unknown job "missing". Available jobs: noop, db:ping, notifications:process, auth:sessions:cleanup, maintenance:process',
-    )
+    // with the list of real names rather than silently do nothing. Checked against the registry
+    // rather than a copy of it: switching a capability on registers a job, and that must not
+    // break this test - the list is asserted to be complete, not to be a particular list.
+    const names = backgroundJobNames()
+    const failure = await runBackgroundJob('missing', runtime).catch((error: unknown) => error)
+
+    expect(names.length).toBeGreaterThan(1)
+    expect(String(failure)).toContain('Unknown job "missing"')
+    for (const name of names) expect(String(failure)).toContain(name)
   })
 
   test('rejects Object.prototype keys instead of running nothing and reporting success', async () => {
