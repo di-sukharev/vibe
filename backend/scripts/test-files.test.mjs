@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -50,9 +51,21 @@ describe('backendTestFiles', () => {
     expect(backendTestFiles(root).parked).toEqual([])
   })
 
-  test('the billing suite stays parked while its tables are commented out', () => {
-    // Discovery would otherwise run it against a database that has no billing tables.
-    expect(parked).toEqual(['src/modules/billing/billing.integration.test.ts'])
+  test('the billing suite is parked exactly while its tables are commented out', () => {
+    // Discovery would otherwise run it against a database that has no billing tables. Asserted
+    // against the schema rather than against a fixed list, so this holds in all three states
+    // docs/IAP.md describes: subscriptions off, switched on, and removed entirely.
+    const suite = 'src/modules/billing/billing.integration.test.ts'
+    const schemaPath = resolve(backendRoot, 'prisma/schema/billing.prisma')
+
+    if (!all.includes(suite) || !existsSync(schemaPath)) {
+      expect(parked).toEqual([])
+      return
+    }
+
+    const tablesAreCommentedOut = !/^\s*model\s/m.test(readFileSync(schemaPath, 'utf8'))
+
+    expect(parked.includes(suite)).toBe(tablesAreCommentedOut)
   })
 
   test('database-backed tests go to the integration runner, and only those', () => {

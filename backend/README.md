@@ -109,7 +109,7 @@ The backend is one workspace with one Prisma schema and one Dockerfile, but it h
 - Worker: `bun run start:worker`, backed by `src/worker.ts`. A loop over `workerLoops`, for work that must run more often than once a minute. Also ships empty, with the same deployment guard.
 - Notification worker: `bun run start:worker:notifications`, backed by `src/worker.ts notifications`, drains pending push outbox rows and checks Expo receipts continuously. It is not a `workerLoop` because it needs more than an interval: shutdown aborts active Expo HTTP calls, stops before the receipt phase or another claim, and caps an outbox pass below `SHUTDOWN_GRACE_SECONDS` so runtime termination still has time to persist the fenced retry state. It logs non-zero delivery/receipt activity and failures, plus a sparse five-minute heartbeat while idle rather than one log per poll.
 
-All entrypoints use `src/runtime.ts` for env loading, Prisma creation, and cleanup, so backend services can be shared without duplicating Prisma schema or database setup. Worker and cron entrypoints use the background loader, which deliberately replaces any inherited `JWT_SECRET` with a public non-signing placeholder; their deployment components receive no API signing key.
+All entrypoints use `src/runtime.ts` for env loading, Prisma creation, and cleanup, so backend services can be shared without duplicating Prisma schema or database setup. The three background entrypoints - cron, scheduler, and worker - use the background loader, which deliberately replaces any inherited `JWT_SECRET` with a public non-signing placeholder; their deployment components receive no API signing key.
 
 ## Push Notifications API
 

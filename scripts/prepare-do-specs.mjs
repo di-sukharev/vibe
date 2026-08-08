@@ -790,7 +790,7 @@ function optionalPrimaryBackendCronJobBlock() {
 
   // Subscriptions ship switched off, so `billing:google-play:reconcile` is not a registered cron
   // task right now; scheduling it would deploy a job that exits non-zero on every run. Uncomment
-  // the first branch together with the billing task in backend/src/cron.ts (docs/IAP.md).
+  // the first branch together with the billing job in backend/src/jobs.ts (docs/IAP.md).
   const providerEnv =
     // task === 'billing:google-play:reconcile'
     //   ? optionalIapEnvBlock('      ', { includeApple: false, requireGoogle: true }) :

@@ -120,7 +120,7 @@ describe('runBackgroundJob', () => {
   //       take: 100,
   //     })
   //     expect(log).toHaveBeenCalledWith(
-  //       'Cron billing:google-play:reconcile task completed.',
+  //       'Job billing:google-play:reconcile completed.',
   //       expect.objectContaining({
   //         backlogDue: 7,
   //         backlogOldestAgeSeconds: 7_200,
