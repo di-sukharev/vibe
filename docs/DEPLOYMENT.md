@@ -85,8 +85,8 @@ Every hit must either go or become provider-neutral, with four exceptions to lea
 
 - `scripts/repo-env.test.mjs` - its DigitalOcean block is the half-removal guard, and both removal
   lists rely on it;
-- `backend/src/jobs.ts` - both comments are already provider-neutral: one names all three
-  hostings to explain what a job is, the other explains the type-only-import rule;
+- `backend/src/jobs.ts` - the one line that matches names all three hostings to explain what a
+  job is, and is already provider-neutral;
 - `website/astro.config.mjs` - a comment naming both providers next to the static output path;
 - `backend/src/db.test.ts`, `backend/src/env.test.ts`, `backend/src/storage/service.test.ts` -
   "DigitalOcean" appears only in test titles about connection strings and S3 URL shapes.
