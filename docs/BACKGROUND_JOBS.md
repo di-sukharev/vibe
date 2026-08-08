@@ -25,6 +25,20 @@ Three processes run that same registry. Which one you use is a hosting decision,
 The scheduler and the worker are shipped **empty**: `schedules` and `workerLoops` contain only a
 commented example. An install that never needs recurring work pays nothing for them.
 
+## The push pipeline is the exception
+
+`bun run --cwd backend start:worker:notifications` runs the Expo push outbox and receipt check, and
+it is **not** a `workerLoop`. Do not reimplement it as one: an interval is all a loop gets, and this
+pipeline needs more. Outbox processing is handed the shutdown `AbortSignal` and a runtime budget
+derived from `SHUTDOWN_GRACE_SECONDS`, so a long batch is cut short cleanly instead of being killed
+mid-send with its retry state unpersisted, and quiet periods emit a sparse heartbeat rather than a
+log line per poll. It lives in `worker.ts` alongside the loops, selected by the `notifications`
+argument.
+
+The same work is also available as the `notifications:process` job in the registry, for installs
+that would rather have a provider timer poke it every few minutes than keep a process alive. That
+is the trade: timely delivery versus one less thing to supervise.
+
 ## Adding a job
 
 1. Add an entry to `backgroundJobs` in `backend/src/jobs.ts`.
