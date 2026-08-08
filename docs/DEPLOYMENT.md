@@ -41,7 +41,9 @@ project runs on Yandex Cloud or an own server, delete the DigitalOcean tooling i
     Managed Valkey provisioning.
   - "Validation" - keep the local checks and the post-deploy list, minus the `deploy:do:specs` and
     `doctl apps spec validate` lines.
-  - "Mobile Releases" - keep as is.
+  - "Expo / EAS" - keep it; mobile releases go through Expo regardless of who hosts the API.
+    Its opening line says mobile deployment is separate from DigitalOcean hosting - reword that to
+    name your hosting instead.
   - Then rewrite the opening paragraphs above, which announce DigitalOcean as the default path.
 - `docs/BACKGROUND_JOBS.md`: the DigitalOcean bullet under "Provider specifics", the App Platform
   half of the cadence sentence, and the two App Platform links. If the Yandex bullet is gone too, delete the

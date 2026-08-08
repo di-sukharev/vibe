@@ -57,7 +57,15 @@ const defaultApiServiceInstanceCount = 1
 const defaultBackendWorkerInstanceSizeSlug = defaultApiServiceInstanceSizeSlug
 const defaultBackendWorkerInstanceCount = 1
 const notificationWorkerRunCommand = 'bun run start:worker:notifications'
+// Asserted against the registry below, so renaming the job fails spec generation instead of
+// deploying a scheduled component that fails on every tick.
 const notificationCronTask = 'notifications:process'
+
+if (!backgroundJobNames().includes(notificationCronTask)) {
+  throw new Error(
+    `The dedicated notification job '${notificationCronTask}' is not in backend/src/jobs.ts. Available jobs: ${backgroundJobNames().join(', ')}`,
+  )
+}
 const appPlatformComponentOwners = new Map()
 
 if (!targets.has(target)) {

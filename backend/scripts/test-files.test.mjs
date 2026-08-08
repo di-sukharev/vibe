@@ -65,7 +65,9 @@ describe('backendTestFiles', () => {
 
     const tablesAreCommentedOut = !/^\s*model\s/m.test(readFileSync(schemaPath, 'utf8'))
 
-    expect(parked.includes(suite)).toBe(tablesAreCommentedOut)
+    // The exact set, not just billing's membership: a stray `@parked-test` in any other file's
+    // header would otherwise drop that suite from both runners with the run still exiting 0.
+    expect(parked).toEqual(tablesAreCommentedOut ? [suite] : [])
   })
 
   test('database-backed tests go to the integration runner, and only those', () => {

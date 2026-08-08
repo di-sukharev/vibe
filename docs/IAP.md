@@ -25,11 +25,13 @@ Most steps below are commented-out blocks waiting for you, and `rg -l 'docs/IAP.
 4. Uncomment the billing wiring in `backend/src/app.ts`: the module import, the two verifier
    options, `createBillingModule`, the `/api/iap` and `/api/webhooks` routes, their ingress groups,
    and the webhook limit constants.
-5. Uncomment the billing job, its two helpers, and the `maintenance:process` rows in
+5. Uncomment the billing job, its `GooglePlayReconcileResult` type and three helpers, and the
+   `maintenance:process` rows in
    `backend/src/jobs.ts`. Keep the module import inside the job body: `jobs.ts` must stay
    type-only at the top level, and `scripts/repo-env.test.mjs` fails if it does not.
 6. Restore the tests: the parked cases in `backend/src/app.test.ts` (ingress and the OpenAPI paths),
-   `backend/src/jobs.test.ts` (the reconcile counter, its mock, and the two env keys), and the
+   `backend/src/jobs.test.ts` (its mock and the two env keys, plus a `reconcile: 0` counter in the
+   `calls` initializer, which is asserted but has no commented line to restore), and the
    entitlement assertion in `backend/src/modules/users/users.integration.test.ts`. Nothing
    else in the suite needs touching: the job-list assertion reads the registry, and the parked-suite
    assertion reads `billing.prisma`, so neither hard-codes a list that step 1 invalidates. Then
@@ -59,7 +61,8 @@ reference them. Remove all of it in one pass:
 - `backend/prisma/schema/billing.prisma` and the commented relations in `base.prisma`
 - `backend/src/modules/billing/` (module, tests, Apple root certificates)
 - `mobile/src/features/billing/`, `mobile/src/app/paywall.tsx`, the paywall entries in
-  `mobile/src/constants/testIds.ts`, the `EXPO_PUBLIC_IAP_*` declarations in
+  `mobile/src/constants/testIds.ts` (the paywall entries and `profile.manageSubscriptionButton`),
+  the `EXPO_PUBLIC_IAP_*` declarations in
   `mobile/src/types/env.d.ts`, and the billing globs in `mobile/eslint.config.js`
 - `packages/contracts/src/iap.ts`, `iap.test.ts`, the `export * from './iap'` line in
   `packages/contracts/src/index.ts`, and the `IAP_*` codes in `packages/contracts/src/errors.ts`
