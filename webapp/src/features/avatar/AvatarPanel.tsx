@@ -87,13 +87,18 @@ export function AvatarPanel({ user }: { user: UserDto }) {
             <FieldDescription>JPEG, PNG, or HEIC, up to 5 MB.</FieldDescription>
           </div>
 
+          {/*
+            Kept out of the tab order: the button above is the control a keyboard or screen
+            reader user operates, and leaving both focusable makes one action cost two tab stops.
+          */}
           <input
             accept={acceptedFileTypes}
-            aria-label="Profile photo"
+            aria-hidden="true"
             className="sr-only"
             data-testid="avatar-file-input"
             onChange={pick}
             ref={fileInput}
+            tabIndex={-1}
             type="file"
           />
         </div>

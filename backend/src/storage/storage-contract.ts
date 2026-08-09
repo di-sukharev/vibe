@@ -122,6 +122,66 @@ export function describeStorageContract(
       })
     })
 
+    test('refuses a write signed for a different key', async () => {
+      await withSetup(async (setup) => {
+        const upload = await setup.storage.createUploadUrl({
+          key: createStorageObjectKey({ namespace: 'contract' }),
+          contentType: 'image/png',
+          byteSize: pngFixture.byteLength,
+        })
+        // The key is inside the signature on both drivers, so pointing a valid signature at a
+        // neighbouring object must fail rather than write there.
+        const repointed = new URL(upload.url)
+        repointed.pathname = repointed.pathname.replace(/[^/]+$/, 'someone-elses-object')
+
+        const response = await setup.request(repointed.toString(), {
+          method: 'PUT',
+          headers: upload.headers,
+          body: pngFixture,
+        })
+
+        expect(response.status).toBe(403)
+      })
+    })
+
+    test('refuses an unsigned write outright', async () => {
+      await withSetup(async (setup) => {
+        const upload = await setup.storage.createUploadUrl({
+          key: createStorageObjectKey({ namespace: 'contract' }),
+          contentType: 'image/png',
+          byteSize: pngFixture.byteLength,
+        })
+        const unsigned = new URL(upload.url)
+        unsigned.search = ''
+
+        const response = await setup.request(unsigned.toString(), {
+          method: 'PUT',
+          headers: upload.headers,
+          body: pngFixture,
+        })
+
+        expect(response.status).toBe(403)
+      })
+    })
+
+    test('refuses a write whose headers differ from the signed intent', async () => {
+      await withSetup(async (setup) => {
+        const upload = await setup.storage.createUploadUrl({
+          key: createStorageObjectKey({ namespace: 'contract' }),
+          contentType: 'image/png',
+          byteSize: pngFixture.byteLength,
+        })
+
+        const response = await setup.request(upload.url, {
+          method: 'PUT',
+          headers: { ...upload.headers, 'Content-Type': 'image/jpeg' },
+          body: pngFixture,
+        })
+
+        expect(response.status).toBe(403)
+      })
+    })
+
     test('reports size and type through HEAD', async () => {
       await withSetup(async (setup) => {
         const key = createStorageObjectKey({ namespace: 'contract' })

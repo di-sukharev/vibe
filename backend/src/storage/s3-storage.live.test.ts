@@ -58,58 +58,6 @@ maybeDescribe('S3PrivateStorage live specifics', () => {
     expect(new URL(upload.url).pathname.startsWith(`/${config.bucket}/`)).toBe(true)
   })
 
-  test('refuses an upload whose content type differs from the signed one', async () => {
-    const upload = await storage.createUploadUrl({
-      key: createStorageObjectKey({ namespace: 'live' }),
-      contentType: 'image/png',
-      byteSize: pngFixture.byteLength,
-    })
-
-    const response = await fetch(upload.url, {
-      method: 'PUT',
-      headers: { ...upload.headers, 'Content-Type': 'image/jpeg' },
-      body: pngFixture,
-    })
-
-    expect(response.status).toBe(403)
-  })
-
-  test('refuses a request signed for a different key', async () => {
-    const upload = await storage.createUploadUrl({
-      key: createStorageObjectKey({ namespace: 'live' }),
-      contentType: 'image/png',
-      byteSize: pngFixture.byteLength,
-    })
-    const repointed = new URL(upload.url)
-    repointed.pathname = `/${config.bucket}/live/2026/08/someone-elses-object`
-
-    const response = await fetch(repointed.toString(), {
-      method: 'PUT',
-      headers: upload.headers,
-      body: pngFixture,
-    })
-
-    expect(response.status).toBe(403)
-  })
-
-  test('refuses an unsigned write outright', async () => {
-    const upload = await storage.createUploadUrl({
-      key: createStorageObjectKey({ namespace: 'live' }),
-      contentType: 'image/png',
-      byteSize: pngFixture.byteLength,
-    })
-    const unsigned = new URL(upload.url)
-    unsigned.search = ''
-
-    const response = await fetch(unsigned.toString(), {
-      method: 'PUT',
-      headers: upload.headers,
-      body: pngFixture,
-    })
-
-    expect(response.status).toBe(403)
-  })
-
   test('serves a ranged GET with a partial-content status', async () => {
     const key = createStorageObjectKey({ namespace: 'live' })
     const upload = await storage.createUploadUrl({

@@ -214,6 +214,41 @@ maybeDescribe('avatar upload API integration', () => {
     expect(response.status).toBe(400)
   })
 
+  test('reports a driver limit below the contract limit as a client error, not a server fault', async () => {
+    // The contract accepts up to AVATAR_MAX_BYTES, but PRIVATE_STORAGE_UPLOAD_MAX_BYTES can be
+    // configured lower. The storage layer then refuses a request the contract let through, and
+    // that must reach the caller as 400 rather than surfacing as an unhandled 500.
+    const tightEnv = { ...env, PRIVATE_STORAGE_UPLOAD_MAX_BYTES: 32 }
+    const tightConfig = privateStorageConfigFromEnv({
+      ...tightEnv,
+      PRIVATE_STORAGE_LOCAL_ROOT: root,
+    }) as FilesystemStorageConfig
+    const tightApp = createApp({
+      env: tightEnv,
+      prisma,
+      privateStorage: {
+        storage: new FilesystemPrivateStorage(tightConfig),
+        httpRoutes: createFilesystemStorageRoutes(tightConfig),
+      },
+    })
+
+    const register = await tightApp.request('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'tight@example.com', password: 'password-1234' }),
+    })
+    const { accessToken } = await register.json()
+
+    const response = await tightApp.request('/api/uploads/avatar', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contentType: 'image/png', byteSize: pngFixture.byteLength }),
+    })
+
+    expect(response.status).toBe(400)
+    expect((await response.json()).error.code).toBe('VALIDATION_ERROR')
+  })
+
   test('keeps one live avatar per user and deletes the object it replaces', async () => {
     const session = await register('replace@example.com')
 

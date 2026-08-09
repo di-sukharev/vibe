@@ -121,24 +121,6 @@ describe('FilesystemPrivateStorage signed URLs', () => {
     })
   })
 
-  test('refuses a PUT whose headers differ from the signed intent', async () => {
-    await withSetup(async ({ request, storage }) => {
-      const upload = await storage.createUploadUrl({
-        key: createStorageObjectKey({ namespace: 'contract' }),
-        contentType: 'image/png',
-        byteSize: pngFixture.byteLength,
-      })
-
-      for (const headers of [
-        { ...upload.headers, 'Content-Type': 'image/jpeg' },
-        { 'Content-Type': 'image/png' },
-      ]) {
-        const response = await request(upload.url, { method: 'PUT', headers, body: pngFixture })
-        expect(response.status).toBe(403)
-      }
-    })
-  })
-
   test('refuses a body whose length differs from the signed size', async () => {
     await withSetup(async ({ request, storage }) => {
       const upload = await storage.createUploadUrl({
@@ -154,6 +136,44 @@ describe('FilesystemPrivateStorage signed URLs', () => {
       })
 
       expect(response.status).toBe(403)
+    })
+  })
+
+  test('refuses a chunked body that outgrows the signed size instead of buffering it', async () => {
+    await withSetup(async ({ request, storage }) => {
+      const upload = await storage.createUploadUrl({
+        key: createStorageObjectKey({ namespace: 'contract' }),
+        contentType: 'image/png',
+        byteSize: pngFixture.byteLength,
+      })
+      // A streamed body carries no Content-Length, so the header check above cannot catch it.
+      // The assertion that matters is not the status - buffering everything and then comparing
+      // lengths also ends in 403 - but that the read STOPS at the cap. This stream keeps handing
+      // out chunks until someone stops pulling, so a reader without a cap drains all of them.
+      let pulls = 0
+      const oversized = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          pulls += 1
+          if (pulls > 500) {
+            controller.close()
+            return
+          }
+          controller.enqueue(new Uint8Array(pngFixture))
+        },
+      })
+
+      const response = await request(upload.url, {
+        method: 'PUT',
+        headers: upload.headers,
+        body: oversized,
+        // @ts-expect-error duplex is required for a streamed request body and is not yet in the types
+        duplex: 'half',
+      })
+
+      expect(response.status).toBe(403)
+      expect(await storage.headObject(upload.key)).toBeNull()
+      // Two chunks are enough to pass a one-chunk limit; anything near 500 means it kept reading.
+      expect(pulls).toBeLessThan(10)
     })
   })
 

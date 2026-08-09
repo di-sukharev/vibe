@@ -26,11 +26,20 @@ export const jpegImage = {
   ),
 }
 
-/** Not an image at all: the finalize check must refuse it whatever the filename says. */
+/**
+ * Not an image at all: the finalize check must refuse it whatever the filename says.
+ *
+ * Deliberately padded past `AVATAR_MIN_BYTES`. Below that floor the browser rejects it on size
+ * and the upload never leaves the page, so the server-side magic-byte check - the thing this
+ * fixture exists to exercise - would never run.
+ */
 export const disguisedTextFile = {
   name: 'not-really.png',
   mimeType: 'image/png',
-  buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script/></svg>', 'utf8'),
+  buffer: Buffer.from(
+    '<svg xmlns="http://www.w3.org/2000/svg"><script/></svg><!-- padding past the minimum size -->',
+    'utf8',
+  ),
 }
 
 /**

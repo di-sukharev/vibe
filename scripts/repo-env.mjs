@@ -92,12 +92,12 @@ export function assertLocalPrivateStorageEndpoint(endpoint) {
  * `allowedHeaders` is passed in from the backend's own list so the container allows exactly what
  * the filesystem driver's CORS layer allows, and a browser upload behaves the same on both.
  */
-export function localPrivateStorageCorsRule(allowedOrigins, allowedHeaders) {
+export function localPrivateStorageCorsRule(allowedOrigins, allowedHeaders, exposedHeaders) {
   return {
     AllowedOrigins: allowedOrigins,
     AllowedMethods: ['GET', 'PUT', 'HEAD', 'DELETE'],
     AllowedHeaders: allowedHeaders,
-    ExposeHeaders: ['ETag', 'Content-Range', 'Content-Length'],
+    ExposeHeaders: exposedHeaders,
     MaxAgeSeconds: 600,
   }
 }

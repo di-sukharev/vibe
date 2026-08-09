@@ -71,7 +71,7 @@ export const backgroundJobs = {
     const deletedIds: string[] = []
     for (const upload of abandoned) {
       try {
-        await privateStorage.deleteObject(upload.objectKey)
+        await privateStorage.storage.deleteObject(upload.objectKey)
         deletedIds.push(upload.id)
       } catch (error) {
         console.error(`Job uploads:pending:cleanup could not delete ${upload.objectKey}:`, error)

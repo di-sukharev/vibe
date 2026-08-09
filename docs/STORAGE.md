@@ -76,7 +76,9 @@ PRIVATE_STORAGE_DOWNLOAD_URL_TTL_SECONDS=300
 
 ## Any S3-Compatible Provider
 
-The S3 driver is not written against one vendor. DigitalOcean Spaces, Yandex Object Storage, MinIO, Cloudflare R2, and AWS S3 all work by setting the five variables above; the differences are endpoint, region, and whether the provider wants path-style addressing.
+The S3 driver is not written against one vendor. DigitalOcean Spaces, Yandex Object Storage, MinIO, Cloudflare R2, and AWS S3 are all configured by the five variables above; the differences are endpoint, region, and whether the provider wants path-style addressing.
+
+One capability is worth checking before you commit to a provider: **conditional writes**. The write-once guarantee rests on `If-None-Match: *` returning `412` when the key exists, and not every S3-compatible server implements it — this template verifies it only against the local SeaweedFS container, and some providers do not document it at all. Where it is missing, uploads still work and the product path stays safe (every ticket mints a fresh UUID key, so there is nothing to overwrite), but a retried PUT silently replaces instead of being refused. `bun run test:storage:s3` against your own endpoint is the quickest way to find out.
 
 - DigitalOcean Spaces — `https://<region>.digitaloceanspaces.com`, virtual-host addressing.
 - Yandex Object Storage — `https://storage.yandexcloud.net`. See [YANDEX_CLOUD.md](YANDEX_CLOUD.md).
@@ -105,11 +107,11 @@ Details that matter, and why:
 
 Deletion is idempotent on both drivers, and superseded objects are removed after the response rather than inside the transaction, so a storage hiccup cannot fail an upload the database already committed.
 
-Know the limit of that trade. The `uploads:pending:cleanup` job in [BACKGROUND_JOBS.md](BACKGROUND_JOBS.md) sweeps uploads that were **never finalized**: their row survives, so their key is still known. It does not cover replace and delete, where the row goes with the transaction and the object delete is best-effort afterwards — if that delete fails, nothing records the key any more and the object is orphaned. For a template storing one small avatar per user that is an acceptable leak; a product storing large or regulated files should make the key outlive the row, with a reconciliation pass over the bucket.
+Know the limit of that trade. The `uploads:pending:cleanup` job in [BACKGROUND_JOBS.md](BACKGROUND_JOBS.md) sweeps uploads that were **never finalized**: their row survives, so their key is still known. It does not cover replace and delete, where the row goes with the transaction and the object delete is best-effort afterwards — if that delete fails, nothing records the key any more and the object is orphaned. Deleting a user has the same shape, and worse: the `users` cascade drops the avatar row without any object delete at all. For a template storing one small avatar per user that is an acceptable leak; a product storing large or regulated files, or one that adds account deletion, should make the key outlive the row and add a reconciliation pass over the bucket.
 
 ## CORS
 
-The browser uploads cross-origin, so both drivers have to allow the same request. `browserUploadAllowedHeaders` in `backend/src/storage/config.ts` is the single source: the app's CORS middleware uses it for the filesystem driver, and `scripts/storage-local.mjs` passes the same list to `PutBucketCors` for the local container. A deployed bucket needs the equivalent rule — the deployed web origins, `GET`/`PUT`/`HEAD`, the `Content-Type` and `If-None-Match` headers, and `ETag` exposed.
+The browser uploads cross-origin, so both drivers have to allow the same request. `browserUploadAllowedHeaders` in `backend/src/storage/config.ts` is the single source: the API's CORS layer allows it plus `Authorization` (as `apiCorsAllowedHeaders`), and `scripts/storage-local.mjs` passes the bare list to `PutBucketCors` for the local container. A presigned URL carries its own authority, so the bucket rule never needs `Authorization`. A deployed bucket needs the equivalent rule — the deployed web origins, `GET`/`PUT`/`HEAD`, the `Content-Type` and `If-None-Match` headers, and `ETag` exposed.
 
 ## Displaying A Private File
 
@@ -134,7 +136,7 @@ When optimized images are required, generate app-owned variants in the backend o
 - Validate content type, size, owner, and permissions before issuing any URL, and verify the stored object before publishing it.
 - Generate object keys server-side. Never trust a client-provided path.
 - Keep emails, names, customer ids, and other personal data out of bucket names, object keys, metadata, and tags.
-- Delete objects when the owning record is deleted; `user_avatars` cascades from `users`, and the cleanup job removes abandoned uploads.
+- Delete objects when the owning record is deleted. `user_avatars` cascades from `users`, but that removes only the rows — and a row is the only record of its object key, so deleting a user today orphans their avatar in the bucket. A product that adds account deletion must delete the objects first; see the limits noted under the upload contract.
 
 ## Current Upstream Documentation
 

@@ -106,9 +106,12 @@ test('recovers from an interrupted upload when the user tries again', async ({ p
 test('refuses a file that is not the image it claims to be', async ({ page }) => {
   await registerAndOpenProfile(page)
 
+  // The file is large enough and named like a PNG, so the browser lets it through and the
+  // rejection has to come from the backend reading its actual leading bytes. Asserting the
+  // message keeps this from passing on a client-side size or type check instead.
   await pickFile(page, disguisedTextFile)
 
-  await expect(page.getByTestId('avatar-error')).toBeVisible()
+  await expect(page.getByTestId('avatar-error')).toContainText('not a supported image')
   await expect(avatarImage(page)).toHaveCount(0)
   await expect(page.getByTestId('avatar-fallback')).toBeVisible()
 })

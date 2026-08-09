@@ -48,8 +48,11 @@ export function describeAvatarFile(file: File) {
   if (!contentType) {
     return { ok: false as const, reason: 'type' as const }
   }
-  if (file.size < AVATAR_MIN_BYTES || file.size > AVATAR_MAX_BYTES) {
-    return { ok: false as const, reason: 'size' as const }
+  if (file.size < AVATAR_MIN_BYTES) {
+    return { ok: false as const, reason: 'too-small' as const }
+  }
+  if (file.size > AVATAR_MAX_BYTES) {
+    return { ok: false as const, reason: 'too-large' as const }
   }
 
   return { ok: true as const, contentType, byteSize: file.size }

@@ -97,7 +97,7 @@ export class AvatarsService {
       throw new UploadsFailure('rejected', 'Uploaded file size does not match the request')
     }
 
-    if (!imageFormatMatchesDeclaredType(pending.contentType, asAvatarType(stored.contentType))) {
+    if (!imageFormatMatchesDeclaredType(asAvatarType(stored.contentType), pending.contentType)) {
       await this.discard(userId, pending)
       throw new UploadsFailure('rejected', 'Uploaded file type does not match the request')
     }

@@ -5,15 +5,21 @@ import type { AppEnv } from '../env'
 import { StorageError } from './errors'
 
 /**
- * Headers a browser must be allowed to send on the direct PUT, and to read back afterwards.
+ * Headers a browser sends on the direct PUT, and reads back afterwards.
  *
- * Exported because two very different places need the identical list and drifting apart would
- * break uploads in a way that only shows up in a browser: the app's CORS middleware in
- * `backend/src/app.ts` (which covers the filesystem driver, served from the API origin) and the
- * `PutBucketCors` call in `scripts/storage-local.mjs` (which covers the local S3 container).
+ * Exported because two very different places need the identical list, and drifting apart would
+ * break uploads in a way that only shows up in a browser: the API's CORS layer (which covers the
+ * filesystem driver, served from the API origin) and the `PutBucketCors` call in
+ * `scripts/storage-local.mjs` (which covers the local S3 container).
+ *
+ * No `Authorization` here on purpose: a presigned URL carries its own authority, so sending it
+ * would only widen the bucket's CORS rule for a header the upload never uses.
  */
-export const browserUploadAllowedHeaders = ['Content-Type', 'Authorization', 'If-None-Match']
+export const browserUploadAllowedHeaders = ['Content-Type', 'If-None-Match']
 export const browserUploadExposedHeaders = ['ETag']
+
+/** The API's CORS allow-list: the upload headers plus what an authenticated API call needs. */
+export const apiCorsAllowedHeaders = [...browserUploadAllowedHeaders, 'Authorization']
 
 export type FilesystemStorageConfig = {
   driver: 'filesystem'

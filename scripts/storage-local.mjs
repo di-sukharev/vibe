@@ -1,7 +1,10 @@
 #!/usr/bin/env bun
 import { spawnSync } from 'node:child_process'
 
-import { browserUploadAllowedHeaders } from '../backend/src/storage/config.ts'
+import {
+  browserUploadAllowedHeaders,
+  browserUploadExposedHeaders,
+} from '../backend/src/storage/config.ts'
 import {
   assertLocalPrivateStorageEndpoint,
   composeEnv,
@@ -105,7 +108,11 @@ async function waitForBucket({ attempts = 90, delayMs = 1000 } = {}) {
   )
 }
 
-function corsOrigins() {
+function corsOrigins({ anyOrigin = false } = {}) {
+  // The E2E web server picks a port derived from this checkout's path, so an allowlist - even a
+  // deliberately exported one - cannot name it. That run needs the permissive rule.
+  if (anyOrigin) return ['*']
+
   const configured = (process.env.CORS_ORIGINS ?? '')
     .split(',')
     .map((origin) => origin.trim())
@@ -119,7 +126,7 @@ function corsOrigins() {
   return ['*']
 }
 
-async function applyBucketCors() {
+async function applyBucketCors({ anyOrigin = false } = {}) {
   const { CreateBucketCommand, PutBucketCorsCommand } = await import('@aws-sdk/client-s3')
   const { client } = await createS3Client()
 
@@ -136,7 +143,11 @@ async function applyBucketCors() {
       new PutBucketCorsCommand({
         Bucket: localPrivateStorageBucket,
         CORSConfiguration: {
-          CORSRules: [localPrivateStorageCorsRule(corsOrigins(), browserUploadAllowedHeaders)],
+          CORSRules: [localPrivateStorageCorsRule(
+              corsOrigins({ anyOrigin }),
+              browserUploadAllowedHeaders,
+              browserUploadExposedHeaders,
+            )],
         },
       }),
     )
@@ -151,12 +162,12 @@ function envBlock() {
     .join('\n')
 }
 
-async function start({ quiet = false } = {}) {
+async function start({ quiet = false, anyOrigin = false } = {}) {
   assertLocalPrivateStorageEndpoint(endpoint)
 
   run('docker', [...composeArgs, 'up', '-d', localPrivateStorageService])
   await waitForBucket()
-  await applyBucketCors()
+  await applyBucketCors({ anyOrigin })
 
   if (!quiet) {
     process.stdout.write(`Local S3 storage is ready at ${endpoint}\n\n${envBlock()}\n`)
@@ -184,8 +195,8 @@ function stop() {
   process.stdout.write('Local S3 storage stopped. Its volume is kept.\n')
 }
 
-async function runAgainstLocalStorage(command, args) {
-  await start({ quiet: true })
+async function runAgainstLocalStorage(command, args, { anyOrigin = false } = {}) {
+  await start({ quiet: true, anyOrigin })
   process.stdout.write(`Local S3 storage is ready at ${endpoint}\n`)
 
   const result = spawnSync(command, args, {
@@ -218,7 +229,7 @@ async function main() {
   if (command === 'test') {
     return runAgainstLocalStorage('bun', ['run', '--cwd', 'backend', 'test:live'])
   }
-  return runAgainstLocalStorage('bun', ['run', '--cwd', 'webapp', 'e2e'])
+  return runAgainstLocalStorage('bun', ['run', '--cwd', 'webapp', 'e2e'], { anyOrigin: true })
 }
 
 export { corsOrigins, envBlock, start as startLocalStorage }

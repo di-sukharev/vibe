@@ -30,6 +30,7 @@ export function createPrivateStorage(env: AppEnv): PrivateStorageRuntime {
 }
 
 export {
+  apiCorsAllowedHeaders,
   browserUploadAllowedHeaders,
   browserUploadExposedHeaders,
   privateStorageConfigFromEnv,

@@ -85,15 +85,18 @@ describe('localPrivateStorageEnv', () => {
 
 describe('localPrivateStorageCorsRule', () => {
   test('allows the methods and headers a browser upload actually uses', () => {
-    const rule = localPrivateStorageCorsRule(['http://localhost:5173'], [
-      'Content-Type',
-      'If-None-Match',
-    ])
+    const rule = localPrivateStorageCorsRule(
+      ['http://localhost:5173'],
+      ['Content-Type', 'If-None-Match'],
+      ['ETag'],
+    )
 
     expect(rule.AllowedMethods).toEqual(expect.arrayContaining(['GET', 'PUT', 'HEAD']))
     expect(rule.AllowedHeaders).toContain('If-None-Match')
     expect(rule.ExposeHeaders).toContain('ETag')
     expect(rule.AllowedOrigins).toEqual(['http://localhost:5173'])
+    // A presigned URL carries its own authority, so the bucket never needs to accept it.
+    expect(rule.AllowedHeaders).not.toContain('Authorization')
   })
 })
 

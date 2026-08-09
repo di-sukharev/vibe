@@ -19,7 +19,7 @@ import { createNotificationsModule } from './modules/notifications'
 import { createUploadsModule } from './modules/uploads'
 import { createUsersModule } from './modules/users'
 import {
-  browserUploadAllowedHeaders,
+  apiCorsAllowedHeaders,
   browserUploadExposedHeaders,
   createPrivateStorage,
   type PrivateStorageRuntime,
@@ -104,9 +104,9 @@ export function createApp({
       },
       // One global CORS layer, because hono answers a preflight in the first middleware that
       // matches: a second, route-scoped cors() registered later would never see an OPTIONS.
-      // The upload headers therefore have to live here. `browserUploadAllowedHeaders` is shared
-      // with the local S3 bucket's CORS rule so both drivers allow exactly the same request.
-      allowHeaders: browserUploadAllowedHeaders,
+      // The upload headers therefore have to live here. They come from the same constant the
+      // local S3 bucket's CORS rule uses, so both drivers allow exactly the same upload request.
+      allowHeaders: apiCorsAllowedHeaders,
       exposeHeaders: browserUploadExposedHeaders,
       allowMethods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
       credentials: true,

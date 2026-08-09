@@ -7,6 +7,7 @@ const app = createApp({
   backgroundTasks: runtime.backgroundTasks,
   env: runtime.env,
   prisma: runtime.prisma,
+  privateStorage: runtime.privateStorage,
 })
 
 const server = Bun.serve({

@@ -3,14 +3,17 @@ import 'dotenv/config'
 import { createBackgroundTasks, type BackgroundTasks } from './background-tasks'
 import { createPrisma, type DbClient } from './db'
 import { loadBackgroundEnv, loadEnv, type AppEnv } from './env'
-import { createPrivateStorage, type PrivateStorage } from './storage'
+import { createPrivateStorage, type PrivateStorageRuntime } from './storage'
 
 export type BackendRuntime = {
   backgroundTasks: BackgroundTasks
   env: AppEnv
   prisma: DbClient
-  /** Background jobs reach storage through here; `jobs.ts` must stay free of runtime imports. */
-  privateStorage: PrivateStorage
+  /**
+   * The storage port plus the routes the filesystem driver needs mounted. Background jobs reach
+   * the port through `privateStorage.storage`; `jobs.ts` must stay free of runtime imports.
+   */
+  privateStorage: PrivateStorageRuntime
   close: (timeoutMs?: number) => Promise<void>
 }
 
@@ -41,14 +44,14 @@ export function createBackgroundRuntime(
 function createRuntime(env: AppEnv): BackendRuntime {
   const prisma = createPrisma(env.DATABASE_URL)
   const backgroundTasks = createBackgroundTasks()
-  const { storage } = createPrivateStorage(env)
+  const privateStorage = createPrivateStorage(env)
   let closed = false
 
   return {
     backgroundTasks,
     env,
     prisma,
-    privateStorage: storage,
+    privateStorage,
     close: async (timeoutMs = env.SHUTDOWN_GRACE_SECONDS * 1000) => {
       if (closed) return
       closed = true

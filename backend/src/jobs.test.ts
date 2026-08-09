@@ -60,9 +60,11 @@ describe('runBackgroundJob', () => {
           },
         },
         privateStorage: {
-          deleteObject: async (objectKey: string) => {
-            if (objectKey === failingKey) throw new Error('storage unavailable')
-            calls.deletedObjects.push(objectKey)
+          storage: {
+            deleteObject: async (objectKey: string) => {
+              if (objectKey === failingKey) throw new Error('storage unavailable')
+              calls.deletedObjects.push(objectKey)
+            },
           },
         },
       } as unknown as BackendRuntime
@@ -119,8 +121,10 @@ describe('runBackgroundJob', () => {
       const runtimeAllFailing = {
         ...cleanupRuntime,
         privateStorage: {
-          deleteObject: async () => {
-            throw new Error('storage unavailable')
+          storage: {
+            deleteObject: async () => {
+              throw new Error('storage unavailable')
+            },
           },
         },
       } as unknown as BackendRuntime

@@ -5,6 +5,12 @@ import { useAuth } from '@/features/auth'
 import { createAvatarUpload, deleteAvatar, fetchAvatar, finalizeAvatarUpload } from './api'
 import { AvatarUploadError, describeAvatarFile, uploadAvatarObject } from './upload'
 
+function describeRejection(reason: 'type' | 'too-small' | 'too-large') {
+  if (reason === 'type') return 'Pick a JPEG, PNG, or HEIC image.'
+  if (reason === 'too-small') return 'That file is too small to be a photo. Pick another one.'
+  return 'Pick an image smaller than 5 MB.'
+}
+
 export const avatarQueryKeys = {
   current: () => ['avatar', 'current'] as const,
 }
@@ -29,12 +35,7 @@ export function useUploadAvatarMutation() {
     mutationFn: async (file: File) => {
       const described = describeAvatarFile(file)
       if (!described.ok) {
-        throw new AvatarUploadError(
-          'unsupported-file',
-          described.reason === 'type'
-            ? 'Pick a JPEG, PNG, or HEIC image.'
-            : 'Pick an image smaller than 5 MB.',
-        )
+        throw new AvatarUploadError('unsupported-file', describeRejection(described.reason))
       }
 
       const { upload } = await createAvatarUpload(auth.transport, {

@@ -83,9 +83,14 @@ async function handlePut(
     return c.json(storageErrorBody('Upload precondition does not match the signed value'), 403)
   }
 
-  // Bounded by the signed length, which the env schema caps at PRIVATE_STORAGE_UPLOAD_MAX_BYTES,
-  // so buffering here cannot be turned into a memory exhaustion vector by a large request.
-  const body = new Uint8Array(await c.req.arrayBuffer())
+  // Read with a hard cap rather than buffering whatever arrives. A chunked request has no
+  // Content-Length to check above, so without this a holder of a valid signed URL could stream
+  // an unbounded body into memory. The cap is this upload's own signed length, which
+  // `assertByteSize` already held to PRIVATE_STORAGE_UPLOAD_MAX_BYTES when the URL was issued.
+  const body = await readBodyWithin(c.req.raw.body, claims.contentLength ?? 0)
+  if (body === 'too_large') {
+    return c.json(storageErrorBody('Upload body is larger than the signed value'), 403)
+  }
   if (claims.contentLength !== undefined && body.byteLength !== claims.contentLength) {
     return c.json(storageErrorBody('Upload body length does not match the signed value'), 403)
   }
@@ -144,6 +149,50 @@ async function handleRead(
 
   c.header('Content-Length', String(bytes.byteLength))
   return c.body(bytes as unknown as ArrayBuffer, 200)
+}
+
+/**
+ * Buffers a request body, refusing to hold more than `limit` bytes.
+ *
+ * Returns `'too_large'` instead of throwing so the caller answers with a status rather than a
+ * 500, and stops reading as soon as the limit is passed rather than after the fact.
+ */
+async function readBodyWithin(
+  body: ReadableStream<Uint8Array> | null,
+  maximumBytes: number,
+): Promise<Uint8Array | 'too_large'> {
+  if (!body) return new Uint8Array()
+
+  const chunks: Uint8Array[] = []
+  const reader = body.getReader()
+  let total = 0
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (!value) continue
+
+      total += value.byteLength
+      if (total > maximumBytes) {
+        // Tell the peer to stop sending rather than just walking away from the stream.
+        await reader.cancel()
+        return 'too_large'
+      }
+      chunks.push(value)
+    }
+  } finally {
+    reader.releaseLock()
+  }
+
+  const merged = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    merged.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+
+  return merged
 }
 
 function decodeObjectKey(pathname: string) {
