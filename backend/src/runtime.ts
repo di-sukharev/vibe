@@ -2,11 +2,17 @@ import 'dotenv/config'
 
 import { createBackgroundTasks, type BackgroundTasks } from './background-tasks'
 import { createPrisma, type DbClient } from './db'
+import { createEmailDelivery, type EmailDelivery } from './email/service'
 import { loadBackgroundEnv, loadEnv, type AppEnv } from './env'
 import { createPrivateStorage, type PrivateStorageRuntime } from './storage'
 
 export type BackendRuntime = {
   backgroundTasks: BackgroundTasks
+  /**
+   * Built here rather than defaulted inside `createApp`, because the `outbox:drain` job runs
+   * under `cron.ts` and never calls `createApp` - it would otherwise have no way to send.
+   */
+  emailDelivery: EmailDelivery
   env: AppEnv
   prisma: DbClient
   /**
@@ -44,11 +50,13 @@ export function createBackgroundRuntime(
 function createRuntime(env: AppEnv): BackendRuntime {
   const prisma = createPrisma(env.DATABASE_URL)
   const backgroundTasks = createBackgroundTasks()
+  const emailDelivery = createEmailDelivery(env)
   const privateStorage = createPrivateStorage(env)
   let closed = false
 
   return {
     backgroundTasks,
+    emailDelivery,
     env,
     prisma,
     privateStorage,

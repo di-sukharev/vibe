@@ -1,0 +1,54 @@
+// =============================================================================
+// TASK OUTBOX
+//
+// Durable background work, kept in its own file the way every other capability on this branch
+// is. On `master` the same two declarations live in `prisma/schema.prisma`.
+// =============================================================================
+
+/// Work that must survive a process restart. `background-tasks.ts` defers work whose loss is
+/// acceptable; this table is for work whose loss is not. Rows are claimed and run by the
+/// `outbox:drain` job - see docs/BACKGROUND_JOBS.md.
+model TaskOutbox {
+  id              String           @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  /// Validated in code against the handler registry, not by a database enum, so adding a task
+  /// type stays a code change. See backend/src/outbox/handlers.ts.
+  type            String
+  /// The idempotency boundary. The caller chooses how wide the window is by what it puts here.
+  dedupeKey       String           @map("dedupe_key")
+  /// Blanked to `{}` once the task reaches a terminal status; the row itself is kept for audit.
+  payload         Json
+  status          TaskOutboxStatus @default(pending)
+  /// Due time. Retries move it into the future; a recovered lease moves it back to now.
+  scheduledFor    DateTime         @default(now()) @map("scheduled_for")
+  attempts        Int              @default(0)
+  lastError       String?          @map("last_error")
+  /// Fencing token held by the process currently running this row. Every write after the claim
+  /// re-asserts it, so a process that lost its lease cannot overwrite the winner's result.
+  processingToken String?          @map("processing_token") @db.Uuid
+  processedAt     DateTime?        @map("processed_at")
+  redactedAt      DateTime?        @map("redacted_at")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  /// Doubles as the lease clock: Prisma bumps it on the claiming `updateMany`, and a row whose
+  /// lease went stale is requeued with `attempts` untouched.
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+
+  /// No user relation on purpose: a generic outbox must not lose queued work when a user row
+  /// goes away, and a task may be keyed on something that is not a user at all. A task that
+  /// needs a user id carries it in the payload.
+  @@unique([type, dedupeKey], map: "task_outbox_type_dedupe_key_key")
+  @@index([status, scheduledFor], map: "task_outbox_status_scheduled_for_idx")
+  @@index([status, processedAt], map: "task_outbox_status_processed_at_idx")
+  @@map("task_outbox")
+}
+
+/// `skipped` is not needed for correctness. It exists so that a system where every task
+/// deliberately does nothing looks different from a healthy one in the drain metrics.
+enum TaskOutboxStatus {
+  pending
+  processing
+  done
+  skipped
+  failed
+
+  @@map("task_outbox_status")
+}

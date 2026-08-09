@@ -122,7 +122,12 @@ maybeDescribe('users and admin API integration', () => {
     })
     const listBody = await list.json()
     expect(list.status).toBe(200)
-    expect(listBody).toMatchObject({ page: 1, pageSize: 20, total: 1 })
+    expect(listBody).toMatchObject({
+      page: 1,
+      pageSize: 20,
+      total: 1,
+      hasNext: false,
+    })
     expect(listBody.items).toEqual([
       {
         id: target.user.id,
@@ -132,6 +137,23 @@ maybeDescribe('users and admin API integration', () => {
         createdAt: target.user.createdAt,
       },
     ])
+
+    const maximumPage = await app.request('/api/admin/users?page=100&pageSize=1', {
+      headers: authenticatedHeaders(admin.accessToken),
+    })
+    expect(maximumPage.status).toBe(200)
+    expect(await maximumPage.json()).toMatchObject({
+      items: [],
+      page: 100,
+      pageSize: 1,
+      hasNext: false,
+    })
+
+    const excessivePage = await app.request('/api/admin/users?page=101', {
+      headers: authenticatedHeaders(admin.accessToken),
+    })
+    expect(excessivePage.status).toBe(400)
+    expect((await excessivePage.json()).error.code).toBe('VALIDATION_ERROR')
 
     const malformedUserId = await app.request('/api/admin/users/not-a-uuid/role', {
       method: 'PATCH',

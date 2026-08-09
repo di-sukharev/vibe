@@ -5,6 +5,7 @@ import {
   userAuthenticationSessionTransactionOptions,
 } from '../../../db'
 import { Prisma } from '../../../generated/prisma/client'
+import { enqueueTask } from '../../../outbox'
 import type { AuthRepository } from '../application/ports'
 import { AuthFailure } from '../domain/errors'
 
@@ -356,6 +357,13 @@ export function createPrismaAuthRepository(db: DbClient): AuthRepository {
         await tx.authSession.updateMany({
           where: { userId: candidate.userId, revokedAt: null },
           data: { revokedAt: input.now },
+        })
+
+        // Inside the transaction on purpose: the committed password change and the queued notice
+        // stand or fall together, so neither a crash nor a failed insert can leave one without
+        // the other.
+        await input.queueNotice(token.user.email, async (task) => {
+          await enqueueTask(tx, task)
         })
 
         return { email: token.user.email }

@@ -87,6 +87,14 @@ const envSchema = z.object({
   WEBHOOK_RATE_LIMIT_MAX: optionalPositiveIntegerSchema,
   WEBHOOK_RATE_LIMIT_WINDOW_SECONDS: optionalPositiveIntegerSchema,
   SHUTDOWN_GRACE_SECONDS: z.coerce.number().int().positive().max(60).default(20),
+  // Which email adapter createEmailDelivery builds. 'console' prints the message instead of
+  // sending it, so password reset can be followed locally; production refuses it below.
+  EMAIL_DELIVERY: z.enum(['disabled', 'console']).default('disabled'),
+  // Task outbox. Defaults suit a drain running once a minute; see docs/BACKGROUND_JOBS.md.
+  TASK_OUTBOX_BATCH_LIMIT: z.coerce.number().int().positive().max(1000).default(50),
+  TASK_OUTBOX_MAX_RUNTIME_MS: z.coerce.number().int().positive().max(600_000).default(55_000),
+  TASK_OUTBOX_LEASE_STALE_MS: z.coerce.number().int().positive().max(3_600_000).default(120_000),
+  TASK_OUTBOX_RETENTION_DAYS: z.coerce.number().int().positive().max(365).default(30),
   TRUST_PROXY: booleanStringSchema,
   TRUSTED_PROXY_CLIENT_IP_HEADER: optionalHttpHeaderNameSchema,
   TRUSTED_PROXY_CLIENT_IP_POSITION: z.enum(['first', 'last']).optional(),
@@ -264,6 +272,16 @@ function validateProductionRuntime(env: z.infer<typeof envSchema>, ctx: z.Refine
       code: 'custom',
       path: ['COOKIE_SECURE'],
       message: 'COOKIE_SECURE must be true in production',
+    })
+  }
+
+  if (env.EMAIL_DELIVERY === 'console') {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['EMAIL_DELIVERY'],
+      // Reported as configured, so password reset would create tokens and queue tasks whose
+      // "delivery" is a log line nobody reads while the user waits for mail.
+      message: 'EMAIL_DELIVERY=console prints emails instead of sending them and is refused in production',
     })
   }
 }

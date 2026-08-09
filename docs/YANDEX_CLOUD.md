@@ -336,7 +336,7 @@ Two details of the timer trigger cost people time:
   console, Terraform, or Lockbox instead.
 
 
-Production must run `auth:sessions:cleanup` on a schedule; setting `SESSION_RETENTION_DAYS` alone does not delete rows. Use a separate private Serverless Container from the same immutable backend image in **task** runtime mode. This keeps the public API process monolithic while giving the timer a one-shot command that exits non-zero on failure.
+Production must run `auth:sessions:cleanup` on a schedule; setting `SESSION_RETENTION_DAYS` alone does not delete rows. An install that wires an email provider needs a second timer for `outbox:drain`, built exactly the same way but with `--args src/cron.ts,outbox:drain` and a one-minute expression `* * ? * * *` - the same six-field dialect as the cleanup trigger below, so one day field must be `?` - unlike DigitalOcean, this path has no 15-minute floor. See [BACKGROUND_JOBS.md](BACKGROUND_JOBS.md). Use a separate private Serverless Container from the same immutable backend image in **task** runtime mode. This keeps the public API process monolithic while giving the timer a one-shot command that exits non-zero on failure.
 
 Create the cleanup container and deploy its revision. The image `WORKDIR` is already `/app/backend`, so the command can call the existing cron runner directly:
 

@@ -38,6 +38,7 @@
 - Some capabilities ship switched off: complete code whose tables are commented out and whose routes are not mounted, currently subscriptions and social sign-in. Do not switch one on because it looks unfinished, and do not delete it as dead code. Each carries a `Status: Off By Default` section in its doc with both paths; the product owner chooses.
 - Keep durable project choices in `CHECKLIST.md`, README files, and docs, not in agent instruction files. Document architecture, setup, operations, contracts, user flows, deployment, storage, and deferred surfaces only when the knowledge is durable.
 - Prefer the modular monolithic backend described in `docs/ARCHITECTURE.md`. Add services, queues, brokers, or real-time infrastructure only for a concrete operational need.
+- Solve the problem with the infrastructure that already exists before adding a new element. Durable background work goes in the `task_outbox` table drained by `outbox:drain`, not in a queue service; a cache, broker, event log, or search engine needs a measured limit of the current approach, recorded in `CHECKLIST.md`, first. `docs/ARCHITECTURE.md` has the rule, the smaller first answer for each case, and the escape condition.
 - Route testing, local database, deployment, storage, and provider-specific work to their existing docs rather than duplicating runbooks here.
 
 ### Product Modules Architecture
@@ -129,6 +130,7 @@ This block applies only while installing the template as a new project:
 - For deployment or cloud work, read `docs/DEPLOYMENT.md` and the active provider/storage docs, then use repository scripts and generators rather than provider details from memory. Check current official docs for changeable external facts.
 - Hosting is one recorded choice in `CHECKLIST.md`, not a running comparison: Russia or a data-residency requirement means Yandex Cloud, anything else means DigitalOcean, and an explicit wish for full control means an own server. Ask where the users are, not which cloud they prefer, and delete the other paths' tooling during setup.
 - Background jobs are declared once in `backend/src/jobs.ts` and run by whichever process the hosting implies - a provider timer through `cron.ts`, the in-repo `scheduler.ts`, or the `worker.ts` loop. The Expo push pipeline (`start:worker:notifications`) is a deliberate exception, not a loop; see `docs/BACKGROUND_JOBS.md` before adding a fifth way.
+- Work that must survive a process restart goes through `backend/src/outbox`; `background-tasks.ts` stays for work whose loss is acceptable. `docs/BACKGROUND_JOBS.md` compares the three before you pick.
 - Concrete DigitalOcean spec defaults belong in `scripts/prepare-do-specs.mjs` and `.do/*.yaml.example`; keep `docs/DEPLOYMENT.md` aligned when changing them.
 - Before deployment or cloud-resource updates, verify `git remote -v`, `git status --short --branch`, and the configured release branch/commit. If the worktree is dirty, not pushed/synced, or ambiguous, stop; never reset, clean, stash, or switch branches merely to make deployment possible.
 - Keep durable storage and media decisions in `docs/STORAGE.md` and provider-specific deployment docs.

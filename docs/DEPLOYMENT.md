@@ -406,6 +406,8 @@ export DO_BACKEND_WORKER_RUN_COMMAND="bun run start:worker:notifications"
 # it also refreshes stale stored purchases; otherwise it only cleans auth sessions.
 export DO_BACKEND_CRON_NAME=maintenance
 export DO_BACKEND_CRON_TASK=maintenance:process
+# Or the outbox drain, if this install sends email - but read the cadence note below first.
+# export DO_BACKEND_CRON_TASK=outbox:drain
 export DO_BACKEND_CRON_SCHEDULE="*/15 * * * *"
 export DO_BACKEND_CRON_TIME_ZONE=UTC
 
@@ -437,6 +439,14 @@ The generator enforces the current optional-env ownership explicitly:
 Worker and cron components receive neither `JWT_SECRET` nor cookie/CORS settings. Their background runtime loader uses a public non-signing compatibility value internally for shared module typing, so compromise of a background component cannot disclose the API key used to mint access or offer-code tokens.
 
 `ENABLE_TEST_PUSH` accepts only `true` or `false` during spec generation and is always API-only; delivery still belongs to the notification worker or cron.
+
+That floor decides how the task outbox runs here. A password-reset email arriving fifteen minutes
+after the user asked for it is not acceptable, so an install that wires an email provider must run
+`outbox:drain` from the **worker** component with `bun run start:scheduler` and a one-minute entry
+in `backend/src/scheduler.ts`, not from a scheduled job. An install with no provider can leave the
+drain on a slow schedule or not run it at all: nothing is queued while delivery is unconfigured.
+See [BACKGROUND_JOBS.md](BACKGROUND_JOBS.md), "Running the drain".
+
 
 ## Real-Time And Horizontal Scaling
 

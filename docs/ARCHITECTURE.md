@@ -23,7 +23,8 @@ transport -> application -> domain/ports -> infrastructure -> DTO
 - `src/cron.ts` runs one job and exits, for a provider timer to trigger.
 - `src/scheduler.ts` is the long-running timer process; `src/worker.ts` is the long-running loop process. Both ship with empty collections, and deployment specs refuse them until one has entries. See [BACKGROUND_JOBS.md](BACKGROUND_JOBS.md).
 - `src/runtime.ts` owns shared env loading, Prisma creation, and runtime cleanup for all backend entrypoints.
-- `src/background-tasks.ts` defers response-independent best-effort work and lets the API drain accepted tasks before graceful shutdown. Tasks receive an `AbortSignal`; a task deadline aborts work but keeps its cleanup tracked until settlement, while server draining and task cleanup consume one shared absolute shutdown deadline. Password-reset account lookup and email delivery use this boundary so the public response path has the same account-independent timing without letting a provider stall API responses or shutdown indefinitely.
+- `src/background-tasks.ts` defers response-independent best-effort work and lets the API drain accepted tasks before graceful shutdown. Tasks receive an `AbortSignal`; a task deadline aborts work but keeps its cleanup tracked until settlement, while server draining and task cleanup consume one shared absolute shutdown deadline. It holds work whose loss on a restart is acceptable - deleting an object whose upload row was rejected, for instance.
+- `src/outbox` holds work whose loss is not acceptable: a row in `task_outbox`, claimed and retried by the `outbox:drain` job until it succeeds or gives up. Three mechanisms, one distinction: `background-tasks.ts` for best-effort work inside a request, `outbox` for durable one-off work, `jobs.ts` for work on a timer. Password reset uses the outbox, which is also what keeps the public response path account-independent: the request writes one row for any address and the handler does the lookup. See [BACKGROUND_JOBS.md](BACKGROUND_JOBS.md).
 - `src/app.ts` is the composition root. It owns the Hono app, CORS, secure headers, error handling, module construction, route mounting, and OpenAPI output.
 - `src/env.ts` validates environment variables with Zod.
 - `src/db.ts` creates the Prisma client.
@@ -50,7 +51,18 @@ Application services must own real use-case orchestration through narrow capabil
 
 ## Runtime Shape And Real-Time
 
-The default runtime shape is a modular monolith: one backend codebase, one database, shared contracts, and clear feature boundaries inside the repository. The backend can expose separate API, worker, and cron entrypoints while still sharing Prisma schema, env validation, services, and contracts. Do not add queues, brokers, or extra infrastructure until the product has a concrete need that the monolith cannot meet clearly.
+The default runtime shape is a modular monolith: one backend codebase, one database, shared contracts, and clear feature boundaries inside the repository. The backend can expose separate API, worker, and cron entrypoints while still sharing Prisma schema, env validation, services, and contracts.
+
+**Solve the problem with the infrastructure that already exists before adding a new infrastructure element.** The starting set is PostgreSQL, one backend process, and the job runners in `backend/src/jobs.ts`. A queue, a broker, an event log, a cache, or a search engine is not just a library: it is a new thing to deploy, monitor, secure, back up and pay for, and a new way for the product to be broken while the database is healthy.
+
+Each of those has a smaller first answer inside what is already here:
+
+- durable background work belongs in the `task_outbox` table drained by the `outbox:drain` job, not in a queue service with its own consumer process;
+- a slow read belongs behind an index or a narrower query before it belongs behind a cache;
+- a text search belongs in PostgreSQL full-text search before it belongs in a search engine;
+- a cross-process notification belongs in a row plus a poll before it belongs in a broker.
+
+This is not absolute. Add the component when a **measured** limit of the current approach has been reached and the new component removes that limit: the drain cannot keep up at the shortest interval the hosting allows and the backlog grows across runs; delivery is needed to processes that do not share this database; the work needs ordering or exactly-once semantics PostgreSQL cannot express; retention or throughput would put queue rows on a different storage path from product data; or real-time fanout must cross backend instances, which is the case the next paragraphs describe. Record the measurement in `CHECKLIST.md` next to the capability row before adding the component, so a later session can tell a real limit from a preference.
 
 On the default DigitalOcean production path, run the backend/API as one `apps-s-1vcpu-1gb` App Platform container so the starting infrastructure stays inside the low-cost budget when paired with the smallest production Managed PostgreSQL cluster. Add App Platform worker or scheduled-job components from the same `backend/Dockerfile` only when the product has a concrete background or periodic task. `webapp` and fully prerendered `website` output remain App Platform Static Site components and do not have runtime container sizes. A `website` route with SSR/on-demand rendering or server islands needs a runtime service.
 
@@ -170,6 +182,8 @@ bun run --cwd backend prisma:migrate
 ```
 
 The template uses database-generated UUIDv7 primary keys (`@default(dbgenerated("uuidv7()")) @db.Uuid`) instead of ORM-generated `cuid()`/`uuid()`. That keeps ID generation consistent for Prisma Client, direct SQL, imports, and any future background workers or non-Prisma writers, but it also means the schema requires PostgreSQL 18+.
+
+A closed set of values belongs in a Postgres enum; an open one does not. `task_outbox.status` is an enum because a row is only ever pending, processing, done, skipped or failed, and changing that genuinely is a schema change. `task_outbox.type` is a plain text column validated in code against the handler registry, so adding a task type stays a code change instead of an `ALTER TYPE` that cannot be rolled back. The same reasoning already governs `DO_BACKEND_CRON_TASK`, which `scripts/prepare-do-specs.mjs` validates against `backgroundJobNames()`.
 
 Treat UUIDv7 as a repository-level rule, not a one-off model detail. New primary keys should use database-generated UUIDv7, and foreign keys that reference those IDs should use `@db.Uuid` so the type stays native all the way through PostgreSQL and Prisma.
 

@@ -4,6 +4,22 @@ Work that happens without a user waiting for it: cleaning up expired sessions, r
 refreshing something on a timer. This document is provider-neutral — the same jobs run on
 DigitalOcean, on Yandex Cloud, and on your own server.
 
+## Three ways to work off the request path
+
+Two of them are not this document's job registry, and picking the wrong one is the mistake worth
+avoiding. The question is what happens if the work is lost.
+
+| | `background-tasks.ts` | `outbox` | `jobs.ts` |
+| --- | --- | --- | --- |
+| Survives a restart | no | **yes** | n/a, it runs again on the next tick |
+| Retries | none | until it succeeds or gives up | next tick |
+| Starts | immediately after the response | on the next drain | on a schedule |
+| Idempotency | none | a dedupe key you choose | job's own business |
+| Use it for | work whose loss is acceptable | work you promised someone | recurring upkeep |
+
+Losing a best-effort cleanup costs a stray file. Losing a password-reset email costs a user their
+account. The first is `background-tasks.ts`; the second is the outbox.
+
 ## One registry, three processes
 
 A job is declared once, in `backend/src/jobs.ts`. It says *what* to do and never *when* or *where*:
@@ -91,6 +107,153 @@ still empty the process logs that it has nothing to do and exits, and a restart 
 into a loop. On `SIGINT`/`SIGTERM` the scheduler stops its timers, waits for jobs
 already in flight to finish, and only then closes the database - so give the process a shutdown
 grace period at least as long as your slowest job.
+
+## The task outbox
+
+Durable one-off work, in one PostgreSQL table. Not a queue service - `docs/ARCHITECTURE.md`
+explains why the template reaches for a table first and what would justify more.
+
+A row is claimed by whichever drain gets there first, run once, and written back. Two drains can
+run at the same time safely: the claim is a conditional update, so the loser simply moves on.
+
+### Adding a task type
+
+1. Add an entry to `taskHandlers` in `backend/src/outbox/handlers.ts`:
+
+```ts
+'invoices:send': {
+  maxAttempts: 5,
+  run: async ({ payload, finalAttempt, now, signal }, runtime) => {
+    const { createInvoiceTasks } = await import('../modules/invoices')
+    await createInvoiceTasks(runtime).send(payload, { signal })
+  },
+},
+```
+
+   Import the module **inside** `run`. A top-level import of `../modules/*` would load that
+   module into every process that can enqueue, and `scripts/repo-env.test.mjs` fails on it.
+
+2. Enqueue it from wherever the work is decided:
+
+```ts
+await enqueueTask(prisma, { type: 'invoices:send', dedupeKey: `invoice:${id}`, payload: { id } })
+```
+
+3. Cover the handler the way `auth:password-reset` is covered in
+   `backend/src/modules/auth/application/auth-service.test.ts`.
+
+There is no migration: the type is a text column validated against the registry. A typo throws at
+the call site, naming the types that exist.
+
+Always enqueue through `enqueueTask`. A raw `INSERT` has to set `updated_at` itself - it is the
+lease clock, and Prisma, not the database, is what fills it in.
+
+### What the handler is promised, and what it must promise back
+
+- **At least once, not exactly once.** A process killed after the side effect but before the
+  completion write will run the task again. Make the work idempotent, or make a duplicate
+  harmless. This is the one rule that cannot be moved into the framework.
+- `finalAttempt` tells the handler its failure is the last one, so compensating work happens
+  there and only there. Password reset uses it to invalidate a token that will never be received.
+- `signal` aborts at the type's `deadlineMs` (15s by default). Pass it to every provider call.
+- Returning `'skipped'` says the handler deliberately did nothing. Without it, a system where
+  every task finds nothing to do looks exactly like a healthy one.
+- A row that gives up keeps `lastError` as its dead-letter diagnostic for the retention window,
+  while the payload is blanked immediately. Whatever your handler lets escape ends up there - and
+  a provider error rethrown verbatim often quotes the recipient, which would outlive the payload
+  it was redacted with. Wrap or trim provider errors that can carry personal data.
+- Throwing retries. Throwing `TerminalTaskError` gives up immediately - for work that can never
+  succeed, such as a payload that will not validate.
+- Five attempts by default, so four retries: 2, 4, 8 and 15 minutes apart, with jitter that only
+  ever adds. The lower bound is
+  load-bearing: the first retry has to clear the 60-second password-reset cooldown.
+
+### Dedupe keys
+
+`(type, dedupeKey)` is unique, and enqueueing an existing pair returns the existing row instead of
+failing. The key is how you choose the window:
+
+- a natural identity - `invoice:<id>` - collapses for as long as the row exists, which is
+  `TASK_OUTBOX_RETENTION_DAYS`. The sweeper deletes the row and the uniqueness with it, so this is
+  not a permanent once-only guard; if the work must never happen twice, keep that fact in your own
+  tables;
+- a time bucket - `<hash>:<minute>` - collapses a burst, which is what password reset does;
+- a random value never collapses.
+
+Derive the key from what the caller submitted, never from what you looked up: a key that depends
+on whether an account exists is an oracle for which addresses are registered.
+
+### Running the drain
+
+`outbox:drain` is an ordinary job, so every runner in the table above can run it. Latency is
+whatever the schedule allows:
+
+| Hosting | How | Achievable |
+| --- | --- | --- |
+| Own server, Yandex Cloud | `scheduler.ts` entry `* * * * *`, or a timer trigger `* * ? * * *` | 1 minute |
+| DigitalOcean scheduled job | `*/15 * * * *` | **15 minutes - the platform floor** |
+| DigitalOcean worker component | `bun run start:scheduler` with a one-minute entry | 1 minute |
+| Anywhere, sub-minute | a `workerLoops` entry with `intervalMs` | seconds |
+
+**A password-reset email arriving fifteen minutes late is not acceptable**, so a DigitalOcean
+install that wires an email provider needs the worker component, not the scheduled job. An install
+with no provider can leave the drain on a slow schedule, or not run it at all - the table stays
+empty because `requestPasswordReset` writes nothing while delivery is unconfigured.
+
+If you use a `workerLoops` entry, leave `singleInstance` off. It looks like the careful choice and
+is the wrong one: the job lock would serialise the whole outbox across instances and throw away
+the per-row claim that already makes parallel drains safe.
+
+Running several drains buys resilience, not throughput. They read the same ordered window of due
+rows and mostly lose claims to each other, so one pass moves at most
+`TASK_OUTBOX_BATCH_LIMIT * 5` rows however many drains you start - measured at ~250 rows whether
+one drain runs or eight. If `backlog` is climbing, raise `TASK_OUTBOX_BATCH_LIMIT` or shorten the
+interval; adding instances will not help, and the measurement is what `docs/ARCHITECTURE.md` asks
+you to record before reaching for a queue service.
+
+### What to watch
+
+Each pass logs one line. Three numbers matter:
+
+- `backlog` climbing across consecutive runs - the drain cannot keep up. That is the measurement
+  `docs/ARCHITECTURE.md` asks for before reaching for a queue service.
+- `terminalFailed` above zero - work was given up on. `lastError` on the row says why.
+- `unhandled` above zero - rows are queued for a type this deployment has no handler for, which
+  means an API is ahead of its runner. Roll the runner forward.
+
+Tuning lives in `TASK_OUTBOX_*` (see `backend/.env.example`). One invariant holds them together:
+a task's `deadlineMs` must stay well inside `TASK_OUTBOX_LEASE_STALE_MS`, or a second drain could
+claim a row whose first runner is still working. The code floors the lease at twice the slowest
+deadline so the two cannot cross.
+
+### What this table is not for
+
+Work that fans out to N recipients and then polls each one for a delivery receipt is a two-level
+problem, and squeezing it in here would mean a row that is partly done. The `mobile` branch's Expo
+push pipeline is exactly that case and keeps its own tables.
+
+## Rebuilding a static site
+
+The website ships as static output, and rung one of its freshness ladder is "rebuild and
+redeploy". If a project ever needs that rebuild to happen automatically, it is a task type, not a
+new service: a content change enqueues one `website:rebuild` row whose dedupe key is a coarse time
+bucket, so an editing burst collapses into one build. `backend/src/outbox/handlers.ts` carries the
+commented shape.
+
+The template documents this instead of shipping it, because the two hosting paths are not one
+feature:
+
+- **DigitalOcean** builds the site from Git, so the handler would `POST` to
+  `/v2/apps/{app_id}/deployments` with an API token. The catch: the build runs from your branch,
+  so content that lives in your *database* will not appear unless the site fetches it at build
+  time.
+- **Yandex Object Storage** has no remote build at all. Something would have to run
+  `bun run build:website` and upload `website/dist` - and the backend container has neither the
+  website workspace, nor the build toolchain, nor the storage credentials.
+
+Before building either, check you need it. If the site must be fresher than a deploy cycle, climb
+the ladder in `website/README.md` - cached SSR with `stale-while-revalidate`, then server islands -
+rather than building a rebuild pipeline. Neither hosting offers per-page ISR.
 
 ## Provider specifics
 

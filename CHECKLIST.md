@@ -148,13 +148,14 @@ A capability with no row is `absent` by default. Add the row instead of assuming
 | --- | --- | --- |
 | Auth (email + password) | included | Template baseline. |
 | Admin roles | included | Roles and seeding in `backend`; admin UI in `webapp`. |
-| Password reset email delivery | available | The flow is built, but no adapter is passed to `createApp` in `backend/src/index.ts`, so the disabled one is used and no email is ever sent. |
+| Password reset email delivery | available | The flow is built and durable - a request queues a `task_outbox` row - but `createEmailDelivery` in `backend/src/email/service.ts` returns the disabled adapter, so nothing is sent. Needs a provider **and** a runner for `outbox:drain`. `EMAIL_DELIVERY=console` prints messages locally. |
 | File/media storage | included | Private uploads end to end, with user avatars as the worked example. Stores on local disk by default and on any S3-compatible bucket via `PRIVATE_STORAGE_*`, with no code change between them. Web only; the mobile app has no upload UI yet. See `docs/STORAGE.md`. |
 | Payments / subscriptions | available | App Store + Google Play subscriptions are implemented but switched off: tables commented out, routes unmounted. Turn on or delete per `docs/IAP.md`. |
 | Push notifications | available | Expo Push is wired but inert until the project has an EAS project id and configured credentials. |
 | Social sign-in (Apple / Google) | available | Implemented but switched off: the route is not mounted and the buttons are not rendered. Turn on or delete per `docs/SOCIAL_AUTH.md`. |
 | Real-time / WebSockets | absent | Requires an explicit product need. |
-| Background jobs | available | Jobs live in `backend/src/jobs.ts` and already include `auth:sessions:cleanup` and `uploads:pending:cleanup`, but nothing runs them on a schedule yet. Pick a runner per `docs/BACKGROUND_JOBS.md`; until then stale sessions, expired reset tokens, and abandoned uploads are never deleted. |
+| Background jobs | available | Jobs live in `backend/src/jobs.ts` and already include `auth:sessions:cleanup`, `uploads:pending:cleanup`, and `outbox:drain`, but nothing runs them on a schedule yet. Pick a runner per `docs/BACKGROUND_JOBS.md`; until then stale sessions, expired reset tokens, and abandoned uploads are never deleted, and queued tasks are never delivered. Once a minute where the hosting allows it; DigitalOcean scheduled jobs floor at 15 minutes, so an install that sends email needs the worker component. |
+| Durable task outbox | included | `task_outbox` in PostgreSQL with handlers in `backend/src/outbox/handlers.ts`, drained by `outbox:drain`. Ships with the password-reset emails as its only producers, and stays empty until something enqueues. Adding a task type is a code change, never a migration. |
 
 ## 10. Environment checks
 

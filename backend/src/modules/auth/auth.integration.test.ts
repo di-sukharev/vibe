@@ -3,10 +3,11 @@ import { randomUUID } from 'node:crypto'
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test'
 
 import { createApp } from '../../app'
-import { createBackgroundTasks } from '../../background-tasks'
 import { createPrisma, type DbClient } from '../../db'
-import type { EmailMessage } from '../../email/service'
+import type { EmailDelivery, EmailMessage } from '../../email/service'
 import { loadEnv } from '../../env'
+import { drainTaskOutbox } from '../../outbox'
+import type { BackendRuntime } from '../../runtime'
 import { socialAuthProviderDeps } from './infrastructure/social-providers'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
@@ -28,6 +29,7 @@ maybeDescribe('auth API integration', () => {
   beforeEach(async () => {
     socialAuthProviderDeps.verifyGoogleIdToken = originalVerifyGoogleIdToken
     socialAuthProviderDeps.verifyAppleIdToken = originalVerifyAppleIdToken
+    await prisma.taskOutbox.deleteMany()
     await prisma.pushToken.deleteMany()
     await prisma.authSession.deleteMany()
     await prisma.user.deleteMany()
@@ -239,23 +241,62 @@ maybeDescribe('auth API integration', () => {
     ).toBe(1)
   })
 
-  test('resets a password with a single-use token and revokes existing sessions', async () => {
-    const backgroundErrors: unknown[] = []
-    const backgroundTasks = createBackgroundTasks({
-      onError: (error) => backgroundErrors.push(error),
+  test('a password change that cannot queue its notice is rolled back', async () => {
+    // The notice is queued inside the transaction that consumes the token, so the two stand or
+    // fall together. Moving the enqueue after the commit would leave a changed password whose
+    // notice was silently lost - and would report an error for work that already happened.
+    const { createPrismaAuthRepository } = await import('./infrastructure/auth-repository')
+    const repository = createPrismaAuthRepository(prisma)
+    const registered = await app.request('/api/auth/token/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'rollback@example.com', password: 'password123' }),
     })
-    const messages: EmailMessage[] = []
-    const emailApp = createApp({
-      backgroundTasks,
-      emailDelivery: {
-        configured: true,
-        send: async (message) => {
-          messages.push(message)
+    expect(registered.status).toBe(201)
+
+    const now = new Date()
+    const tokenHash = `hash:${crypto.randomUUID()}`
+    const user = await prisma.user.findUniqueOrThrow({ where: { email: 'rollback@example.com' } })
+    await prisma.passwordResetToken.create({
+      data: { expiresAt: new Date(now.getTime() + 60_000), tokenHash, userId: user.id },
+    })
+
+    await expect(
+      repository.completePasswordReset({
+        now,
+        passwordHash: 'changed-hash',
+        // Enqueue first, then fail: this is what proves the insert shares the transaction
+        // rather than merely that a throwing callback rolls it back.
+        queueNotice: async (email, enqueue) => {
+          await enqueue({ dedupeKey: tokenHash, payload: { email }, type: 'auth:password-changed' })
+          throw new Error('outbox unavailable')
         },
-      },
-      env,
-      prisma,
+        tokenHash,
+      }),
+    ).rejects.toThrow('outbox unavailable')
+
+    const unchanged = await prisma.user.findUniqueOrThrow({ where: { id: user.id } })
+    expect(unchanged.passwordHash).not.toBe('changed-hash')
+    // The notice went back with it. Otherwise a rollback would still tell the user their
+    // password had changed and their sessions were signed out.
+    expect(await prisma.taskOutbox.count({ where: { dedupeKey: tokenHash } })).toBe(0)
+    expect(await prisma.passwordResetToken.findUniqueOrThrow({ where: { tokenHash } })).toMatchObject({
+      usedAt: null,
     })
+  })
+
+  test('resets a password with a single-use token and revokes existing sessions', async () => {
+    const messages: EmailMessage[] = []
+    const emailDelivery: EmailDelivery = {
+      configured: true,
+      send: async (message) => {
+        messages.push(message)
+      },
+    }
+    const emailApp = createApp({ emailDelivery, env, prisma })
+    // The drain runs outside any request, so it builds its own auth service from the runtime.
+    const drainRuntime = { emailDelivery, env, prisma } as unknown as BackendRuntime
+    const drain = () => drainTaskOutbox(drainRuntime, { now: new Date() })
     const register = await emailApp.request('/api/auth/token/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -290,8 +331,15 @@ maybeDescribe('auth API integration', () => {
     const acceptedBody = await unknownRequest.json()
     expect(await resetRequest.json()).toEqual(acceptedBody)
     expect(await concurrentResetRequest.json()).toEqual(acceptedBody)
-    await backgroundTasks.drain()
-    expect(backgroundErrors).toEqual([])
+    // The accept is a promise the system can keep: the work is committed before the response,
+    // and nothing account-dependent has happened yet.
+    expect(await prisma.taskOutbox.count({ where: { status: 'pending' } })).toBeGreaterThan(0)
+    expect(await prisma.passwordResetToken.count()).toBe(0)
+
+    const drained = await drain()
+
+    // One address exists and one does not: one email, one deliberate skip, no failures.
+    expect(drained).toMatchObject({ done: 1, skipped: 1, terminalFailed: 0, transientFailed: 0 })
     expect(messages).toHaveLength(1)
 
     const resetUrlText = messages[0]!.text
@@ -327,8 +375,18 @@ maybeDescribe('auth API integration', () => {
     expect(successfulConfirm.headers.get('set-cookie')).toContain('web_app_demo_refresh=')
     expect(successfulConfirm.headers.get('set-cookie')).toContain('Max-Age=0')
     expect((await rejectedConfirm.json()).error.code).toBe('AUTH_PASSWORD_RESET_INVALID')
-    await backgroundTasks.drain()
+    await drain()
     expect(messages.filter(({ subject }) => subject === 'Your password was changed')).toHaveLength(1)
+
+    // Nothing is left holding the submitted address once the work is finished.
+    const finished = await prisma.taskOutbox.findMany({ where: { type: { startsWith: 'auth:' } } })
+    expect(finished.every((row) => ['done', 'skipped'].includes(row.status))).toBe(true)
+    expect(finished.every((row) => row.redactedAt !== null)).toBe(true)
+    expect(finished.map((row) => row.payload)).toEqual(finished.map(() => ({})))
+
+    // Draining again must not send a second copy of anything.
+    await drain()
+    expect(messages).toHaveLength(2)
 
     const replay = await emailApp.request('/api/auth/password-reset/confirm', {
       method: 'POST',

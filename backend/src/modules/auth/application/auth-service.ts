@@ -17,7 +17,7 @@ import type {
   Clock,
   LogoutCleanup,
   PasswordResetNotifier,
-  PasswordResetTaskDeferrer,
+  PasswordResetTaskQueue,
   PasswordResetTokens,
   Passwords,
   RefreshTokens,
@@ -26,7 +26,7 @@ import type {
 
 type AuthServiceDependencies = {
   accessTokens: AccessTokens
-  backgroundTasks: PasswordResetTaskDeferrer
+  passwordResetTasks: PasswordResetTaskQueue
   clock: Clock
   logoutCleanup: LogoutCleanup
   passwordResetCooldownSeconds: number
@@ -129,19 +129,42 @@ export class AuthService {
   }
 
   async requestPasswordReset(input: PasswordResetRequest) {
-    const { backgroundTasks, passwordResetNotifier } = this.dependencies
+    const { passwordResetNotifier, passwordResetTasks } = this.dependencies
+    // With no provider wired there is nothing to deliver, so nothing is written down either -
+    // neither a token nor a queued task.
     if (!passwordResetNotifier.configured) return { accepted: true as const }
 
-    backgroundTasks.defer((signal) => this.deliverPasswordReset(input, signal))
+    // Exactly one insert, whether or not the address belongs to an account. That is what keeps
+    // the response time from answering a question the response body refuses to answer - and it
+    // makes the 202 a promise the system can keep, because the row is committed before it.
+    await passwordResetTasks.enqueuePasswordReset({
+      email: input.email,
+      now: this.dependencies.clock.now(),
+    })
+
     return { accepted: true as const }
   }
 
-  private async deliverPasswordReset(input: PasswordResetRequest, signal: AbortSignal) {
+  /** Sends the "your password changed" notice. Nothing to compensate for if it never arrives. */
+  async deliverPasswordChanged(input: { email: string }, signal: AbortSignal) {
+    await this.dependencies.passwordResetNotifier.sendPasswordChanged(input, signal)
+  }
+
+  /**
+   * The account-dependent half, run by the outbox rather than inside the request.
+   *
+   * `finalAttempt` decides whether a failed send is worth compensating for: until then the token
+   * is left alive for the next attempt, because one provider hiccup should not cost the user
+   * their reset link.
+   */
+  async deliverPasswordReset(
+    input: PasswordResetRequest,
+    { finalAttempt, now, signal }: { finalAttempt: boolean; now: Date; signal: AbortSignal },
+  ): Promise<'done' | 'skipped'> {
     const { passwordResetNotifier, repository } = this.dependencies
     const user = await repository.findUserByEmail(input.email)
-    if (!user?.passwordHash) return
+    if (!user?.passwordHash) return 'skipped'
 
-    const now = this.dependencies.clock.now()
     const token = this.dependencies.passwordResetTokens.create()
     const tokenHash = this.dependencies.passwordResetTokens.hash(token)
     const expiresAt = new Date(
@@ -156,22 +179,18 @@ export class AuthService {
         now.getTime() - this.dependencies.passwordResetCooldownSeconds * 1000,
       ),
     })
-    if (!created) return
+    // The cooldown already refused a second token for this account. A retry that lands here is
+    // one the drain will not repeat, so there is nothing left to send.
+    if (!created) return 'skipped'
 
     try {
-      await passwordResetNotifier.sendPasswordReset(
-        {
-          email: user.email,
-          token,
-          expiresAt,
-        },
-        signal,
-      )
+      await passwordResetNotifier.sendPasswordReset({ email: user.email, token, expiresAt }, signal)
     } catch (error) {
-      await repository.invalidatePasswordResetToken({ tokenHash, now })
+      if (finalAttempt) await repository.invalidatePasswordResetToken({ tokenHash, now })
       throw error
     }
 
+    return 'done'
   }
 
   async confirmPasswordReset(input: PasswordResetConfirmRequest) {
@@ -192,6 +211,10 @@ export class AuthService {
       tokenHash,
       passwordHash,
       now: this.dependencies.clock.now(),
+      // Keyed on the token that was just consumed, so the notice cannot be sent twice however
+      // many times this runs.
+      queueNotice: (email, enqueue) =>
+        enqueue({ dedupeKey: tokenHash, payload: { email }, type: 'auth:password-changed' }),
     })
     if (!completed) {
       throw new AuthFailure(
@@ -199,13 +222,6 @@ export class AuthService {
         'Password reset link is invalid or expired',
       )
     }
-
-    this.dependencies.backgroundTasks.defer((signal) =>
-      this.dependencies.passwordResetNotifier.sendPasswordChanged(
-        { email: completed.email },
-        signal,
-      ),
-    )
   }
 
   async refresh(refreshToken: string | undefined, metadata: SessionMetadata) {

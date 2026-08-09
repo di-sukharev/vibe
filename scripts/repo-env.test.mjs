@@ -78,6 +78,24 @@ test('the background job registry can be read without a database', async () => {
   expect(runtimeImports).toEqual([])
 })
 
+test('the task handler registry does not drag a product module into every process', async () => {
+  // A different rule from the one above, for a different reason: the API imports this registry to
+  // validate a task type at enqueue time, so a top-level `../modules/...` import would load that
+  // module's SDKs into every process that can enqueue. Handlers use `await import()` inside `run`,
+  // which also keeps a module out of the runs that never touch it. Type imports are erased and
+  // therefore fine.
+  const heavyImports = (await readFile(resolve(repositoryRoot, 'backend/src/outbox/handlers.ts'), 'utf8'))
+    .split('\n')
+    .filter(
+      (line) =>
+        /^import\s/.test(line) &&
+        !/^import type\s/.test(line) &&
+        /['"]\.\.\/(modules|generated)\//.test(line),
+    )
+
+  expect(heavyImports).toEqual([])
+})
+
 test('hosting tooling and the command that drives it are removed together', async () => {
   // A project keeps one hosting path and deletes the others during setup. The failure that hurts
   // is a half-removal: a script entry that points at a deleted generator, or a generator with no

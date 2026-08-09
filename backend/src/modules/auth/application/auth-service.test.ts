@@ -13,9 +13,6 @@ const user = {
 }
 
 const unusedPasswordResetDependencies = {
-  backgroundTasks: {
-    defer: () => undefined,
-  },
   passwordResetCooldownSeconds: 60,
   passwordResetNotifier: {
     configured: false,
@@ -23,6 +20,9 @@ const unusedPasswordResetDependencies = {
     sendPasswordReset: async () => undefined,
   },
   passwordResetTokenTtlMinutes: 30,
+  passwordResetTasks: {
+    enqueuePasswordReset: async () => undefined,
+  },
   passwordResetTokens: {
     create: () => 'r'.repeat(43),
     hash: (token: string) => `hash:${token}`,
@@ -235,22 +235,15 @@ test('refresh returns the winning successor when another request wins the rotati
 
 test('password reset request stays generic and creates nothing while delivery is disabled', async () => {
   let repositoryCalls = 0
+  const queued: unknown[] = []
   const service = new AuthService({
+    ...unusedPasswordResetDependencies,
     accessTokens: {} as never,
-    backgroundTasks: { defer: () => undefined },
     clock: { now: () => new Date('2026-01-01T00:00:00.000Z') },
     logoutCleanup: async () => undefined,
     passwords: { hash: async () => 'hash', verify: async () => true },
-    passwordResetCooldownSeconds: 60,
-    passwordResetNotifier: {
-      configured: false,
-      sendPasswordChanged: async () => undefined,
-      sendPasswordReset: async () => undefined,
-    },
-    passwordResetTokenTtlMinutes: 30,
-    passwordResetTokens: {
-      create: () => 'r'.repeat(43),
-      hash: (token) => `hash:${token}`,
+    passwordResetTasks: {
+        enqueuePasswordReset: async (input) => void queued.push(input),
     },
     refreshTokens: {} as never,
     refreshReuseGraceSeconds: 10,
@@ -267,30 +260,66 @@ test('password reset request stays generic and creates nothing while delivery is
   await expect(service.requestPasswordReset({ email: user.email })).resolves.toEqual({
     accepted: true,
   })
+  // Nothing to deliver means nothing written down: no token, and no queued task that would sit
+  // in the outbox forever waiting for a provider that never arrives.
   expect(repositoryCalls).toBe(0)
+  expect(queued).toEqual([])
 })
 
-test('password reset request reports delivery failure after invalidating its token', async () => {
-  const deferredTasks: Array<(signal: AbortSignal) => Promise<void>> = []
-  const invalidated: string[] = []
-  const stored: Array<{
-    userId: string
-    tokenHash: string
-    expiresAt: Date
-    now: Date
-    createdAfter: Date
-  }> = []
-  const rawToken = 'r'.repeat(43)
+test('a reset request queues exactly one task without looking the account up', async () => {
+  // The response must not reveal whether the address exists, so the account lookup belongs to the
+  // handler. What the request does is one insert, identical either way.
   const now = new Date('2026-01-01T00:00:00.000Z')
+  let repositoryCalls = 0
+  const queued: unknown[] = []
   const service = new AuthService({
+    ...unusedPasswordResetDependencies,
     accessTokens: {} as never,
-    backgroundTasks: {
-      defer: (task) => deferredTasks.push(task),
-    },
     clock: { now: () => now },
     logoutCleanup: async () => undefined,
     passwords: { hash: async () => 'hash', verify: async () => true },
-    passwordResetCooldownSeconds: 60,
+    passwordResetNotifier: {
+      configured: true,
+      sendPasswordChanged: async () => undefined,
+      sendPasswordReset: async () => undefined,
+    },
+    passwordResetTasks: {
+        enqueuePasswordReset: async (input) => void queued.push(input),
+    },
+    refreshTokens: {} as never,
+    refreshReuseGraceSeconds: 10,
+    refreshTokenTtlDays: 30,
+    repository: {
+      findUserByEmail: async () => {
+        repositoryCalls += 1
+        return user
+      },
+    } as unknown as AuthRepository,
+    sessionAbsoluteTtlDays: 90,
+  })
+
+  await expect(service.requestPasswordReset({ email: 'nobody@example.com' })).resolves.toEqual({
+    accepted: true,
+  })
+  expect(queued).toEqual([{ email: 'nobody@example.com', now }])
+  expect(repositoryCalls).toBe(0)
+})
+
+function deliveryService({
+  invalidated,
+  stored,
+}: {
+  invalidated: string[]
+  stored: unknown[]
+}) {
+  const rawToken = 'r'.repeat(43)
+
+  return new AuthService({
+    ...unusedPasswordResetDependencies,
+    accessTokens: {} as never,
+    clock: { now: () => new Date('2026-01-01T00:00:00.000Z') },
+    logoutCleanup: async () => undefined,
+    passwords: { hash: async () => 'hash', verify: async () => true },
     passwordResetNotifier: {
       configured: true,
       sendPasswordChanged: async () => undefined,
@@ -298,11 +327,7 @@ test('password reset request reports delivery failure after invalidating its tok
         throw new Error('provider unavailable')
       },
     },
-    passwordResetTokenTtlMinutes: 30,
-    passwordResetTokens: {
-      create: () => rawToken,
-      hash: (token) => `hash:${token}`,
-    },
+    passwordResetTokens: { create: () => rawToken, hash: (token) => `hash:${token}` },
     refreshTokens: {} as never,
     refreshReuseGraceSeconds: 10,
     refreshTokenTtlDays: 30,
@@ -320,39 +345,134 @@ test('password reset request reports delivery failure after invalidating its tok
     } as unknown as AuthRepository,
     sessionAbsoluteTtlDays: 90,
   })
+}
 
-  await expect(service.requestPasswordReset({ email: user.email })).resolves.toEqual({
-    accepted: true,
-  })
-  expect(stored).toEqual([])
-  expect(deferredTasks).toHaveLength(1)
+test('a transient delivery failure leaves the reset link alive for the next attempt', async () => {
+  // The old behaviour killed the token on the first hiccup, so one flaky provider call cost the
+  // user their link even though the outbox was about to try again.
+  const invalidated: string[] = []
+  const stored: unknown[] = []
+  const now = new Date('2026-01-01T00:00:00.000Z')
 
   await expect(
-    deferredTasks[0]!(new AbortController().signal),
+    deliveryService({ invalidated, stored }).deliverPasswordReset(
+      { email: user.email },
+      { finalAttempt: false, now, signal: new AbortController().signal },
+    ),
   ).rejects.toThrow('provider unavailable')
-  expect(stored).toEqual([{
-    userId: user.id,
-    tokenHash: `hash:${rawToken}`,
-    expiresAt: new Date('2026-01-01T00:30:00.000Z'),
-    now,
-    createdAfter: new Date('2025-12-31T23:59:00.000Z'),
-  }])
-  expect(invalidated).toEqual([`hash:${rawToken}`])
+
+  expect(stored).toEqual([
+    {
+      userId: user.id,
+      tokenHash: `hash:${'r'.repeat(43)}`,
+      expiresAt: new Date('2026-01-01T00:30:00.000Z'),
+      now,
+      createdAfter: new Date('2025-12-31T23:59:00.000Z'),
+    },
+  ])
+  expect(invalidated).toEqual([])
 })
 
-test('password reset confirmation rejects invalid tokens before hashing and defers notification', async () => {
-  const deferredTasks: Array<(signal: AbortSignal) => Promise<void>> = []
-  const changedEmails: string[] = []
+test('the last delivery attempt invalidates the token before reporting failure', async () => {
+  const invalidated: string[] = []
+  const stored: unknown[] = []
+
+  await expect(
+    deliveryService({ invalidated, stored }).deliverPasswordReset(
+      { email: user.email },
+      {
+        finalAttempt: true,
+        now: new Date('2026-01-01T00:00:00.000Z'),
+        signal: new AbortController().signal,
+      },
+    ),
+  ).rejects.toThrow('provider unavailable')
+
+  // No more attempts are coming, so a token nobody can ever receive must not stay live.
+  expect(invalidated).toEqual([`hash:${'r'.repeat(43)}`])
+})
+
+test('a delivery the cooldown refused sends nothing', async () => {
+  // Without this branch the service would email a link whose token was never persisted, while
+  // the account's earlier token is still the live one - the user follows it and is told the
+  // link is invalid.
+  const sent: unknown[] = []
+  const service = new AuthService({
+    ...unusedPasswordResetDependencies,
+    accessTokens: {} as never,
+    clock: { now: () => new Date('2026-01-01T00:00:00.000Z') },
+    logoutCleanup: async () => undefined,
+    passwords: { hash: async () => 'hash', verify: async () => true },
+    passwordResetNotifier: {
+      configured: true,
+      sendPasswordChanged: async () => undefined,
+      sendPasswordReset: async (input) => void sent.push(input),
+    },
+    refreshTokens: {} as never,
+    refreshReuseGraceSeconds: 10,
+    refreshTokenTtlDays: 30,
+    repository: {
+      findUserByEmail: async () => user,
+      // What createPasswordResetToken does inside the cooldown window.
+      createPasswordResetToken: async () => false,
+    } as unknown as AuthRepository,
+    sessionAbsoluteTtlDays: 90,
+  })
+
+  await expect(
+    service.deliverPasswordReset(
+      { email: user.email },
+      {
+        finalAttempt: false,
+        now: new Date('2026-01-01T00:00:00.000Z'),
+        signal: new AbortController().signal,
+      },
+    ),
+  ).resolves.toBe('skipped')
+  expect(sent).toEqual([])
+})
+
+test('delivery to an address with no account is skipped rather than retried', async () => {
+  const service = new AuthService({
+    ...unusedPasswordResetDependencies,
+    accessTokens: {} as never,
+    clock: { now: () => new Date('2026-01-01T00:00:00.000Z') },
+    logoutCleanup: async () => undefined,
+    passwords: { hash: async () => 'hash', verify: async () => true },
+    passwordResetNotifier: {
+      configured: true,
+      sendPasswordChanged: async () => undefined,
+      sendPasswordReset: async () => undefined,
+    },
+    refreshTokens: {} as never,
+    refreshReuseGraceSeconds: 10,
+    refreshTokenTtlDays: 30,
+    repository: { findUserByEmail: async () => null } as unknown as AuthRepository,
+    sessionAbsoluteTtlDays: 90,
+  })
+
+  await expect(
+    service.deliverPasswordReset(
+      { email: 'nobody@example.com' },
+      {
+        finalAttempt: false,
+        now: new Date('2026-01-01T00:00:00.000Z'),
+        signal: new AbortController().signal,
+      },
+    ),
+  ).resolves.toBe('skipped')
+})
+
+test('password reset confirmation rejects invalid tokens before hashing and queues the notice', async () => {
+  const changed: unknown[] = []
   const completed: Array<{ tokenHash: string; passwordHash: string; now: Date }> = []
   let active = false
   let valid = false
   let passwordHashCalls = 0
   const now = new Date('2026-01-01T00:00:00.000Z')
   const service = new AuthService({
+    ...unusedPasswordResetDependencies,
     accessTokens: {} as never,
-    backgroundTasks: {
-      defer: (task) => deferredTasks.push(task),
-    },
     clock: { now: () => now },
     logoutCleanup: async () => undefined,
     passwords: {
@@ -362,18 +482,10 @@ test('password reset confirmation rejects invalid tokens before hashing and defe
       },
       verify: async () => true,
     },
-    passwordResetCooldownSeconds: 60,
     passwordResetNotifier: {
       configured: true,
-      sendPasswordChanged: async ({ email }) => {
-        changedEmails.push(email)
-      },
+      sendPasswordChanged: async () => undefined,
       sendPasswordReset: async () => undefined,
-    },
-    passwordResetTokenTtlMinutes: 30,
-    passwordResetTokens: {
-      create: () => 'r'.repeat(43),
-      hash: (token) => `hash:${token}`,
     },
     refreshTokens: {} as never,
     refreshReuseGraceSeconds: 10,
@@ -383,8 +495,11 @@ test('password reset confirmation rejects invalid tokens before hashing and defe
       completePasswordReset: async (
         input: Parameters<AuthRepository['completePasswordReset']>[0],
       ) => {
-        completed.push(input)
-        return valid ? { email: user.email } : null
+        completed.push({ now: input.now, passwordHash: input.passwordHash, tokenHash: input.tokenHash })
+        if (!valid) return null
+        // Stands in for the transaction: the repository is what runs this, and only on success.
+        await input.queueNotice(user.email, async (task) => void changed.push(task))
+        return { email: user.email }
       },
     } as unknown as AuthRepository,
     sessionAbsoluteTtlDays: 90,
@@ -394,6 +509,7 @@ test('password reset confirmation rejects invalid tokens before hashing and defe
   await expect(service.confirmPasswordReset(input)).rejects.toThrow('invalid or expired')
   expect(passwordHashCalls).toBe(0)
   expect(completed).toEqual([])
+  expect(changed).toEqual([])
 
   active = true
   valid = true
@@ -402,11 +518,10 @@ test('password reset confirmation rejects invalid tokens before hashing and defe
     { tokenHash: `hash:${input.token}`, passwordHash: `password:${input.password}`, now },
   ])
   expect(passwordHashCalls).toBe(1)
-  expect(changedEmails).toEqual([])
-  expect(deferredTasks).toHaveLength(1)
-
-  await deferredTasks[0]!(new AbortController().signal)
-  expect(changedEmails).toEqual([user.email])
+  // Keyed on the consumed token, so replaying the confirmation cannot send a second notice.
+  expect(changed).toEqual([
+    { dedupeKey: `hash:${input.token}`, payload: { email: user.email }, type: 'auth:password-changed' },
+  ])
 })
 
 // Sign in with Apple / Google ships switched off: the HTTP route is not mounted, so the

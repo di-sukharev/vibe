@@ -66,6 +66,8 @@ When the website has only fully prerendered output and no server islands or runt
 
 On the default DigitalOcean/Yandex path, "regeneration" means redeploying static output or letting CDN/runtime cache refresh. It is not the same product feature as built-in Next/Vercel on-demand ISR.
 
+If that redeploy ever needs to happen automatically, it is a background task rather than a new service - see "Rebuilding a static site" in [../docs/BACKGROUND_JOBS.md](../docs/BACKGROUND_JOBS.md), which also explains why the template documents it instead of shipping it.
+
 ### SSR upgrade path
 
 Do this only when a route actually needs server rendering. Do not use SSR just because the product is a marketplace. Steps (also summarized in `astro.config.mjs`):

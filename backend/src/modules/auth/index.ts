@@ -1,13 +1,14 @@
-import type { TaskDeferrer } from '../../background-tasks'
 import type { DbClient } from '../../db'
 import type { EmailDelivery } from '../../email/service'
 import type { AppEnv } from '../../env'
+import type { BackendRuntime } from '../../runtime'
 import { AuthService } from './application/auth-service'
-import type { Clock, LogoutCleanup } from './application/ports'
+import { passwordResetCooldownSeconds, type Clock, type LogoutCleanup } from './application/ports'
 import { createPrismaAuthRepository } from './infrastructure/auth-repository'
 import { signAccessToken, verifyAccessToken } from './infrastructure/access-tokens'
 import { hashPassword, verifyPassword } from './infrastructure/passwords'
 import { createPasswordResetNotifier } from './infrastructure/password-reset-notifier'
+import { createPasswordResetTaskQueue } from './infrastructure/password-reset-task-queue'
 import {
   createPasswordResetToken,
   hashPasswordResetToken,
@@ -24,7 +25,6 @@ import { createAuthRoutes } from './transport/routes'
 import { executeAuth } from './transport/errors'
 
 type CreateAuthModuleOptions = {
-  backgroundTasks: TaskDeferrer
   clock?: Clock
   db: DbClient
   emailDelivery: EmailDelivery
@@ -39,22 +39,60 @@ const systemClock: Clock = {
 const noLogoutCleanup: LogoutCleanup = () => undefined
 
 export function createAuthModule({
-  backgroundTasks,
   clock = systemClock,
   db,
   emailDelivery,
   env,
   logoutCleanup = noLogoutCleanup,
 }: CreateAuthModuleOptions) {
-  const service = new AuthService({
+  const service = buildAuthService({ clock, db, emailDelivery, env, logoutCleanup })
+  const requireAuth = createRequireAuth((accessToken) => service.authenticateAccessToken(accessToken))
+
+  return {
+    authenticateAccessToken: (accessToken: string | undefined) =>
+      executeAuth(() => service.authenticateAccessToken(accessToken)),
+    requireAuth,
+    requireAdmin: createRequireRole('admin'),
+    routes: createAuthRoutes({ env, requireAuth, service }),
+  }
+}
+
+/**
+ * The same service without the HTTP surface, for the outbox handlers.
+ *
+ * A drain runs under `cron.ts`: building routes and middleware there to send one email would be
+ * paying for a web server nobody is talking to.
+ */
+export function createAuthTasks(runtime: BackendRuntime) {
+  const service = buildAuthService({
+    clock: systemClock,
+    db: runtime.prisma,
+    emailDelivery: runtime.emailDelivery,
+    env: runtime.env,
+    logoutCleanup: noLogoutCleanup,
+  })
+
+  return {
+    deliverPasswordChanged: service.deliverPasswordChanged.bind(service),
+    deliverPasswordReset: service.deliverPasswordReset.bind(service),
+  }
+}
+
+function buildAuthService({
+  clock,
+  db,
+  emailDelivery,
+  env,
+  logoutCleanup,
+}: Required<CreateAuthModuleOptions>) {
+  return new AuthService({
     accessTokens: {
       sign: (payload) => signAccessToken(payload, env),
       verify: (token) => verifyAccessToken(token, env),
     },
-    backgroundTasks,
     clock,
     logoutCleanup,
-    passwordResetCooldownSeconds: 60,
+    passwordResetCooldownSeconds,
     passwordResetNotifier: createPasswordResetNotifier(
       emailDelivery,
       env.WEBAPP_ORIGIN ?? env.CORS_ORIGINS[0] ?? 'http://localhost:5173',
@@ -77,20 +115,12 @@ export function createAuthModule({
       familyHash: (token) => hashRefreshTokenFamily(token, env.JWT_SECRET),
       rotate: (token) => deriveRotatedRefreshToken(token, env.JWT_SECRET),
     },
+    passwordResetTasks: createPasswordResetTaskQueue(db),
     repository: createPrismaAuthRepository(db),
     socialIdentities: {
       verify: (provider, idToken) => verifySocialIdentity(provider, idToken, env),
     },
   })
-  const requireAuth = createRequireAuth((accessToken) => service.authenticateAccessToken(accessToken))
-
-  return {
-    authenticateAccessToken: (accessToken: string | undefined) =>
-      executeAuth(() => service.authenticateAccessToken(accessToken)),
-    requireAuth,
-    requireAdmin: createRequireRole('admin'),
-    routes: createAuthRoutes({ env, requireAuth, service }),
-  }
 }
 
 export type { AuthHttpEnv }

@@ -143,6 +143,28 @@ describe('loadEnv', () => {
     expect(() => loadEnv({ ...productionBase, COOKIE_SECURE: 'false' })).toThrow('COOKIE_SECURE')
     expect(() => loadEnv({ ...productionBase, CORS_ORIGINS: 'http://web.example.com' }))
       .toThrow('CORS_ORIGINS')
+    // The console sink reports itself as configured, so production would create reset tokens and
+    // queue tasks whose delivery is a log line while the user waits for mail that never arrives.
+    expect(() => loadEnv({ ...productionBase, EMAIL_DELIVERY: 'console' })).toThrow('EMAIL_DELIVERY')
+  })
+
+  test('the task outbox has usable defaults and refuses nonsense', () => {
+    const base = {
+      DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
+      JWT_SECRET: '12345678901234567890123456789012',
+    }
+
+    expect(loadEnv(base)).toMatchObject({
+      EMAIL_DELIVERY: 'disabled',
+      TASK_OUTBOX_BATCH_LIMIT: 50,
+      TASK_OUTBOX_LEASE_STALE_MS: 120_000,
+      TASK_OUTBOX_MAX_RUNTIME_MS: 55_000,
+      TASK_OUTBOX_RETENTION_DAYS: 30,
+    })
+
+    expect(() => loadEnv({ ...base, TASK_OUTBOX_BATCH_LIMIT: '0' })).toThrow('TASK_OUTBOX_BATCH_LIMIT')
+    expect(() => loadEnv({ ...base, TASK_OUTBOX_RETENTION_DAYS: '-1' })).toThrow('TASK_OUTBOX_RETENTION_DAYS')
+    expect(() => loadEnv({ ...base, EMAIL_DELIVERY: 'smtp' })).toThrow('EMAIL_DELIVERY')
   })
 
   test('rejects unsafe production CORS origins', () => {

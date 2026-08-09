@@ -63,7 +63,6 @@ export function createApp({
   const storage = privateStorage ?? createPrivateStorage(env)
   const notifications = createNotificationsModule({ db: prisma, env })
   const auth = createAuthModule({
-    backgroundTasks,
     db: prisma,
     emailDelivery,
     env,

@@ -4,7 +4,6 @@ import type {
   SocialAuthProvider,
 } from '@web-app-demo/contracts'
 
-import type { TaskDeferrer } from '../../../background-tasks'
 import type { SessionMetadata } from '../domain/session'
 import type { AuthUserRecord } from '../domain/user'
 
@@ -94,6 +93,12 @@ export type AuthRepository = {
     tokenHash: string
     passwordHash: string
     now: Date
+    /**
+     * Called inside the transaction that consumes the token, so a committed password change
+     * cannot exist without its notice queued - and a failure to queue rolls the change back
+     * instead of returning an error for work that already happened.
+     */
+    queueNotice(email: string, enqueue: (task: QueuedTask) => Promise<void>): Promise<void>
   }): Promise<{ email: string } | null>
 }
 
@@ -121,7 +126,33 @@ export type PasswordResetNotifier = {
   sendPasswordChanged(input: { email: string }, signal: AbortSignal): Promise<void>
 }
 
-export type PasswordResetTaskDeferrer = TaskDeferrer
+/**
+ * Queues the account-dependent half of a password reset.
+ *
+ * The request handler must not look the account up: doing so would make the response time reveal
+ * whether the address exists. It writes one row for any address, and the handler decides.
+ */
+export type PasswordResetTaskQueue = {
+  enqueuePasswordReset(input: { email: string; now: Date }): Promise<void>
+}
+
+/**
+ * How long an account must wait before a second reset token can be minted.
+ *
+ * Exported because two other things are pinned to it: the outbox retry delay has to clear it, or
+ * a retry is silently swallowed as a cooldown hit and the user never gets a link; and the dedupe
+ * bucket matches it, so a collapsed burst and a refused token mean the same thing.
+ * `password-reset-cooldown.test.ts` pins the retry delay; `password-reset-task-queue.test.ts`
+ * pins the bucket.
+ */
+export const passwordResetCooldownSeconds = 60
+
+/** What the application asks for; the infrastructure decides which client writes it. */
+export type QueuedTask = {
+  type: string
+  dedupeKey: string
+  payload: unknown
+}
 
 export const passwordResetAccepted = {
   accepted: true,

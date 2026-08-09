@@ -106,12 +106,9 @@ export function isJobLockExpiry(error: unknown): error is JobLockExpiredError {
 }
 
 function isPrismaTransactionFailure(error: unknown) {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as { code?: unknown }).code === 'P2028'
-  )
+  if (typeof error !== 'object' || error === null || !('code' in error)) return false
+
+  return (error as { code?: unknown }).code === 'P2028'
 }
 
 export function acquireUserRoleMutationLock(

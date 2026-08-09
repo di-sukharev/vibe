@@ -3,8 +3,14 @@ import type { BackendRuntime } from './runtime'
 /**
  * The one place a background job is declared.
  *
- * Jobs, not tasks: `background-tasks.ts` next door is a different mechanism - it defers
- * best-effort work inside a single API request. These run outside any request.
+ * One of three ways to work off the request path, and the one for *recurring* work:
+ *   - `background-tasks.ts` defers best-effort work inside a single API request. Losing it on a
+ *     restart is acceptable.
+ *   - `outbox/` queues durable one-off work in PostgreSQL. Losing it is not acceptable, so it is
+ *     retried until it succeeds or gives up.
+ *   - this file declares work that happens on a timer, whether or not anyone asked for it.
+ *
+ * A task type is never scheduled; one job here, `outbox:drain`, runs every type.
  *
  * **Keep every import in this file a type import.** Tooling outside the backend reads this list
  * without a database, and may run before `prisma:generate` has; a runtime import here would drag
@@ -103,6 +109,18 @@ export const backgroundJobs = {
       terminalNotificationOutboxesRedacted,
     })
     // if (googlePlay) assertGooglePlayReconcileSucceeded(googlePlay)
+  },
+  'outbox:drain': async (runtime, now) => {
+    const { drainOptionsFromEnv, drainTaskOutbox } = await import('./outbox')
+    const metrics = await drainTaskOutbox(runtime, {
+      ...drainOptionsFromEnv(runtime.env),
+      now,
+    })
+
+    // One line, because an operator reads these in a log: `backlog` climbing across runs means
+    // the drain cannot keep up, and `unhandled` above zero means rows are queued for a task type
+    // this deployment has no handler for.
+    console.log('Job outbox:drain completed.', metrics)
   },
 } satisfies Record<string, BackgroundJob>
 
