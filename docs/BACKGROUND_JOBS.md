@@ -11,6 +11,7 @@ A job is declared once, in `backend/src/jobs.ts`. It says *what* to do and never
 ```ts
 export const backgroundJobs = {
   'auth:sessions:cleanup': async ({ env, prisma }, now) => { /* … */ },
+  'uploads:pending:cleanup': async ({ prisma, privateStorage }, now) => { /* … */ },
 } satisfies Record<string, BackgroundJob>
 ```
 

@@ -11,14 +11,16 @@ import { backendTestFiles } from './test-files.mjs'
 const backendRoot = resolve(fileURLToPath(new URL('.', import.meta.url)), '..')
 
 describe('backendTestFiles', () => {
-  const { all, parked, unit, integration } = backendTestFiles(backendRoot)
+  const { all, parked, unit, integration, live } = backendTestFiles(backendRoot)
 
   test('every test file lands in exactly one runner, or is explicitly parked', () => {
     // Losing the split does not fail anything by itself: the unit runner would simply start
     // running database-backed tests against whatever DATABASE_URL happens to be set, and still
     // exit 0. This is the only place that notices.
     expect(unit.filter((file) => integration.includes(file))).toEqual([])
-    expect([...unit, ...integration, ...parked].sort()).toEqual(all)
+    expect(unit.filter((file) => live.includes(file))).toEqual([])
+    expect(integration.filter((file) => live.includes(file))).toEqual([])
+    expect([...unit, ...integration, ...live, ...parked].sort()).toEqual(all)
     expect(all.length).toBeGreaterThan(0)
   })
 
@@ -74,6 +76,16 @@ describe('backendTestFiles', () => {
     expect(integration).toContain('src/db.integration.test.ts')
     expect(unit).toContain('src/db.test.ts')
     expect(integration.every((file) => file.includes('.integration.test.'))).toBe(true)
+  })
+
+  test('tests needing a service no runner starts stay out of the fast suite', () => {
+    // `bun run test` must stay runnable with no Docker daemon. A live test landing in the unit
+    // set would fail for everyone who has not started a container, and a red suite people learn
+    // to ignore is worse than no suite.
+    expect(live).toContain('src/storage/s3-storage.live.test.ts')
+    expect(live.every((file) => file.includes('.live.test.'))).toBe(true)
+    expect(unit.some((file) => file.includes('.live.test.'))).toBe(false)
+    expect(live.length).toBeGreaterThan(0)
   })
 
   test('a test file that would run in no runner stops the suite', async () => {

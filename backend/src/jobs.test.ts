@@ -33,6 +33,104 @@ describe('runBackgroundJob', () => {
     }
   })
 
+  describe('uploads:pending:cleanup', () => {
+    const expired = [
+      { id: 'upload-1', objectKey: 'avatars/2026/07/one' },
+      { id: 'upload-2', objectKey: 'avatars/2026/07/two' },
+    ]
+
+    function createCleanupRuntime({ failingKey }: { failingKey?: string } = {}) {
+      const calls: { findMany: unknown[]; deleteMany: unknown[]; deletedObjects: string[] } = {
+        findMany: [],
+        deleteMany: [],
+        deletedObjects: [],
+      }
+
+      const runtime = {
+        prisma: {
+          userAvatar: {
+            findMany: async (input: unknown) => {
+              calls.findMany.push(input)
+              return expired
+            },
+            deleteMany: async (input: { where: { id: { in: string[] } } }) => {
+              calls.deleteMany.push(input)
+              return { count: input.where.id.in.length }
+            },
+          },
+        },
+        privateStorage: {
+          deleteObject: async (objectKey: string) => {
+            if (objectKey === failingKey) throw new Error('storage unavailable')
+            calls.deletedObjects.push(objectKey)
+          },
+        },
+      } as unknown as BackendRuntime
+
+      return { calls, runtime }
+    }
+
+    test('collects pending uploads whose signed URL expired over an hour ago', async () => {
+      const { calls, runtime: cleanupRuntime } = createCleanupRuntime()
+      const now = new Date('2026-08-09T12:00:00.000Z')
+
+      await runBackgroundJob('uploads:pending:cleanup', cleanupRuntime, now)
+
+      expect(calls.findMany).toEqual([
+        {
+          where: {
+            state: 'pending',
+            // Slack past expiry for clock skew between the app and the database. Finalize
+            // already refuses an expired upload, so this is not what protects the boundary.
+            expiresAt: { lt: new Date('2026-08-09T11:00:00.000Z') },
+          },
+          orderBy: { expiresAt: 'asc' },
+          take: 500,
+        },
+      ])
+    })
+
+    test('removes the stored object before the row that points at it', async () => {
+      const { calls, runtime: cleanupRuntime } = createCleanupRuntime()
+
+      await runBackgroundJob('uploads:pending:cleanup', cleanupRuntime, new Date())
+
+      expect(calls.deletedObjects).toEqual(['avatars/2026/07/one', 'avatars/2026/07/two'])
+      expect(calls.deleteMany).toEqual([
+        { where: { id: { in: ['upload-1', 'upload-2'] } } },
+      ])
+    })
+
+    test('keeps the row when its object could not be deleted, so the next run retries', async () => {
+      // The row is the only record of the object key. Deleting it after a failed object delete
+      // would strand that object forever, which is the exact leak this ordering exists to avoid.
+      const { calls, runtime: cleanupRuntime } = createCleanupRuntime({
+        failingKey: 'avatars/2026/07/one',
+      })
+
+      await runBackgroundJob('uploads:pending:cleanup', cleanupRuntime, new Date())
+
+      expect(calls.deletedObjects).toEqual(['avatars/2026/07/two'])
+      expect(calls.deleteMany).toEqual([{ where: { id: { in: ['upload-2'] } } }])
+    })
+
+    test('does not issue a delete when every object failed', async () => {
+      const { calls, runtime: cleanupRuntime } = createCleanupRuntime()
+      const runtimeAllFailing = {
+        ...cleanupRuntime,
+        privateStorage: {
+          deleteObject: async () => {
+            throw new Error('storage unavailable')
+          },
+        },
+      } as unknown as BackendRuntime
+
+      await runBackgroundJob('uploads:pending:cleanup', runtimeAllFailing, new Date())
+
+      expect(calls.deleteMany).toEqual([])
+    })
+  })
+
   test('deletes expired and revoked auth sessions after the retention window', async () => {
     const sessionCalls: unknown[] = []
     const resetTokenCalls: unknown[] = []

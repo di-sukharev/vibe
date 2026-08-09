@@ -145,7 +145,7 @@ if (includesBackend) {
       '      ',
     ),
     REPLACE_WITH_OPTIONAL_IAP_ENVS: optionalIapEnvBlock('      '),
-    REPLACE_WITH_OPTIONAL_STORAGE_ENVS: optionalStorageEnvBlock(),
+    REPLACE_WITH_STORAGE_ENVS: storageEnvBlock(),
     REPLACE_WITH_INITIAL_ADMIN_ENVS: initialAdminEnvBlock(),
   })
 }
@@ -206,6 +206,7 @@ function printUsage() {
   console.error('  all targets: DO_GITHUB_REPO, optional DO_PROJECT_SLUG, DO_GIT_BRANCH, DO_APP_REGION')
   console.error('  backend-initial: JWT_SECRET, ADMIN_SEED_EMAIL, ADMIN_SEED_PASSWORD')
   console.error('  backend-final: JWT_SECRET, DO_BACKEND_URL, DO_WEBAPP_URL, DO_AUTH_SITE_DOMAIN')
+  console.error('  backend storage: complete PRIVATE_STORAGE_* group from backend/.env.example')
   console.error('  webapp: DO_BACKEND_URL, DO_WEBAPP_URL, DO_AUTH_SITE_DOMAIN')
   console.error('  website: no target-specific values')
   console.error('  all: JWT_SECRET, DO_BACKEND_URL, DO_WEBAPP_URL, DO_AUTH_SITE_DOMAIN')
@@ -220,7 +221,6 @@ function printUsage() {
   console.error('  worker: DO_BACKEND_WORKER_ENABLED=true, DO_BACKEND_WORKER_RUN_COMMAND')
   console.error('  cron: DO_BACKEND_CRON_NAME, DO_BACKEND_CRON_TASK, DO_BACKEND_CRON_SCHEDULE')
   console.error('  notification recovery cron: DO_BACKEND_NOTIFICATION_CRON_NAME, DO_BACKEND_NOTIFICATION_CRON_SCHEDULE')
-  console.error('  storage: complete SPACES_* group from backend/.env.example')
 }
 
 function requiredEnv(name) {
@@ -632,46 +632,70 @@ function requiredCommaSeparatedValues(name) {
   return [...new Set(values)].join(',')
 }
 
-function optionalStorageEnvBlock() {
+/**
+ * Required, not optional: this template ships file uploads, and the backend refuses the
+ * filesystem storage driver under NODE_ENV=production, which the image sets. A spec generated
+ * without a bucket would deploy a backend that crash-loops on its first boot - after the
+ * pre-deploy migration job has already succeeded.
+ */
+function storageEnvBlock() {
   const requiredNames = [
-    'SPACES_REGION',
-    'SPACES_BUCKET',
-    'SPACES_ENDPOINT',
-    'SPACES_ACCESS_KEY_ID',
-    'SPACES_SECRET_ACCESS_KEY',
+    'PRIVATE_STORAGE_REGION',
+    'PRIVATE_STORAGE_BUCKET',
+    'PRIVATE_STORAGE_ENDPOINT',
+    'PRIVATE_STORAGE_ACCESS_KEY_ID',
+    'PRIVATE_STORAGE_SECRET_ACCESS_KEY',
   ]
-  const optionalNames = [
-    'SPACES_CDN_BASE_URL',
-    'SPACES_UPLOAD_MAX_BYTES',
-    'SPACES_UPLOAD_URL_TTL_SECONDS',
-    'SPACES_DOWNLOAD_URL_TTL_SECONDS',
-    'SPACES_PUBLIC_CACHE_CONTROL',
-  ]
-  const configured = [...requiredNames, ...optionalNames].some((name) => process.env[name]?.trim())
-  if (!configured) return ''
+
+  // Report the whole gap at once. Failing on whichever key happens to be read first would make
+  // an operator rediscover the same error one variable at a time.
+  const missing = requiredNames.filter((name) => !process.env[name]?.trim())
+  if (missing.length > 0) {
+    throw new Error(
+      `${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} required when private storage is configured`,
+    )
+  }
+
+  const endpoint = requiredUrlEnv('PRIVATE_STORAGE_ENDPOINT')
+  const loopbackHosts = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
+  if (loopbackHosts.has(new URL(endpoint).hostname)) {
+    throw new Error(
+      'PRIVATE_STORAGE_ENDPOINT must not be a loopback address in a deployed spec. The local S3 container is for development only.',
+    )
+  }
 
   const values = {
-    SPACES_REGION: requiredEnv('SPACES_REGION'),
-    SPACES_BUCKET: requiredEnv('SPACES_BUCKET'),
-    SPACES_ENDPOINT: requiredUrlEnv('SPACES_ENDPOINT'),
-    SPACES_ACCESS_KEY_ID: requiredEnv('SPACES_ACCESS_KEY_ID'),
-    SPACES_SECRET_ACCESS_KEY: requiredEnv('SPACES_SECRET_ACCESS_KEY'),
-    SPACES_UPLOAD_MAX_BYTES: String(optionalPositiveIntegerEnv('SPACES_UPLOAD_MAX_BYTES', 10 * 1024 * 1024)),
-    SPACES_UPLOAD_URL_TTL_SECONDS: String(optionalPositiveIntegerEnv('SPACES_UPLOAD_URL_TTL_SECONDS', 900)),
-    SPACES_DOWNLOAD_URL_TTL_SECONDS: String(optionalPositiveIntegerEnv('SPACES_DOWNLOAD_URL_TTL_SECONDS', 300)),
-    SPACES_PUBLIC_CACHE_CONTROL:
-      process.env.SPACES_PUBLIC_CACHE_CONTROL?.trim() || 'public, max-age=31536000, immutable',
+    // The backend refuses the filesystem driver in production, because an App Platform
+    // container's disk does not survive a redeploy. Deploying uploads means deploying a bucket.
+    PRIVATE_STORAGE_DRIVER: 's3',
+    PRIVATE_STORAGE_REGION: requiredEnv('PRIVATE_STORAGE_REGION'),
+    PRIVATE_STORAGE_BUCKET: requiredEnv('PRIVATE_STORAGE_BUCKET'),
+    PRIVATE_STORAGE_ENDPOINT: endpoint,
+    PRIVATE_STORAGE_ACCESS_KEY_ID: requiredEnv('PRIVATE_STORAGE_ACCESS_KEY_ID'),
+    PRIVATE_STORAGE_SECRET_ACCESS_KEY: requiredEnv('PRIVATE_STORAGE_SECRET_ACCESS_KEY'),
+    // A remote endpoint is the whole point of a deployed spec, so the gate that guards against
+    // one in development is opened here explicitly rather than by default.
+    PRIVATE_STORAGE_ALLOW_REMOTE_ENDPOINT: 'true',
+    PRIVATE_STORAGE_FORCE_PATH_STYLE: process.env.PRIVATE_STORAGE_FORCE_PATH_STYLE?.trim() || 'false',
+    PRIVATE_STORAGE_UPLOAD_MAX_BYTES: String(
+      optionalPositiveIntegerEnv('PRIVATE_STORAGE_UPLOAD_MAX_BYTES', 5 * 1024 * 1024),
+    ),
+    PRIVATE_STORAGE_UPLOAD_URL_TTL_SECONDS: String(
+      optionalPositiveIntegerEnv('PRIVATE_STORAGE_UPLOAD_URL_TTL_SECONDS', 900),
+    ),
+    PRIVATE_STORAGE_DOWNLOAD_URL_TTL_SECONDS: String(
+      optionalPositiveIntegerEnv('PRIVATE_STORAGE_DOWNLOAD_URL_TTL_SECONDS', 300),
+    ),
   }
-  const cdnBaseUrl = process.env.SPACES_CDN_BASE_URL?.trim()
-  if (cdnBaseUrl) values.SPACES_CDN_BASE_URL = normalizeHttpsUrl('SPACES_CDN_BASE_URL', cdnBaseUrl)
 
   for (const [name, value] of Object.entries(values)) assertSafeYamlString(name, value)
 
   return Object.entries(values)
     .map(([name, value]) => {
-      const type = name === 'SPACES_ACCESS_KEY_ID' || name === 'SPACES_SECRET_ACCESS_KEY'
-        ? 'SECRET'
-        : 'GENERAL'
+      const type =
+        name === 'PRIVATE_STORAGE_ACCESS_KEY_ID' || name === 'PRIVATE_STORAGE_SECRET_ACCESS_KEY'
+          ? 'SECRET'
+          : 'GENERAL'
       return `      - key: ${name}\n        value: ${yamlString(value)}\n        scope: RUN_TIME\n        type: ${type}`
     })
     .join('\n')
@@ -733,6 +757,7 @@ workers:
         value: "\${${dbComponentName}.DATABASE_URL}"
         scope: RUN_TIME
         type: SECRET
+${storageEnvBlock()}
 ${
   runCommand === notificationWorkerRunCommand
     ? optionalExpoPushAccessTokenEnvBlock('      ')
@@ -864,6 +889,7 @@ function backendScheduledJobBlock({ name, providerEnv, schedule, task, timeZone 
         value: "\${${dbComponentName}.DATABASE_URL}"
         scope: RUN_TIME
         type: SECRET
+${storageEnvBlock()}
 ${providerEnv}`
 }
 

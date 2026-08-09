@@ -16,7 +16,14 @@ import { createAuthModule, type AuthHttpEnv } from './modules/auth'
 //   type GooglePlaySubscriptionVerifier,
 // } from './modules/billing'
 import { createNotificationsModule } from './modules/notifications'
+import { createUploadsModule } from './modules/uploads'
 import { createUsersModule } from './modules/users'
+import {
+  browserUploadAllowedHeaders,
+  browserUploadExposedHeaders,
+  createPrivateStorage,
+  type PrivateStorageRuntime,
+} from './storage'
 
 type CreateAppOptions = {
   backgroundTasks?: TaskDeferrer
@@ -26,6 +33,11 @@ type CreateAppOptions = {
   // appStoreIapVerifier?: AppStoreSubscriptionVerifier
   // googlePlayIapVerifier?: GooglePlaySubscriptionVerifier
   prisma: DbClient
+  /**
+   * Storage is never absent: the filesystem driver always works. Injectable so tests can point
+   * it at a temporary directory instead of the configured root.
+   */
+  privateStorage?: PrivateStorageRuntime
 }
 
 // Defaults for the App Store webhook ingress; uncomment with the billing routes.
@@ -40,6 +52,7 @@ export function createApp({
   env,
   // googlePlayIapVerifier,
   prisma,
+  privateStorage,
 }: CreateAppOptions) {
   // const billing = createBillingModule({
   //   appStoreVerifier: appStoreIapVerifier,
@@ -47,6 +60,7 @@ export function createApp({
   //   env,
   //   googlePlayVerifier: googlePlayIapVerifier,
   // })
+  const storage = privateStorage ?? createPrivateStorage(env)
   const notifications = createNotificationsModule({ db: prisma, env })
   const auth = createAuthModule({
     backgroundTasks,
@@ -67,6 +81,12 @@ export function createApp({
     requireAdmin: auth.requireAdmin,
     requireAuth: auth.requireAuth,
   })
+  const uploads = createUploadsModule({
+    backgroundTasks,
+    db: prisma,
+    requireAuth: auth.requireAuth,
+    storage: storage.storage,
+  })
   const app = new OpenAPIHono<AuthHttpEnv>({ defaultHook: validationErrorHook })
   app.openAPIRegistry.registerComponent('securitySchemes', 'BearerAuth', {
     type: 'http',
@@ -82,8 +102,13 @@ export function createApp({
         if (!origin) return env.CORS_ORIGINS[0] ?? null
         return env.CORS_ORIGINS.includes(origin) ? origin : null
       },
-      allowHeaders: ['Content-Type', 'Authorization'],
-      allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      // One global CORS layer, because hono answers a preflight in the first middleware that
+      // matches: a second, route-scoped cors() registered later would never see an OPTIONS.
+      // The upload headers therefore have to live here. `browserUploadAllowedHeaders` is shared
+      // with the local S3 bucket's CORS rule so both drivers allow exactly the same request.
+      allowHeaders: browserUploadAllowedHeaders,
+      exposeHeaders: browserUploadExposedHeaders,
+      allowMethods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
       credentials: true,
       maxAge: 600,
     }),
@@ -103,6 +128,7 @@ export function createApp({
   for (const middleware of createIngressSecurity(publicWriteSecurity)) {
     app.use('/api/users/*', middleware)
     app.use('/api/admin/*', middleware)
+    app.use('/api/uploads/*', middleware)
   }
   // Ingress budget for the subscription routes, uncomment together with them:
   // for (const middleware of createIngressSecurity({
@@ -156,7 +182,14 @@ export function createApp({
   app.route('/api/admin', users.adminRoutes)
   // app.route('/api/iap', billing.createRoutes(auth.authenticateAccessToken))
   app.route('/api/notifications', notifications.createRoutes(auth.authenticateAccessToken))
+  app.route('/api/uploads', uploads.routes)
   // app.route('/api/webhooks', billing.webhookRoutes)
+
+  // Only the filesystem driver needs the backend to serve the URLs it signs. With an S3 driver
+  // the browser uploads straight to the bucket and there is nothing to mount here.
+  if (storage.httpRoutes) {
+    app.route('/storage', storage.httpRoutes)
+  }
 
   app.doc('/openapi.json', {
     openapi: '3.0.0',

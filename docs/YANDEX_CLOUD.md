@@ -166,6 +166,16 @@ TRUST_PROXY=true
 TRUSTED_PROXY_CLIENT_IP_HEADER=x-forwarded-for
 TRUSTED_PROXY_CLIENT_IP_POSITION=last
 COOKIE_SECURE=true
+# Required. The image runs with NODE_ENV=production, where the backend refuses the filesystem
+# storage driver because a container disk does not survive a redeploy, and refuses a remote
+# endpoint until the gate below is opened deliberately.
+PRIVATE_STORAGE_DRIVER=s3
+PRIVATE_STORAGE_REGION=ru-central1
+PRIVATE_STORAGE_BUCKET=<project-prod-bucket>
+PRIVATE_STORAGE_ENDPOINT=https://storage.yandexcloud.net
+PRIVATE_STORAGE_ACCESS_KEY_ID=<static-access-key-id>
+PRIVATE_STORAGE_SECRET_ACCESS_KEY=<static-access-key-secret>
+PRIVATE_STORAGE_ALLOW_REMOTE_ENDPOINT=true
 ```
 
 Yandex Serverless Containers append the invoking user's address to `X-Forwarded-For`, including after any values supplied by the caller. Selecting the last value avoids trusting a caller-controlled first entry. Recheck this provider contract if the backend moves behind a different Yandex ingress product.
@@ -346,7 +356,7 @@ yc serverless container revision deploy \
   --environment DATABASE_URL='<production_database_url>',JWT_SECRET='<production_jwt_secret>',CORS_ORIGINS=https://app.example.com,COOKIE_SECURE=true,SESSION_ABSOLUTE_TTL_DAYS=90,SESSION_RETENTION_DAYS=7
 ```
 
-Configure the cleanup revision with the same production `DATABASE_URL`, `JWT_SECRET`, session TTL, retention, network, and Lockbox policy as the API revision. Prefer Lockbox or the console instead of putting real secrets into shell history. Do not make the cleanup container public.
+Configure the cleanup revision with the same production `DATABASE_URL`, `JWT_SECRET`, `PRIVATE_STORAGE_*` group, session TTL, retention, network, and Lockbox policy as the API revision. The storage variables are not optional here either: the cleanup container runs the same image, so it fails the same startup validation without them, and `uploads:pending:cleanup` needs storage to do its work. Prefer Lockbox or the console instead of putting real secrets into shell history. Do not make the cleanup container public.
 
 Create a narrowly scoped service account for the timer, grant it invocation access only to the cleanup container, and schedule the task daily at 03:00 UTC. Yandex timer expressions have six fields and use UTC:
 
@@ -457,7 +467,7 @@ Recommended production setup:
 - Keep private files private and serve them through short-lived presigned URLs after backend permission checks.
 - Do not put emails, names, customer IDs, or sensitive data in bucket names, object keys, metadata, or tags.
 
-The backend storage service in this template is S3-compatible but currently named around the DigitalOcean default. If Yandex Cloud is selected for production storage, configure a provider-specific storage pass before launch: make the S3 signing region/provider endpoint explicit, set a Yandex CDN/public base URL, and validate presigned PUT/GET behavior against Object Storage.
+The backend storage layer is provider-neutral: Yandex Object Storage is configured, not coded for. Set the `PRIVATE_STORAGE_*` group above and the same code path that runs against a local container runs against Object Storage. Before launch, verify presigned PUT/GET behaviour against the real bucket and configure its CORS rule for the deployed web origins; see [STORAGE.md](STORAGE.md).
 
 ## Image Optimization
 
@@ -489,8 +499,8 @@ After deployment:
 - verify the private auth cleanup timer is active and its most recent scheduled invocation completed with task exit code `0`;
 - verify `webapp` route refreshes load the SPA fallback instead of a broken 404 page;
 - verify `website` static assets load from the production domain;
-- verify public media loads through the Cloud CDN domain when storage is active;
-- verify private file links expire and require backend authorization when private storage is active.
+- verify an avatar upload completes end to end against the production bucket, and that its
+  download link expires and requires backend authorization.
 
 ## Current Upstream Documentation
 

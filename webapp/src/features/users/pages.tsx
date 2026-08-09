@@ -1,6 +1,7 @@
 import type { UserDto } from '@web-app-demo/contracts'
 
 import { PageContainer, PageHeader } from '@/components/PageLayout'
+import { AvatarPanel } from '@/features/avatar'
 import { AppearancePanel } from '@/features/settings'
 import { AccountSummary } from './AccountSummary'
 import { ProfilePanel } from './ProfilePanel'
@@ -26,6 +27,7 @@ export function UserProfile({ user }: { user: UserDto }) {
           description="Keep the identity shown across your workspace current."
           title="Profile"
         />
+        <AvatarPanel user={user} />
         <ProfilePanel user={user} />
       </div>
     </PageContainer>

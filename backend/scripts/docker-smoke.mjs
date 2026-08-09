@@ -6,6 +6,8 @@ import {
   composeProjectName,
   defaultTestDatabaseUrl,
   postgresPortFromDatabaseUrl,
+  postgresTestDataVolume,
+  postgresTestService,
   repositoryHash,
   repositoryRoot,
 } from '../../scripts/repo-env.mjs'
@@ -197,6 +199,23 @@ try {
     'CORS_ORIGINS=https://web.example.com',
     '-e',
     'COOKIE_SECURE=true',
+    // The image sets NODE_ENV=production, where the backend refuses the filesystem storage
+    // driver because a container disk does not survive a redeploy. These are shape-only: the
+    // smoke test never uploads anything, and an S3 client is not contacted at construction.
+    '-e',
+    'PRIVATE_STORAGE_DRIVER=s3',
+    '-e',
+    'PRIVATE_STORAGE_REGION=us-east-1',
+    '-e',
+    'PRIVATE_STORAGE_BUCKET=docker-smoke-not-a-real-bucket',
+    '-e',
+    'PRIVATE_STORAGE_ENDPOINT=https://storage.invalid',
+    '-e',
+    'PRIVATE_STORAGE_ACCESS_KEY_ID=docker-smoke-not-a-real-key',
+    '-e',
+    'PRIVATE_STORAGE_SECRET_ACCESS_KEY=docker-smoke-not-a-real-secret',
+    '-e',
+    'PRIVATE_STORAGE_ALLOW_REMOTE_ENDPOINT=true',
     imageName,
   ])
 
@@ -204,9 +223,16 @@ try {
   await smokeAuthApi()
 } finally {
   spawnSync('docker', ['rm', '-f', containerName], { stdio: 'ignore' })
-  spawnSync('docker', [...composeArgs, 'down', '--volumes', '--remove-orphans'], {
-    cwd: repositoryRoot,
-    env: dockerEnv,
-    stdio: 'inherit',
-  })
+  // Only the database this smoke test started. `down --volumes` cannot be scoped to a service,
+  // so it would also delete the optional local storage volume and the uploads inside it.
+  spawnSync(
+    'docker',
+    [...composeArgs, 'rm', '--stop', '--force', '--volumes', postgresTestService],
+    { cwd: repositoryRoot, env: dockerEnv, stdio: 'inherit' },
+  )
+  spawnSync(
+    'docker',
+    ['volume', 'rm', '--force', `${composeProjectName}_${postgresTestDataVolume}`],
+    { cwd: repositoryRoot, env: dockerEnv, stdio: 'ignore' },
+  )
 }

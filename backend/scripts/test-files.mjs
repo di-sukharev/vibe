@@ -12,18 +12,24 @@ const runnerPattern = '{src,scripts}/**/*.test.{ts,mjs}'
 const anyTestFilePattern = '**/*{.test,.spec,_test,_spec}.{ts,tsx,mts,cts,js,mjs,cjs,jsx}'
 
 /**
- * Splits the backend test files between the two runners.
+ * Splits the backend test files between the three runners.
  *
  * The split is by filename, not by a hand-maintained list: a list rots silently, because `bun test`
  * treats a path that no longer exists as a filter matching nothing rather than as an error. A test
- * that needs the database is named `*.integration.test.ts`; everything else runs without one.
+ * that needs the database is named `*.integration.test.ts`; a test that needs a service no runner
+ * starts for it - today the local S3 container - is named `*.live.test.ts`; everything else runs
+ * with nothing installed.
+ *
+ * The live category exists so `bun run test` stays runnable on a machine with no Docker daemon.
+ * Without it a live test would land in the unit set and fail for everyone who has not started a
+ * container, which is the fastest way to teach people to ignore a red suite.
  *
  * A suite belonging to a capability that ships switched off - billing, for instance, whose tables
  * are commented out in the Prisma schema - marks itself `@parked-test` in its opening comment and
- * is skipped by both runners until that line is removed. Parking is declared in the file it
+ * is skipped by every runner until that line is removed. Parking is declared in the file it
  * affects rather than in a list here, for the same reason as everything else above.
  *
- * Throws if any test file in the backend matches neither runner - a suite that runs nowhere and
+ * Throws if any test file in the backend matches no runner - a suite that runs nowhere and
  * fails nothing is the failure mode this whole module exists to prevent.
  */
 export function backendTestFiles(backendRoot) {
@@ -44,8 +50,11 @@ export function backendTestFiles(backendRoot) {
   return {
     all,
     parked,
-    unit: active.filter((file) => !file.includes('.integration.test.')),
+    unit: active.filter(
+      (file) => !file.includes('.integration.test.') && !file.includes('.live.test.'),
+    ),
     integration: active.filter((file) => file.includes('.integration.test.')),
+    live: active.filter((file) => file.includes('.live.test.')),
   }
 }
 

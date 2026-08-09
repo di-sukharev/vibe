@@ -40,14 +40,25 @@ bun run --cwd backend prisma:validate
 bun run smoke:backend:docker
 ```
 
-Backend test files are discovered, not listed, and the filename decides which runner picks them
-up: anything under `backend/src` or `backend/scripts` named `*.integration.test.ts` needs the Docker
-Postgres and runs in `test:integration`; every other `*.test.ts` or `*.test.mjs` there runs in
-`test:unit` without a database. Name a database-backed test accordingly - `backend/scripts/test-files.mjs`
-owns the split and `backend/scripts/test-files.test.mjs` fails if the two runners stop being
-complementary. A suite belonging to a capability that ships switched off marks itself
-`@parked-test` in its opening comment and runs in neither runner until that line is deleted;
-`backend/src/modules/billing/billing.integration.test.ts` is the example.
+Backend test files are discovered, not listed, and the filename decides which of the three runners
+picks them up. Anything under `backend/src` or `backend/scripts` named `*.integration.test.ts` needs
+the Docker Postgres and runs in `test:integration`. Anything named `*.live.test.ts` needs an external
+service that no runner starts for it - today the local S3 container - and runs in `test:live`.
+Everything else named `*.test.ts` or `*.test.mjs` runs in `test:unit` with nothing installed. Name a
+test accordingly: `backend/scripts/test-files.mjs` owns the split and `backend/scripts/test-files.test.mjs`
+fails if the runners stop being complementary. A suite belonging to a capability that ships switched
+off marks itself `@parked-test` in its opening comment and runs in no runner until that line is
+deleted; `backend/src/modules/billing/billing.integration.test.ts` is the example.
+The third category exists so `bun run test` stays runnable on a machine with no Docker daemon. A
+live test landing in the unit set would fail for everyone who has not started a container, and a red
+suite people learn to ignore is worse than no suite. Run the live tests deliberately:
+
+```bash
+bun run test:storage:s3
+```
+
+That command starts the local S3 container, waits for it, and runs the storage contract against it.
+See [STORAGE.md](STORAGE.md).
 
 Contract tests live in `packages/contracts/src/*.test.ts` and protect shared request/response/error schemas used by backend, webapp, and mobile. Webapp and mobile unit tests live in each client `tests/` directory and cover API refresh/retry behavior that would be too expensive and brittle to fully exercise in E2E.
 
@@ -56,6 +67,10 @@ Backend tests live next to their owning product modules. Integration tests exerc
 The integration and Docker smoke runners refuse database names that do not end with `_test` unless an override is set intentionally. This protects `web_app_demo` development data from test writes.
 
 The Docker smoke test uses a unique Compose project and host port for every invocation, builds the backend image, starts it against its own `postgres_test`, waits for `/health/ready`, verifies DB-backed token auth, and removes only the isolated containers, network, and volume it created.
+
+No runner uses `docker compose down`. It cannot be scoped to a service, so it would stop the optional
+local storage container and delete the volume holding a developer's uploads as a side effect of
+running tests. Teardown removes the test database service and its named volume explicitly instead.
 
 This template does not ship with GitHub Actions or other hosted CI/CD. Run the relevant checks locally after each task, starting with the smallest set that meaningfully covers the changed surface and expanding only when risk justifies it.
 
@@ -84,10 +99,22 @@ The webapp E2E flow:
 - uses `TEST_DATABASE_URL` as the primary database URL, then passes that value to the backend as `DATABASE_URL` inside the test run;
 - starts the backend on `E2E_BACKEND_PORT`, which defaults to a repository-derived port;
 - starts Vite on `E2E_WEB_PORT`, which defaults to a repository-derived port;
-- stops its `postgres_test` compose project and removes the test volume after the run unless `E2E_KEEP_DOCKER=1` is set;
+- removes the `postgres_test` service and its named volume after the run unless `E2E_KEEP_DOCKER=1` is set, leaving every other service and volume in the project untouched;
+- stores filesystem-driver uploads under `webapp/e2e/.artifacts/storage` rather than `backend/.storage`;
 - runs the user path: validation -> register -> `/app` sidebar -> refresh -> profile persistence -> logout/login safe return;
 - runs the administrator path: seeded login -> `/admin` sidebar -> cross-role redirects -> search/promotion -> target session revocation -> admin login;
-- restores one logical browser session concurrently in two tabs, propagates confirmed logout and bootstrap-error recovery, and converges both tabs on the winning session after competing account changes.
+- restores one logical browser session concurrently in two tabs, propagates confirmed logout and bootstrap-error recovery, and converges both tabs on the winning session after competing account changes;
+- runs the avatar path: upload -> finalize -> persistence across a reload -> replace -> delete, plus an aborted transfer that recovers on retry, a file that is not the image it claims to be, and one user's avatar staying invisible to another.
+
+The avatar spec runs against the filesystem driver by default, so `bun run e2e:webapp` needs no
+extra container. Run the identical spec against a real S3 server with:
+
+```bash
+bun run e2e:webapp:s3
+```
+
+Both must pass. That is what proves a project can develop locally and deploy to a bucket without
+changing product code.
 
 Useful env:
 

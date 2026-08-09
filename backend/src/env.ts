@@ -91,16 +91,19 @@ const envSchema = z.object({
   TRUSTED_PROXY_CLIENT_IP_HEADER: optionalHttpHeaderNameSchema,
   TRUSTED_PROXY_CLIENT_IP_POSITION: z.enum(['first', 'last']).optional(),
   COOKIE_SECURE: booleanStringSchema,
-  SPACES_REGION: optionalStringSchema,
-  SPACES_BUCKET: optionalStringSchema,
-  SPACES_ENDPOINT: optionalUrlSchema,
-  SPACES_CDN_BASE_URL: optionalUrlSchema,
-  SPACES_ACCESS_KEY_ID: optionalStringSchema,
-  SPACES_SECRET_ACCESS_KEY: optionalStringSchema,
-  SPACES_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(10 * 1024 * 1024),
-  SPACES_UPLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().max(7 * 24 * 60 * 60).default(15 * 60),
-  SPACES_DOWNLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().max(7 * 24 * 60 * 60).default(5 * 60),
-  SPACES_PUBLIC_CACHE_CONTROL: stringWithDefault('public, max-age=31536000, immutable'),
+  PRIVATE_STORAGE_DRIVER: z.enum(['filesystem', 's3']).default('filesystem'),
+  PRIVATE_STORAGE_LOCAL_ROOT: stringWithDefault('.storage'),
+  PRIVATE_STORAGE_LOCAL_PUBLIC_URL: optionalUrlSchema,
+  PRIVATE_STORAGE_REGION: optionalStringSchema,
+  PRIVATE_STORAGE_BUCKET: optionalStringSchema,
+  PRIVATE_STORAGE_ENDPOINT: optionalUrlSchema,
+  PRIVATE_STORAGE_ACCESS_KEY_ID: optionalStringSchema,
+  PRIVATE_STORAGE_SECRET_ACCESS_KEY: optionalStringSchema,
+  PRIVATE_STORAGE_FORCE_PATH_STYLE: booleanStringSchema,
+  PRIVATE_STORAGE_ALLOW_REMOTE_ENDPOINT: booleanStringSchema,
+  PRIVATE_STORAGE_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(5 * 1024 * 1024),
+  PRIVATE_STORAGE_UPLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().max(7 * 24 * 60 * 60).default(15 * 60),
+  PRIVATE_STORAGE_DOWNLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().max(7 * 24 * 60 * 60).default(5 * 60),
   APPLE_IAP_BUNDLE_ID: optionalStringSchema,
   APPLE_IAP_APP_APPLE_ID: optionalPositiveIntegerSchema,
   APPLE_IAP_ENVIRONMENT: z.enum(['Sandbox', 'Production']).default('Sandbox'),
@@ -141,7 +144,7 @@ const envSchema = z.object({
   validateSessionTtls(env, ctx)
   validateTrustedProxy(env, ctx)
   validateIngressRateLimitProvider(env, ctx)
-  validateStorageEnv(env, ctx)
+  validatePrivateStorageEnv(env, ctx)
   validateAppleIapEnv(env, ctx)
   validateGooglePlayIapEnv(env, ctx)
 })
@@ -336,27 +339,139 @@ function validateCorsOrigins(env: z.infer<typeof envSchema>, ctx: z.RefinementCt
   }
 }
 
-function validateStorageEnv(env: z.infer<typeof envSchema>, ctx: z.RefinementCtx) {
-  const requiredStorageKeys = [
-    'SPACES_REGION',
-    'SPACES_BUCKET',
-    'SPACES_ENDPOINT',
-    'SPACES_ACCESS_KEY_ID',
-    'SPACES_SECRET_ACCESS_KEY',
-  ] as const
-  const storageConfigured =
-    requiredStorageKeys.some((key) => env[key] !== undefined) || env.SPACES_CDN_BASE_URL !== undefined
+const s3StorageKeys = [
+  'PRIVATE_STORAGE_REGION',
+  'PRIVATE_STORAGE_BUCKET',
+  'PRIVATE_STORAGE_ENDPOINT',
+  'PRIVATE_STORAGE_ACCESS_KEY_ID',
+  'PRIVATE_STORAGE_SECRET_ACCESS_KEY',
+] as const
 
-  if (!storageConfigured) return
+const loopbackStorageHosts = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
 
-  for (const key of requiredStorageKeys) {
+export function isLoopbackStorageEndpoint(endpoint: string) {
+  try {
+    return loopbackStorageHosts.has(new URL(endpoint).hostname)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The storage driver is the one switch that decides whether uploads touch the local disk or a
+ * real S3 bucket, so every way of getting it half-configured fails at startup rather than at the
+ * first upload. Two rules carry most of the weight: production refuses the filesystem driver
+ * outright, because a container filesystem does not survive a redeploy, and a non-loopback
+ * endpoint outside production needs a deliberate opt-in so a stray `.env` cannot point a
+ * development machine at someone's real bucket.
+ */
+function validatePrivateStorageEnv(env: z.infer<typeof envSchema>, ctx: z.RefinementCtx) {
+  const isProduction = env.NODE_ENV === 'production'
+
+  if (env.PRIVATE_STORAGE_DRIVER === 'filesystem') {
+    if (isProduction) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['PRIVATE_STORAGE_DRIVER'],
+        message:
+          'PRIVATE_STORAGE_DRIVER must be s3 in production; a container filesystem does not survive a redeploy',
+      })
+    }
+
+    for (const key of s3StorageKeys) {
+      if (env[key] !== undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [key],
+          message: `${key} is set but PRIVATE_STORAGE_DRIVER is filesystem, so it would be ignored`,
+        })
+      }
+    }
+
+    return
+  }
+
+  for (const key of s3StorageKeys) {
     if (env[key] === undefined) {
       ctx.addIssue({
         code: 'custom',
         path: [key],
-        message: `${key} is required when DigitalOcean Spaces storage is configured`,
+        message: `${key} is required when PRIVATE_STORAGE_DRIVER is s3`,
       })
     }
+  }
+
+  const endpoint = env.PRIVATE_STORAGE_ENDPOINT
+  if (endpoint === undefined) return
+
+  let url: URL
+  try {
+    url = new URL(endpoint)
+  } catch {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['PRIVATE_STORAGE_ENDPOINT'],
+      message: 'PRIVATE_STORAGE_ENDPOINT must be a valid URL',
+    })
+    return
+  }
+
+  if (!['http:', 'https:'].includes(url.protocol)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['PRIVATE_STORAGE_ENDPOINT'],
+      message: 'PRIVATE_STORAGE_ENDPOINT must use http or https',
+    })
+    return
+  }
+
+  if (url.origin !== endpoint.replace(/\/+$/, '')) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['PRIVATE_STORAGE_ENDPOINT'],
+      message: 'PRIVATE_STORAGE_ENDPOINT must contain an origin only, not a path or query',
+    })
+  }
+
+  const loopback = loopbackStorageHosts.has(url.hostname)
+
+  if (isProduction && loopback) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['PRIVATE_STORAGE_ENDPOINT'],
+      message: 'PRIVATE_STORAGE_ENDPOINT must not be a loopback address in production',
+    })
+  }
+
+  if (isProduction && url.protocol !== 'https:') {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['PRIVATE_STORAGE_ENDPOINT'],
+      message: 'PRIVATE_STORAGE_ENDPOINT must use https in production',
+    })
+  }
+
+  // The gate applies wherever the endpoint is remote, production included. Outside production it
+  // stops a stray `.env` from pointing a development machine at a real bucket; in production it
+  // is the deliberate step that opens storage, so a deploy cannot reach someone else's bucket by
+  // inheriting a variable. Exempting production would leave the flag inert exactly where the
+  // consequences are worst.
+  if (!loopback && !env.PRIVATE_STORAGE_ALLOW_REMOTE_ENDPOINT) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['PRIVATE_STORAGE_ENDPOINT'],
+      message:
+        'PRIVATE_STORAGE_ENDPOINT points at a remote bucket; set PRIVATE_STORAGE_ALLOW_REMOTE_ENDPOINT=true to allow it deliberately',
+    })
+  }
+
+  if (loopback && !env.PRIVATE_STORAGE_FORCE_PATH_STYLE) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['PRIVATE_STORAGE_FORCE_PATH_STYLE'],
+      message:
+        'PRIVATE_STORAGE_FORCE_PATH_STYLE must be true for a local S3 endpoint, which cannot resolve bucket subdomains',
+    })
   }
 }
 

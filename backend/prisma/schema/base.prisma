@@ -30,6 +30,7 @@ model User {
   pushNotificationOutbox  PushNotificationOutbox[]
   pushDeliveries          PushDelivery[]
   passwordResetTokens PasswordResetToken[]
+  avatars             UserAvatar[]
 
   @@index([role], map: "users_role_idx")
   @@map("users")

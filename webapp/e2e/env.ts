@@ -20,6 +20,9 @@ export const defaultBackendPort =
 export const defaultWebPort =
   process.env.E2E_WEB_PORT ?? String(preferredWebPort)
 export const defaultDatabaseUrl = `postgresql://superuser:superpassword@localhost:${defaultPostgresTestPort}/web_app_demo_test?schema=public`
+export const postgresTestService = 'postgres_test'
+/** Mirrors `postgresTestDataVolume` in scripts/repo-env.mjs; a test asserts they agree. */
+export const postgresTestDataVolume = 'postgres_18_test_data'
 export const e2eAdminEmail = 'admin@example.com'
 export const e2eAdminPassword = 'admin-e2e-password'
 

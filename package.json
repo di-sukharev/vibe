@@ -31,6 +31,7 @@
     "dev:website": "bun run --cwd website dev",
     "dev:mobile": "bun run --cwd mobile dev",
     "dev:backend": "bun run --cwd backend dev",
+    "dev:backend:s3": "bun scripts/storage-local.mjs dev-backend",
     "dev:seed": "bun run --cwd backend prisma:seed",
     "build": "bun run --filter '*' --sequential build",
     "build:webapp": "bun run --cwd webapp build",
@@ -40,6 +41,10 @@
     "architecture:check": "bun scripts/architecture-check.mjs",
     "lint": "bun run --cwd webapp lint && bun run --cwd mobile lint",
     "deploy:do:specs": "bun scripts/prepare-do-specs.mjs",
+    "storage:local:start": "bun scripts/storage-local.mjs start",
+    "storage:local:status": "bun scripts/storage-local.mjs status",
+    "storage:local:stop": "bun scripts/storage-local.mjs stop",
+    "storage:local:env": "bun scripts/storage-local.mjs env",
     "typecheck": "bun run --filter '*' --sequential typecheck",
     "typecheck:webapp": "bun run --cwd webapp typecheck",
     "typecheck:website": "bun run --cwd website typecheck",
@@ -51,11 +56,13 @@
     "test:backend": "bun run --cwd backend test",
     "test:backend:unit": "bun run --cwd backend test:unit",
     "test:backend:integration": "bun run --cwd backend test:integration",
+    "test:storage:s3": "bun scripts/storage-local.mjs test",
     "test:webapp": "bun run --cwd webapp test",
     "test:mobile": "bun run --cwd mobile test",
     "test:website": "bun run --cwd website test",
     "smoke:backend:docker": "bun run --cwd backend smoke:docker",
     "e2e:webapp": "bun run --cwd webapp e2e",
+    "e2e:webapp:s3": "bun scripts/storage-local.mjs e2e",
     "e2e:mobile": "bun run --cwd mobile e2e:maestro"
   }
 }

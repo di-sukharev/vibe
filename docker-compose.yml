@@ -33,6 +33,40 @@ services:
       timeout: 5s
       retries: 10
 
+  # Optional S3-compatible object storage for local development. Nothing needs it by default:
+  # PRIVATE_STORAGE_DRIVER=filesystem stores uploads on disk with no container at all. Start
+  # this only to exercise the real S3 path, with `bun run storage:local:start`.
+  storage_s3:
+    image: chrislusf/seaweedfs:4.41
+    restart: unless-stopped
+    # `mini` runs master, volume, filer, and the S3 gateway in one process. Versioning and
+    # object locking stay off: SeaweedFS mishandles conditional writes when they are enabled,
+    # and conditional writes are what make an upload key write-once.
+    command:
+      - "mini"
+      - "-dir=/data"
+      - "-bucket=local-private-storage"
+      - "-s3.port=8333"
+      - "-admin.ui=false"
+      - "-webdav=false"
+    environment:
+      # Deliberately literal and obviously fake. Reading these from the shell would let real
+      # cloud credentials leak into a development container.
+      AWS_ACCESS_KEY_ID: local-private-storage-not-a-real-key
+      AWS_SECRET_ACCESS_KEY: local-private-storage-not-a-real-secret-do-not-use-in-production
+    ports:
+      - "127.0.0.1:${PRIVATE_STORAGE_S3_PORT:-24331}:8333"
+    volumes:
+      - seaweedfs_4_41_data:/data
+    healthcheck:
+      # The master reports cluster readiness; the S3 port parses an unknown path as a bucket
+      # name, so it cannot answer a health probe.
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9333/cluster/status"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
 volumes:
   postgres_18_data:
   postgres_18_test_data:
+  seaweedfs_4_41_data:

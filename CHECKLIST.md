@@ -66,7 +66,7 @@ Ask about product needs, not implementations. Mark what the first version actual
 
 ## 5. Files, images, and media
 
-Answer these only when uploads are active above; otherwise mark the rows `n/a`. Keep the section either way - `docs/STORAGE.md` sends the agent here when uploads are added later.
+This project ships private file storage with user avatars, so answer these for the files your product adds on top; otherwise mark the rows `n/a`. Keep the section either way - `docs/STORAGE.md` sends the agent here when uploads are added later.
 
 | Question | Answer |
 | --- | --- |
@@ -149,12 +149,12 @@ A capability with no row is `absent` by default. Add the row instead of assuming
 | Auth (email + password) | included | Template baseline. |
 | Admin roles | included | Roles and seeding in `backend`; admin UI in `webapp`. |
 | Password reset email delivery | available | The flow is built, but no adapter is passed to `createApp` in `backend/src/index.ts`, so the disabled one is used and no email is ever sent. |
-| File/media storage | available | Service layer only. Needs DigitalOcean Spaces env, plus routes, contracts, and UI before users can upload anything. |
+| File/media storage | included | Private uploads end to end, with user avatars as the worked example. Stores on local disk by default and on any S3-compatible bucket via `PRIVATE_STORAGE_*`, with no code change between them. Web only; the mobile app has no upload UI yet. See `docs/STORAGE.md`. |
 | Payments / subscriptions | available | App Store + Google Play subscriptions are implemented but switched off: tables commented out, routes unmounted. Turn on or delete per `docs/IAP.md`. |
 | Push notifications | available | Expo Push is wired but inert until the project has an EAS project id and configured credentials. |
 | Social sign-in (Apple / Google) | available | Implemented but switched off: the route is not mounted and the buttons are not rendered. Turn on or delete per `docs/SOCIAL_AUTH.md`. |
 | Real-time / WebSockets | absent | Requires an explicit product need. |
-| Background jobs | available | Jobs live in `backend/src/jobs.ts` and already include `auth:sessions:cleanup`, but nothing runs them on a schedule yet. Pick a runner per `docs/BACKGROUND_JOBS.md`; until then stale sessions and expired reset tokens are never deleted. |
+| Background jobs | available | Jobs live in `backend/src/jobs.ts` and already include `auth:sessions:cleanup` and `uploads:pending:cleanup`, but nothing runs them on a schedule yet. Pick a runner per `docs/BACKGROUND_JOBS.md`; until then stale sessions, expired reset tokens, and abandoned uploads are never deleted. |
 
 ## 10. Environment checks
 

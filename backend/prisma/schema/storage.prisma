@@ -1,0 +1,30 @@
+/// One row per avatar upload attempt. The object itself lives in private storage; this table
+/// owns who it belongs to and whether it is finished, because storage cannot answer either.
+model UserAvatar {
+  id          String          @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  userId      String          @map("user_id") @db.Uuid
+  state       UserAvatarState @default(pending)
+  /// Backend-generated and PII-free; see backend/src/storage/object-keys.ts.
+  objectKey   String          @unique(map: "user_avatars_object_key_key") @map("object_key")
+  contentType String          @map("content_type")
+  byteSize    Int             @map("byte_size")
+  /// When the signed upload URL stops working, which is also when a pending row becomes junk.
+  expiresAt   DateTime        @map("expires_at")
+  readyAt     DateTime?       @map("ready_at")
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade, map: "user_avatars_user_id_fkey")
+
+  /// The product rule as a database constraint: at most one upload in flight and at most one
+  /// live avatar per user, so a lost race fails loudly instead of leaving two live avatars.
+  @@unique([userId, state], map: "user_avatars_user_id_state_key")
+  @@index([state, expiresAt], map: "user_avatars_state_expires_at_idx")
+  @@map("user_avatars")
+}
+
+enum UserAvatarState {
+  pending
+  ready
+
+  @@map("user_avatar_state")
+}

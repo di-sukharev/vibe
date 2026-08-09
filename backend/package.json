@@ -16,6 +16,7 @@
     "test": "bun run test:unit && bun run test:integration",
     "test:unit": "bun scripts/test-unit.mjs",
     "test:integration": "bun scripts/test-integration.mjs",
+    "test:live": "bun scripts/test-live.mjs",
     "smoke:docker": "bun scripts/docker-smoke.mjs",
     "prisma": "prisma",
     "prisma:generate": "bun scripts/prisma-generate.mjs",

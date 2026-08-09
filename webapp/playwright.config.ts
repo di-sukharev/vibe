@@ -32,6 +32,10 @@ const backendEnv = normalizeEnv({
   CORS_ORIGINS: [frontendUrl, 'http://localhost:5173'].join(','),
   COOKIE_SECURE: 'false',
   AUTH_RATE_LIMIT_MAX: process.env.E2E_AUTH_RATE_LIMIT_MAX ?? '120',
+  // Keeps filesystem-driver uploads inside the run's artifacts instead of accumulating in
+  // backend/.storage. Ignored when `bun run e2e:webapp:s3` supplies an S3 configuration, which
+  // arrives through the process environment spread above.
+  PRIVATE_STORAGE_LOCAL_ROOT: resolve(frontendRoot, 'e2e/.artifacts/storage'),
 })
 
 export default defineConfig({

@@ -356,11 +356,11 @@ describe('prepare-do-specs', () => {
     const result = runPrepareSpecs({
       ENABLE_TEST_PUSH: 'true',
       EXPO_PUSH_ACCESS_TOKEN: 'expo-push-secret',
-      SPACES_REGION: 'nyc3',
-      SPACES_BUCKET: 'uploads',
-      SPACES_ENDPOINT: 'https://nyc3.digitaloceanspaces.com',
-      SPACES_ACCESS_KEY_ID: 'access-key',
-      SPACES_SECRET_ACCESS_KEY: 'storage-secret',
+      PRIVATE_STORAGE_REGION: 'nyc3',
+      PRIVATE_STORAGE_BUCKET: 'uploads',
+      PRIVATE_STORAGE_ENDPOINT: 'https://nyc3.digitaloceanspaces.com',
+      PRIVATE_STORAGE_ACCESS_KEY_ID: 'access-key',
+      PRIVATE_STORAGE_SECRET_ACCESS_KEY: 'storage-secret',
       GOOGLE_PLAY_PACKAGE_NAME: 'com.example.app',
       GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64: 'google-secret',
       GOOGLE_PLAY_PRODUCT_IDS: 'com.example.app.premium',
@@ -386,23 +386,26 @@ describe('prepare-do-specs', () => {
         scope: RUN_TIME
         type: GENERAL`);
     expect(apiBlock).not.toContain('key: EXPO_PUSH_ACCESS_TOKEN');
-    expect(apiBlock).toContain('key: SPACES_SECRET_ACCESS_KEY');
+    expect(apiBlock).toContain('key: PRIVATE_STORAGE_SECRET_ACCESS_KEY');
     expect(apiBlock).toContain('key: GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64');
 
     expect(workerBlock).toContain('key: EXPO_PUSH_ACCESS_TOKEN');
     expect(workerBlock).not.toContain('key: ENABLE_TEST_PUSH');
-    expect(workerBlock).not.toContain('key: SPACES_SECRET_ACCESS_KEY');
+    // Storage is the exception to component scoping: every runner boots the same image and
+    // builds storage through createBackendRuntime, so a component without the group fails
+    // startup validation before it can do any work.
+    expect(workerBlock).toContain('key: PRIVATE_STORAGE_SECRET_ACCESS_KEY');
     expect(workerBlock).not.toContain('key: GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64');
 
     expect(cronBlock).toContain('key: GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64');
     expect(cronBlock).not.toContain('key: JWT_SECRET');
     expect(cronBlock).not.toContain('key: ENABLE_TEST_PUSH');
     expect(cronBlock).not.toContain('key: EXPO_PUSH_ACCESS_TOKEN');
-    expect(cronBlock).not.toContain('key: SPACES_SECRET_ACCESS_KEY');
+    expect(cronBlock).toContain('key: PRIVATE_STORAGE_SECRET_ACCESS_KEY');
 
     expect(spec.match(/key: ENABLE_TEST_PUSH/g)).toHaveLength(1);
     expect(spec.match(/key: EXPO_PUSH_ACCESS_TOKEN/g)).toHaveLength(1);
-    expect(spec.match(/key: SPACES_SECRET_ACCESS_KEY/g)).toHaveLength(1);
+    expect(spec.match(/key: PRIVATE_STORAGE_SECRET_ACCESS_KEY/g)).toHaveLength(3);
     expect(spec.match(/key: GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64/g)).toHaveLength(2);
   });
 
@@ -554,22 +557,51 @@ describe('prepare-do-specs', () => {
   });
 
   test('requires complete storage settings and marks credentials as secrets', () => {
-    const incomplete = runPrepareSpecs({ SPACES_BUCKET: 'uploads' });
+    const incomplete = runPrepareSpecs(
+      { PRIVATE_STORAGE_BUCKET: 'uploads' },
+      { omitStorage: true },
+    );
     expect(incomplete.status).not.toBe(0);
-    expect(`${incomplete.stdout}\n${incomplete.stderr}`).toContain('SPACES_REGION');
+    expect(`${incomplete.stdout}\n${incomplete.stderr}`).toContain('PRIVATE_STORAGE_REGION');
 
-    const complete = runPrepareSpecs({
-      SPACES_REGION: 'nyc3',
-      SPACES_BUCKET: 'uploads',
-      SPACES_ENDPOINT: 'https://nyc3.digitaloceanspaces.com',
-      SPACES_ACCESS_KEY_ID: 'access-key',
-      SPACES_SECRET_ACCESS_KEY: 'secret-key',
-    });
+    // No storage at all is refused too: the deployed backend cannot boot without a bucket, so a
+    // spec generated without one would crash-loop after the migration job already succeeded.
+    const absent = runPrepareSpecs({}, { omitStorage: true });
+    expect(absent.status).not.toBe(0);
+    expect(`${absent.stdout}\n${absent.stderr}`).toContain('PRIVATE_STORAGE_REGION');
+
+    const complete = runPrepareSpecs();
     expect(complete.status).toBe(0);
     const spec = readFileSync(backendSpecPath, 'utf8');
-    expect(spec).toContain('key: SPACES_ACCESS_KEY_ID');
-    expect(spec).toContain('key: SPACES_SECRET_ACCESS_KEY');
+    expect(spec).toContain('key: PRIVATE_STORAGE_ACCESS_KEY_ID');
+    expect(spec).toContain('key: PRIVATE_STORAGE_SECRET_ACCESS_KEY');
     expect(spec.match(/type: SECRET/g)?.length).toBeGreaterThanOrEqual(3);
+  });
+
+  test('deploys the s3 driver and opens the remote-endpoint gate explicitly', () => {
+    // The backend is fail-closed on both: it refuses the filesystem driver in production, and
+    // refuses a non-loopback endpoint until the gate is opened deliberately. A generated spec
+    // has to state both, or the deployed app will not start.
+    const complete = runPrepareSpecs({
+      PRIVATE_STORAGE_REGION: 'ru-central1',
+      PRIVATE_STORAGE_ENDPOINT: 'https://storage.yandexcloud.net',
+    });
+
+    expect(complete.status).toBe(0);
+    const spec = readFileSync(backendSpecPath, 'utf8');
+    expect(spec).toContain('key: PRIVATE_STORAGE_DRIVER');
+    expect(spec).toContain('value: "s3"');
+    expect(spec).toContain('key: PRIVATE_STORAGE_ALLOW_REMOTE_ENDPOINT');
+  });
+
+  test('refuses to deploy a spec pointing at the local development container', () => {
+    const loopback = runPrepareSpecs({
+      PRIVATE_STORAGE_BUCKET: 'local-private-storage',
+      PRIVATE_STORAGE_ENDPOINT: 'http://127.0.0.1:24331',
+    });
+
+    expect(loopback.status).not.toBe(0);
+    expect(`${loopback.stdout}\n${loopback.stderr}`).toContain('PRIVATE_STORAGE_ENDPOINT');
   });
 
   test('requires complete production App Store settings and marks its private key as secret', () => {
@@ -709,7 +741,19 @@ describe('prepare-do-specs', () => {
   });
 });
 
-function runPrepareSpecs(extraEnv = {}, { skipReleaseGitCheck = true, target = 'backend-final' } = {}) {
+// A deployed backend refuses to boot without durable storage, so this is required input now.
+const completeStorageEnv = {
+  PRIVATE_STORAGE_REGION: 'nyc3',
+  PRIVATE_STORAGE_BUCKET: 'uploads',
+  PRIVATE_STORAGE_ENDPOINT: 'https://nyc3.digitaloceanspaces.com',
+  PRIVATE_STORAGE_ACCESS_KEY_ID: 'access-key',
+  PRIVATE_STORAGE_SECRET_ACCESS_KEY: 'secret-key',
+};
+
+function runPrepareSpecs(
+  extraEnv = {},
+  { skipReleaseGitCheck = true, target = 'backend-final', omitStorage = false } = {},
+) {
   const testOnlyEnv = skipReleaseGitCheck
     ? {
         NODE_ENV: 'test',
@@ -731,6 +775,7 @@ function runPrepareSpecs(extraEnv = {}, { skipReleaseGitCheck = true, target = '
       DO_AUTH_SITE_DOMAIN: 'example.com',
       DO_BACKEND_URL: 'https://api.example.com',
       DO_WEBAPP_URL: 'https://webapp.example.com',
+      ...(omitStorage ? {} : completeStorageEnv),
       ...extraEnv,
     },
   });

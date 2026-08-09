@@ -54,6 +54,39 @@ export const backgroundJobs = {
       `Job auth:sessions:cleanup removed ${sessionsDeleted} stale sessions and ${passwordResetTokensDeleted} expired password reset tokens.`,
     )
   },
+  'uploads:pending:cleanup': async ({ prisma, privateStorage }, now) => {
+    // An upload whose signed URL has expired can never be finalized, so its row and any bytes
+    // that did land are junk. Objects go first: a row deleted before its object would leave
+    // storage holding a file nothing points at and nothing will ever look for again.
+    const abandoned = await prisma.userAvatar.findMany({
+      where: { state: 'pending', expiresAt: { lt: new Date(now.getTime() - 60 * 60 * 1000) } },
+      orderBy: { expiresAt: 'asc' },
+      take: 500,
+    })
+
+    // Only rows whose object is actually gone are deleted. Dropping a row after a failed object
+    // delete would strand that object forever: the row is the only record of its key, so nothing
+    // would ever look for it again. Keeping the row means the next run simply retries. Deletes
+    // are idempotent, so a missing object still counts as removed and cannot block the queue.
+    const deletedIds: string[] = []
+    for (const upload of abandoned) {
+      try {
+        await privateStorage.deleteObject(upload.objectKey)
+        deletedIds.push(upload.id)
+      } catch (error) {
+        console.error(`Job uploads:pending:cleanup could not delete ${upload.objectKey}:`, error)
+      }
+    }
+
+    const rows =
+      deletedIds.length > 0
+        ? await prisma.userAvatar.deleteMany({ where: { id: { in: deletedIds } } })
+        : { count: 0 }
+
+    console.log(
+      `Job uploads:pending:cleanup removed ${rows.count} abandoned uploads, and left ${abandoned.length - deletedIds.length} to retry.`,
+    )
+  },
   'maintenance:process': async (runtime, now) => {
     const { passwordResetTokensDeleted, sessionsDeleted } = await cleanupAuthState(runtime, now)
     const terminalNotificationOutboxesRedacted = await (

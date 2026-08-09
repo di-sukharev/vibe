@@ -158,6 +158,23 @@ export function acquirePushInstallationLock(
   )
 }
 
+/**
+ * Serialises avatar changes for one user.
+ *
+ * Requesting an upload, finalizing one, and deleting an avatar all move rows between the
+ * `pending` and `ready` states that `@@unique([userId, state])` constrains. Without this lock
+ * two concurrent requests race that index and one loses with a constraint error rather than a
+ * meaningful outcome; with it they simply queue.
+ */
+export function acquireUserAvatarMutationLock(
+  prisma: Pick<DbClient, '$executeRaw'>,
+  userId: string,
+) {
+  return prisma.$executeRaw(
+    Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`user-avatar:${userId}`}, 0))`,
+  )
+}
+
 export function normalizePgConnectionString(connectionString: string) {
   const url = new URL(connectionString)
   const sslMode = url.searchParams.get('sslmode')

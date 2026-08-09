@@ -50,7 +50,7 @@ If mobile is active, ask whether Expo/EAS builds, Expo Push notifications, and M
 - Deploy `webapp` and fully prerendered `website` output as DigitalOcean App Platform Static Sites, not App Platform services. They do not get `instance_size_slug` or `instance_count`; static site assets are served through DigitalOcean's global CDN by default. Use an external CDN only when the product needs advanced controls such as bot filtering, custom rate limiting, or geographic traffic rules.
 - For DigitalOcean app specs, use committed `.do/*.yaml.example` templates plus `bun run deploy:do:specs`; generated specs stay in `.scratch/deploy` and must fail on empty values or unresolved placeholders before `doctl apps create`. Concrete App Platform machine defaults live in `scripts/prepare-do-specs.mjs`; update that script and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) together when changing infrastructure tiers.
 - Before deployment or cloud-resource updates, verify `git remote -v` and `git status --short --branch`. Deploy only from the intended pushed release branch with a clean worktree; if local changes, untracked files, or branch sync issues are present, stop instead of cleaning, stashing, resetting, or checking out over another session's work.
-- Use DigitalOcean Spaces Standard Storage plus Spaces CDN for persistent files, uploads, and public media. Do not store uploads on the App Platform container filesystem.
+- Use DigitalOcean Spaces Standard Storage, or any S3-compatible bucket, for persistent files and uploads. Do not store uploads on the App Platform container filesystem: the backend refuses the filesystem storage driver in production for exactly that reason.
 - If [CHECKLIST.md](CHECKLIST.md) records Yandex Cloud, use [docs/YANDEX_CLOUD.md](docs/YANDEX_CLOUD.md) instead: Serverless Containers for backend/API, Managed Service for PostgreSQL for production data, Object Storage for files/static sites, and Cloud CDN for public static/media delivery.
 - Explain manual prerequisites only for the active release path: DigitalOcean account, billing/project setup, `doctl auth init`, registry access when using DigitalOcean Container Registry, DigitalOcean Managed PostgreSQL, production domains/DNS, and Expo/EAS/App Store/Google Play accounts when mobile release work is requested.
 - The agent may create uncommitted app-local `.env` files from their matching `.env.example` files and generate a local-only `JWT_SECRET`; never commit secrets or print raw secrets in the final report.
@@ -69,7 +69,7 @@ If mobile is active, ask whether Expo/EAS builds, Expo Push notifications, and M
 - `docs/BACKGROUND_JOBS.md` - jobs, the three ways to run them, and how to pick one.
 - `docs/TESTING.md` - the backend, Playwright, and Maestro testing contract.
 - `docs/LOCAL_DATABASE.md` - cross-platform local PostgreSQL setup for Windows, macOS, and Linux.
-- `docs/STORAGE.md` - DigitalOcean Spaces, CDN, uploads, and image/media storage rules.
+- `docs/STORAGE.md` - private file storage: the filesystem and S3 drivers, the local S3 container, and the upload contract.
 - `docs/SOCIAL_AUTH.md` - Apple and Google social auth setup for the Expo mobile app.
 - `docs/IAP.md` - App Store and Google Play subscriptions: how the implementation works, and how to switch it on (it ships off) or delete it.
 - `docs/YANDEX_CLOUD.md` - the Yandex Cloud hosting path, chosen when users or data must stay in Russia.
@@ -226,6 +226,7 @@ Test runners use the separate Docker Compose `postgres_test` service and the `TE
 - `bun run dev:webapp` - start the Vite CSR webapp.
 - `bun run dev:website` - start the Astro website project.
 - `bun run dev:mobile` - start the Expo app.
+- `bun run dev:backend:s3` - start the backend against the local S3 container instead of the disk.
 - `bun run typecheck` - run TypeScript checks across workspaces.
 - `bun run lint` - run ESLint over the webapp and the mobile app.
 - `bun run build` - run production build/typecheck/export scripts for workspaces that define them.
@@ -236,12 +237,15 @@ Test runners use the separate Docker Compose `postgres_test` service and the `TE
 - `bun run test:backend:integration` - run DB-backed auth, billing, and notifications tests through `postgres_test`.
 - `bun run test:webapp` - run webapp client tests.
 - `bun run test:mobile` - run mobile client tests.
+- `bun run test:storage:s3` - run the storage contract against a real local S3 server (needs Docker).
 - `bun run --cwd backend start:cron -- <job>` - run one background job once; see [docs/BACKGROUND_JOBS.md](docs/BACKGROUND_JOBS.md).
 - `bun run --cwd backend start:scheduler` - run the in-repo scheduler process (empty until you add schedules).
 - `bun run --cwd backend start:worker` - run the loop worker process (empty until you add loops).
 - `bun run --cwd backend start:worker:notifications` - run the Expo push outbox/receipt worker.
 - `bun run deploy:do:specs` - safely generate concrete DigitalOcean specs under `.scratch/deploy`.
-- `bun run e2e:webapp` - run the Playwright auth smoke test through backend + Vite.
+- `bun run e2e:webapp` - run the Playwright journeys through backend + Vite.
+- `bun run e2e:webapp:s3` - run the same journeys against the local S3 container.
+- `bun run storage:local:start|status|stop|env` - manage the optional local S3 container; `stop` keeps its volume.
 - `bun run e2e:mobile` - run the Maestro auth smoke test against an installed Expo development build and host-reachable Metro URL.
 - `bun run --cwd mobile e2e:maestro:audit` - check the mobile Maestro flow and runner inputs for known flaky patterns.
 - `bun run --cwd backend prisma:migrate` - create/apply a Prisma migration in development.
@@ -253,7 +257,7 @@ Test runners use the separate Docker Compose `postgres_test` service and the `TE
 
 - [backend/README.md](backend/README.md) - API, auth, Prisma, and backend validation.
 - [docs/LOCAL_DATABASE.md](docs/LOCAL_DATABASE.md) - Docker Compose PostgreSQL setup and reset workflow.
-- [docs/STORAGE.md](docs/STORAGE.md) - DigitalOcean Spaces, CDN, uploads, and image/media storage rules.
+- [docs/STORAGE.md](docs/STORAGE.md) - private file storage: the filesystem and S3 drivers, the local S3 container, and the upload contract.
 - [docs/SOCIAL_AUTH.md](docs/SOCIAL_AUTH.md) - Apple and Google mobile social auth setup.
 - [docs/IAP.md](docs/IAP.md) - App Store and Google Play subscription setup and troubleshooting.
 - [docs/BACKGROUND_JOBS.md](docs/BACKGROUND_JOBS.md) - jobs and the processes that run them.
