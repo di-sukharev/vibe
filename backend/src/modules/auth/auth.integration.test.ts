@@ -6,7 +6,7 @@ import { createApp } from '../../app'
 import { createBackgroundTasks } from '../../background-tasks'
 import { createPrisma, type DbClient } from '../../db'
 import type { EmailMessage } from '../../email/service'
-import type { AppEnv } from '../../env'
+import { loadEnv } from '../../env'
 import { socialAuthProviderDeps } from './infrastructure/social-providers'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
@@ -14,43 +14,12 @@ const databaseUrl = process.env.TEST_DATABASE_URL
 const maybeDescribe = databaseUrl ? describe : describe.skip
 
 maybeDescribe('auth API integration', () => {
-  const env: AppEnv = {
-    PORT: 3000,
+  const env = loadEnv({
     DATABASE_URL: databaseUrl!,
+    ACCESS_TOKEN_TTL_SECONDS: '60',
+    CORS_ORIGINS: 'http://localhost:5173',
     JWT_SECRET: '12345678901234567890123456789012',
-    CORS_ORIGINS: ['http://localhost:5173'],
-    ACCESS_TOKEN_TTL_SECONDS: 60,
-    REFRESH_TOKEN_TTL_DAYS: 30,
-    REFRESH_REUSE_GRACE_SECONDS: 10,
-    SESSION_ABSOLUTE_TTL_DAYS: 90,
-    SESSION_RETENTION_DAYS: 7,
-    AUTH_BODY_LIMIT_BYTES: 64 * 1024,
-    INGRESS_RATE_LIMIT_PROVIDER: 'local',
-    AUTH_RATE_LIMIT_MAX: 60,
-    AUTH_RATE_LIMIT_WINDOW_SECONDS: 60,
-    ADMIN_USERS_READ_RATE_LIMIT_MAX: 120,
-    ADMIN_USERS_READ_RATE_LIMIT_WINDOW_SECONDS: 60,
-    IAP_BODY_LIMIT_BYTES: 64 * 1024,
-    IAP_RATE_LIMIT_MAX: 60,
-    IAP_RATE_LIMIT_WINDOW_SECONDS: 60,
-    SHUTDOWN_GRACE_SECONDS: 20,
-    TRUST_PROXY: false,
-    COOKIE_SECURE: false,
-    ENABLE_TEST_PUSH: false,
-    PRIVATE_STORAGE_DRIVER: 'filesystem',
-    PRIVATE_STORAGE_LOCAL_ROOT: '.storage',
-    PRIVATE_STORAGE_FORCE_PATH_STYLE: false,
-    PRIVATE_STORAGE_ALLOW_REMOTE_ENDPOINT: false,
-    PRIVATE_STORAGE_UPLOAD_MAX_BYTES: 5 * 1024 * 1024,
-    PRIVATE_STORAGE_UPLOAD_URL_TTL_SECONDS: 900,
-    PRIVATE_STORAGE_DOWNLOAD_URL_TTL_SECONDS: 300,
-    APPLE_IAP_ENVIRONMENT: 'Sandbox',
-    APPLE_IAP_PRODUCT_IDS: [],
-    APPLE_AUTH_JWKS_TIMEOUT_MS: 5000,
-    GOOGLE_AUTH_CLIENT_IDS: [],
-    GOOGLE_PLAY_PRODUCT_IDS: [],
-    GOOGLE_PLAY_BASE_PLAN_IDS: [],
-  }
+  })
   const prisma = createPrisma(databaseUrl!)
   const app = createApp({ env, prisma })
   const originalVerifyGoogleIdToken = socialAuthProviderDeps.verifyGoogleIdToken
