@@ -31,6 +31,16 @@ const backendEnv = normalizeEnv({
     process.env.JWT_SECRET ?? 'web-e2e-secret-at-least-thirty-two-characters',
   CORS_ORIGINS: [frontendUrl, 'http://localhost:5173'].join(','),
   COOKIE_SECURE: 'false',
+  // Pinned for the same reason as the storage settings below: otherwise a developer's
+  // backend/.env decides whether an E2E password-reset request mints a token at all. The
+  // credentials are blanked with it, exactly as storageEnv() does: the env schema treats an
+  // empty string as unset, and a leftover provider key under EMAIL_DELIVERY=disabled is a
+  // startup error - which would surface here as an opaque webServer timeout.
+  EMAIL_DELIVERY: 'disabled',
+  EMAIL_RESEND_API_KEY: '',
+  EMAIL_POSTBOX_ACCESS_KEY_ID: '',
+  EMAIL_POSTBOX_SECRET_ACCESS_KEY: '',
+  EMAIL_POSTBOX_CONFIGURATION_SET: '',
   AUTH_RATE_LIMIT_MAX: process.env.E2E_AUTH_RATE_LIMIT_MAX ?? '120',
   // Keeps filesystem-driver uploads inside the run's artifacts instead of accumulating in
   // backend/.storage.

@@ -43,7 +43,8 @@ bun run smoke:backend:docker
 Backend test files are discovered, not listed, and the filename decides which of the three runners
 picks them up. Anything under `backend/src` or `backend/scripts` named `*.integration.test.ts` needs
 the Docker Postgres and runs in `test:integration`. Anything named `*.live.test.ts` needs an external
-service that no runner starts for it - today the local S3 container - and runs in `test:live`.
+service or account that no runner starts for it - the local S3 container, or an email provider - and
+runs in `test:live`.
 Everything else named `*.test.ts` or `*.test.mjs` runs in `test:unit` with nothing installed. Name a
 test accordingly: `backend/scripts/test-files.mjs` owns the split and `backend/scripts/test-files.test.mjs`
 fails if the runners stop being complementary. A suite belonging to a capability that ships switched
@@ -54,11 +55,16 @@ live test landing in the unit set would fail for everyone who has not started a 
 suite people learn to ignore is worse than no suite. Run the live tests deliberately:
 
 ```bash
-bun run test:storage:s3
+bun run test:storage:s3          # starts the local S3 container and runs the storage contract
+bun run --cwd backend test:live  # runs whichever live suites the environment configures
 ```
 
-That command starts the local S3 container, waits for it, and runs the storage contract against it.
-See [STORAGE.md](STORAGE.md).
+`backend/scripts/test-live.mjs` owns a table of live suites - storage, Postbox, Resend - each with
+the variables it needs. It runs the ones that are fully configured, refuses with the missing names
+when one is half configured, and refuses outright when none is, because a live contract test that
+quietly passes without contacting anything proves nothing. Every `*.live.test.ts` must belong to
+exactly one suite or the script fails, the same reasoning as the unclaimed-file check above. See
+[STORAGE.md](STORAGE.md) and [EMAIL.md](EMAIL.md).
 
 Contract tests live in `packages/contracts/src/*.test.ts` and protect shared request/response/error schemas used by backend, webapp, and mobile. Webapp and mobile unit tests live in each client `tests/` directory and cover API refresh/retry behavior that would be too expensive and brittle to fully exercise in E2E.
 

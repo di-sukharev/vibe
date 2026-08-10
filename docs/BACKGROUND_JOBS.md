@@ -39,8 +39,13 @@ Three processes run that same registry. Which one you use is a hosting decision,
 | `backend/src/scheduler.ts` | Long-running process with timers inside. | You want schedules to live in the repository instead of a cloud console, or you run on your own server. Also the natural fit for a cloud worker component. |
 | `backend/src/worker.ts` | Long-running loop. | Work must run more often than once a minute, must run continuously, or several jobs should run side by side. No cron expression goes below one minute — this is the way around that. |
 
-The scheduler and the worker are shipped **empty**: `schedules` and `workerLoops` contain only a
-commented example. An install that never needs recurring work pays nothing for them.
+The scheduler ships with **one** entry, `outbox:drain` every minute, which is the worked example
+for the rest of this document and the reason a password-reset email leaves at all. The worker
+ships **empty**: `workerLoops` contains only a commented example, so an install that never needs
+sub-minute work pays nothing for it.
+
+Neither process starts itself. Shipping the entry decides *what* runs; a deployment still has to
+run the process — see "Running the drain" below.
 
 ## The push pipeline is the exception
 
@@ -100,10 +105,12 @@ case and says so in the log instead of reporting a generic failure, but the fix 
 bun run --cwd backend start:scheduler
 ```
 
-Under systemd, the unit needs `Restart=always`, the backend environment, and a working directory of
+Under systemd, the unit needs `Restart=always`, `NODE_ENV=production` (without it the backend
+still accepts `EMAIL_DELIVERY=console`, so a real install could write reset links to a log instead
+of sending them), the backend environment, and a working directory of
 `backend`. Under Docker, the same image the API uses with the command overridden and
-`restart: unless-stopped`. Add the entry to `schedules` before you set either up: with the list
-still empty the process logs that it has nothing to do and exits, and a restart policy turns that
+`restart: unless-stopped`. The shipped `schedules` already has an entry, so the process stays up;
+if you empty the list it logs that it has nothing to do and exits, and a restart policy turns that
 into a loop. On `SIGINT`/`SIGTERM` the scheduler stops its timers, waits for jobs
 already in flight to finish, and only then closes the database - so give the process a shutdown
 grace period at least as long as your slowest job.
@@ -185,20 +192,27 @@ on whether an account exists is an oracle for which addresses are registered.
 
 ### Running the drain
 
-`outbox:drain` is an ordinary job, so every runner in the table above can run it. Latency is
+`outbox:drain` is an ordinary job, so every runner in the table above can run it. The template
+ships the second row already configured - `schedules` in `scheduler.ts` runs it every minute, and
+`bun run dev` starts that process next to the API. What is left is deploying it. Latency is
 whatever the schedule allows:
 
 | Hosting | How | Achievable |
 | --- | --- | --- |
-| Own server, Yandex Cloud | `scheduler.ts` entry `* * * * *`, or a timer trigger `* * ? * * *` | 1 minute |
+| Local development | `bun run dev` runs the scheduler alongside the API | 1 minute |
+| Own server, Yandex Cloud | the shipped `scheduler.ts` entry, or a timer trigger `* * ? * * *` | 1 minute |
+| DigitalOcean worker component | `bun run start:scheduler`, accepted as shipped | 1 minute |
 | DigitalOcean scheduled job | `*/15 * * * *` | **15 minutes - the platform floor** |
-| DigitalOcean worker component | `bun run start:scheduler` with a one-minute entry | 1 minute |
 | Anywhere, sub-minute | a `workerLoops` entry with `intervalMs` | seconds |
 
 **A password-reset email arriving fifteen minutes late is not acceptable**, so a DigitalOcean
 install that wires an email provider needs the worker component, not the scheduled job. An install
 with no provider can leave the drain on a slow schedule, or not run it at all - the table stays
 empty because `requestPasswordReset` writes nothing while delivery is unconfigured.
+
+The worker component and the loop worker are different things: the component runs
+`bun run start:scheduler`, which the deployment generator accepts as shipped, while
+`bun run start:worker` stays refused until `workerLoops` has an entry.
 
 If you use a `workerLoops` entry, leave `singleInstance` off. It looks like the careful choice and
 is the wrong one: the job lock would serialise the whole outbox across instances and throw away

@@ -486,6 +486,41 @@ Cloud CDN can use an Object Storage bucket as an origin. Create a CDN resource, 
 
 Use immutable asset filenames from Vite/Astro builds and long cache headers for hashed assets. Keep `index.html` cache short enough for releases to roll out quickly.
 
+## Transactional Email With Postbox
+
+Yandex Cloud Postbox is the email provider for this hosting path: the same account, the same kind
+of static access key as Object Storage, and the mail never leaves the region. It implements the
+Amazon SESv2 API, so the driver in `backend/src/email/postbox-delivery.ts` signs its requests with
+AWS SigV4 under service `ses` and region `ru-central1`.
+
+Setup:
+
+1. Create the sending address or domain in Postbox and complete verification. A domain needs DKIM
+   and SPF records published in DNS; a single address needs its confirmation link followed. Nothing
+   sends until verification is green.
+2. Create a service account with the Postbox sender role, then issue a **static access key** for it -
+   the same key type Object Storage uses, not an IAM token, which expires.
+3. Set the `EMAIL_*` group on the API container revision **and** on the drain task container. Both
+   build delivery through `createBackendRuntime`, and the one that actually sends is the drain:
+
+```bash
+EMAIL_DELIVERY=postbox
+EMAIL_FROM="Example <no-reply@example.com>"
+EMAIL_POSTBOX_ACCESS_KEY_ID=<static access key id>
+EMAIL_POSTBOX_SECRET_ACCESS_KEY=<static secret key>
+# WEBAPP_ORIGIN is required alongside these: it builds the links inside the messages.
+```
+
+4. Run the drain. `outbox:drain` is already in the shipped `schedules`, so either deploy
+   `bun run start:scheduler` as a long-running process, or create the timer trigger described in
+   [Background Jobs And The Cleanup Timer](#background-jobs-and-the-cleanup-timer). Without a
+   runner the API accepts every reset request and sends nothing.
+
+New accounts start in a sandbox with low quotas - on the order of one message per second and 200
+per day - and can only send to verified addresses. Request production access and a quota raise
+before launch, not on launch day. The full driver contract, the failure classification, and the
+live test that proves the signature are in [EMAIL.md](EMAIL.md).
+
 ## Object Storage And Media
 
 Yandex Object Storage is S3-compatible. Use it for durable uploads, generated files, public media, and downloadable assets.

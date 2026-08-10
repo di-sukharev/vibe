@@ -17,7 +17,8 @@ const anyTestFilePattern = '**/*{.test,.spec,_test,_spec}.{ts,tsx,mts,cts,js,mjs
  * The split is by filename, not by a hand-maintained list: a list rots silently, because `bun test`
  * treats a path that no longer exists as a filter matching nothing rather than as an error. A test
  * that needs the database is named `*.integration.test.ts`; a test that needs a service no runner
- * starts for it - today the local S3 container - is named `*.live.test.ts`; everything else runs
+ * starts for it - the local S3 container, or an email provider - is named `*.live.test.ts`;
+ * everything else runs
  * with nothing installed.
  *
  * The live category exists so `bun run test` stays runnable on a machine with no Docker daemon.

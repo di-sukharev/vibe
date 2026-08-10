@@ -94,21 +94,163 @@ describe('prepare-do-specs', () => {
     }
   });
 
-  test('refuses a runner whose configuration is still empty', () => {
-    // Both template runners exit immediately while their lists are empty, and App Platform
-    // restarts an exited worker forever. The check reads the source, so the same command is
-    // accepted once the project adds work to it - see scripts/runner-collections.test.mjs for
-    // the accepting direction.
-    for (const command of ['bun run start:worker', 'bun run start:scheduler']) {
-      const result = runPrepareSpecs({
-        DO_BACKEND_WORKER_ENABLED: 'true',
-        DO_BACKEND_WORKER_NAME: 'worker',
-        DO_BACKEND_WORKER_RUN_COMMAND: command,
-      });
+  test('refuses the loop worker while its configuration is still empty', () => {
+    // `workerLoops` ships empty, so this process exits immediately and App Platform would restart
+    // it forever. The check reads the source, so the same command is accepted once the project
+    // adds a loop to it.
+    const result = runPrepareSpecs({
+      DO_BACKEND_WORKER_ENABLED: 'true',
+      DO_BACKEND_WORKER_NAME: 'worker',
+      DO_BACKEND_WORKER_RUN_COMMAND: 'bun run start:worker',
+    });
 
-      expect(result.status).not.toBe(0);
-      expect(`${result.stdout}\n${result.stderr}`).toContain('is still empty');
-    }
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).toContain('is still empty');
+  });
+
+  test('accepts the scheduler, which ships with the outbox drain already scheduled', () => {
+    // The accepting half of the same guard, and the more valuable one: it proves the check is
+    // reading the collection rather than refusing every template command outright. An install
+    // that sends email needs exactly this component, because DigitalOcean's scheduled jobs floor
+    // at 15 minutes.
+    const result = runPrepareSpecs({
+      DO_BACKEND_WORKER_ENABLED: 'true',
+      DO_BACKEND_WORKER_NAME: 'scheduler',
+      DO_BACKEND_WORKER_RUN_COMMAND: 'bun run start:scheduler',
+    });
+
+    expect(result.status).toBe(0);
+    expect(readFileSync(backendSpecPath, 'utf8')).toContain(
+      'run_command: "bun run start:scheduler"',
+    );
+  });
+
+  test('emits the email group into every backend component, or the install sends nothing', () => {
+    // The API mints the token, but the drain is what sends. A group on the API alone would
+    // deploy a worker that accepts work and silently delivers none of it.
+    const result = runPrepareSpecs({
+      EMAIL_DELIVERY: 'resend',
+      EMAIL_FROM: 'Example <no-reply@example.com>',
+      EMAIL_RESEND_API_KEY: 're_live_key',
+      DO_BACKEND_WORKER_ENABLED: 'true',
+      DO_BACKEND_WORKER_NAME: 'scheduler',
+      DO_BACKEND_WORKER_RUN_COMMAND: 'bun run start:scheduler',
+      DO_BACKEND_CRON_NAME: 'session-cleanup',
+      DO_BACKEND_CRON_TASK: 'auth:sessions:cleanup',
+      DO_BACKEND_CRON_SCHEDULE: '0 3 * * *',
+    });
+
+    expect(result.status).toBe(0);
+    const spec = readFileSync(backendSpecPath, 'utf8');
+
+    // Three components, so three copies of the driver key and of the origin the links use.
+    expect(spec.match(/key: EMAIL_DELIVERY/g)).toHaveLength(3);
+    expect(spec.match(/key: WEBAPP_ORIGIN/g)).toHaveLength(3);
+    // The credential is a secret; the sender address is not.
+    expect(spec).toContain('key: EMAIL_RESEND_API_KEY');
+    expect(spec).toMatch(/key: EMAIL_RESEND_API_KEY\n\s+value: "re_live_key"\n\s+scope: RUN_TIME\n\s+type: SECRET/);
+    expect(spec).toMatch(/key: EMAIL_FROM\n\s+value: "Example <no-reply@example.com>"\n\s+scope: RUN_TIME\n\s+type: GENERAL/);
+  });
+
+  test('an install with no email provider gets no email keys at all', () => {
+    const result = runPrepareSpecs({});
+
+    expect(result.status).toBe(0);
+    expect(readFileSync(backendSpecPath, 'utf8')).not.toContain('key: EMAIL_');
+  });
+
+  test('refuses a half-configured email group instead of deploying a silent install', () => {
+    // Without the API key the backend would refuse to start; without this check the operator
+    // discovers that from a crash loop after the migration job has already run.
+    const result = runPrepareSpecs({
+      EMAIL_DELIVERY: 'resend',
+      EMAIL_FROM: 'no-reply@example.com',
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).toContain('EMAIL_RESEND_API_KEY');
+  });
+
+  test('refuses provider credentials that no driver would read', () => {
+    const result = runPrepareSpecs({ EMAIL_RESEND_API_KEY: 're_live_key' });
+
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).toContain('EMAIL_DELIVERY');
+  });
+
+  test('refuses an email group the backend would reject at boot', () => {
+    // Presence is not enough. A spec that applies and then crash-loops every container is worse
+    // than one that never generates, because the PRE_DEPLOY migration has already run by then.
+    const base = {
+      EMAIL_DELIVERY: 'postbox',
+      EMAIL_FROM: 'no-reply@example.com',
+      EMAIL_POSTBOX_ACCESS_KEY_ID: 'YCAJEtest',
+      EMAIL_POSTBOX_SECRET_ACCESS_KEY: 'YCPtest',
+    };
+
+    const malformedSender = runPrepareSpecs({ ...base, EMAIL_FROM: 'Example App' });
+    expect(malformedSender.status).not.toBe(0);
+    expect(`${malformedSender.stdout}\n${malformedSender.stderr}`).toContain('EMAIL_FROM');
+
+    // The scheme-less form a console copy-paste produces.
+    const schemeless = runPrepareSpecs({
+      ...base,
+      EMAIL_POSTBOX_ENDPOINT: 'postbox.cloud.yandex.net',
+    });
+    expect(schemeless.status).not.toBe(0);
+    expect(`${schemeless.stdout}\n${schemeless.stderr}`).toContain('EMAIL_POSTBOX_ENDPOINT');
+
+    const withPath = runPrepareSpecs({
+      ...base,
+      EMAIL_POSTBOX_ENDPOINT: 'https://postbox.cloud.yandex.net/v2/email',
+    });
+    expect(withPath.status).not.toBe(0);
+    expect(`${withPath.stdout}\n${withPath.stderr}`).toContain('origin only');
+
+    // The optional keys are validated too: they are emitted into the spec, and the backend
+    // refuses them by name at boot exactly like the required ones.
+    const badReplyTo = runPrepareSpecs({ ...base, EMAIL_REPLY_TO: 'Support Desk' });
+    expect(badReplyTo.status).not.toBe(0);
+    expect(`${badReplyTo.stdout}\n${badReplyTo.stderr}`).toContain('EMAIL_REPLY_TO');
+
+    // Above the schema ceiling, which is pinned below the outbox's per-attempt deadline.
+    const longTimeout = runPrepareSpecs({ ...base, EMAIL_REQUEST_TIMEOUT_MS: '30000' });
+    expect(longTimeout.status).not.toBe(0);
+    expect(`${longTimeout.stdout}\n${longTimeout.stderr}`).toContain('EMAIL_REQUEST_TIMEOUT_MS');
+
+    // A credential belonging to the other provider is refused rather than dropped in silence.
+    const foreign = runPrepareSpecs({ ...base, EMAIL_RESEND_API_KEY: 're_live_key' });
+    expect(foreign.status).not.toBe(0);
+    expect(`${foreign.stdout}\n${foreign.stderr}`).toContain('EMAIL_RESEND_API_KEY');
+
+    // But the other provider's *endpoint and region* are not refused, because the backend does
+    // not refuse them either - they carry schema defaults, so it cannot tell a set one from a
+    // defaulted one. backend/.env.example ships both non-empty, so refusing here would block any
+    // operator whose shell has their backend env loaded, with an error blaming the backend.
+    const inheritedDefaults = runPrepareSpecs({
+      EMAIL_DELIVERY: 'resend',
+      EMAIL_FROM: 'no-reply@example.com',
+      EMAIL_RESEND_API_KEY: 're_live_key',
+      EMAIL_POSTBOX_ENDPOINT: 'https://postbox.cloud.yandex.net',
+      EMAIL_POSTBOX_REGION: 'ru-central1',
+    });
+    expect(inheritedDefaults.status).toBe(0);
+    // And they do not leak into the Resend spec.
+    expect(readFileSync(backendSpecPath, 'utf8')).not.toContain('EMAIL_POSTBOX_ENDPOINT');
+
+    // And the well-formed versions still generate.
+    expect(runPrepareSpecs({ ...base, EMAIL_FROM: 'Example App <no-reply@example.com>' }).status).toBe(0);
+    expect(
+      runPrepareSpecs({ ...base, EMAIL_REPLY_TO: 'support@example.com', EMAIL_REQUEST_TIMEOUT_MS: '8000' })
+        .status,
+    ).toBe(0);
+  });
+
+  test('refuses the console sink, which prints instead of sending', () => {
+    const result = runPrepareSpecs({ EMAIL_DELIVERY: 'console' });
+
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).toContain('console');
   });
 
   test('rejects a scheduled job whose name is not in the registry', () => {

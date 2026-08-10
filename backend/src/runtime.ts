@@ -2,7 +2,7 @@ import 'dotenv/config'
 
 import { createBackgroundTasks, type BackgroundTasks } from './background-tasks'
 import { createPrisma, type DbClient } from './db'
-import { createEmailDelivery, type EmailDelivery } from './email/service'
+import { createEmailDelivery, type EmailDelivery } from './email'
 import { loadBackgroundEnv, loadEnv, type AppEnv } from './env'
 import { createPrivateStorage, type PrivateStorageRuntime } from './storage'
 

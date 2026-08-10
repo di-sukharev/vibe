@@ -124,6 +124,15 @@ export type PasswordResetNotifier = {
     signal: AbortSignal,
   ): Promise<void>
   sendPasswordChanged(input: { email: string }, signal: AbortSignal): Promise<void>
+  /**
+   * True when a send failed in a way no retry can fix, so compensation has to happen now.
+   *
+   * The application layer cannot answer this itself: only the notifier knows what its transport's
+   * failures mean, and asking it here keeps this layer free of both the email module and the task
+   * outbox. Without it a permanently rejected address would leave a live reset token behind that
+   * nobody will ever receive, because the retry that would have cleaned it up never runs.
+   */
+  isPermanentFailure(error: unknown): boolean
 }
 
 /**

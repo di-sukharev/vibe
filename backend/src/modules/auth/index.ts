@@ -1,5 +1,5 @@
 import type { DbClient } from '../../db'
-import type { EmailDelivery } from '../../email/service'
+import type { EmailDelivery } from '../../email'
 import type { AppEnv } from '../../env'
 import type { BackendRuntime } from '../../runtime'
 import { AuthService } from './application/auth-service'

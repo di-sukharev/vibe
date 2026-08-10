@@ -18,13 +18,20 @@ export type ScheduleEntry = {
 }
 
 /**
- * Empty on purpose. This process is ready but idle until a product needs recurring work, so an
- * install that never schedules anything pays nothing for it.
+ * What this process runs, and the worked example for adding your own.
  *
- * Uncomment the example (or add your own) to switch it on, then run the process wherever it
- * belongs: a VPS under systemd or Docker, or a cloud worker component. See docs/BACKGROUND_JOBS.md.
+ * Deploying it is still a choice: a VPS under systemd or Docker, or a cloud worker component. An
+ * install that never deploys it queues password-reset emails that nobody sends. See
+ * docs/BACKGROUND_JOBS.md, "Running the drain".
  */
 export const schedules: ScheduleEntry[] = [
+  // Every minute, because the work in the queue is a password-reset email and a link that
+  // arrives a quarter of an hour late is a broken reset. `TASK_OUTBOX_MAX_RUNTIME_MS` defaults to
+  // 55s precisely so one pass finishes inside one tick, and `protect` below stops a slow pass
+  // from overlapping itself. `timeoutMs` is deliberately left at the 15-minute default: an
+  // operator may raise the pass budget to ten minutes, and a lock shorter than the run it guards
+  // would expire mid-pass and let another instance in.
+  { expression: '* * * * *', job: 'outbox:drain' },
   // { expression: '0 3 * * *', job: 'auth:sessions:cleanup' },
 ]
 
@@ -105,6 +112,7 @@ export async function main() {
   const { jobs, stop: stopSchedules } = startSchedules(runtime)
 
   if (jobs.length === 0) {
+    // Only reachable once a project empties `schedules`, which is a legitimate thing to do.
     // Nothing to wait for, so do not linger as a process that a supervisor will restart forever.
     console.log(
       'Scheduler started with no schedules. Add entries to `schedules` in src/scheduler.ts; see docs/BACKGROUND_JOBS.md.',

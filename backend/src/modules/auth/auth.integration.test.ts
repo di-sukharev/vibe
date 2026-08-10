@@ -4,7 +4,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:tes
 
 import { createApp } from '../../app'
 import { createPrisma, type DbClient } from '../../db'
-import type { EmailDelivery, EmailMessage } from '../../email/service'
+import type { EmailDelivery, EmailMessage } from '../../email'
 import { loadEnv } from '../../env'
 import { drainTaskOutbox } from '../../outbox'
 import type { BackendRuntime } from '../../runtime'
@@ -288,6 +288,7 @@ maybeDescribe('auth API integration', () => {
   test('resets a password with a single-use token and revokes existing sessions', async () => {
     const messages: EmailMessage[] = []
     const emailDelivery: EmailDelivery = {
+      driver: 'console',
       configured: true,
       send: async (message) => {
         messages.push(message)

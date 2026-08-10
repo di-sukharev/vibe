@@ -529,3 +529,150 @@ describe('private storage env', () => {
     ).toThrow('origin only')
   })
 })
+
+describe('email env', () => {
+  const base = {
+    DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
+    JWT_SECRET: '12345678901234567890123456789012',
+    WEBAPP_ORIGIN: 'http://localhost:5173',
+  }
+  const resend = {
+    EMAIL_DELIVERY: 'resend',
+    EMAIL_FROM: 'Example <no-reply@example.com>',
+    EMAIL_RESEND_API_KEY: 're_test_key',
+  }
+  const postbox = {
+    EMAIL_DELIVERY: 'postbox',
+    EMAIL_FROM: 'no-reply@example.com',
+    EMAIL_POSTBOX_ACCESS_KEY_ID: 'YCAJEtest',
+    EMAIL_POSTBOX_SECRET_ACCESS_KEY: 'YCPtest',
+  }
+
+  test('sends nothing by default, so a fresh install cannot leak mail it never configured', () => {
+    const env = loadEnv(base)
+
+    expect(env.EMAIL_DELIVERY).toBe('disabled')
+    expect(env.EMAIL_FROM).toBeUndefined()
+    expect(env.EMAIL_REQUEST_TIMEOUT_MS).toBe(10_000)
+  })
+
+  test('provider endpoints and region have working defaults', () => {
+    const env = loadEnv({ ...base, ...postbox })
+
+    expect(env.EMAIL_POSTBOX_ENDPOINT).toBe('https://postbox.cloud.yandex.net')
+    expect(env.EMAIL_POSTBOX_REGION).toBe('ru-central1')
+    expect(loadEnv({ ...base, ...resend }).EMAIL_RESEND_ENDPOINT).toBe('https://api.resend.com')
+  })
+
+  test('requires the whole provider group, naming every key that is missing', () => {
+    for (const [group, keys] of [
+      [postbox, ['EMAIL_FROM', 'EMAIL_POSTBOX_ACCESS_KEY_ID', 'EMAIL_POSTBOX_SECRET_ACCESS_KEY']],
+      [resend, ['EMAIL_FROM', 'EMAIL_RESEND_API_KEY']],
+    ] as const) {
+      for (const omitted of keys) {
+        const partial: Record<string, string> = { ...base, ...group }
+        delete partial[omitted]
+        expect(() => loadEnv(partial)).toThrow(omitted)
+      }
+    }
+  })
+
+  test('refuses credentials the selected driver would silently ignore', () => {
+    expect(() => loadEnv({ ...base, ...resend, EMAIL_POSTBOX_ACCESS_KEY_ID: 'YCAJEtest' })).toThrow(
+      'EMAIL_POSTBOX_ACCESS_KEY_ID',
+    )
+    expect(() => loadEnv({ ...base, ...postbox, EMAIL_RESEND_API_KEY: 're_test_key' })).toThrow(
+      'EMAIL_RESEND_API_KEY',
+    )
+    expect(() => loadEnv({ ...base, EMAIL_RESEND_API_KEY: 're_test_key' })).toThrow(
+      'EMAIL_RESEND_API_KEY',
+    )
+  })
+
+  test('allows the shared settings under any driver, so switching provider is a one-line edit', () => {
+    // EMAIL_FROM and friends are inert without a provider. Forbidding them would only make
+    // flipping EMAIL_DELIVERY between console and resend a multi-line change.
+    const env = loadEnv({ ...base, EMAIL_DELIVERY: 'console', EMAIL_FROM: 'a@example.com' })
+
+    expect(env.EMAIL_FROM).toBe('a@example.com')
+  })
+
+  test('refuses a sender that is not an address or a display-name address', () => {
+    for (const from of ['not-an-address', 'a@b', 'Name <a@b@c.com>', 'a@example.com, b@example.com', 'Bob <a@x.com> <b@y.com>']) {
+      expect(() => loadEnv({ ...base, ...resend, EMAIL_FROM: from })).toThrow('EMAIL_FROM')
+    }
+
+    expect(loadEnv({ ...base, ...resend, EMAIL_FROM: 'a@example.com' }).EMAIL_FROM).toBe('a@example.com')
+    expect(() => loadEnv({ ...base, ...resend, EMAIL_REPLY_TO: 'nope' })).toThrow('EMAIL_REPLY_TO')
+  })
+
+  test('requires WEBAPP_ORIGIN, because the provider sends links a user has to be able to open', () => {
+    // Without it the reset link is built from CORS_ORIGINS[0], which in a background runner is
+    // not the browser app at all. Better to refuse at startup than to send a dead link.
+    const withoutOrigin: Record<string, string> = { ...base, ...resend }
+    delete withoutOrigin.WEBAPP_ORIGIN
+
+    expect(() => loadEnv(withoutOrigin)).toThrow('WEBAPP_ORIGIN')
+    // Still optional while nothing is being sent.
+    expect(loadEnv({ DATABASE_URL: base.DATABASE_URL, JWT_SECRET: base.JWT_SECRET }).WEBAPP_ORIGIN).toBeUndefined()
+  })
+
+  test('a provider is allowed in production while the console sink is not', () => {
+    const production = {
+      ...base,
+      NODE_ENV: 'production',
+      JWT_SECRET: 'a'.repeat(63) + 'b',
+      COOKIE_SECURE: 'true',
+      CORS_ORIGINS: 'https://app.example.com',
+      WEBAPP_ORIGIN: 'https://app.example.com',
+      PRIVATE_STORAGE_DRIVER: 's3',
+      PRIVATE_STORAGE_REGION: 'ru-central1',
+      PRIVATE_STORAGE_BUCKET: 'uploads',
+      PRIVATE_STORAGE_ENDPOINT: 'https://storage.yandexcloud.net',
+      PRIVATE_STORAGE_ACCESS_KEY_ID: 'key',
+      PRIVATE_STORAGE_SECRET_ACCESS_KEY: 'secret',
+      PRIVATE_STORAGE_ALLOW_REMOTE_ENDPOINT: 'true',
+    }
+
+    expect(loadEnv({ ...production, ...postbox }).EMAIL_DELIVERY).toBe('postbox')
+    expect(() => loadEnv({ ...production, EMAIL_DELIVERY: 'console' })).toThrow('EMAIL_DELIVERY')
+    // Disabled stays legitimate: an install with no email is a real install.
+    expect(loadEnv(production).EMAIL_DELIVERY).toBe('disabled')
+  })
+
+  test('refuses an endpoint that would crash the driver at boot instead of at the first send', () => {
+    // `new URL` runs while createBackendRuntime builds the driver, so a scheme-less value - the
+    // form a console copy-paste produces - would take down the API and every runner with a
+    // TypeError naming no variable at all.
+    for (const endpoint of ['postbox.cloud.yandex.net', 'ftp://postbox.cloud.yandex.net', 'not a url']) {
+      expect(() => loadEnv({ ...base, ...postbox, EMAIL_POSTBOX_ENDPOINT: endpoint })).toThrow(
+        'EMAIL_POSTBOX_ENDPOINT',
+      )
+    }
+
+    expect(() =>
+      loadEnv({ ...base, ...resend, EMAIL_RESEND_ENDPOINT: 'https://api.resend.com/emails' }),
+    ).toThrow('EMAIL_RESEND_ENDPOINT')
+
+    // A trailing slash is tolerated, because the driver strips it before appending its path.
+    expect(
+      loadEnv({ ...base, ...postbox, EMAIL_POSTBOX_ENDPOINT: 'https://postbox.example.com/' })
+        .EMAIL_POSTBOX_ENDPOINT,
+    ).toBe('https://postbox.example.com/')
+  })
+
+  test('the console sink survives a background runner, which reports itself as secure', () => {
+    // A background process sets COOKIE_SECURE=true because it serves no browser. Gating the
+    // console refusal on that instead of NODE_ENV would break local development on every branch
+    // whose runners do so.
+    const runner = {
+      ...base,
+      JWT_SECRET: 'a'.repeat(63) + 'b',
+      COOKIE_SECURE: 'true',
+      CORS_ORIGINS: 'https://app.example.com',
+      WEBAPP_ORIGIN: 'https://app.example.com',
+    }
+
+    expect(loadEnv({ ...runner, EMAIL_DELIVERY: 'console' }).EMAIL_DELIVERY).toBe('console')
+  })
+})

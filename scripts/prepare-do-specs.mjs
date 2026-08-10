@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { getDomain } from 'tldts'
 
 import { backgroundJobNames } from '../backend/src/jobs.ts'
+import { isUsableEmailAddress } from '../backend/src/email/address.ts'
 import { parseAdminSeedConfig } from '../backend/src/modules/users/domain/admin-seed-config.ts'
 import { validateDigitalOceanCronSchedule } from './do-cron.mjs'
 import { collectionIsEmpty } from './runner-collections.mjs'
@@ -16,10 +17,11 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const scratchDir = resolve(repoRoot, '.scratch/deploy')
 const targets = new Set(['backend-initial', 'backend-final', 'webapp', 'website', 'all'])
 const target = process.argv[2]
-// A worker component restarts forever if its command exits, so refuse the two template runners
-// while their configuration is still empty. Both are legitimate once they have work to do, which
-// is why this reads the source instead of matching command strings.
-const emptyRunnerConfigurations = [
+// A worker component restarts forever if its command exits, so refuse a template runner whose
+// configuration is empty. The scheduler ships with an `outbox:drain` entry and is accepted out of
+// the box; the loop worker ships empty and is refused until a project adds a loop. Both stay
+// listed and the check reads the source, so a project that empties `schedules` is caught too.
+const templateRunners = [
   {
     command: 'bun run start:worker',
     source: 'backend/src/worker.ts',
@@ -30,6 +32,31 @@ const emptyRunnerConfigurations = [
     source: 'backend/src/scheduler.ts',
     collection: 'schedules',
   },
+]
+
+/**
+ * Every `EMAIL_*` key the generator knows about, in one table.
+ *
+ * One list rather than three, because the previous shape had the refusal ("you set a credential
+ * but no driver"), the requirement, and the emission each carrying their own subset - and a key
+ * missing from the wrong subset is silently dropped from a generated spec, or emitted in a form
+ * the backend refuses at boot. `check` mirrors what `validateEmailEnv` and the schema enforce, so
+ * a bad value fails here rather than after the PRE_DEPLOY migration has already run.
+ */
+const emailKeys = [
+  { name: 'EMAIL_FROM', drivers: ['postbox', 'resend'], required: true, check: assertEmailAddress },
+  { name: 'EMAIL_REPLY_TO', drivers: ['postbox', 'resend'], check: assertEmailAddress },
+  { name: 'EMAIL_REQUEST_TIMEOUT_MS', drivers: ['postbox', 'resend'], check: assertEmailTimeout },
+  { name: 'EMAIL_POSTBOX_ACCESS_KEY_ID', drivers: ['postbox'], required: true, secret: true },
+  { name: 'EMAIL_POSTBOX_SECRET_ACCESS_KEY', drivers: ['postbox'], required: true, secret: true },
+  // `secret` doubles as "this key is credential-shaped", which is the set env.ts refuses under
+  // another driver. The configuration set is not a secret value but is in that set, so it is
+  // marked here and filtered out of the SECRET list below.
+  { name: 'EMAIL_POSTBOX_CONFIGURATION_SET', drivers: ['postbox'], secret: true, plain: true },
+  { name: 'EMAIL_POSTBOX_ENDPOINT', drivers: ['postbox'], check: assertEmailEndpoint },
+  { name: 'EMAIL_POSTBOX_REGION', drivers: ['postbox'] },
+  { name: 'EMAIL_RESEND_API_KEY', drivers: ['resend'], required: true, secret: true },
+  { name: 'EMAIL_RESEND_ENDPOINT', drivers: ['resend'], check: assertEmailEndpoint },
 ]
 
 const knownWeakJwtSecrets = new Set(['replace-with-at-least-32-random-characters'])
@@ -146,6 +173,7 @@ if (includesBackend) {
     ),
     REPLACE_WITH_OPTIONAL_IAP_ENVS: optionalIapEnvBlock('      '),
     REPLACE_WITH_STORAGE_ENVS: storageEnvBlock(),
+    REPLACE_WITH_EMAIL_ENVS: emailEnvBlock(),
     REPLACE_WITH_INITIAL_ADMIN_ENVS: initialAdminEnvBlock(),
   })
 }
@@ -701,6 +729,132 @@ function storageEnvBlock() {
     .join('\n')
 }
 
+/**
+ * The `EMAIL_*` group, for the same reason storage has one: every runner builds delivery through
+ * `createBackendRuntime`, and the runner is the process that actually sends.
+ *
+ * Empty when no provider is configured, because an install with no email is legitimate. What it
+ * refuses is the middle ground: a half-configured group would deploy an install that accepts every
+ * password-reset request, queues nothing, and silently sends nothing - invisible in the logs, in
+ * `task_outbox`, and to the user.
+ *
+ * `WEBAPP_ORIGIN` rides along rather than being asked for. It is the origin the reset links point
+ * at, `backend/src/env.ts` requires it whenever a provider is selected, and the generator already
+ * knows it - leaving it to a hand edit would turn a missed variable into a crash loop after the
+ * migration job has already run.
+ */
+function emailEnvBlock() {
+  const driver = process.env.EMAIL_DELIVERY?.trim()
+
+  if (!driver || driver === 'disabled') {
+    const configuredWithoutDriver = emailKeys
+      .map((key) => key.name)
+      .filter((name) => process.env[name]?.trim())
+
+    if (configuredWithoutDriver.length > 0) {
+      throw new Error(
+        `${configuredWithoutDriver.join(', ')} is set but EMAIL_DELIVERY is not, so the deployed install would send nothing. Set EMAIL_DELIVERY=postbox or EMAIL_DELIVERY=resend, or unset these.`,
+      )
+    }
+
+    return ''
+  }
+
+  if (driver !== 'postbox' && driver !== 'resend') {
+    throw new Error(
+      `EMAIL_DELIVERY=${driver} cannot be deployed. Use 'postbox' or 'resend'; 'console' only prints messages and the backend refuses it in production.`,
+    )
+  }
+
+  const owned = emailKeys.filter((key) => key.drivers.includes(driver))
+  // Only the credential-shaped keys, matching `emailProviderKeys` in backend/src/env.ts exactly.
+  // The endpoint and region keys carry schema defaults, so the backend cannot tell a set one from
+  // a defaulted one and does not refuse them - and backend/.env.example ships them non-empty, so
+  // refusing them here would hard-block an operator whose shell has their backend env loaded.
+  const foreign = emailKeys.filter(
+    (key) => key.secret && !key.drivers.includes(driver) && process.env[key.name]?.trim(),
+  )
+
+  if (foreign.length > 0) {
+    const names = foreign.map((key) => key.name)
+    throw new Error(
+      `${names.join(', ')} ${names.length === 1 ? 'belongs' : 'belong'} to another provider, and the backend refuses ${names.length === 1 ? 'it' : 'them'} under EMAIL_DELIVERY=${driver}`,
+    )
+  }
+
+  // Report the whole gap at once, like the storage group: failing on whichever key is read first
+  // would make an operator rediscover the same error one variable at a time.
+  const missing = owned.filter((key) => key.required && !process.env[key.name]?.trim())
+  if (missing.length > 0) {
+    throw new Error(
+      `${missing.map((key) => key.name).join(', ')} ${missing.length === 1 ? 'is' : 'are'} required when EMAIL_DELIVERY is ${driver}`,
+    )
+  }
+
+  const values = { EMAIL_DELIVERY: driver, WEBAPP_ORIGIN: backendWebappUrl }
+
+  for (const key of owned) {
+    const value = process.env[key.name]?.trim()
+    if (!value) continue
+
+    key.check?.(key.name, value)
+    values[key.name] = value
+  }
+
+  for (const [name, value] of Object.entries(values)) assertSafeYamlString(name, value)
+
+  const secretNames = new Set(
+    emailKeys.filter((key) => key.secret && !key.plain).map((key) => key.name),
+  )
+
+  return Object.entries(values)
+    .map(
+      ([name, value]) =>
+        `      - key: ${name}\n        value: ${yamlString(value)}\n        scope: RUN_TIME\n        type: ${secretNames.has(name) ? 'SECRET' : 'GENERAL'}`,
+    )
+    .join('\n')
+}
+
+/** The same group with a leading newline, for the blocks that append it after storage. */
+function emailEnvBlockLine() {
+  const block = emailEnvBlock()
+
+  return block ? `\n${block}` : ''
+}
+
+/** The same rules `validateEmailEnv` applies, so the generator and the backend cannot disagree. */
+function assertEmailAddress(name, value) {
+  if (!isUsableEmailAddress(value)) {
+    throw new Error(
+      `${name} must be "addr@example.com" or "Display Name <addr@example.com>"; the backend refuses anything else at startup`,
+    )
+  }
+}
+
+function assertEmailTimeout(name, value) {
+  // The schema caps this below the outbox's per-attempt deadline; a larger value never fires.
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 14_000) {
+    throw new Error(`${name} must be a whole number of milliseconds between 1 and 14000`)
+  }
+}
+
+
+function assertEmailEndpoint(name, value) {
+  const trimmed = value.replace(/\/+$/, '')
+  let url
+  try {
+    url = new URL(trimmed)
+  } catch {
+    throw new Error(`${name} must be a valid URL, including the scheme`)
+  }
+
+  if (!['http:', 'https:'].includes(url.protocol)) throw new Error(`${name} must use http or https`)
+  if (url.origin !== trimmed) {
+    throw new Error(`${name} must contain an origin only, not a path or query`)
+  }
+}
+
 function optionalBackendWorkersBlock() {
   const workerEnvNames = [
     'DO_BACKEND_WORKER_ENABLED',
@@ -757,7 +911,7 @@ workers:
         value: "\${${dbComponentName}.DATABASE_URL}"
         scope: RUN_TIME
         type: SECRET
-${storageEnvBlock()}
+${storageEnvBlock()}${emailEnvBlockLine()}
 ${
   runCommand === notificationWorkerRunCommand
     ? optionalExpoPushAccessTokenEnvBlock('      ')
@@ -783,7 +937,7 @@ function requiredWorkerRunCommand(name) {
   const value = requiredEnv(name)
   assertSafeYamlString(name, value)
 
-  const runner = emptyRunnerConfigurations.find((candidate) => candidate.command === value)
+  const runner = templateRunners.find((candidate) => candidate.command === value)
   if (runner && runnerHasNoWork(runner)) {
     throw new Error(
       `${name} points at '${runner.command}', but '${runner.collection}' in ${runner.source} is still empty, so the process exits immediately and App Platform would restart it forever. Add entries there first (see docs/BACKGROUND_JOBS.md) or point the worker at your own command.`,
@@ -889,7 +1043,7 @@ function backendScheduledJobBlock({ name, providerEnv, schedule, task, timeZone 
         value: "\${${dbComponentName}.DATABASE_URL}"
         scope: RUN_TIME
         type: SECRET
-${storageEnvBlock()}
+${storageEnvBlock()}${emailEnvBlockLine()}
 ${providerEnv}`
 }
 

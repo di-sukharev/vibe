@@ -16,6 +16,7 @@ const unusedPasswordResetDependencies = {
   passwordResetCooldownSeconds: 60,
   passwordResetNotifier: {
     configured: false,
+    isPermanentFailure: () => false,
     sendPasswordChanged: async () => undefined,
     sendPasswordReset: async () => undefined,
   },
@@ -280,6 +281,7 @@ test('a reset request queues exactly one task without looking the account up', a
     passwords: { hash: async () => 'hash', verify: async () => true },
     passwordResetNotifier: {
       configured: true,
+      isPermanentFailure: () => false,
       sendPasswordChanged: async () => undefined,
       sendPasswordReset: async () => undefined,
     },
@@ -307,9 +309,12 @@ test('a reset request queues exactly one task without looking the account up', a
 
 function deliveryService({
   invalidated,
+  permanent = false,
   stored,
 }: {
   invalidated: string[]
+  /** Whether the notifier reports its failure as one no retry can fix. */
+  permanent?: boolean
   stored: unknown[]
 }) {
   const rawToken = 'r'.repeat(43)
@@ -322,6 +327,7 @@ function deliveryService({
     passwords: { hash: async () => 'hash', verify: async () => true },
     passwordResetNotifier: {
       configured: true,
+      isPermanentFailure: () => permanent,
       sendPasswordChanged: async () => undefined,
       sendPasswordReset: async () => {
         throw new Error('provider unavailable')
@@ -392,6 +398,27 @@ test('the last delivery attempt invalidates the token before reporting failure',
   expect(invalidated).toEqual([`hash:${'r'.repeat(43)}`])
 })
 
+test('a permanent rejection invalidates the token on the first attempt, not the last', async () => {
+  // The drain decides a task is terminal only after the handler returns, so `finalAttempt` is
+  // still false here and always will be. Waiting for it would leave a live token behind for a
+  // link the provider has already refused to deliver.
+  const invalidated: string[] = []
+  const stored: unknown[] = []
+
+  await expect(
+    deliveryService({ invalidated, permanent: true, stored }).deliverPasswordReset(
+      { email: user.email },
+      {
+        finalAttempt: false,
+        now: new Date('2026-01-01T00:00:00.000Z'),
+        signal: new AbortController().signal,
+      },
+    ),
+  ).rejects.toThrow('provider unavailable')
+
+  expect(invalidated).toEqual([`hash:${'r'.repeat(43)}`])
+})
+
 test('a delivery the cooldown refused sends nothing', async () => {
   // Without this branch the service would email a link whose token was never persisted, while
   // the account's earlier token is still the live one - the user follows it and is told the
@@ -405,6 +432,7 @@ test('a delivery the cooldown refused sends nothing', async () => {
     passwords: { hash: async () => 'hash', verify: async () => true },
     passwordResetNotifier: {
       configured: true,
+      isPermanentFailure: () => false,
       sendPasswordChanged: async () => undefined,
       sendPasswordReset: async (input) => void sent.push(input),
     },
@@ -441,6 +469,7 @@ test('delivery to an address with no account is skipped rather than retried', as
     passwords: { hash: async () => 'hash', verify: async () => true },
     passwordResetNotifier: {
       configured: true,
+      isPermanentFailure: () => false,
       sendPasswordChanged: async () => undefined,
       sendPasswordReset: async () => undefined,
     },
@@ -484,6 +513,7 @@ test('password reset confirmation rejects invalid tokens before hashing and queu
     },
     passwordResetNotifier: {
       configured: true,
+      isPermanentFailure: () => false,
       sendPasswordChanged: async () => undefined,
       sendPasswordReset: async () => undefined,
     },

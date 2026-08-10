@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { isUsableEmailAddress } from './email/address'
+
 const booleanStringSchema = z
   .enum(['true', 'false'])
   .default('false')
@@ -89,7 +91,23 @@ const envSchema = z.object({
   SHUTDOWN_GRACE_SECONDS: z.coerce.number().int().positive().max(60).default(20),
   // Which email adapter createEmailDelivery builds. 'console' prints the message instead of
   // sending it, so password reset can be followed locally; production refuses it below.
-  EMAIL_DELIVERY: z.enum(['disabled', 'console']).default('disabled'),
+  // The provider drivers are configured by the EMAIL_* group under validateEmailEnv.
+  EMAIL_DELIVERY: z.enum(['disabled', 'console', 'postbox', 'resend']).default('disabled'),
+  EMAIL_FROM: optionalStringSchema,
+  EMAIL_REPLY_TO: optionalStringSchema,
+  // Capped below the outbox's own per-attempt deadline (`defaultTaskDeadlineMs`, 15s), so a
+  // raised value cannot be wholly inert. It is a ceiling, not a guarantee: the deadline covers the
+  // account lookup and the token write as well as the send, so at the very top of this range the
+  // drain can still abort first and report its own timeout instead of the provider's.
+  // `config.test.ts` pins the ceiling against the deadline.
+  EMAIL_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().max(14_000).default(10_000),
+  EMAIL_POSTBOX_ENDPOINT: stringWithDefault('https://postbox.cloud.yandex.net'),
+  EMAIL_POSTBOX_REGION: stringWithDefault('ru-central1'),
+  EMAIL_POSTBOX_ACCESS_KEY_ID: optionalStringSchema,
+  EMAIL_POSTBOX_SECRET_ACCESS_KEY: optionalStringSchema,
+  EMAIL_POSTBOX_CONFIGURATION_SET: optionalStringSchema,
+  EMAIL_RESEND_ENDPOINT: stringWithDefault('https://api.resend.com'),
+  EMAIL_RESEND_API_KEY: optionalStringSchema,
   // Task outbox. Defaults suit a drain running once a minute; see docs/BACKGROUND_JOBS.md.
   TASK_OUTBOX_BATCH_LIMIT: z.coerce.number().int().positive().max(1000).default(50),
   TASK_OUTBOX_MAX_RUNTIME_MS: z.coerce.number().int().positive().max(600_000).default(55_000),
@@ -155,6 +173,7 @@ const envSchema = z.object({
   validatePrivateStorageEnv(env, ctx)
   validateAppleIapEnv(env, ctx)
   validateGooglePlayIapEnv(env, ctx)
+  validateEmailEnv(env, ctx)
 })
 
 export type AppEnv = z.infer<typeof envSchema>
@@ -275,6 +294,9 @@ function validateProductionRuntime(env: z.infer<typeof envSchema>, ctx: z.Refine
     })
   }
 
+  // Deliberately gated on NODE_ENV rather than isProductionLikeRuntime: a background runner sets
+  // COOKIE_SECURE=true because it has no browser to serve, which would make every local scheduler
+  // refuse the console sink and take the one way of following a reset link locally with it.
   if (env.EMAIL_DELIVERY === 'console') {
     ctx.addIssue({
       code: 'custom',
@@ -354,6 +376,128 @@ function validateCorsOrigins(env: z.infer<typeof envSchema>, ctx: z.RefinementCt
         message: `CORS_ORIGINS must use HTTPS when COOKIE_SECURE=true: ${origin}`,
       })
     }
+  }
+}
+
+/**
+ * Credential-shaped keys that only mean something under one driver. Listed per driver so a key
+ * set under the wrong one is refused rather than silently ignored, the same rule the storage
+ * group applies to `s3StorageKeys`.
+ */
+export const emailProviderKeys = {
+  postbox: [
+    'EMAIL_POSTBOX_ACCESS_KEY_ID',
+    'EMAIL_POSTBOX_SECRET_ACCESS_KEY',
+    'EMAIL_POSTBOX_CONFIGURATION_SET',
+  ],
+  resend: ['EMAIL_RESEND_API_KEY'],
+} as const satisfies Record<'postbox' | 'resend', readonly string[]>
+
+/** The subset of the above that a driver cannot start without. */
+const requiredEmailProviderKeys = {
+  postbox: ['EMAIL_POSTBOX_ACCESS_KEY_ID', 'EMAIL_POSTBOX_SECRET_ACCESS_KEY'],
+  resend: ['EMAIL_RESEND_API_KEY'],
+} as const satisfies Record<'postbox' | 'resend', readonly string[]>
+
+/**
+ * Email is either off or fully configured; there is no half-wired state that fails at the first
+ * password reset instead of at startup.
+ *
+ * `EMAIL_FROM`, `EMAIL_REPLY_TO` and `EMAIL_REQUEST_TIMEOUT_MS` are shared and inert, so they are
+ * allowed under any driver: forbidding them would make flipping `EMAIL_DELIVERY` between
+ * `console` and a provider a multi-line edit for no safety gain. The credential-shaped keys are
+ * the opposite, and setting one under the wrong driver is an error.
+ */
+function validateEmailEnv(env: z.infer<typeof envSchema>, ctx: z.RefinementCtx) {
+  const driver = env.EMAIL_DELIVERY
+  const sending = driver === 'postbox' || driver === 'resend'
+
+  for (const [owner, keys] of Object.entries(emailProviderKeys)) {
+    if (owner === driver) continue
+
+    for (const key of keys) {
+      if (env[key as keyof typeof env] !== undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [key],
+          message: `${key} is set but EMAIL_DELIVERY is ${driver}, so it would be ignored`,
+        })
+      }
+    }
+  }
+
+  if (!sending) return
+
+  for (const key of requiredEmailProviderKeys[driver]) {
+    if (env[key as keyof typeof env] === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [key],
+        message: `${key} is required when EMAIL_DELIVERY is ${driver}`,
+      })
+    }
+  }
+
+  if (env.EMAIL_FROM === undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['EMAIL_FROM'],
+      message: `EMAIL_FROM is required when EMAIL_DELIVERY is ${driver}`,
+    })
+  }
+
+  for (const key of ['EMAIL_FROM', 'EMAIL_REPLY_TO'] as const) {
+    const value = env[key]
+    if (value !== undefined && !isUsableEmailAddress(value)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [key],
+        message: `${key} must be "addr@example.com" or "Display Name <addr@example.com>"`,
+      })
+    }
+  }
+
+  // The endpoint is parsed with `new URL` while the driver is being built, inside
+  // `createBackendRuntime`. A scheme-less value - the form a console copy-paste produces - would
+  // otherwise crash every entrypoint at boot with a TypeError naming no variable at all.
+  const endpointKey = driver === 'postbox' ? 'EMAIL_POSTBOX_ENDPOINT' : 'EMAIL_RESEND_ENDPOINT'
+  const endpoint = env[endpointKey].replace(/\/+$/, '')
+  let endpointUrl: URL | null = null
+  try {
+    endpointUrl = new URL(endpoint)
+  } catch {
+    ctx.addIssue({
+      code: 'custom',
+      path: [endpointKey],
+      message: `${endpointKey} must be a valid URL, including the scheme`,
+    })
+  }
+
+  if (endpointUrl && !['http:', 'https:'].includes(endpointUrl.protocol)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: [endpointKey],
+      message: `${endpointKey} must use http or https`,
+    })
+  } else if (endpointUrl && endpointUrl.origin !== endpoint) {
+    // The drivers append their own path, so a value carrying one would produce a URL neither the
+    // provider nor the signature agrees with.
+    ctx.addIssue({
+      code: 'custom',
+      path: [endpointKey],
+      message: `${endpointKey} must contain an origin only, not a path or query`,
+    })
+  }
+
+  // Without it the reset link is built from CORS_ORIGINS[0], which is not necessarily the browser
+  // app - and in a background process on a branch that overrides CORS_ORIGINS it is not an app at
+  // all. A link pointing at the wrong origin is a broken email, so refuse to start instead.
+  if (env.WEBAPP_ORIGIN === undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['WEBAPP_ORIGIN'],
+      message: `WEBAPP_ORIGIN is required when EMAIL_DELIVERY is ${driver}, because it builds the links inside the emails`,
+    })
   }
 }
 

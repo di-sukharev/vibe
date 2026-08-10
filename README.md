@@ -68,6 +68,7 @@ Install this repository into the project. Before cloning from a GitHub URL, ask 
 - `docs/BACKGROUND_JOBS.md` - the three ways to work off the request path, the durable task outbox, and how to run them.
 - `docs/TESTING.md` - the backend, Playwright, and Maestro testing contract.
 - `docs/LOCAL_DATABASE.md` - cross-platform local PostgreSQL setup for Windows, macOS, and Linux.
+- `docs/EMAIL.md` - transactional email: the four drivers, Postbox and Resend, and how delivery reaches the outbox.
 - `docs/STORAGE.md` - private file storage: the filesystem and S3 drivers, the local S3 container, and the upload contract.
 - `docs/SOCIAL_AUTH.md` - Apple and Google social auth setup for the Expo mobile app.
 - `docs/IAP.md` - App Store and Google Play subscriptions: how the implementation works, and how to switch it on (it ships off) or delete it.
@@ -242,7 +243,7 @@ Test runners use the separate Docker Compose `postgres_test` service and the `TE
 - `bun run test:mobile` - run mobile client tests.
 - `bun run test:storage:s3` - run the storage contract against a real local S3 server (needs Docker).
 - `bun run --cwd backend start:cron -- <job>` - run one background job once, for example `outbox:drain`; see [docs/BACKGROUND_JOBS.md](docs/BACKGROUND_JOBS.md).
-- `bun run --cwd backend start:scheduler` - run the in-repo scheduler process (empty until you add schedules).
+- `bun run --cwd backend start:scheduler` - run the in-repo scheduler process (ships with the outbox drain every minute; `bun run dev` starts it too).
 - `bun run --cwd backend start:worker` - run the loop worker process (empty until you add loops).
 - `bun run --cwd backend start:worker:notifications` - run the Expo push outbox/receipt worker.
 - `bun run deploy:do:specs` - safely generate concrete DigitalOcean specs under `.scratch/deploy`.
@@ -260,6 +261,7 @@ Test runners use the separate Docker Compose `postgres_test` service and the `TE
 
 - [backend/README.md](backend/README.md) - API, auth, Prisma, and backend validation.
 - [docs/LOCAL_DATABASE.md](docs/LOCAL_DATABASE.md) - Docker Compose PostgreSQL setup and reset workflow.
+- [docs/EMAIL.md](docs/EMAIL.md) - transactional email: the four drivers, Postbox and Resend, and how delivery reaches the outbox.
 - [docs/STORAGE.md](docs/STORAGE.md) - private file storage: the filesystem and S3 drivers, the local S3 container, and the upload contract.
 - [docs/SOCIAL_AUTH.md](docs/SOCIAL_AUTH.md) - Apple and Google mobile social auth setup.
 - [docs/IAP.md](docs/IAP.md) - App Store and Google Play subscription setup and troubleshooting.
@@ -282,7 +284,7 @@ API contracts live in `packages/contracts` and are imported by every active laye
 
 The backend follows the Product Modules flow `transport -> application -> domain/ports -> infrastructure`. Routes own HTTP representation, application services own use cases and orchestration, optional domain code owns pure policies and transitions, and context-specific infrastructure owns Prisma and provider SDKs. Cross-context imports go only through each module's public `index.ts`; API, worker, and cron entrypoints share `src/runtime.ts` for env and Prisma lifecycle.
 
-Keep the default architecture monolithic. For DigitalOcean production, the backend/API default is one `apps-s-1vcpu-1gb` App Platform container so a new project starts inside the expected low-cost budget with Managed PostgreSQL while retaining a clear scale-up path. Add backend worker or scheduled-job components from the same Docker image only when a concrete background job exists; the deployment generator refuses to deploy the scheduler or the loop worker while their lists are still empty. For real-time features, a single backend instance can own its local WebSocket connections. If the backend is horizontally scaled and users connected to different instances must receive the same chat, presence, or live events, add a managed Redis-compatible Pub/Sub broker between instances, using DigitalOcean Managed Valkey or Yandex Managed Service for Valkey, whichever hosting the checklist records.
+Keep the default architecture monolithic. For DigitalOcean production, the backend/API default is one `apps-s-1vcpu-1gb` App Platform container so a new project starts inside the expected low-cost budget with Managed PostgreSQL while retaining a clear scale-up path. Add backend worker or scheduled-job components from the same Docker image only when a concrete background job exists; the deployment generator refuses to deploy the loop worker while its list is still empty, and accepts the scheduler, which ships with the outbox drain. For real-time features, a single backend instance can own its local WebSocket connections. If the backend is horizontally scaled and users connected to different instances must receive the same chat, presence, or live events, add a managed Redis-compatible Pub/Sub broker between instances, using DigitalOcean Managed Valkey or Yandex Managed Service for Valkey, whichever hosting the checklist records.
 
 Ongoing engineering guidance lives in [AGENTS.md](AGENTS.md), [CLAUDE.md](CLAUDE.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/TESTING.md](docs/TESTING.md), and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). First-run download and product setup instructions live in this README.
 

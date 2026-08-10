@@ -65,7 +65,10 @@ export const schedules: ScheduleEntry[] = [
     )
   })
 
-  test('the shipped runners are empty, so the template never deploys a crash-looping worker', async () => {
+  test('the shipped scheduler has work and the shipped loop worker does not', async () => {
+    // One of each, deliberately: the scheduler drains the task outbox out of the box, so it is
+    // deployable as-is, while the loop worker stays empty and the deploy guard keeps refusing it
+    // until a project gives it something to do. Both directions of that guard stay covered.
     const [worker, scheduler] = await Promise.all([
       readFile(resolve(repositoryRoot, 'backend/src/worker.ts'), 'utf8'),
       readFile(resolve(repositoryRoot, 'backend/src/scheduler.ts'), 'utf8'),
@@ -74,6 +77,6 @@ export const schedules: ScheduleEntry[] = [
     expect({
       workerLoops: collectionIsEmpty(worker, 'workerLoops'),
       schedules: collectionIsEmpty(scheduler, 'schedules'),
-    }).toEqual({ workerLoops: true, schedules: true })
+    }).toEqual({ workerLoops: true, schedules: false })
   })
 })

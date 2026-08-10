@@ -4,7 +4,7 @@ import { secureHeaders } from 'hono/secure-headers'
 
 import { createBackgroundTasks, type TaskDeferrer } from './background-tasks'
 import type { DbClient } from './db'
-import { disabledEmailDelivery, type EmailDelivery } from './email/service'
+import { disabledEmailDelivery, type EmailDelivery } from './email'
 import type { AppEnv } from './env'
 import { errorResponse, handleError, validationErrorHook } from './http/errors'
 import { createFixedWindowRateLimit, createIngressSecurity } from './http/security'

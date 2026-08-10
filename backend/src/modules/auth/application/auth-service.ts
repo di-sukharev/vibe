@@ -186,7 +186,17 @@ export class AuthService {
     try {
       await passwordResetNotifier.sendPasswordReset({ email: user.email, token, expiresAt }, signal)
     } catch (error) {
-      if (finalAttempt) await repository.invalidatePasswordResetToken({ tokenHash, now })
+      // Also on a permanent failure, not only on the last attempt: the drain marks such a task
+      // terminal *after* this returns, so waiting for `finalAttempt` would mean the compensation
+      // never runs and a live token is left for a link that was never delivered.
+      // Not atomic with the failure it compensates for: if this write itself throws, it
+      // replaces the error in flight, the drain reads that as retryable, and the next attempt is
+      // swallowed by the cooldown and reported as `skipped` - leaving a live token nobody will
+      // receive. It needs a database failure inside a one-statement window and the exposure is
+      // bounded by the token's TTL, so it is accepted rather than wrapped in more machinery.
+      if (finalAttempt || passwordResetNotifier.isPermanentFailure(error)) {
+        await repository.invalidatePasswordResetToken({ tokenHash, now })
+      }
       throw error
     }
 

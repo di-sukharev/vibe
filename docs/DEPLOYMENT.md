@@ -61,7 +61,7 @@ project runs on Yandex Cloud or an own server, delete the DigitalOcean tooling i
   `bun run deploy:do:specs` mention, including the setup instructions near the top of `README.md`
   that name DigitalOcean as the supported production path.
 - `backend/README.md`: the DigitalOcean part of "Deployment", and - in "Runtime Entrypoints" - the
-  sentence about deployment generation refusing a runner whose list is empty.
+  sentence about deployment generation refusing the loop worker while its list is empty.
 - `website/README.md`: the `.do/backend-app.yaml.example` link and the
   `bun run deploy:do:specs website` command.
 - `docs/ARCHITECTURE.md`: the App Platform sizing and component guidance, the DigitalOcean half of
@@ -396,7 +396,8 @@ Keep API, worker, and cron in the same backend workspace so they share Prisma sc
 DigitalOcean App Platform supports non-routable worker components and scheduled job components in the same app spec. The committed backend template always includes the API service and `migrate` pre-deploy job. Optional worker and scheduled jobs are inserted by the generator only when explicitly configured:
 
 ```bash
-# Add the push notification worker after Expo Push is active.
+# Add the push notification worker after Expo Push is active. The generic scheduler is accepted
+# as shipped: `schedules` already drains the task outbox every minute.
 export DO_BACKEND_WORKER_ENABLED=true
 export DO_BACKEND_WORKER_RUN_COMMAND="bun run start:worker:notifications"
 # Or run the in-repo scheduler instead - but only once `schedules` in backend/src/scheduler.ts has
@@ -420,7 +421,7 @@ export DO_BACKEND_NOTIFICATION_CRON_TIME_ZONE=UTC
 bun run deploy:do:specs backend-final
 ```
 
-Use worker components only after the process has work to do. The notification worker qualifies once the app sends push notifications. For the two generic runners the generator reads `backend/src/scheduler.ts` and `backend/src/worker.ts` before accepting `bun run start:scheduler` or `bun run start:worker`: while `schedules` or `workerLoops` is still the empty list the process exits immediately and App Platform would restart it forever. Fill the list in and the same command is accepted; any other command is passed through as-is. Production should normally schedule `maintenance:process`; it removes stale auth sessions and expired password-reset tokens, redacts legacy terminal notification content, and - once subscriptions are turned on and the complete Google Play group is configured - reconciles stale stored purchase tokens in bounded batches. `auth:sessions:cleanup` remains available as a dedicated task and covers both sessions and reset tokens. `billing:google-play:reconcile` exists only after subscriptions are turned on (docs/IAP.md); spec generation rejects it until then, because scheduling an unregistered task deploys a job that fails on every run.
+Use worker components only after the process has work to do. The notification worker qualifies once the app sends push notifications. For the two generic runners the generator reads `backend/src/scheduler.ts` and `backend/src/worker.ts` before accepting `bun run start:scheduler` or `bun run start:worker`. `schedules` ships with the outbox drain, so the scheduler is accepted as-is; `workerLoops` ships empty, so `bun run start:worker` is refused - that process would exit immediately and App Platform would restart it forever. Fill the list in and the same command is accepted, and emptying `schedules` makes the scheduler refused in turn; any other command is passed through as-is. Production should normally schedule `maintenance:process`; it removes stale auth sessions and expired password-reset tokens, redacts legacy terminal notification content, and - once subscriptions are turned on and the complete Google Play group is configured - reconciles stale stored purchase tokens in bounded batches. `auth:sessions:cleanup` remains available as a dedicated task and covers both sessions and reset tokens. `billing:google-play:reconcile` exists only after subscriptions are turned on (docs/IAP.md); spec generation rejects it until then, because scheduling an unregistered task deploys a job that fails on every run.
 
 Choose one notification-processing topology explicitly:
 
@@ -439,6 +440,24 @@ The generator enforces the current optional-env ownership explicitly:
 Worker and cron components receive neither `JWT_SECRET` nor cookie/CORS settings. Their background runtime loader uses a public non-signing compatibility value internally for shared module typing, so compromise of a background component cannot disclose the API key used to mint access or offer-code tokens.
 
 `ENABLE_TEST_PUSH` accepts only `true` or `false` during spec generation and is always API-only; delivery still belongs to the notification worker or cron.
+
+An install that sends email exports the `EMAIL_*` group before generating the spec:
+
+```bash
+export EMAIL_DELIVERY=resend            # or postbox
+export EMAIL_FROM="Example <no-reply@example.com>"
+export EMAIL_RESEND_API_KEY=re_...
+```
+
+The generator emits them into the API, the worker, and the cron component alike, and adds
+`WEBAPP_ORIGIN` itself from the webapp URL you already supplied - every runner builds delivery
+through `createBackendRuntime`, and the runner is the process that actually sends, so a group on
+the API alone would deploy an install that accepts every reset request and delivers none of them.
+The credentials are marked `SECRET`. A half-configured group is refused at generation rather than
+becoming a crash loop after the migration job has already run, and `EMAIL_DELIVERY=console` is
+refused outright. Leave the group unset and no email keys are emitted at all: an install with no
+email is a legitimate install. See [EMAIL.md](EMAIL.md) for the provider groups and the failure
+contract.
 
 That floor decides how the task outbox runs here. A password-reset email arriving fifteen minutes
 after the user asked for it is not acceptable, so an install that wires an email provider must run

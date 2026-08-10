@@ -150,6 +150,7 @@ Deployment is often deferred at install time, which leaves these rows `_unanswer
 The user is a product owner, not an engineer. These are engineering decisions the agent owns, makes, and explains only in product terms:
 
 - Which browser surface a feature belongs to (`website` for SEO/public, `webapp` for behind-login).
+- Which email provider the recorded hosting implies: Yandex Cloud means Postbox, anything else means Resend. Ask where the users are, not which mail service the owner prefers.
 - SSG plus build-time backend data and rebuild/redeploy for public product information unless a recorded freshness or personalization need requires runtime rendering.
 - One browser checkout in authenticated `webapp`; `website` may hand off a local cart but never owns payment. Mobile payment UI stays native and separate.
 - Monolithic backend; no microservices during setup.
@@ -176,7 +177,7 @@ A capability with no row is `absent` by default. Add the row instead of assuming
 | --- | --- | --- |
 | Auth (email + password) | included | Template baseline. |
 | Admin roles | included | Roles and seeding in `backend`; admin UI in `webapp`. |
-| Password reset email delivery | available | The flow is built and durable - a request queues a `task_outbox` row - but `createEmailDelivery` in `backend/src/email/service.ts` returns the disabled adapter, so nothing is sent. Needs a provider **and** a runner for `outbox:drain`. `EMAIL_DELIVERY=console` prints messages locally. |
+| Password reset email delivery | included | Two providers behind one port, Yandex Cloud Postbox and Resend, selected by `EMAIL_DELIVERY`. It defaults to `disabled`, so a fresh install sends nothing and queues nothing; `console` prints messages locally. Delivery is durable: a request queues a `task_outbox` row and the shipped scheduler drains it every minute. Production needs an account with a provider and a deployed runner. Email is a backend concern; the mobile app never sends. See `docs/EMAIL.md`. |
 | File/media storage | included | Private uploads end to end, with user avatars as the worked example. Stores on local disk by default and on any S3-compatible bucket via `PRIVATE_STORAGE_*`, with no code change between them. Web only; the mobile app has no upload UI yet. See `docs/STORAGE.md`. |
 | Website build-time backend data | absent | The baseline landing content is repository-owned; add a shared public DTO and build fetch only when `website` needs database-backed information. |
 | Automatic SSG rebuild | absent | Durable desired/published revision state, single-flight deployment reconciliation, immutable atomic/blue-green release promotion, public-marker verification, and a provider adapter are not implemented. Yandex additionally needs a separate builder/upload component. See `docs/WEB_SURFACES.md`. |
@@ -186,7 +187,7 @@ A capability with no row is `absent` by default. Add the row instead of assuming
 | Push notifications | available | Expo Push is wired but inert until the project has an EAS project id and configured credentials. |
 | Social sign-in (Apple / Google) | available | Implemented but switched off: the route is not mounted and the buttons are not rendered. Turn on or delete per `docs/SOCIAL_AUTH.md`. |
 | Real-time / WebSockets | absent | Requires an explicit product need. |
-| Background jobs | available | Jobs live in `backend/src/jobs.ts` and already include `auth:sessions:cleanup`, `uploads:pending:cleanup`, and `outbox:drain`, but nothing runs them on a schedule yet. Pick a runner per `docs/BACKGROUND_JOBS.md`; until then stale sessions, expired reset tokens, and abandoned uploads are never deleted, and queued tasks are never delivered. Once a minute where the hosting allows it; DigitalOcean scheduled jobs floor at 15 minutes, so an install that sends email needs the worker component. |
+| Background jobs | included | Jobs live in `backend/src/jobs.ts` and include `auth:sessions:cleanup`, `uploads:pending:cleanup`, and `outbox:drain`. The shipped `schedules` in `backend/src/scheduler.ts` runs `outbox:drain` every minute, and `bun run dev` starts that process alongside the API. Deploying it is still a choice - a DigitalOcean worker component, a Yandex VM, or systemd - and nothing runs on a timer in production until you do. `auth:sessions:cleanup` needs a schedule of its own or stale sessions and expired reset tokens are never deleted. `workerLoops` stays empty. See `docs/BACKGROUND_JOBS.md`. |
 | Durable task outbox | included | `task_outbox` in PostgreSQL with handlers in `backend/src/outbox/handlers.ts`, drained by `outbox:drain`. Ships with the password-reset emails as its only producers, and stays empty until something enqueues. Adding a task type is a code change, never a migration. |
 
 ## 11. Environment checks

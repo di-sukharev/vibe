@@ -158,6 +158,7 @@ test('intake documentation keeps pointing at the install checklist it delegates 
   // Installed projects delete documentation they do not use, so only the always-present
   // entry points are required; the optional runbooks are checked when they still exist.
   const optionalIntakeReferences = [
+    'docs/EMAIL.md',
     'docs/STORAGE.md',
     'docs/DEPLOYMENT.md',
     'docs/YANDEX_CLOUD.md',
@@ -425,4 +426,98 @@ test('assertTestDatabaseUrl accepts non-test databases with an intentional overr
       'postgresql://superuser:superpassword@localhost:54329/web_app_demo?schema=public',
     ),
   ).not.toThrow()
+})
+
+test('the AWS signer stays a single copy, which is what the exact pin in backend buys', async () => {
+  // `backend/src/email/postbox-delivery.ts` signs Postbox requests with `@smithy/signature-v4`,
+  // pinned to the exact version the AWS SDK has already resolved for S3 storage. Any range wide
+  // enough to admit a newer release makes the package manager hoist a second signer and a second
+  // 5 MB `@smithy/core`, then push the SDK's copies into nineteen nested duplicates - and every
+  // other check stays green while the image grows by ~95 MB. This is the only thing that notices.
+  const copies = async (packageName) => {
+    const found = []
+    const walk = async (directory, depth) => {
+      if (depth > 6) return
+      const entries = await readdir(directory, { withFileTypes: true }).catch(() => [])
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue
+        const path = resolve(directory, entry.name)
+        if (entry.name === 'node_modules') {
+          if (await access(resolve(path, packageName)).then(() => true, () => false)) {
+            found.push(resolve(path, packageName))
+          }
+          await walk(path, depth + 1)
+          continue
+        }
+        if (entry.name.startsWith('.') || entry.name === 'dist') continue
+        if (depth === 0 || directory.includes('node_modules')) await walk(path, depth + 1)
+      }
+    }
+    await walk(repositoryRoot, 0)
+
+    return found
+  }
+
+  // `@smithy/core` is the 5 MB half and must be a single copy - that is the whole cost the pin
+  // exists to avoid. The signer itself is 220 KB, and the package manager may lay several
+  // identical copies out for the SDK's own subtree; what matters there is that every copy is the
+  // *same version*, because a second version is the symptom that the pin has drifted from what
+  // the SDK resolved and that `@smithy/core` is about to split with it.
+  expect({ packageName: '@smithy/core', copies: (await copies('@smithy/core')).length }).toEqual({
+    packageName: '@smithy/core',
+    copies: 1,
+  })
+
+  const signerVersions = new Set()
+  for (const path of await copies('@smithy/signature-v4')) {
+    signerVersions.add(JSON.parse(await readFile(resolve(path, 'package.json'), 'utf8')).version)
+  }
+
+  expect([...signerVersions]).toHaveLength(1)
+
+  // And the pin itself is exact, because a caret here is what reintroduces the duplication.
+  const backendPackage = JSON.parse(
+    await readFile(resolve(repositoryRoot, 'backend/package.json'), 'utf8'),
+  )
+
+  expect(backendPackage.dependencies['@smithy/signature-v4']).toMatch(/^\d+\.\d+\.\d+$/)
+  // And the pin is the version actually installed, not a stale one the resolver worked around.
+  expect([...signerVersions]).toEqual([backendPackage.dependencies['@smithy/signature-v4']])
+})
+
+test('the deploy generator refuses every email credential the env schema knows about', async () => {
+  // Two lists of the same names: `emailProviderKeys` in backend/src/env.ts decides which keys are
+  // refused under the wrong driver, and `emailEnvBlock()` in prepare-do-specs.mjs decides which
+  // ones mean "you meant to configure email". A key present in the first and missing from the
+  // second is silently dropped from a generated spec, which is how an install deploys with a
+  // provider half-configured and sends nothing.
+  const { emailProviderKeys } = await import('../backend/src/env.ts')
+  const generator = await readFile(resolve(repositoryRoot, 'scripts/prepare-do-specs.mjs'), 'utf8')
+  // `emailKeys` is the single table the generator refuses, requires, and emits from, so this is
+  // the list that actually decides what reaches a deployed component.
+  const block = /const emailKeys = \[([\s\S]*?)\n\]/.exec(generator)
+
+  expect(block).not.toBeNull()
+
+  const listed = new Set([...block[1].matchAll(/name: '([A-Z_]+)'/g)].map((match) => match[1]))
+
+  for (const name of Object.values(emailProviderKeys).flat()) {
+    expect({ name, listedInGenerator: listed.has(name) }).toEqual({ name, listedInGenerator: true })
+  }
+})
+
+test('the E2E backend blanks every email credential the env schema would refuse', async () => {
+  // webapp/playwright.config.ts pins EMAIL_DELIVERY=disabled and blanks the credentials, because
+  // a value inherited from the developer's shell or backend/.env is refused at startup - and that
+  // surfaces as an opaque 120-second webServer timeout with nothing pointing at email. A key added
+  // to `emailProviderKeys` and not to that list reintroduces it silently.
+  const { emailProviderKeys } = await import('../backend/src/env.ts')
+  const config = await readFile(resolve(repositoryRoot, 'webapp/playwright.config.ts'), 'utf8')
+
+  for (const name of Object.values(emailProviderKeys).flat()) {
+    expect({ name, blankedForE2E: new RegExp(`${name}:\\s*''`).test(config) }).toEqual({
+      name,
+      blankedForE2E: true,
+    })
+  }
 })
