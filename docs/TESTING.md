@@ -72,7 +72,7 @@ No runner uses `docker compose down`. It cannot be scoped to a service, so it wo
 local storage container and delete the volume holding a developer's uploads as a side effect of
 running tests. Teardown removes the test database service and its named volume explicitly instead.
 
-This template does not ship with GitHub Actions or other hosted CI/CD. Run the relevant checks locally after each task, starting with the smallest set that meaningfully covers the changed surface and expanding only when risk justifies it.
+This template does not ship with GitHub Actions or another hosted validation runner. Run the relevant checks locally after each task, starting with the smallest set that meaningfully covers the changed surface and expanding only when risk justifies it. Production releases and activated SSG rebuilds follow the selected hosting provider's deployment runbook; they do not run task validation.
 
 ## Webapp E2E
 

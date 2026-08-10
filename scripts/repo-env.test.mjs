@@ -96,6 +96,21 @@ test('the task handler registry does not drag a product module into every proces
   expect(heavyImports).toEqual([])
 })
 
+test('task validation stays local and has no GitHub workflow or CI-only Playwright behavior', async () => {
+  const workflowDirectory = resolve(repositoryRoot, '.github/workflows')
+  const workflows = await readdir(workflowDirectory).catch((error) => {
+    if (error.code === 'ENOENT') return []
+    throw error
+  })
+  const playwright = await readFile(resolve(repositoryRoot, 'webapp/playwright.config.ts'), 'utf8')
+
+  expect(workflows).toEqual([])
+  expect(playwright).not.toContain('process.env.CI')
+  expect(playwright).toMatch(/forbidOnly:\s*true/)
+  expect(playwright).toMatch(/retries:\s*0/)
+  expect(playwright).toMatch(/trace:\s*'retain-on-failure'/)
+})
+
 test('hosting tooling and the command that drives it are removed together', async () => {
   // A project keeps one hosting path and deletes the others during setup. The failure that hurts
   // is a half-removal: a script entry that points at a deleted generator, or a generator with no
@@ -205,6 +220,137 @@ test('intake documentation keeps pointing at the install checklist it delegates 
   expect(ledgerRowStates.filter((state) => !ledgerStates.includes(state))).toEqual([])
 
   expect(checklist).toMatch(/^\*\*Install status:\*\*/m)
+})
+
+test('web surface contract stays mandatory for agent and commerce work', async () => {
+  const contractPath = 'docs/WEB_SURFACES.md'
+  const [
+    contract,
+    readme,
+    checklist,
+    websiteReadme,
+    webappReadme,
+    mobileReadme,
+    agents,
+    claude,
+    backgroundJobs,
+    packageJson,
+  ] =
+    await Promise.all([
+      readFile(resolve(repositoryRoot, contractPath), 'utf8'),
+      readFile(resolve(repositoryRoot, 'README.md'), 'utf8'),
+      readFile(resolve(repositoryRoot, 'CHECKLIST.md'), 'utf8'),
+      readFile(resolve(repositoryRoot, 'website/README.md'), 'utf8'),
+      readFile(resolve(repositoryRoot, 'webapp/README.md'), 'utf8'),
+      readFile(resolve(repositoryRoot, 'mobile/README.md'), 'utf8'),
+      readFile(resolve(repositoryRoot, 'AGENTS.md'), 'utf8'),
+      readFile(resolve(repositoryRoot, 'CLAUDE.md'), 'utf8'),
+      readFile(resolve(repositoryRoot, 'docs/BACKGROUND_JOBS.md'), 'utf8'),
+      readFile(resolve(repositoryRoot, 'package.json'), 'utf8'),
+    ])
+  const yandexCloud = await readFile(resolve(repositoryRoot, 'docs/YANDEX_CLOUD.md'), 'utf8').catch(
+    () => null,
+  )
+
+  for (const documentation of [agents, claude]) {
+    expect(documentation).toMatch(/always read `docs\/WEB_SURFACES\.md` first/)
+  }
+
+  const normalizeAgentFilename = (documentation) =>
+    documentation
+      .replace(/^# (?:AGENTS|CLAUDE)\.md$/m, '# AGENT_FILE.md')
+      .replace(/`(?:AGENTS|CLAUDE)\.md`/g, '`AGENT_FILE.md`')
+  expect(normalizeAgentFilename(agents)).toBe(normalizeAgentFilename(claude))
+  for (const documentation of [agents, claude]) {
+    expect(documentation).toContain(
+      'Do not create or use GitHub CI/CD, GitHub Actions, or hosted validation workflows',
+    )
+    expect(documentation).toMatch(/validation builds[\s\S]*task checks only locally/)
+    expect(documentation).toMatch(/production release or SSG rebuild[\s\S]*is not a task check/)
+    expect(documentation).toMatch(
+      /bug remains unclear after repository research[\s\S]*search the web for the exact error/,
+    )
+  }
+
+  expect(readme).toContain(`](${contractPath})`)
+  expect(readme).not.toContain('--single-branch')
+  expect(readme).toContain('bun run mobile:template:check')
+  expect(readme).toContain('bun run mobile:template:check -- --published')
+  expect(JSON.parse(packageJson).scripts['mobile:template:check']).toBe(
+    'bun scripts/check-mobile-template.mjs',
+  )
+  for (const documentation of [websiteReadme, webappReadme, mobileReadme]) {
+    expect(documentation).toContain('](../docs/WEB_SURFACES.md)')
+  }
+  expect(mobileReadme).toContain('bun run mobile:template:check')
+  expect(mobileReadme).toContain('bun run mobile:template:check -- --published')
+  expect(mobileReadme).toMatch(
+    /After first-run setup[\s\S]*do not use this template gate for product releases/,
+  )
+
+  for (const sectionName of [
+    'Surface ownership',
+    'Static website data and freshness',
+    'Browser cart and checkout',
+    'Mobile payments',
+    'Implementation checklist',
+  ]) {
+    expect(contract).toMatch(new RegExp(`^## ${sectionName}`, 'm'))
+  }
+
+  // These are the cross-surface decisions this file exists to protect. Headings and links alone
+  // would still pass if a future edit accidentally moved checkout into the website, trusted a
+  // browser total, made native payments depend on browser checkout, or replaced the durable
+  // single-flight rebuild controller with one long or order-dependent outbox attempt.
+  for (const invariant of [
+    /`website` exists for public product information and is SSG by default/,
+    /Astro fetches a public,\s+contract-validated backend snapshot while building the static output/,
+    /browser\s+payment starts from the authenticated `webapp`/,
+    /stable product\/offer\/variant identifiers\s+and quantities/,
+    /preserves the\s+imported selection across its registration\/sign-in flow/,
+    /Do not put a payment SDK[\s\S]*provider webhook in `website`/,
+    /the backend remains\s+authoritative when an order is created/,
+    /Persist durable rebuild state with at least\s+`desiredRevision`, `publishedRevision`/,
+    /at most one provider deployment may be active/,
+    /public, cache-busted revision marker/,
+    /correctness does not depend on reopening\s+a terminal outbox row/,
+    /Mobile payments are a separate presentation and transport boundary from browser checkout/,
+    /App Store and Google\s+Play subscriptions through `expo-iap`/,
+    /direct card entry, a saved-card provider flow, Apple Pay, or\s+Google Pay/,
+    /PCI-compliant payment provider's hosted UI or native SDK/,
+    /Raw\s+PAN\/CVC must never enter custom app inputs, application APIs, logs, analytics, or storage/,
+    /only the provider's opaque payment-method\/token identifiers/,
+  ]) {
+    expect(contract).toMatch(invariant)
+  }
+
+  for (const invariant of [
+    /`desiredRevision`, `publishedRevision`/,
+    /at most one provider deployment at a time/,
+    /immutable revisioned\s+artifact/,
+    /promotes it atomically or through an equivalent blue-green release/,
+    /cache-busted public\s+marker/,
+  ]) {
+    expect(backgroundJobs).toMatch(invariant)
+  }
+
+  if (yandexCloud !== null) {
+    expect(yandexCloud).toMatch(/^### Automatic website rebuild/m)
+    expect(yandexCloud).toContain('Automatic SSG rebuild is not part of the baseline Yandex path')
+    expect(yandexCloud).toMatch(/immutable revisioned prefix or release bucket/)
+    expect(yandexCloud).toMatch(/atomically\/blue-green promotes that release/)
+    expect(yandexCloud).toContain('never treat an in-place recursive upload as a safe automatic release')
+  }
+
+  expect(checklist).toMatch(/^## (?:\d+\. )?Website data and freshness/m)
+  for (const capability of [
+    'Website build-time backend data',
+    'Automatic SSG rebuild',
+    'Website cart handoff',
+    'Browser checkout / payments',
+  ]) {
+    expect(checklist).toContain(`| ${capability} |`)
+  }
 })
 
 // Reads the State column of the capability ledger table. Tolerates the table formatting a

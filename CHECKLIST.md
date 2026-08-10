@@ -2,7 +2,7 @@
 
 This file is the intake record for this repository. The installing agent fills it in during first-run setup and keeps it current afterwards.
 
-**For the agent:** ask the questions below in the user's language, in product terms, and write the answers into this file as you go. Do not start feature work until everything through *First-version capabilities* is answered. Never ask the user anything under *Decided by the agent* - make those calls yourself and explain them in product terms.
+**For the agent:** ask the questions below in the user's language, in product terms, and write the answers into this file as you go. Do not start feature work until everything through *First-version capabilities* and every conditional section activated by those answers is completed. Never ask the user anything under *Decided by the agent* - make those calls yourself and explain them in product terms.
 
 **For the product owner:** this is the record of what was decided about your project. If something here is wrong, say so - the agent treats this file as the source of truth for what your product needs.
 
@@ -78,7 +78,23 @@ This project ships private file storage with user avatars, so answer these for t
 | How long do files live after the owning record is deleted? | _unanswered_ |
 | Should filenames be visible to users, or opaque? | _unanswered_ |
 
-## 6. Payments
+## 6. Website data and freshness
+
+Answer these when `website` is active; otherwise mark the rows `n/a`. Keep product choices here and
+follow the implementation contract in `docs/WEB_SURFACES.md`.
+
+| Question | Answer |
+| --- | --- |
+| Which public product or content data comes from the backend/database at website build time? | _unanswered_ |
+| How soon after that data changes must the public website show the change? | _unanswered_ |
+| Which changes require an automatic rebuild/redeploy rather than a manual release? | _unanswered_ |
+
+The default is Astro SSG. Database-backed public data is fetched while building static output. If
+published database changes must appear automatically, implement the documented `website:rebuild`
+outbox path. SSR or request-time rendering is an exception recorded here only when the required
+freshness or personalization cannot be met by rebuild/redeploy.
+
+## 7. Payments
 
 Answer these only when payments are active above; otherwise mark the rows `n/a`. Keep the section either way, and replace the `n/a` answers if payments are added later.
 
@@ -86,11 +102,21 @@ Answer these only when payments are active above; otherwise mark the rows `n/a`.
 | --- | --- |
 | What exactly do users pay for? | _unanswered_ |
 | Recurring subscription, one-off purchase, or both? | _unanswered_ |
+| Does the public website need a local cart or offer selection before registration/sign-in? | _unanswered_ |
+| Which active surfaces need payment: browser checkout, App Store / Google Play, native card entry, Apple Pay, or Google Pay? | _unanswered_ |
 | What stops working when someone does not pay? | _unanswered_ |
 
-Whatever this project ends up with, the ledger below is what states it. App Store and Google Play subscriptions ship here as working code that is switched off: the tables are commented out, the routes are not mounted, and the paywall says so on screen. `docs/IAP.md` has both paths - how to turn them on, and what to delete if the product will never sell anything. Browser payments (Stripe and similar) are built as a new module against the answers above.
+Whatever this project ends up with, the ledger below is what states it. Read `docs/WEB_SURFACES.md`
+before implementing any payment surface. Browser checkout is built in authenticated `webapp` plus
+the backend; `website` may pass a local cart but never owns a second payment flow. The `mobile`
+template line ships App Store and Google Play subscriptions as working code that is switched off,
+and may independently add policy-compliant card, Apple Pay, or Google Pay flows when the product
+needs them. Declining a shipped payment capability means deleting its code during setup and
+recording it as `removed`. Payments are never half-present and are never reintroduced on a guess.
+`docs/IAP.md` documents both mobile paths: how to turn store subscriptions on and what to delete when
+the product will never sell them.
 
-## 7. Deployment
+## 8. Deployment
 
 | Question | Answer |
 | --- | --- |
@@ -119,11 +145,13 @@ regardless of the choice.
 
 Deployment is often deferred at install time, which leaves these rows `_unanswered_`. When the user later asks to deploy, ask the unanswered questions then and write the answers back here before following `docs/DEPLOYMENT.md`.
 
-## 8. Decided by the agent - do not ask the user
+## 9. Decided by the agent - do not ask the user
 
 The user is a product owner, not an engineer. These are engineering decisions the agent owns, makes, and explains only in product terms:
 
 - Which browser surface a feature belongs to (`website` for SEO/public, `webapp` for behind-login).
+- SSG plus build-time backend data and rebuild/redeploy for public product information unless a recorded freshness or personalization need requires runtime rendering.
+- One browser checkout in authenticated `webapp`; `website` may hand off a local cart but never owns payment. Mobile payment UI stays native and separate.
 - Monolithic backend; no microservices during setup.
 - Docker Compose for local PostgreSQL on every OS; never a native install unless the user insists.
 - Astro for `website`; Next.js only if Vercel-style ISR is a stated product requirement.
@@ -133,7 +161,7 @@ The user is a product owner, not an engineer. These are engineering decisions th
 - Test boundaries: E2E for important user journeys, integration for API/auth/persistence, unit for pure rules.
 - Libraries, file layout, naming, refactors, and validation scope.
 
-## 9. Capability ledger
+## 10. Capability ledger
 
 What this project actually contains. The agent updates it whenever a capability is added or removed. Every row carries exactly one state:
 
@@ -150,6 +178,10 @@ A capability with no row is `absent` by default. Add the row instead of assuming
 | Admin roles | included | Roles and seeding in `backend`; admin UI in `webapp`. |
 | Password reset email delivery | available | The flow is built and durable - a request queues a `task_outbox` row - but `createEmailDelivery` in `backend/src/email/service.ts` returns the disabled adapter, so nothing is sent. Needs a provider **and** a runner for `outbox:drain`. `EMAIL_DELIVERY=console` prints messages locally. |
 | File/media storage | included | Private uploads end to end, with user avatars as the worked example. Stores on local disk by default and on any S3-compatible bucket via `PRIVATE_STORAGE_*`, with no code change between them. Web only; the mobile app has no upload UI yet. See `docs/STORAGE.md`. |
+| Website build-time backend data | absent | The baseline landing content is repository-owned; add a shared public DTO and build fetch only when `website` needs database-backed information. |
+| Automatic SSG rebuild | absent | Durable desired/published revision state, single-flight deployment reconciliation, immutable atomic/blue-green release promotion, public-marker verification, and a provider adapter are not implemented. Yandex additionally needs a separate builder/upload component. See `docs/WEB_SURFACES.md`. |
+| Website cart handoff | absent | No local cart or cross-origin handoff exists. When activated, it feeds the one authenticated browser checkout defined in `docs/WEB_SURFACES.md`. |
+| Browser checkout / payments | absent | No browser checkout or payment code exists. Build it in `webapp` plus the backend, never in `website`; native store subscriptions remain the separate mobile path below. |
 | Payments / subscriptions | available | App Store + Google Play subscriptions are implemented but switched off: tables commented out, routes unmounted. Turn on or delete per `docs/IAP.md`. |
 | Push notifications | available | Expo Push is wired but inert until the project has an EAS project id and configured credentials. |
 | Social sign-in (Apple / Google) | available | Implemented but switched off: the route is not mounted and the buttons are not rendered. Turn on or delete per `docs/SOCIAL_AUTH.md`. |
@@ -157,7 +189,7 @@ A capability with no row is `absent` by default. Add the row instead of assuming
 | Background jobs | available | Jobs live in `backend/src/jobs.ts` and already include `auth:sessions:cleanup`, `uploads:pending:cleanup`, and `outbox:drain`, but nothing runs them on a schedule yet. Pick a runner per `docs/BACKGROUND_JOBS.md`; until then stale sessions, expired reset tokens, and abandoned uploads are never deleted, and queued tasks are never delivered. Once a minute where the hosting allows it; DigitalOcean scheduled jobs floor at 15 minutes, so an install that sends email needs the worker component. |
 | Durable task outbox | included | `task_outbox` in PostgreSQL with handlers in `backend/src/outbox/handlers.ts`, drained by `outbox:drain`. Ships with the password-reset emails as its only producers, and stays empty until something enqueues. Adding a task type is a code change, never a migration. |
 
-## 10. Environment checks
+## 11. Environment checks
 
 Verified by the agent during setup, not asked.
 
@@ -166,7 +198,7 @@ Verified by the agent during setup, not asked.
 - [ ] App-local `.env` files created from `.env.example`, with a locally generated `JWT_SECRET` (never committed)
 - [ ] Smallest meaningful validation run for the active surfaces
 
-## 11. After setup
+## 12. After setup
 
 - [ ] Durable answers above filled in, install status set to `completed YYYY-MM-DD`
 - [ ] Validation scope recorded for this project (which suites run before a change is called done): _unanswered_

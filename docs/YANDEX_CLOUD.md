@@ -397,9 +397,12 @@ Each backend instance should publish domain events to Valkey and subscribe to th
 
 Deploy `webapp` and fully prerendered `website` output as static websites in Yandex Object Storage. Once `website` uses SSR/on-demand rendering or Astro server islands, that surface needs an Astro adapter and must move to a Serverless Container runtime instead of static hosting. When server islands appear on cached pages or rolling deploys, generate a stable key with `astro create-key` and configure `ASTRO_KEY` as a secret in both build and runtime environments. Never commit it, expose it as `PUBLIC_*`, print it in logs, or bake it into static output.
 
+Read [WEB_SURFACES.md](WEB_SURFACES.md) before adding build-time backend data, an automatic rebuild,
+or commerce handoff. This section owns Yandex deployment mechanics, not product-surface ownership.
+
 Use shared CDN caching only for anonymous, public-equivalent website responses. Auth-dependent or personalized routes and server islands must use `private` or `no-store`, or a deliberately supported `Vary: Cookie`/`Authorization` strategy. `ASTRO_KEY` is not a cache privacy boundary.
 
-Build locally or in CI:
+Build locally:
 
 ```bash
 VITE_API_URL=https://api.example.com bun run build:webapp
@@ -423,6 +426,36 @@ Upload built assets to public website buckets:
 aws --endpoint-url=https://storage.yandexcloud.net/ s3 cp --recursive webapp/dist/ s3://<webapp-bucket>/
 aws --endpoint-url=https://storage.yandexcloud.net/ s3 cp --recursive website/dist/ s3://<website-bucket>/
 ```
+
+### Automatic website rebuild
+
+Automatic SSG rebuild is not part of the baseline Yandex path. Object Storage accepts files but
+does not build the repository, and the backend runtime image intentionally lacks the website
+source, Bun/Astro toolchain, and public-site upload credentials. Keep the capability `absent` while
+the documented local build/upload above is the only release path.
+
+If `CHECKLIST.md` requires automatic rebuilds, add a separate builder component that:
+
+- runs a versioned artifact containing the repository website workspace and pinned build toolchain;
+- exposes a private authenticated trigger to the backend provider adapter and uses a narrowly
+  scoped service account;
+- receives only a publication revision, fetches public build DTOs through server-only config, and
+  validates them before building;
+- stages the complete build under an immutable revisioned prefix or release bucket, validates it,
+  then atomically/blue-green promotes that release (or uses an equivalent provider-supported
+  switch); never treat an in-place recursive upload as a safe automatic release;
+- includes the cache-busted public revision marker in the promoted artifact, performs the required
+  CDN invalidation after promotion, and verifies the marker only after the release switch;
+- reports a durable deployment id and status so short reconcile passes can survive restarts, verify
+  the public marker, retry failures, roll back a failed promotion, clean old releases safely, and
+  schedule one follow-up when a newer revision exists.
+
+If the selected Yandex architecture cannot provide an atomic or blue-green release switch, keep
+automatic rebuild `absent`; use the documented manual release or a runtime-rendering surface
+instead of publishing mixed revisions. The `website:rebuild` outbox task coordinates revisions and
+retries; it does not run Astro or hold Object Storage credentials inside the API/worker image.
+Until this separate component is built and validated, choose manual release or record a
+runtime-rendering requirement instead of claiming automatic rebuild support.
 
 Configure Object Storage static website hosting with `index.html` as the home page. For the React SPA, also use `index.html` as the error document or configure equivalent CDN routing so route refreshes do not break client-side routing.
 

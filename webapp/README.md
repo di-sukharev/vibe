@@ -1,6 +1,6 @@
 # Webapp
 
-The CSR browser client provides authenticated, role-specific workspaces. It needs no SEO, so it stays client-side rendered; the public, SEO-facing surfaces live in the `website` workspace instead. It consumes the same API contracts as mobile and keeps server-state, form-state, auth, and role navigation centralized.
+The CSR browser client provides authenticated, role-specific workspaces. It needs no SEO, so it stays client-side rendered; the public, SEO-facing surfaces live in the `website` workspace instead. It consumes the same API contracts as mobile and keeps server-state, form-state, auth, and role navigation centralized. Read [../docs/WEB_SURFACES.md](../docs/WEB_SURFACES.md) before adding product-data handoff, carts, checkout, orders, subscriptions, entitlements, or payments.
 
 ## Project Surface Status
 
@@ -56,6 +56,15 @@ Production deployment for the browser app uses DigitalOcean App Platform Static 
 Use TanStack Query for server state, TanStack Mutation for API writes, TanStack Form for forms, and shared Zod schemas from `packages/contracts` for validation. The access token lives only in browser memory; refresh uses the HttpOnly cookie set by the backend. One browser Web Lock serializes every cookie-changing auth transition across same-origin tabs. Versioned session events make login, registration, refresh expiry, and logout invalidate stale access tokens and session-scoped caches before another principal can be applied; refresh/retry also compares JWT subjects and never repeats an authenticated operation as a different user. `src/features/auth` is the golden path: its public index exposes the provider, user context, auth UI, and an authenticated transport capability for future product APIs; its API adapter owns auth paths and refresh/retry; and the login, signup, forgot-password, and reset-password forms validate submissions with shared contracts without putting product logic in pages.
 
 Put user-specific TanStack Query keys under the `['session', ...]` prefix. Login, registration, confirmed logout, and auth expiry remove and cancel stale session scope while preserving public caches. Successful account changes notify other same-origin tabs to bootstrap from the winning HttpOnly cookie; confirmed logout and auth expiry clear their in-memory session UI. A failed server logout leaves both the HttpOnly cookie and local authenticated state intact and shows a retryable error instead of pretending the user signed out.
+
+When browser commerce is activated, this workspace owns the only browser checkout. It imports the
+public website's untrusted local selection, preserves it across registration/sign-in, returns the
+user to a role-safe `/app/checkout`, and asks the backend for an authoritative price/availability
+snapshot before starting payment. Provider redirects or wallet sheets may be part of that flow,
+but order/payment authority and webhooks stay in the backend. Keep the account minimal: add only
+checkout, purchase/subscription status, order history, and settings the product actually needs.
+The default branch does not yet contain the cart, checkout route, or browser payment module; the
+capability ledger must change before they are implemented.
 
 The route map is intentionally disjoint:
 

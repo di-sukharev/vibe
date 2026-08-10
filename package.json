@@ -40,6 +40,7 @@
     "build:backend": "bun run --cwd backend build",
     "architecture:check": "bun scripts/architecture-check.mjs",
     "lint": "bun run --cwd webapp lint && bun run --cwd mobile lint",
+    "mobile:template:check": "bun scripts/check-mobile-template.mjs",
     "deploy:do:specs": "bun scripts/prepare-do-specs.mjs",
     "storage:local:start": "bun scripts/storage-local.mjs start",
     "storage:local:status": "bun scripts/storage-local.mjs status",

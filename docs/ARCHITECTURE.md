@@ -113,7 +113,13 @@ send-fence budget. They then revoke every session and push token atomically.
 
 ## Frontend
 
-There are two browser surfaces, split by whether the pages need SEO. `website` (Astro, SSG by default, SSR/hybrid only when needed) owns public, search-indexable, and link-previewed pages: landing, marketing, content, and the public catalog of a storefront or marketplace. `webapp` (React CSR) owns screens that live behind sign-in and need no SEO: buyer account, seller/admin panels, checkout/account workflows, dashboards, settings, and authenticated tools. A marketplace normally uses both surfaces, sharing `@web-app-demo/contracts`. The native mobile app is a third client that consumes the same contracts. The decision rule the installing agent should apply is in the root [README.md](../README.md) under "Choosing `webapp` vs `website`".
+There are two browser surfaces, split by whether the pages need SEO. `website` (Astro, SSG by default, SSR/hybrid only when needed) owns public, search-indexable, and link-previewed pages: landing, marketing, content, and the public catalog of a storefront or marketplace. `webapp` (React CSR) owns screens that live behind sign-in and need no SEO: buyer account, seller/admin panels, checkout/account workflows, dashboards, settings, and authenticated tools. A marketplace normally uses both surfaces, sharing `@web-app-demo/contracts`. The native mobile app is a third client that consumes the same contracts. The decision rule the installing agent should apply is in the root [README.md](../README.md) under "Choosing `webapp` vs `website`"; the mandatory data/cart/payment ownership contract is [WEB_SURFACES.md](WEB_SURFACES.md).
+
+Browser commerce has one authenticated checkout in `webapp`: `website` may provide public product
+information and an anonymous local cart, but it cannot create payments or own order state. Mobile
+is a separate native payment boundary and may use its configured store, wallet, or card path while
+the backend keeps shared orders and entitlements authoritative. Do not route native payment through
+the public website or create parallel browser checkout implementations.
 
 The webapp and mobile app follow the same client rules:
 
@@ -171,7 +177,7 @@ Backend unit/integration tests verify auth, users/admin RBAC, billing, and notif
 
 Client E2E in this template is a happy-path smoke layer, not the place for large validation matrices. Keep negative payloads, password/JWT/session rules, and error-shape checks in backend tests. Add fast client-level tests for form validation and API state edge cases when those surfaces grow.
 
-Run `bun run architecture:check` as part of every validation ladder. The dependency-free checker reports forbidden static imports as `path:line`, has fixture tests for each rule family, and runs in CI. File length is deliberately not an architecture rule; ownership and dependency direction are.
+Run `bun run architecture:check` locally as part of every validation ladder. The dependency-free checker reports forbidden static imports as `path:line` and has fixture tests for each rule family. File length is deliberately not an architecture rule; ownership and dependency direction are.
 
 ## Prisma
 

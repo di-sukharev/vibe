@@ -234,22 +234,41 @@ push pipeline is exactly that case and keeps its own tables.
 
 ## Rebuilding a static site
 
+Read the cross-surface contract in [WEB_SURFACES.md](WEB_SURFACES.md) before implementing this
+capability. It defines which data may enter static output and when rebuild is part of the owning
+product write flow.
+
 The website ships as static output, and rung one of its freshness ladder is "rebuild and
-redeploy". If a project ever needs that rebuild to happen automatically, it is a task type, not a
-new service: a content change enqueues one `website:rebuild` row whose dedupe key is a coarse time
-bucket, so an editing burst collapses into one build. `backend/src/outbox/handlers.ts` carries the
-commented shape.
+redeploy". If a project ever needs that rebuild to happen automatically, implement a durable
+controller rather than treating one outbox attempt as the whole deployment. Its state row stores
+`desiredRevision`, `publishedRevision`, and the active provider deployment id/status/revision. The
+publishing transaction advances `desiredRevision` and enqueues a uniquely keyed
+`website:rebuild:<revision>` wake-up. The wake-up runs one short reconcile pass; a configured
+`website:rebuild:reconcile` recurring job runs the same pass to recover after restarts, lost
+wake-ups, expired terminal rows, or hosted builds longer than an outbox deadline.
+
+The controller allows at most one provider deployment at a time. It adopts an ambiguously triggered
+deployment instead of blindly sending another, records the provider id, and polls on later passes.
+The backend build snapshot returns its actual revision. The provider builds an immutable revisioned
+artifact and promotes it atomically or through an equivalent blue-green release; an in-place
+recursive upload is not safe enough. The artifact contains that revision in a cache-busted public
+marker, and provider success is accepted only after promotion and marker verification. Then the
+controller advances `publishedRevision`; if `desiredRevision` is newer, it starts one follow-up.
+This single-flight state machine prevents a slow older deployment from overwriting a newer one.
+`backend/src/outbox/handlers.ts` carries only a commented shape; it is documentation, not an enabled
+controller or provider adapter.
 
 The template documents this instead of shipping it, because the two hosting paths are not one
 feature:
 
-- **DigitalOcean** builds the site from Git, so the handler would `POST` to
-  `/v2/apps/{app_id}/deployments` with an API token. The catch: the build runs from your branch,
-  so content that lives in your *database* will not appear unless the site fetches it at build
-  time.
-- **Yandex Object Storage** has no remote build at all. Something would have to run
-  `bun run build:website` and upload `website/dist` - and the backend container has neither the
-  website workspace, nor the build toolchain, nor the storage credentials.
+- **DigitalOcean** builds the site from Git, so the adapter triggers a deployment through
+  `/v2/apps/{app_id}/deployments`, tracks the returned deployment to success, and reconciles the
+  deployed revision. The build runs from your branch, so database content appears only when the
+  site fetches it at build time.
+- **Yandex Object Storage** has no remote build. The shipped path supports manual local
+  build/upload only. Automatic rebuild remains unavailable until the project adds the dedicated,
+  authenticated builder described in `YANDEX_CLOUD.md`; the backend runtime container must not
+  grow a website toolchain and broad storage credentials for this purpose.
 
 Before building either, check you need it. If the site must be fresher than a deploy cycle, climb
 the ladder in `website/README.md` - cached SSR with `stale-while-revalidate`, then server islands -
@@ -259,8 +278,9 @@ rather than building a rebuild pipeline. Neither hosting offers per-page ISR.
 
 - DigitalOcean: [docs/DEPLOYMENT.md](DEPLOYMENT.md) — "Backend Worker And Cron". `bun run deploy:do:specs`
   generates the scheduled job or worker component and validates the schedule before you deploy.
-- Yandex Cloud: [docs/YANDEX_CLOUD.md](YANDEX_CLOUD.md) — "Background Jobs And The Cleanup Timer". A second
-  container in task mode plus a timer trigger, provisioned by hand.
+- Yandex Cloud: [docs/YANDEX_CLOUD.md](YANDEX_CLOUD.md) — "Automatic website rebuild". The baseline
+  is manual build/upload; automatic rebuild requires a separate builder component before the
+  capability can leave `absent`.
 
 ## Upstream documentation
 

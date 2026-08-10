@@ -19,6 +19,15 @@ This section may be updated during first-run bootstrap. If the root `README.md` 
 - Product screens compose `src/components/dashboard/ScreenShell.tsx`, which owns the shared native site header and delegates safe-area, scrolling, keyboard avoidance, and back navigation to the low-level `Screen` layout primitive.
 - Phones use the native bottom-tab shell. Expo Web switches to the same compact side-rail/inset composition at the shared wide-layout breakpoint.
 
+## Cross-Surface Payment Contract
+
+Read [../docs/WEB_SURFACES.md](../docs/WEB_SURFACES.md) before payment work. Mobile owns its
+native payment experience separately from browser checkout. The App Store and Google Play
+subscription paths are already present but switched off until the capability ledger activates
+them. A product may also add policy-compliant card, Apple Pay, or Google Pay flows in mobile without
+routing them through `website` or `webapp`; re-check current store rules for the product type,
+storefront, and region first.
+
 ## Local Demo User
 
 From the repository root, prepare the local backend once:
@@ -27,6 +36,7 @@ From the repository root, prepare the local backend once:
 docker compose --env-file backend/.env up -d postgres
 bun run --cwd backend prisma:deploy
 bun run dev:seed
+
 ```
 
 The development seed creates the demo accounts only. It grants no entitlement,
@@ -216,6 +226,31 @@ Mobile UI primitives live in `src/components/ui` and mirror the local Web ShadCN
 The canonical native color, radius, spacing, typography, and interaction tokens live in `src/components/ui/theme-tokens.ts` and `src/components/ui/theme.ts`. Shared dashboard composition belongs in `src/components/dashboard`: `ScreenShell`, `SiteHeader`, section/metric/account cards, navigation rail/items, data rows, and reusable loading/empty/error states. Product-owned auth and billing components accept semantic data, state, and callbacks; they do not expose `style` or `className`. Routes only arrange those closed components.
 
 Render visible text through `src/components/ui/typography.tsx`. `Typography` owns the mobile type scale from `h1` through `h6` plus body, caption, label, button, link, and code text variants; screens and UI primitives should not import React Native `Text` directly or use legacy text wrappers.
+
+## Mobile Template Line Synchronization
+
+Template maintainers merge `master` into `mobile`, preserve the mobile runtime and its
+`available` Payments/Push/Social capability rows, then validate the clean candidate before push:
+
+```bash
+git fetch origin
+bun install --frozen-lockfile
+bun run mobile:template:check
+```
+
+After pushing the validated candidate, verify the published ref:
+
+```bash
+git fetch origin
+bun run mobile:template:check -- --published
+```
+
+The default check allows a clean candidate ahead of `origin/mobile`; `--published` additionally
+requires `HEAD` to equal that ref. Both verify current `origin/master`, the native App Store and
+Google Play paths, the cross-surface contract, equivalent agent instructions, the template ledger,
+and the relevant local suites. If the check fails, stop setup or template publication. After first-run setup
+changes capabilities to `included` or `removed`, do not use this template gate for product releases;
+use the installed product's recorded local test, typecheck, store-sandbox, and release runbooks.
 
 ## Current Upstream Documentation
 

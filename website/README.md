@@ -1,6 +1,6 @@
 # Website
 
-The website workspace is a separate Astro project for public, SEO-facing surfaces: landing pages, marketing/content sites, and the public catalog of product sites such as a marketplace. It is the SSG-first counterpart to the CSR `webapp` (which lives behind auth and needs no SEO). Keep it independent from authenticated browser-app workflows unless a product need explicitly requires shared API data.
+The website workspace is a separate Astro project for public, SEO-facing surfaces: landing pages, marketing/content sites, and the public catalog of product sites such as a marketplace. It is the SSG-first counterpart to the CSR `webapp` (which lives behind auth and needs no SEO). Read the mandatory cross-surface contract in [../docs/WEB_SURFACES.md](../docs/WEB_SURFACES.md) before adding backend-built product data, a cart, checkout, orders, subscriptions, entitlements, or payments.
 
 ## Stack
 
@@ -21,6 +21,12 @@ and page metadata in the layout/page.
 ## Rendering model
 
 Astro prerenders every page to static HTML by default, so the standard build is a cheap static site in `website/dist`, deployable to a Static Site host or object storage + CDN. No server adapter is installed by default, on purpose: the common case (landing and content pages, plus stable public marketplace pages) is pure static.
+
+Database-backed public product information may be fetched from the backend during `astro build`,
+validated with a shared contract, and emitted as static HTML. Only public-safe data belongs in the
+artifact, and required snapshot failures fail the build instead of publishing an empty catalog.
+When a database change must update this output automatically, the owning write flow enqueues the
+documented `website:rebuild` task; the commented handler is not a working rebuild feature by itself.
 
 A route can opt into server rendering (SSR) with `export const prerender = false`. SSR is a deliberate upgrade, not the marketplace default, because it requires installing a Node adapter and deploying as a runtime service instead of a Static Site. Keep marketing/content pages and durable public catalog pages static. Render only request-specific routes on demand: live search, personalized public views, or inventory/price pages where stale HTML is unacceptable.
 
@@ -81,7 +87,7 @@ Keep dynamic pages fresh with HTTP cache headers (`Cache-Control`, `stale-while-
 
 ## Practice
 
-Keep website-specific UI and content in this workspace. Do not duplicate authenticated browser-app flows from `webapp`. Auth inside `website` is acceptable only for small public-site needs, such as a logged-in header state or lightweight listing actions. Full buyer account, seller/admin, checkout/account, and dashboard workflows stay in `webapp` unless they have a concrete SEO requirement.
+Keep website-specific UI and content in this workspace. Do not duplicate authenticated browser-app flows from `webapp`. Auth inside `website` is acceptable only for small public-site needs, such as a logged-in header state or lightweight listing actions. Full buyer account, seller/admin, checkout/account, and dashboard workflows stay in `webapp` unless they have a concrete SEO requirement. An anonymous local cart or selected offer may start here, but it contains only untrusted identifiers and quantities and hands off to the single authenticated `webapp` checkout. Never add payment creation, card entry, authoritative totals, order state, or provider webhooks to `website`.
 
 If the website starts reading API data or shared DTOs, add `@web-app-demo/contracts` intentionally and validate the producer/consumer path. Add `@astrojs/react` only when a page needs interactive React islands.
 

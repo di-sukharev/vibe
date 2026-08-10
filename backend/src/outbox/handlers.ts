@@ -43,11 +43,12 @@ export const taskHandlers = {
       await createAuthTasks(runtime).deliverPasswordChanged(input, signal)
     },
   },
-  // Rebuilding a static site is a task type, not a service: a content change enqueues one row
-  // whose dedupe key is a coarse time bucket, so an editing burst collapses into one build. The
-  // template documents this instead of shipping it, because DigitalOcean builds from Git while
-  // Yandex Object Storage has no remote build at all. See docs/BACKGROUND_JOBS.md, "Rebuilding a
-  // static site", before uncommenting.
+  // This is only a wake-up for a durable, single-flight rebuild controller. Publishing advances
+  // desiredRevision and enqueues a unique website:rebuild:<revision> task; short reconciler passes
+  // persist/adopt provider deployment state, verify the public artifact revision, and start one
+  // follow-up while desiredRevision is newer than publishedRevision. A recurring reconcile job is
+  // the repair path, so correctness never depends on reopening this terminal outbox row. The
+  // template does not ship that state machine. See docs/BACKGROUND_JOBS.md before implementing.
   //
   // 'website:rebuild': {
   //   maxAttempts: 3,

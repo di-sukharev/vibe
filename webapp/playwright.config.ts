@@ -82,13 +82,13 @@ export default defineConfig({
   },
   fullyParallel: false,
   workers: 1,
-  forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
+  forbidOnly: true,
+  retries: 0,
   reporter: [['list'], ['html', { open: 'never', outputFolder: 'e2e/.artifacts/report' }]],
   use: {
     baseURL: frontendUrl,
     screenshot: 'only-on-failure',
-    trace: 'on-first-retry',
+    trace: 'retain-on-failure',
     video: 'retain-on-failure',
   },
   projects: [
