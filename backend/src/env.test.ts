@@ -56,6 +56,24 @@ describe('loadEnv', () => {
 
     expect(env.JWT_SECRET).toBe('0123456789abcdef'.repeat(4))
     expect(env.CORS_ORIGINS).toEqual(['https://background.invalid'])
+    expect(env.COOKIE_SECURE).toBe(true)
+  })
+
+  test('a background runner in development accepts the local origin .env.example ships', () => {
+    // COOKIE_SECURE is forced only in production. Forcing it everywhere would make the HTTPS rule
+    // on WEBAPP_ORIGIN refuse http://localhost:5173, and the scheduler `bun run dev` now starts
+    // would die at boot while the API next to it kept running.
+    const env = loadBackgroundEnv({
+      DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
+      JWT_SECRET: '12345678901234567890123456789012',
+      WEBAPP_ORIGIN: 'http://localhost:5173',
+      EMAIL_DELIVERY: 'console',
+    })
+
+    expect({ origin: env.WEBAPP_ORIGIN, secure: env.COOKIE_SECURE }).toEqual({
+      origin: 'http://localhost:5173',
+      secure: false,
+    })
   })
 
   test('parses backend .env.example with optional blank App Store fields', () => {

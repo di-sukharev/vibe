@@ -188,7 +188,12 @@ export function loadBackgroundEnv(source: Record<string, string | undefined>) {
   return loadEnv({
     ...source,
     CORS_ORIGINS: 'https://background.invalid',
-    COOKIE_SECURE: 'true',
+    // Forced only where it is a real statement about the deployment. In production the API's
+    // fail-closed checks must apply to a runner booting the same image; in development forcing it
+    // would mean asserting things about a process that serves no browser at all - and one of
+    // those, the HTTPS rule on WEBAPP_ORIGIN, would then refuse the `http://localhost:5173` that
+    // `.env.example` ships, so `bun run dev` could not start its scheduler.
+    ...(source.NODE_ENV === 'production' ? { COOKIE_SECURE: 'true' } : {}),
     JWT_SECRET: backgroundNonSigningJwtPlaceholder,
   })
 }
