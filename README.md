@@ -241,6 +241,14 @@ Test runners use the separate Docker Compose `postgres_test` service and the `TE
   transitive dependency nothing here imports directly. Treat that block as maintenance, not
   configuration - after a dependency update, drop the floors one at a time and re-run `bun audit`;
   the ones that stay quiet are no longer needed. `bun update` still moves everything within them.
+- Prisma is pinned to an exact `7.9.0` in `backend/package.json`, and that is deliberate: 7.9.1
+  cannot be installed. `bun add @prisma/client@7.9.1` in an empty directory produces 12 KB and
+  three files instead of 78 MB and seventeen, with an empty `runtime/`, so the generated client's
+  `@prisma/client/runtime/client` import stops resolving and every Prisma type collapses - about
+  180 typecheck errors that look nothing like a packaging problem. The published tarball is
+  intact, so this is an install-side failure. `bun update` cannot move an exact pin; `bun update
+  --latest` can, so check Prisma after one, and try 7.9.2 when it ships.
+- `bun run test` - run contract, backend, and webapp unit/integration tests.
   On this branch two advisories stay open: `image-size` reaches the Expo and React Native build
   tooling, and every published version including the newest is affected, so there is no floor to
   set. It is a denial of service in the ICNS/JXL/HEIF parsers that read image dimensions during a
