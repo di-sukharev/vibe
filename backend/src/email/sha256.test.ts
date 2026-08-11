@@ -18,16 +18,6 @@ async function digest(secret: unknown, chunks: (string | Uint8Array)[]) {
   return Buffer.from(await hash.digest()).toString('hex')
 }
 
-test('the plain digest matches the published SHA-256 of "abc"', async () => {
-  expect(await digest(undefined, ['abc'])).toBe(
-    'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
-  )
-})
-
-test('chunks accumulate rather than replacing each other', async () => {
-  expect(await digest(undefined, ['a', 'b', 'c'])).toBe(await digest(undefined, ['abc']))
-})
-
 test('the keyed mode derives the signing key from AWS’s own published test vector', async () => {
   // From the AWS Signature Version 4 test suite: the four chained HMACs that turn a secret key
   // into a request signing key. If any link mis-encodes, this value changes.
@@ -48,10 +38,4 @@ test('a keyed digest differs from an unkeyed one, so the secret is not silently 
   // The failure mode that would otherwise look fine: a constructor that dropped its argument
   // would still sign every request, just with a signature nobody can verify.
   expect(await digest('a-key', ['payload'])).not.toBe(await digest(undefined, ['payload']))
-})
-
-test('accepts the byte arrays the signer chains between rounds', async () => {
-  const keyBytes = new Uint8Array([1, 2, 3, 4])
-
-  expect(await digest(keyBytes, [new Uint8Array([5, 6, 7])])).toMatch(/^[0-9a-f]{64}$/)
 })

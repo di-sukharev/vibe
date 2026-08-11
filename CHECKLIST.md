@@ -6,7 +6,7 @@ This file is the intake record for this repository. The installing agent fills i
 
 **For the product owner:** this is the record of what was decided about your project. If something here is wrong, say so - the agent treats this file as the source of truth for what your product needs.
 
-Answer cells hold `_unanswered_` until the question is asked, and `n/a` when the question cannot apply to this project. Answers are written in the product owner's language, but the section headings and the capability-ledger state words stay in English: other documents and `scripts/repo-env.test.mjs` refer to them by those exact names. Keep every section heading, even when its rows are all `n/a`.
+Answer cells hold `_unanswered_` until the question is asked, and `n/a` when the question cannot apply to this project. Answers are written in the product owner's language, but the section headings and the capability-ledger state words stay in English: other documents refer to them by those exact names. Keep every section heading, even when its rows are all `n/a`.
 
 **When working on the template itself** (not installing it for a project), there is nothing to record: leave every answer cell at `_unanswered_` and every checkbox unchecked - those would otherwise ship to each future install. The capability ledger is the exception: it always describes the current branch, so keep it current when template work adds or removes a capability.
 
@@ -208,4 +208,4 @@ Verified by the agent during setup, not asked.
 - [ ] `Bootstrap-Only Instructions` blocks deleted from `AGENTS.md` and `CLAUDE.md`
 - [ ] Local URLs, commands run, and anything the user must authorize manually reported back to the user
 
-`README.md`, `AGENTS.md`, `CLAUDE.md`, and some `docs/` runbooks route agents into this file, and `scripts/repo-env.test.mjs` fails if a cited section heading or a ledger state name disappears. Add rows and sections a project needs, and cross-reference sections by name rather than by number so renumbering stays harmless.
+`README.md`, `AGENTS.md`, `CLAUDE.md`, and some `docs/` runbooks route agents into this file by section name, so renaming a heading breaks those pointers silently. Add rows and sections a project needs, and cross-reference sections by name rather than by number so renumbering stays harmless.

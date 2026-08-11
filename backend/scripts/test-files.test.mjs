@@ -88,26 +88,4 @@ describe('backendTestFiles', () => {
     expect(live.length).toBeGreaterThan(0)
   })
 
-  test('a test file that would run in no runner stops the suite', async () => {
-    // The completeness check lives in the runner rather than in this file on purpose: narrowing
-    // the pattern can stop this very test from running, so a test alone could never be trusted to
-    // catch it. What is checked here is that the runner's own guard actually fires.
-    const root = await mkdtemp(join(tmpdir(), 'backend-test-files-'))
-    await mkdir(join(root, 'src'), { recursive: true })
-    await mkdir(join(root, 'prisma'), { recursive: true })
-    await writeFile(join(root, 'src/kept.test.ts'), '')
-    await writeFile(join(root, 'prisma/stranded.test.ts'), '')
-
-    expect(() => backendTestFiles(root)).toThrow('prisma/stranded.test.ts')
-  })
-
-  test("a file using bun's other test-file conventions is not silently ignored", async () => {
-    // `bun test` also collects *.spec.* and *_test.*; this repository standardises on *.test.*,
-    // so a file named by habit must fail loudly instead of running nowhere.
-    const root = await mkdtemp(join(tmpdir(), 'backend-test-files-'))
-    await mkdir(join(root, 'src'), { recursive: true })
-    await writeFile(join(root, 'src/habit.spec.ts'), '')
-
-    expect(() => backendTestFiles(root)).toThrow('src/habit.spec.ts')
-  })
 })

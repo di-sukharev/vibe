@@ -16,7 +16,6 @@ import type { BackendRuntime } from './runtime'
  * without a database, and may run before `prisma:generate` has; a runtime import here would drag
  * the Prisma client and the env schema along. A job that needs a module imports it inside its own
  * body, which also keeps a module's SDKs out of the runs that do not use them.
- * `scripts/repo-env.test.mjs` enforces this.
  *
  * Jobs say what to do; they never say when or where. Three processes run this same registry:
  *   - `cron.ts`      - one shot, triggered by a provider timer (DigitalOcean job, Yandex trigger, system cron)

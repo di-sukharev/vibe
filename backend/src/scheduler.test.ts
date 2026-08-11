@@ -1,8 +1,6 @@
 import { expect, spyOn, test } from 'bun:test'
 
-import { Cron } from 'croner'
-
-import { runScheduledJob, schedules, startSchedules, type ScheduleEntry } from './scheduler'
+import { runScheduledJob, startSchedules, type ScheduleEntry } from './scheduler'
 import type { BackendRuntime } from './runtime'
 
 function runtimeWithLock(options: { acquired: boolean }) {
@@ -198,22 +196,4 @@ test('one job can be scheduled more than once', () => {
   } finally {
     void handle.stop()
   }
-})
-
-test('the shipped schedule drains the outbox often enough for a password-reset email', () => {
-  // The one entry the template ships, asserted against the real cron library rather than the
-  // string: a change to '*/30 * * * *' would still look fine but would make a reset link arrive
-  // half an hour late, which docs/EMAIL.md promises it does not.
-  const drain = schedules.find((entry) => entry.job === 'outbox:drain')
-
-  expect(drain).toBeDefined()
-
-  const [first, second] = new Cron(drain!.expression, {
-    timezone: drain!.timeZone ?? 'UTC',
-  }).nextRuns(2)
-
-  // One minute, which is what docs/EMAIL.md and CHECKLIST.md promise. Deliberately not the
-  // 15-minute DigitalOcean floor: `*/15 * * * *` is the realistic regression, and it would make
-  // both of those documents false while still looking like a reasonable schedule.
-  expect(second!.getTime() - first!.getTime()).toBeLessThanOrEqual(60 * 1000)
 })

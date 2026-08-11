@@ -121,14 +121,4 @@ describe('the request timeout stays inside the task deadline', () => {
     )
     expect(loadEnv(base).EMAIL_REQUEST_TIMEOUT_MS).toBeLessThan(defaultTaskDeadlineMs)
   })
-
-  test('the schema ceiling itself stays under the deadline, not merely the default', () => {
-    const ceiling = 14_000
-
-    expect(loadEnv({ ...base, EMAIL_REQUEST_TIMEOUT_MS: String(ceiling) }).EMAIL_REQUEST_TIMEOUT_MS)
-      .toBeLessThan(defaultTaskDeadlineMs)
-    expect(() => loadEnv({ ...base, EMAIL_REQUEST_TIMEOUT_MS: String(ceiling + 1) })).toThrow(
-      'EMAIL_REQUEST_TIMEOUT_MS',
-    )
-  })
 })

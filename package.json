@@ -14,7 +14,6 @@
   ],
   "overrides": {
     "@babel/core": "^7.29.7",
-    "@hono/node-server": "^2.0.12",
     "esbuild": "^0.28.1",
     "hono": "^4.12.34",
     "js-yaml": "^4.3.1",
@@ -39,7 +38,6 @@
     "build:mobile": "bun run --cwd mobile build",
     "build:backend": "bun run --cwd backend build",
     "architecture:check": "bun scripts/architecture-check.mjs",
-    "deps:drift:check": "bun scripts/branch-dependency-drift.mjs",
     "lint": "bun run --cwd webapp lint && bun run --cwd mobile lint",
     "mobile:template:check": "bun scripts/check-mobile-template.mjs",
     "deploy:do:specs": "bun scripts/prepare-do-specs.mjs",

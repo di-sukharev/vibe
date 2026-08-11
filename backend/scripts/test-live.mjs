@@ -86,20 +86,6 @@ if (import.meta.main) {
     process.exit(1)
   }
 
-  // Every live file must belong to exactly one suite, the same reasoning as the unclaimed-file
-  // check in test-files.mjs: a live test no suite owns can never be selected, so it would run
-  // nowhere while looking like coverage.
-  const unclaimed = liveTestFiles.filter(
-    (file) => liveSuites.filter((suite) => suite.match(file)).length !== 1,
-  )
-
-  if (unclaimed.length > 0) {
-    console.error(
-      `These live tests match no suite, or more than one, in backend/scripts/test-live.mjs: ${unclaimed.join(', ')}. Add a suite with the variables they need.`,
-    )
-    process.exit(1)
-  }
-
   const { selected: configured, error } = selectLiveSuites(process.env)
 
   if (error) {

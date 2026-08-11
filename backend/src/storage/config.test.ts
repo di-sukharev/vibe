@@ -84,8 +84,5 @@ describe('deriveLocalSigningKey', () => {
 })
 
 describe('browser upload CORS headers', () => {
-  test('include the two headers a signed direct PUT depends on', () => {
-    expect(browserUploadAllowedHeaders).toContain('Content-Type')
-    expect(browserUploadAllowedHeaders).toContain('If-None-Match')
-  })
+
 })

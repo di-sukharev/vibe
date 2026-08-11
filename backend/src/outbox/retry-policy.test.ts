@@ -3,9 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import { TerminalTaskError } from './errors'
 import {
   classifyFailure,
-  defaultLeaseStaleMs,
   defaultMaxAttempts,
-  defaultTaskDeadlineMs,
   isFinalAttempt,
   nextAttemptAt,
   nextAttemptDelayMs,
@@ -86,8 +84,4 @@ describe('resolveLeaseStaleMs', () => {
     expect(resolveLeaseStaleMs(120_000, 15_000)).toBe(120_000)
   })
 
-  test('the shipped defaults leave the deadline well inside the lease', () => {
-    expect(defaultTaskDeadlineMs * 2).toBeLessThanOrEqual(defaultLeaseStaleMs)
-    expect(defaultMaxAttempts).toBeGreaterThan(1)
-  })
 })

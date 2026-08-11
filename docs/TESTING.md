@@ -46,10 +46,15 @@ the Docker Postgres and runs in `test:integration`. Anything named `*.live.test.
 service or account that no runner starts for it - the local S3 container, or an email provider - and
 runs in `test:live`.
 Everything else named `*.test.ts` or `*.test.mjs` runs in `test:unit` with nothing installed. Name a
+<<<<<<< HEAD
 test accordingly: `backend/scripts/test-files.mjs` owns the split and `backend/scripts/test-files.test.mjs`
 fails if the runners stop being complementary. A suite belonging to a capability that ships switched
 off marks itself `@parked-test` in its opening comment and runs in no runner until that line is
 deleted; `backend/src/modules/billing/billing.integration.test.ts` is the example.
+=======
+test accordingly: `backend/scripts/test-files.mjs` owns the split.
+
+>>>>>>> master
 The third category exists so `bun run test` stays runnable on a machine with no Docker daemon. A
 live test landing in the unit set would fail for everyone who has not started a container, and a red
 suite people learn to ignore is worse than no suite. Run the live tests deliberately:
@@ -62,9 +67,8 @@ bun run --cwd backend test:live  # runs whichever live suites the environment co
 `backend/scripts/test-live.mjs` owns a table of live suites - storage, Postbox, Resend - each with
 the variables it needs. It runs the ones that are fully configured, refuses with the missing names
 when one is half configured, and refuses outright when none is, because a live contract test that
-quietly passes without contacting anything proves nothing. Every `*.live.test.ts` must belong to
-exactly one suite or the script fails, the same reasoning as the unclaimed-file check above. See
-[STORAGE.md](STORAGE.md) and [EMAIL.md](EMAIL.md).
+quietly passes without contacting anything proves nothing. See [STORAGE.md](STORAGE.md) and
+[EMAIL.md](EMAIL.md).
 
 Contract tests live in `packages/contracts/src/*.test.ts` and protect shared request/response/error schemas used by backend, webapp, and mobile. Webapp and mobile unit tests live in each client `tests/` directory and cover API refresh/retry behavior that would be too expensive and brittle to fully exercise in E2E.
 
@@ -252,24 +256,6 @@ The template intentionally keeps the official mobile lane on Expo dev client bec
 - `scrollUntilVisible` can stop when an element is barely inside the viewport. Use `visibilityPercentage: 100` and `centerElement: true` before tapping important CTA buttons.
 - After removing Expo starter routes, clean native tabs, web tabs, and string `href` values at the same time. Prefer object-form navigation for dynamic or query routes so typed Expo Router routes catch stale paths.
 - Product E2E should validate test data before the UI flow starts: backend health, auth/session prerequisites, and required seed data should fail or skip in preflight with a readable message.
-
-## Keeping The Two Branches Honest
-
-`bun run deps:drift:check` compares every dependency range that `master` and `mobile` both
-declare, and refuses a difference that is not on the exception list in
-`scripts/branch-dependency-drift.mjs` with a reason attached. It exists because a workspace-wide
-dependency sweep once landed on `mobile` alone: every sync runs master -> mobile, so the drift was
-one-way and self-perpetuating, and it survived eight days because Prisma's generated client is
-git-ignored - a version regression there produces a zero-line diff, and this repository has no
-hosted CI by design.
-
-The same command also checks that the installed `node_modules` matches this branch's lockfile.
-Switching branches without reinstalling leaves the previous branch's dependencies in place, and
-every check then passes while reporting on packages the branch does not declare. A green run that
-means nothing is worse than a red one.
-
-Both halves run inside `bun run mobile:template:check`, which already proves `origin/master` is an
-ancestor of `mobile`. Ancestry says the commits are a superset; this says the versions are.
 
 ## Current Upstream Documentation
 

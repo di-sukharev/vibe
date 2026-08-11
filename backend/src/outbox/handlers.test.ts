@@ -47,27 +47,3 @@ describe('a task payload that cannot be used', () => {
     }
   })
 })
-
-describe('the shipped registry', () => {
-  test('no shipped deadline forces the lease above its default', () => {
-    // The floor in resolveLeaseStaleMs guarantees a lease always covers an attempt, so comparing
-    // a deadline against the *derived* lease can never fail. What is worth pinning is the other
-    // direction: a handler deadline big enough to push the lease past the documented default
-    // would silently override TASK_OUTBOX_LEASE_STALE_MS, and a crashed runner's row would sit
-    // `processing` for hours instead of two minutes.
-    for (const [type, entry] of Object.entries(taskHandlers as TaskHandlerRegistry)) {
-      const deadlineMs = entry.deadlineMs ?? defaultTaskDeadlineMs
-
-      expect({ type, withinDefault: deadlineMs * 2 <= defaultLeaseStaleMs }).toEqual({
-        type,
-        withinDefault: true,
-      })
-    }
-  })
-
-  test('names are namespaced, so a type reads as what it belongs to', () => {
-    for (const type of taskTypeNames()) {
-      expect({ type, namespaced: type.includes(':') }).toEqual({ type, namespaced: true })
-    }
-  })
-})

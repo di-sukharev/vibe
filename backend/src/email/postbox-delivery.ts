@@ -21,8 +21,7 @@ const outboundEmailsPath = '/v2/email/outbound-emails'
  * it must resolve to the same version `@aws-sdk/core` already pulls in. When the two diverge the
  * package manager hoists a second signer and a second 5 MB `@smithy/core`, and pushes the SDK's
  * copies into nineteen nested duplicates - about 95 MB of image for nothing. A test in
- * `scripts/repo-env.test.mjs` counts the copies, so a future SDK bump that reopens the gap fails
- * there rather than quietly bloating the build.
+ * A future SDK bump can reopen that gap quietly, so check the copy count after one.
  */
 export function createPostboxDelivery(
   config: PostboxEmailConfig,

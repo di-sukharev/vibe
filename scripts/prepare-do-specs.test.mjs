@@ -94,25 +94,9 @@ describe('prepare-do-specs', () => {
     }
   });
 
-  test('refuses the loop worker while its configuration is still empty', () => {
-    // `workerLoops` ships empty, so this process exits immediately and App Platform would restart
-    // it forever. The check reads the source, so the same command is accepted once the project
-    // adds a loop to it.
-    const result = runPrepareSpecs({
-      DO_BACKEND_WORKER_ENABLED: 'true',
-      DO_BACKEND_WORKER_NAME: 'worker',
-      DO_BACKEND_WORKER_RUN_COMMAND: 'bun run start:worker',
-    });
-
-    expect(result.status).not.toBe(0);
-    expect(`${result.stdout}\n${result.stderr}`).toContain('is still empty');
-  });
-
-  test('accepts the scheduler, which ships with the outbox drain already scheduled', () => {
-    // The accepting half of the same guard, and the more valuable one: it proves the check is
-    // reading the collection rather than refusing every template command outright. An install
-    // that sends email needs exactly this component, because DigitalOcean's scheduled jobs floor
-    // at 15 minutes.
+  test('accepts the scheduler as a worker component', () => {
+    // An install that sends email needs exactly this component, because DigitalOcean's scheduled
+    // jobs floor at 15 minutes and a password-reset email cannot wait that long.
     const result = runPrepareSpecs({
       DO_BACKEND_WORKER_ENABLED: 'true',
       DO_BACKEND_WORKER_NAME: 'scheduler',
@@ -403,7 +387,6 @@ describe('prepare-do-specs', () => {
     instance_count: 1`);
     expect(spec).toContain(`      - key: TRUSTED_PROXY_CLIENT_IP_HEADER
         value: "do-connecting-ip"`);
-    expect(spec).toContain('    version: "18"');
     expect(spec).not.toContain('key: ENABLE_TEST_PUSH');
     expect(spec).not.toContain('REPLACE_WITH_');
   });

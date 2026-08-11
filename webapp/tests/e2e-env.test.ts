@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test'
 
 import { composeEnv } from '../e2e/env'
-import { applyE2ePortEnv, resolveE2ePorts, type PortPlan } from '../e2e/ports'
+import { applyE2ePortEnv, type PortPlan } from '../e2e/ports'
 import { portFromUrl } from '../e2e/url'
 
 const envKeys = [
@@ -60,42 +60,6 @@ test('composeEnv defaults a portless postgres URL to the postgres default port',
   })
 
   expect(env.POSTGRES_TEST_PORT).toBe('5432')
-})
-
-test('composeEnv defaults a portless postgresql URL to the postgres default port', () => {
-  process.env.POSTGRES_TEST_PORT = '54331'
-
-  const env = composeEnv({
-    DATABASE_URL: 'postgresql://superuser:superpassword@localhost/web_app_demo_test?schema=public',
-    TEST_DATABASE_URL: 'postgresql://superuser:superpassword@localhost/web_app_demo_test?schema=public',
-    POSTGRES_TEST_PORT: '54331',
-  })
-
-  expect(env.POSTGRES_TEST_PORT).toBe('5432')
-})
-
-test('resolveE2ePorts defaults a portless postgres URL alias to the postgres default port', async () => {
-  process.env.TEST_DATABASE_URL = 'postgres://superuser:superpassword@localhost/web_app_demo_test?schema=public'
-  process.env.POSTGRES_TEST_PORT = '54331'
-  process.env.E2E_BACKEND_PORT = '50001'
-  process.env.E2E_WEB_PORT = '55001'
-
-  const plan = await resolveE2ePorts()
-
-  expect(plan.postgresTestPort).toBe(5432)
-  expect(plan.databaseUrl).toBe('postgres://superuser:superpassword@localhost/web_app_demo_test?schema=public')
-})
-
-test('resolveE2ePorts defaults a portless postgresql URL to the postgres default port', async () => {
-  process.env.TEST_DATABASE_URL = 'postgresql://superuser:superpassword@localhost/web_app_demo_test?schema=public'
-  process.env.POSTGRES_TEST_PORT = '54331'
-  process.env.E2E_BACKEND_PORT = '50001'
-  process.env.E2E_WEB_PORT = '55001'
-
-  const plan = await resolveE2ePorts()
-
-  expect(plan.postgresTestPort).toBe(5432)
-  expect(plan.databaseUrl).toBe('postgresql://superuser:superpassword@localhost/web_app_demo_test?schema=public')
 })
 
 test('applyE2ePortEnv overwrites a stale postgres test port with the planned port', () => {

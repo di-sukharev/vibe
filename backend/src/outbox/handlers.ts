@@ -14,7 +14,6 @@ export type TaskHandlerRegistry = Record<string, TaskHandlerEntry>
  * this registry to validate a task type at enqueue time, and a top-level module import would
  * drag that module's SDKs into every process that can enqueue. Handlers reach their module with
  * `await import()` inside `run`, which also keeps a module out of the runs that do not use it.
- * `scripts/repo-env.test.mjs` enforces this.
  */
 export const taskHandlers = {
   /**

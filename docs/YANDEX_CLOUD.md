@@ -9,6 +9,7 @@ DigitalOcean is the choice for audiences outside Russia. Either way the decision
 The hosting choice is recorded in [CHECKLIST.md](../CHECKLIST.md) and only one path is kept. If the
 project runs on DigitalOcean or an own server, delete the Yandex tooling in one pass.
 
+<<<<<<< HEAD
 **Delete this file.** One piece of backend code is Yandex-specific and needs a decision rather than
 a delete: `INGRESS_RATE_LIMIT_PROVIDER` in `backend/src/env.ts` accepts `yandex-sws`, and
 `backend/src/app.ts` turns the backend's own IP-keyed rate limits off when it is set, because Smart
@@ -16,6 +17,11 @@ Web Security is doing that job at the edge. Keep the code and keep the value at 
 - on any other hosting `yandex-sws` would silently disable those limits with nothing replacing them.
 Delete the `yandex-sws` option and the checks around it only if you are sure no edge WAF will ever
 sit in front of this API; `backend/src/app.test.ts` and `backend/src/env.test.ts` cover it.
+=======
+**Delete this file.** Nothing in `backend/` or `scripts/` is Yandex-specific, so there is no code to
+remove; the two mentions that remain (a comment in `backend/src/jobs.ts` and the provider-doc check
+are deliberately provider-neutral and stay.
+>>>>>>> master
 
 **Then edit these files** - one bullet each, so no link is left dangling:
 
@@ -42,12 +48,18 @@ Finally, sweep for what no list can enumerate:
 rg -n 'Yandex|yandexcloud|yc serverless' --glob '!node_modules'
 ```
 
+<<<<<<< HEAD
 Every hit must go, except these:
 
 - the `yandex-sws` ingress option in `backend/src/env.ts` and `backend/src/app.ts`, plus its cases
   in `backend/src/app.test.ts` and `backend/src/env.test.ts` - see the note above;
 - the comment naming all three hostings in `backend/src/jobs.ts`;
 - the comment next to the static output path in `website/astro.config.mjs`. (`scripts/repo-env.test.mjs` names this file too, in the uppercase
+=======
+Every hit must go, except two deliberate provider-neutral comments: the one naming all three
+hostings in `backend/src/jobs.ts`, and the one next to the static output path in
+`website/astro.config.mjs`. (The uppercase
+>>>>>>> master
 path `docs/YANDEX_CLOUD.md`, which the case-sensitive pattern above does not match. It stays: that
 is the guard the closing line below relies on.)
 
@@ -55,7 +67,7 @@ When you are done, delete **both** "If You Chose Another Hosting" sections - thi
 in `docs/DEPLOYMENT.md`. The choice is made; a surviving section tells the project to delete the
 tooling it actually uses.
 
-Run `bun run test` afterwards; `scripts/repo-env.test.mjs` checks that at least one of the two
+Run `bun run test` afterwards, and check that at least one of the two
 provider documents survives.
 
 ## Service Map

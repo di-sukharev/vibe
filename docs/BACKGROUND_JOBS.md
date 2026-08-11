@@ -138,7 +138,7 @@ run at the same time safely: the claim is a conditional update, so the loser sim
 ```
 
    Import the module **inside** `run`. A top-level import of `../modules/*` would load that
-   module into every process that can enqueue, and `scripts/repo-env.test.mjs` fails on it.
+   module into every process that can enqueue.
 
 2. Enqueue it from wherever the work is decided:
 

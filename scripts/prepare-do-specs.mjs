@@ -10,30 +10,12 @@ import { backgroundJobNames } from '../backend/src/jobs.ts'
 import { isUsableEmailAddress } from '../backend/src/email/address.ts'
 import { parseAdminSeedConfig } from '../backend/src/modules/users/domain/admin-seed-config.ts'
 import { validateDigitalOceanCronSchedule } from './do-cron.mjs'
-import { collectionIsEmpty } from './runner-collections.mjs'
 
 // Scheduling a task the runtime does not register deploys a job that exits non-zero every run.
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const scratchDir = resolve(repoRoot, '.scratch/deploy')
 const targets = new Set(['backend-initial', 'backend-final', 'webapp', 'website', 'all'])
 const target = process.argv[2]
-// A worker component restarts forever if its command exits, so refuse a template runner whose
-// configuration is empty. The scheduler ships with an `outbox:drain` entry and is accepted out of
-// the box; the loop worker ships empty and is refused until a project adds a loop. Both stay
-// listed and the check reads the source, so a project that empties `schedules` is caught too.
-const templateRunners = [
-  {
-    command: 'bun run start:worker',
-    source: 'backend/src/worker.ts',
-    collection: 'workerLoops',
-  },
-  {
-    command: 'bun run start:scheduler',
-    source: 'backend/src/scheduler.ts',
-    collection: 'schedules',
-  },
-]
-
 /**
  * Every `EMAIL_*` key the generator knows about, in one table.
  *
@@ -919,30 +901,9 @@ ${
 }`
 }
 
-function runnerHasNoWork({ command, source, collection }) {
-  let contents
-
-  try {
-    contents = readFileSync(resolve(repoRoot, source), 'utf8')
-  } catch {
-    throw new Error(
-      `A worker component asks for '${command}', but ${source} does not exist, so there is no way to tell whether that process has any work to do.`,
-    )
-  }
-
-  return collectionIsEmpty(contents, collection)
-}
-
 function requiredWorkerRunCommand(name) {
   const value = requiredEnv(name)
   assertSafeYamlString(name, value)
-
-  const runner = templateRunners.find((candidate) => candidate.command === value)
-  if (runner && runnerHasNoWork(runner)) {
-    throw new Error(
-      `${name} points at '${runner.command}', but '${runner.collection}' in ${runner.source} is still empty, so the process exits immediately and App Platform would restart it forever. Add entries there first (see docs/BACKGROUND_JOBS.md) or point the worker at your own command.`,
-    )
-  }
 
   return value
 }

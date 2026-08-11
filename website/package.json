@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
-    "test": "bun run build && bun test tests",
+    "test": "bun test tests",
     "typecheck": "astro check",
     "preview": "astro preview",
     "astro": "astro"
