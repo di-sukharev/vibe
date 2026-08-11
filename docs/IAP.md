@@ -31,7 +31,7 @@ Most steps below are commented-out blocks waiting for you, and `rg -l 'docs/IAP.
 5. Uncomment the billing job, its `GooglePlayReconcileResult` type and three helpers, and the
    `maintenance:process` rows in
    `backend/src/jobs.ts`. Keep the module import inside the job body: `jobs.ts` must stay
-   type-only at the top level, and `scripts/repo-env.test.mjs` fails if it does not.
+   type-only at the top level, so tooling can read the registry without a database.
 6. Restore the tests: the parked cases in `backend/src/app.test.ts` (ingress and the OpenAPI paths),
    `backend/src/jobs.test.ts` (its mock and the two env keys, plus a `reconcile: 0` counter in the
    `calls` initializer, which is asserted but has no commented line to restore), and the

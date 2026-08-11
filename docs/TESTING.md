@@ -46,15 +46,9 @@ the Docker Postgres and runs in `test:integration`. Anything named `*.live.test.
 service or account that no runner starts for it - the local S3 container, or an email provider - and
 runs in `test:live`.
 Everything else named `*.test.ts` or `*.test.mjs` runs in `test:unit` with nothing installed. Name a
-<<<<<<< HEAD
-test accordingly: `backend/scripts/test-files.mjs` owns the split and `backend/scripts/test-files.test.mjs`
-fails if the runners stop being complementary. A suite belonging to a capability that ships switched
+test accordingly: `backend/scripts/test-files.mjs` owns the split. A suite belonging to a capability that ships switched
 off marks itself `@parked-test` in its opening comment and runs in no runner until that line is
 deleted; `backend/src/modules/billing/billing.integration.test.ts` is the example.
-=======
-test accordingly: `backend/scripts/test-files.mjs` owns the split.
-
->>>>>>> master
 The third category exists so `bun run test` stays runnable on a machine with no Docker daemon. A
 live test landing in the unit set would fail for everyone who has not started a container, and a red
 suite people learn to ignore is worse than no suite. Run the live tests deliberately:

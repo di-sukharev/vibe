@@ -419,8 +419,7 @@ export DO_BACKEND_NOTIFICATION_CRON_TIME_ZONE=UTC
 bun run deploy:do:specs backend-final
 ```
 
-<<<<<<< HEAD
-Use worker components only after the process has work to do. The notification worker qualifies once the app sends push notifications. For the two generic runners the generator reads `backend/src/scheduler.ts` and `backend/src/worker.ts` before accepting `bun run start:scheduler` or `bun run start:worker`. `schedules` ships with the outbox drain, so the scheduler is accepted as-is; `workerLoops` ships empty, so `bun run start:worker` is refused - that process would exit immediately and App Platform would restart it forever. Fill the list in and the same command is accepted, and emptying `schedules` makes the scheduler refused in turn; any other command is passed through as-is. Production should normally schedule `maintenance:process`; it removes stale auth sessions and expired password-reset tokens, redacts legacy terminal notification content, and - once subscriptions are turned on and the complete Google Play group is configured - reconciles stale stored purchase tokens in bounded batches. `auth:sessions:cleanup` remains available as a dedicated task and covers both sessions and reset tokens. `billing:google-play:reconcile` exists only after subscriptions are turned on (docs/IAP.md); spec generation rejects it until then, because scheduling an unregistered task deploys a job that fails on every run.
+Use worker components only after the process has work to do. The notification worker qualifies once the app sends push notifications. `schedules` ships with the outbox drain, so `bun run start:scheduler` is deployable as-is; `workerLoops` ships empty, so give it a loop before pointing a worker component at `bun run start:worker` - that process would exit immediately and App Platform would restart it forever. Any command is passed through as-is. Production should normally schedule `maintenance:process`; it removes stale auth sessions and expired password-reset tokens, redacts legacy terminal notification content, and - once subscriptions are turned on and the complete Google Play group is configured - reconciles stale stored purchase tokens in bounded batches. `auth:sessions:cleanup` remains available as a dedicated task and covers both sessions and reset tokens. `billing:google-play:reconcile` exists only after subscriptions are turned on (docs/IAP.md); spec generation rejects it until then, because scheduling an unregistered task deploys a job that fails on every run.
 
 Choose one notification-processing topology explicitly:
 
@@ -439,9 +438,6 @@ The generator enforces the current optional-env ownership explicitly:
 Worker and cron components receive neither `JWT_SECRET` nor cookie/CORS settings. Their background runtime loader uses a public non-signing compatibility value internally for shared module typing, so compromise of a background component cannot disclose the API key used to mint access or offer-code tokens.
 
 `ENABLE_TEST_PUSH` accepts only `true` or `false` during spec generation and is always API-only; delivery still belongs to the notification worker or cron.
-=======
-Use worker components only after the process has work to do. `schedules` ships with the outbox drain, so `bun run start:scheduler` is deployable as-is; `workerLoops` ships empty, so give it a loop before pointing a worker component at `bun run start:worker` - that process would exit immediately and App Platform would restart it forever. Any command is passed through as-is. Production auth should schedule `auth:sessions:cleanup`; it removes revoked sessions and sessions past either sliding or absolute lifetime only after `SESSION_RETENTION_DAYS`, and removes expired password-reset tokens. Keep every schedule at DigitalOcean's supported cadence of at least 15 minutes.
->>>>>>> master
 
 An install that sends email exports the `EMAIL_*` group before generating the spec:
 
