@@ -229,7 +229,8 @@ This block exists only for fresh installs from the template. If this repository 
 - Do not print secrets, tokens, private keys, credentials, cookies, customer data, or raw `.env` values in final responses.
 - Do not add real secrets to fixtures, tests, docs, screenshots, logs, or committed files.
 - Keep ad-hoc investigation artifacts out of the repository root. Put temporary screenshots, logs, and one-off exports under `./.scratch/` or the tool-owned artifact directory; do not create new root-level `.tmp-*` or `.codex-tmp-*` files.
-- Delete what you put in `./.scratch/` once the task that needed it is done, and say so in the report. It is git-ignored, so nothing else will ever notice it: copies of `node_modules`, prebuild output, and browser captures accumulated 6.3 GB there before anyone looked. Keep an artifact only when a named follow-up depends on it.
+- Delete what you put in `./.scratch/` or the tool-owned scratch directory once the task that needed it is done, and say so in the report. Both are invisible to git, so nothing else will ever notice them: copies of `node_modules`, prebuild output, and browser captures reached 6.3 GB in one and 21 GB in the other before anyone looked. Keep an artifact only when a named follow-up depends on it.
+- When a comparison needs a copy of the repository, copy it without `node_modules` and install only if the experiment actually runs code. A copy with dependencies is about 1.6 GB against roughly 30 MB without them, and most comparisons only ever read files.
 - Do not create or use `git worktree` checkouts unless explicitly asked. Use the main checkout so work does not get stranded.
 - Do not weaken auth, permissions, validation, encryption, rate limits, or auditability to make a task easier.
 - Do not manually edit generated files unless the repository explicitly requires it. Update the source and run the generator instead.
