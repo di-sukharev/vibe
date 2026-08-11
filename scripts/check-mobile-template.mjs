@@ -141,6 +141,9 @@ if (import.meta.main) {
   }
 
   for (const args of [
+    // Version alignment is the other half of "mobile is master plus the app": the ancestry check
+    // above proves the commits are a superset, this proves the dependencies are.
+    ['run', 'deps:drift:check'],
     ['run', 'test:deploy'],
     ['run', 'test:contracts'],
     ['run', 'test:backend:unit'],

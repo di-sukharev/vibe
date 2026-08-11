@@ -428,7 +428,7 @@ test('assertTestDatabaseUrl accepts non-test databases with an intentional overr
   ).not.toThrow()
 })
 
-test('the AWS signer stays a single copy, which is what the exact pin in backend buys', async () => {
+test('the AWS signer resolves to one version, so the image carries one copy of it', async () => {
   // `backend/src/email/postbox-delivery.ts` signs Postbox requests with `@smithy/signature-v4`,
   // pinned to the exact version the AWS SDK has already resolved for S3 storage. Any range wide
   // enough to admit a newer release makes the package manager hoist a second signer and a second
@@ -475,23 +475,11 @@ test('the AWS signer stays a single copy, which is what the exact pin in backend
 
   expect([...signerVersions]).toHaveLength(1)
 
-  // And the pin itself is exact, because a caret here is what reintroduces the duplication.
-  const backendPackage = JSON.parse(
-    await readFile(resolve(repositoryRoot, 'backend/package.json'), 'utf8'),
-  )
-
-  expect(backendPackage.dependencies['@smithy/signature-v4']).toMatch(/^\d+\.\d+\.\d+$/)
-  // And the pin is the version actually installed, not a stale one the resolver worked around.
-  // A mismatch is usually a stale `node_modules` after a branch switch - `master` and `mobile`
-  // pin different versions because their AWS SDKs resolve different ones - so say so here rather
-  // than leaving a bare version diff.
-  expect({
-    installed: [...signerVersions],
-    hint: 'run `bun install` if this differs after switching branches',
-  }).toEqual({
-    installed: [backendPackage.dependencies['@smithy/signature-v4']],
-    hint: 'run `bun install` if this differs after switching branches',
-  })
+  // Deliberately no assertion about the declared range. It used to be an exact pin, because a
+  // caret resolved a newer signer than the AWS SDK had and split `@smithy/core` in two. Once the
+  // SDK caught up, the caret resolves to the same version the SDK wants and the duplication is
+  // gone - so the range is free again and only the outcome above is worth enforcing. If a future
+  // SDK bump reopens the gap, the copy count fails here and names the fix.
 })
 
 test('the deploy generator refuses every email credential the env schema knows about', async () => {

@@ -17,11 +17,12 @@ const outboundEmailsPath = '/v2/email/outbound-emails'
  * AWS SDK already brings in for S3 storage rather than adding an SES client: the signature is the
  * only AWS-shaped part of the exchange, and everything else is one JSON POST.
  *
- * `@smithy/signature-v4` is pinned to an exact version in `backend/package.json`, and that is
- * load-bearing rather than lazy: any range wide enough to admit a newer release makes the package
- * manager hoist a second copy of the signer and its 5 MB `@smithy/core`, then push the AWS SDK's
- * already-resolved copies down into nineteen nested duplicates. Pinning to the version the SDK
- * has resolved keeps the install at one copy. Bump it when the SDK's own copy moves.
+ * `@smithy/signature-v4` is declared as an ordinary range, but the constraint behind it is real:
+ * it must resolve to the same version `@aws-sdk/core` already pulls in. When the two diverge the
+ * package manager hoists a second signer and a second 5 MB `@smithy/core`, and pushes the SDK's
+ * copies into nineteen nested duplicates - about 95 MB of image for nothing. A test in
+ * `scripts/repo-env.test.mjs` counts the copies, so a future SDK bump that reopens the gap fails
+ * there rather than quietly bloating the build.
  */
 export function createPostboxDelivery(
   config: PostboxEmailConfig,

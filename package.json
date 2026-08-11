@@ -39,6 +39,7 @@
     "build:mobile": "bun run --cwd mobile build",
     "build:backend": "bun run --cwd backend build",
     "architecture:check": "bun scripts/architecture-check.mjs",
+    "deps:drift:check": "bun scripts/branch-dependency-drift.mjs",
     "lint": "bun run --cwd webapp lint && bun run --cwd mobile lint",
     "mobile:template:check": "bun scripts/check-mobile-template.mjs",
     "deploy:do:specs": "bun scripts/prepare-do-specs.mjs",

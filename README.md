@@ -233,6 +233,11 @@ Test runners use the separate Docker Compose `postgres_test` service and the `TE
 - `bun run dev:backend:s3` - start the backend against the local S3 container instead of the disk.
 - `bun run typecheck` - run TypeScript checks across workspaces.
 - `bun run lint` - run ESLint over the webapp and the mobile app.
+- `bun run architecture:check` - enforce the module/feature dependency boundaries.
+- `bun run deps:drift:check` - check that `master` and `mobile` declare the same dependency
+  versions, and that `node_modules` matches this branch's lockfile rather than the branch you
+  were on before. Runs inside `mobile:template:check`; skips the branch comparison in an
+  installed project that kept only one line.
 - `bun run build` - run production build/typecheck/export scripts for workspaces that define them.
 - `bun run architecture:check` - enforce backend module and client feature dependency boundaries.
 - `bun run test` - run contract, backend, webapp, and mobile unit/integration tests.

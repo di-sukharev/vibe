@@ -253,6 +253,24 @@ The template intentionally keeps the official mobile lane on Expo dev client bec
 - After removing Expo starter routes, clean native tabs, web tabs, and string `href` values at the same time. Prefer object-form navigation for dynamic or query routes so typed Expo Router routes catch stale paths.
 - Product E2E should validate test data before the UI flow starts: backend health, auth/session prerequisites, and required seed data should fail or skip in preflight with a readable message.
 
+## Keeping The Two Branches Honest
+
+`bun run deps:drift:check` compares every dependency range that `master` and `mobile` both
+declare, and refuses a difference that is not on the exception list in
+`scripts/branch-dependency-drift.mjs` with a reason attached. It exists because a workspace-wide
+dependency sweep once landed on `mobile` alone: every sync runs master -> mobile, so the drift was
+one-way and self-perpetuating, and it survived eight days because Prisma's generated client is
+git-ignored - a version regression there produces a zero-line diff, and this repository has no
+hosted CI by design.
+
+The same command also checks that the installed `node_modules` matches this branch's lockfile.
+Switching branches without reinstalling leaves the previous branch's dependencies in place, and
+every check then passes while reporting on packages the branch does not declare. A green run that
+means nothing is worse than a red one.
+
+Both halves run inside `bun run mobile:template:check`, which already proves `origin/master` is an
+ancestor of `mobile`. Ancestry says the commits are a superset; this says the versions are.
+
 ## Current Upstream Documentation
 
 For testing questions, consult the current upstream documentation linked here first. This document describes this repository's testing contract; upstream docs are authoritative for runner behavior.
