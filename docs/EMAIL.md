@@ -63,7 +63,7 @@ EMAIL_RESEND_ENDPOINT=https://api.resend.com
 
 This follows the hosting already recorded in [CHECKLIST.md](../CHECKLIST.md), not a separate preference:
 
-- **Yandex Cloud, or any data-residency requirement → Postbox.** Same account, same static access keys as object storage, and the mail never leaves the region. Postbox speaks the Amazon SESv2 API, so the driver signs its requests with AWS SigV4 under service `ses`. Default quotas start at one message per second and 200 per day; raise them in the console before a launch. See [YANDEX_CLOUD.md](YANDEX_CLOUD.md).
+- **Yandex Cloud, or any data-residency requirement → Postbox.** Same account, same static access keys as object storage, and the mail never leaves the region. Postbox speaks the Amazon SESv2 API, so the driver signs its requests with AWS SigV4 under service `ses`. It also offers SMTP, with a different credential — the template uses the API because SMTP would mean adding a mail client dependency for no gain. Default quotas start at one message per second and 200 per day; raise them in the console before a launch. See [YANDEX_CLOUD.md](YANDEX_CLOUD.md).
 - **Anything else → Resend.** A bearer token and one JSON POST, with a verified sending domain.
 
 Both are transactional-email services, not marketing platforms, which is what the shipped messages are.

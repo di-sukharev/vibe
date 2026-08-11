@@ -482,7 +482,16 @@ test('the AWS signer stays a single copy, which is what the exact pin in backend
 
   expect(backendPackage.dependencies['@smithy/signature-v4']).toMatch(/^\d+\.\d+\.\d+$/)
   // And the pin is the version actually installed, not a stale one the resolver worked around.
-  expect([...signerVersions]).toEqual([backendPackage.dependencies['@smithy/signature-v4']])
+  // A mismatch is usually a stale `node_modules` after a branch switch - `master` and `mobile`
+  // pin different versions because their AWS SDKs resolve different ones - so say so here rather
+  // than leaving a bare version diff.
+  expect({
+    installed: [...signerVersions],
+    hint: 'run `bun install` if this differs after switching branches',
+  }).toEqual({
+    installed: [backendPackage.dependencies['@smithy/signature-v4']],
+    hint: 'run `bun install` if this differs after switching branches',
+  })
 })
 
 test('the deploy generator refuses every email credential the env schema knows about', async () => {

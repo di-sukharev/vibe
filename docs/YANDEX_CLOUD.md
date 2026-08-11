@@ -498,8 +498,21 @@ Setup:
 1. Create the sending address or domain in Postbox and complete verification. A domain needs DKIM
    and SPF records published in DNS; a single address needs its confirmation link followed. Nothing
    sends until verification is green.
-2. Create a service account with the Postbox sender role, then issue a **static access key** for it -
-   the same key type Object Storage uses, not an IAM token, which expires.
+2. Create a service account, grant it the `postbox.sender` role on the folder, then issue a
+   **static access key** for it - the same AWS-compatible key type Object Storage uses:
+
+```bash
+yc iam service-account create --name postbox-sender
+yc resource-manager folder add-access-binding <folder-id> \
+  --role postbox.sender --subject serviceAccount:<service-account-id>
+yc iam access-key create --service-account-name postbox-sender
+```
+
+   **Not an API key.** `yc iam api-key create --scope yc.postbox.send` also produces an id and a
+   secret, and Postbox really does accept it - over **SMTP**, which is its other transport. This
+   driver speaks the SES-compatible HTTP API, which authenticates with SigV4 and only accepts a
+   static access key. Feeding it an API key fails as a signature error that looks like a revoked
+   credential. An IAM token is wrong for a third reason: it expires.
 3. Set the `EMAIL_*` group on the API container revision **and** on the drain task container. Both
    build delivery through `createBackendRuntime`, and the one that actually sends is the drain:
 
