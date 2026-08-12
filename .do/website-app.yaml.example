@@ -1,0 +1,38 @@
+# DigitalOcean App Platform spec for the marketing website.
+#
+# Copy to `.do/website-app.yaml`, fill in the REPLACE_WITH_* identifiers, commit it, and deploy
+# with `bun run deploy:do website`.
+#
+# This assumes the Astro build is fully prerendered. SSR routes, server islands, or any
+# on-demand rendering need a runtime service component instead of a static site.
+name: REPLACE_WITH_PROJECT_SLUG-website
+region: REPLACE_WITH_DO_APP_REGION
+alerts:
+  - rule: DEPLOYMENT_FAILED
+  - rule: DOMAIN_FAILED
+
+domains:
+  - domain: REPLACE_WITH_WEBSITE_DOMAIN
+    type: PRIMARY
+
+static_sites:
+  - name: website
+    github:
+      repo: REPLACE_WITH_GITHUB_REPO
+      branch: REPLACE_WITH_GIT_BRANCH
+      deploy_on_push: false
+    source_dir: /
+    environment_slug: node-js
+    build_command: bun install --frozen-lockfile && bun run build:website
+    output_dir: website/dist
+    index_document: index.html
+    envs:
+      - key: PUBLIC_WEBSITE_URL
+        value: "${_self.PUBLIC_URL}"
+        scope: BUILD_TIME
+        type: GENERAL
+      # The website links visitors into the app; see docs/WEB_SURFACES.md for what may cross.
+      - key: PUBLIC_WEBAPP_URL
+        value: "https://REPLACE_WITH_WEBAPP_DOMAIN"
+        scope: BUILD_TIME
+        type: GENERAL

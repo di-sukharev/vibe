@@ -69,7 +69,7 @@ PRIVATE_STORAGE_DOWNLOAD_URL_TTL_SECONDS=300
 `backend/src/env.ts` refuses to start on an incoherent combination rather than failing at the first upload:
 
 - **Production refuses the filesystem driver.** An App Platform container's disk does not survive a deploy, so a production app that ships uploads must have a bucket.
-- **A non-loopback endpoint needs `PRIVATE_STORAGE_ALLOW_REMOTE_ENDPOINT=true`.** This is the whole safety story in one rule: outside production a stray `.env` cannot point a development machine at a real bucket, and production stays fail-closed until someone opens the gate on purpose. `scripts/prepare-do-specs.mjs` sets it in a generated deployment spec, and refuses to generate one pointing at a loopback address.
+- **A non-loopback endpoint needs `PRIVATE_STORAGE_ALLOW_REMOTE_ENDPOINT=true`.** This is the whole safety story in one rule: outside production a stray `.env` cannot point a development machine at a real bucket, and production stays fail-closed until someone opens the gate on purpose. The committed DigitalOcean spec `.do/api-app.yaml` sets it explicitly, so opening the gate is a visible line in a reviewed file rather than a flag someone passed once.
 - **Production requires HTTPS and a non-loopback endpoint.**
 - **The five S3 settings are all-or-nothing**, and setting any of them under the filesystem driver is an error rather than something quietly ignored.
 - **A local endpoint requires path-style addressing**, because it cannot resolve `<bucket>.<host>`.

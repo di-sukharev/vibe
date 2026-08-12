@@ -6,8 +6,7 @@
  * `config.ts` means that stays true even if `config.ts` ever needs a *value* from `env.ts`, which
  * is the edit that would turn the edge into a real initialisation cycle. Nothing in the toolchain
  * would catch that: `architecture-check.mjs` has no cycle detection, and the symptom would be a
- * TDZ crash at boot in every entrypoint. It is also imported by `scripts/prepare-do-specs.mjs`,
- * which must not drag zod and the env schema into spec generation.
+ * TDZ crash at boot in every entrypoint.
  */
 
 /**

@@ -202,7 +202,7 @@ This block exists only for fresh installs from the template. If this repository 
 ## Deployment And Storage
 
 - Deployment and infrastructure policy belongs in `README.md` and `docs/`, especially `docs/DEPLOYMENT.md`, `docs/STORAGE.md`, `docs/LOCAL_DATABASE.md`, and `docs/YANDEX_CLOUD.md`.
-- Concrete DigitalOcean spec defaults belong in `scripts/prepare-do-specs.mjs` and `.do/*.yaml.example`; update README/docs alongside those scripts.
+- DigitalOcean app specs are committed in `.do/*.yaml` and applied by `scripts/deploy-do.mjs`, which takes secret values from the running app; never put a secret value in a spec. Yandex releases run through `scripts/release-yc.mjs`. Update README/docs alongside those scripts.
 - Hosting is one recorded choice in `CHECKLIST.md`, not a running comparison: Russia or a data-residency requirement means Yandex Cloud, anything else means DigitalOcean, and an explicit wish for full control means an own server. Ask where the users are, not which cloud they prefer, and delete the other paths' tooling during setup.
 - Background jobs are declared once in `backend/src/jobs.ts` and run by whichever process the hosting implies - a provider timer through `cron.ts`, the in-repo `scheduler.ts`, or the `worker.ts` loop. See `docs/BACKGROUND_JOBS.md` before adding a fourth way.
 - Work that must survive a process restart goes through `backend/src/outbox`; `background-tasks.ts` stays for work whose loss is acceptable. `docs/BACKGROUND_JOBS.md` compares the three before you pick.

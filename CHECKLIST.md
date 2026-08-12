@@ -132,9 +132,9 @@ picks the hosting from that answer:
 
 | Hosting | Chosen when | What the template gives you |
 | --- | --- | --- |
-| DigitalOcean | Default for an audience outside Russia. | `bun run deploy:do:specs` generates validated App Platform specs; managed PostgreSQL, static sites, CDN, scheduled jobs and workers are all covered. |
-| Yandex Cloud | Users in Russia, or data must stay there. | Serverless Containers, Managed PostgreSQL, Object Storage, API Gateway. Provisioning follows `docs/YANDEX_CLOUD.md` step by step - there is no generator. |
-| Own server | Full control wanted, no vendor lock-in, and someone is willing to run the machine. | The same Docker image plus the in-repo scheduler, with a short runbook in the "Own Server" section of `docs/DEPLOYMENT.md`. No generator: you own TLS, backups, updates, and monitoring. |
+| DigitalOcean | Default for an audience outside Russia. | `bun run deploy:do <api\|webapp\|website>` applies the committed App Platform specs in `.do/`; managed PostgreSQL, static sites, CDN, scheduled jobs and workers are all covered. |
+| Yandex Cloud | Users in Russia, or data must stay there. | Serverless Containers, Managed PostgreSQL, Object Storage, API Gateway. Provisioning follows `docs/YANDEX_CLOUD.md` step by step, once; each release afterwards is `bun run release:yc release`. |
+| Own server | Full control wanted, no vendor lock-in, and someone is willing to run the machine. | The same Docker image plus the in-repo scheduler, with a short runbook in the "Own Server" section of `docs/DEPLOYMENT.md`. No release script: you own TLS, backups, updates, and monitoring. |
 
 Pick exactly one and record it above. The other paths are not kept "just in case": their scripts,
 spec templates, and docs are deleted during setup. Follow the "If You Chose Another Hosting" list in

@@ -41,11 +41,11 @@ Most steps below are commented-out blocks waiting for you, and `rg -l 'docs/IAP.
    delete the
    `@parked-test` line at the top of `backend/src/modules/billing/billing.integration.test.ts` so
    both test runners pick it up again (it already typechecks, so nothing else is needed).
-7. Allow the job in deployment specs: uncomment the `providerEnv` branch in
-   `scripts/prepare-do-specs.mjs` that gives `billing:google-play:reconcile` the Google Play group,
-   and restore the parked assertion in `scripts/prepare-do-specs.test.mjs`. The generator validates
-   job names against `backend/src/jobs.ts` directly, so step 5 is what makes the job schedulable -
-   there is no second list to update.
+7. Schedule the job where it is deployed. On DigitalOcean add a `SCHEDULED` component running
+   `bun run start:cron -- billing:google-play:reconcile` to `.do/api-app.yaml`, with the complete
+   Google Play group in its `envs`. `bun run deploy:do api` validates job names against
+   `backend/src/jobs.ts` directly, so step 5 is what makes the job schedulable - there is no
+   second list to update.
 8. Uncomment `<IapProvider>` in `mobile/src/composition/AppProviders.tsx`, then in
    `mobile/src/app/(tabs)/profile.tsx` uncomment all three parked pieces: the `@/features/billing`
    imports, the `const iap = useSubscriptionIap()` line, and the `SubscriptionSummary` block.
@@ -83,10 +83,8 @@ reference them. Remove all of it in one pass:
   the whole of `mobile/tests/iap*.test.*`, `mobile/tests/offer-code-controller.test.ts`,
   `mobile/tests/paywall-view-state.test.ts`, and `mobile/tests/workspace-surfaces.test.ts`
   (entirely billing)
-- the store credential groups in `scripts/prepare-do-specs.mjs` (including `optionalIapEnvBlock`
-  with its `maintenance:process` caller, the Apple certificates path, and the
-  `billing:google-play:reconcile` scheduled-job branch) with their assertions in
-  `scripts/prepare-do-specs.test.mjs`, and the `IAP_*` entries in `.do/backend-app.yaml.example`
+- the commented store credential groups and the `IAP_*` and `WEBHOOK_*` entries in
+  `.do/api-app.yaml.example`, plus the store paragraphs in `docs/DEPLOYMENT.md`
 - the `APPLE_IAP_*`, `GOOGLE_PLAY_*`, `IAP_*`, and `WEBHOOK_*` entries in `backend/src/env.ts`
   (the webhook limits exist only for App Store notifications) with their
   validators, their assertions in `backend/src/env.test.ts`, the same keys in every backend test
@@ -164,10 +162,11 @@ Create a Google Cloud service account, link it in Play Console, grant subscripti
 
 Backend credentials are secrets. Do not put App Store API keys, Apple private keys, or Google service-account JSON in mobile env.
 
-For the default DigitalOcean path, export either complete store group before running
-`bun run deploy:do:specs backend-final`. The generator rejects partial groups, rejects App Store
-Sandbox configuration in a production spec, uses the bundled certificate path, and emits the Apple
-private key and Google service-account JSON as `SECRET` runtime values.
+For the default DigitalOcean path, uncomment either complete store group in `.do/api-app.yaml` and
+set the two credential payloads - the Apple private key and the Google service-account JSON - as
+`SECRET` values in the DigitalOcean console, where `bun run deploy:do api` carries them forward
+without ever reading them. Keep each group whole, keep `APPLE_IAP_ENVIRONMENT=Production`, and
+leave `APPLE_IAP_ROOT_CERTS_DIR` at the bundled certificate path.
 
 ## Mobile Env
 

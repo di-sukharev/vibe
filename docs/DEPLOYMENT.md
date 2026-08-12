@@ -22,8 +22,8 @@ project runs on Yandex Cloud or an own server, delete the DigitalOcean tooling i
 
 **Delete these files**
 
-- `scripts/prepare-do-specs.mjs`, `scripts/do-cron.mjs`, and their
-  tests - only the DigitalOcean generator reads runner collections
+- `scripts/deploy-do.mjs`, `scripts/deploy-do.test.mjs`, and `scripts/do-cron.mjs` - the cron
+  validator has no other reader
 - `.do/`
 
 **Then make the one conditional file deletion**, which depends on the path you kept rather than on this
@@ -46,19 +46,19 @@ tooling, not DigitalOcean tooling:
 
 **Edit these files** - one bullet each, so nothing is left half-removed:
 
-- root `package.json`: drop the `deploy:do:specs` script. Leaving it behind points at a deleted
-  generator - remove both together or neither.
+- root `package.json`: drop the `deploy:do` script. Leaving it behind points at a deleted
+  script - remove both together or neither.
 - **this file**: delete every section except the seven below, then clean those seven.
   - "Release Source Preflight" - drop the App Platform paragraph.
   - "Secrets And Backend Env" - `TRUSTED_PROXY_CLIENT_IP_HEADER=do-connecting-ip` is wrong on any
     other ingress, `PRIVATE_STORAGE_ENDPOINT` names a DigitalOcean host, and the storage paragraph mentions
-    a `deploy:do:specs` command that no longer exists.
+    `.do/api-app.yaml`, which no longer exists.
   - "Own Server" - keep as is; on the Yandex path, delete it too.
-  - "Production Auth And CORS" - drop the `DO_AUTH_SITE_DOMAIN` sentence.
+  - "Production Auth And CORS" - drop the sentence naming the two `.do/` specs; the same-site rule
+    itself is a browser rule and stays.
   - "Real-Time And Horizontal Scaling" - keep the monolith-first and Pub/Sub guidance, drop the
     Managed Valkey provisioning.
-  - "Validation" - keep the local checks and the post-deploy list, minus the `deploy:do:specs` and
-    `doctl apps spec validate` lines.
+  - "Validation" - keep the local checks and the post-deploy list, minus the two `deploy:do` lines.
   - "Expo / EAS" - keep it; mobile releases go through Expo regardless of who hosts the API.
     Its opening line says mobile deployment is separate from DigitalOcean hosting - reword that to
     name your hosting instead.
@@ -81,12 +81,11 @@ tooling, not DigitalOcean tooling:
   rules, and the storage-service guidance - they are about S3 and about this codebase, not about
   DigitalOcean.
 - `webapp/README.md` and the root `README.md`: the DigitalOcean deployment guidance and every
-  `bun run deploy:do:specs` mention, including the setup instructions near the top of `README.md`
+  `bun run deploy:do` mention, including the setup instructions near the top of `README.md`
   that name DigitalOcean as the supported production path.
-- `backend/README.md`: the DigitalOcean part of "Deployment", and - in "Runtime Entrypoints" - the
-  sentence about deployment generation refusing the loop worker while its list is empty.
-- `website/README.md`: the `.do/backend-app.yaml.example` link and the
-  `bun run deploy:do:specs website` command.
+- `backend/README.md`: the DigitalOcean part of "Deployment".
+- `website/README.md`: the `.do/api-app.yaml.example` link and the
+  `bun run deploy:do website` command.
 - `docs/ARCHITECTURE.md`: the App Platform sizing and component guidance, the DigitalOcean half of
   the Valkey broker sentence, and the Managed Valkey link. Agents are told to read this file for
   non-trivial work, so a leftover here misdirects every future session.
@@ -102,7 +101,7 @@ tooling, not DigitalOcean tooling:
 Finally, sweep for what no list can enumerate:
 
 ```bash
-rg -n 'DigitalOcean|App Platform|deploy:do:specs|doctl|Spaces|\.do/' --glob '!node_modules'
+rg -n 'DigitalOcean|App Platform|deploy:do|doctl|Spaces|\.do/' --glob '!node_modules'
 ```
 
 Every hit must either go or become provider-neutral, with three exceptions to leave alone:
@@ -134,7 +133,7 @@ git status --short --branch
 
 Deploy only from the intended release branch after the intended commit is pushed and the local branch is in sync with its upstream. If the worktree has modified, deleted, or untracked files, stop and report that deployment is blocked. Do not run `git reset`, `git checkout --`, `git clean`, `git stash`, or equivalent cleanup to make deployment possible unless the user explicitly requested that exact destructive action.
 
-DigitalOcean App Platform builds from the connected Git branch, not from local `dist` folders or uncommitted files. A dirty local checkout can still cause an agent to deploy the wrong branch, generate specs from the wrong release source, or erase another session's work while trying to make the branch clean. The supported failure mode is to stop, not to repair the checkout.
+DigitalOcean App Platform builds from the connected Git branch, not from local `dist` folders or uncommitted files. A dirty local checkout can still cause an agent to deploy the wrong branch, or to erase another session's work while trying to make the branch clean. The supported failure mode is to stop, not to repair the checkout.
 
 ## Secrets And Backend Env
 
@@ -175,7 +174,7 @@ COOKIE_SECURE=true
 
 With `INGRESS_RATE_LIMIT_PROVIDER=local`, `AUTH_RATE_LIMIT_*`, `IAP_RATE_LIMIT_*`, `WEBHOOK_RATE_LIMIT_*`, and `ADMIN_USERS_READ_RATE_LIMIT_*` use bounded in-process maps. The admin directory budget is shared by all sessions and search filters for the same administrator, but none of these budgets is global across multiple backend processes. Replace the ingress budgets with a trusted edge/WAF policy or shared state before scaling the API to multiple instances. The only other value, `yandex-sws`, exists for a Yandex Cloud deployment fronted by Smart Web Security: it disables the backend's IP-keyed ingress budgets on the assumption that the edge enforces them, while body limits and the administrator-keyed directory budget stay on. Do not set it on any other hosting - nothing would be enforcing those limits.
 
-Object storage is required, not optional: the image runs with `NODE_ENV=production`, where the backend refuses the filesystem storage driver because a container disk does not survive a redeploy. `bun run deploy:do:specs` refuses to generate a backend spec without this group.
+Object storage is required, not optional: the image runs with `NODE_ENV=production`, where the backend refuses the filesystem storage driver because a container disk does not survive a redeploy. A backend deployed without this group crash-loops on its first boot.
 
 ```bash
 PRIVATE_STORAGE_DRIVER=s3
@@ -191,32 +190,36 @@ PRIVATE_STORAGE_UPLOAD_URL_TTL_SECONDS=900
 PRIVATE_STORAGE_DOWNLOAD_URL_TTL_SECONDS=300
 ```
 
-Export the complete group before generating specs. On DigitalOcean, `bun run deploy:do:specs backend-final` rejects partial storage configuration, writes access credentials as `SECRET`, and gives the group to the API service only. Current notification, billing, and maintenance background commands do not consume Spaces, so their worker/cron components do not receive storage credentials. Add an explicit command-to-env mapping and tests before a future storage-consuming background command is deployed.
+On DigitalOcean the non-secret half of the group is in `.do/api-app.yaml` and the two access credentials are `SECRET` entries set in the console; copy the whole group into any worker or cron component you add. On another hosting, set the same variables on every backend runtime by hand.
 
-If native subscriptions are active, export the complete group for each enabled store before generating
-the production backend spec:
+If native subscriptions are active, the store groups follow the same rule: the identifiers are in the spec, the credential payloads are `SECRET` entries with no value, set once in the console.
 
-```bash
-APPLE_IAP_BUNDLE_ID=com.example.app
-APPLE_IAP_APP_APPLE_ID=1234567890
-APPLE_IAP_ENVIRONMENT=Production
-APPLE_IAP_ISSUER_ID=<issuer-id>
-APPLE_IAP_KEY_ID=<key-id>
-APPLE_IAP_PRIVATE_KEY_BASE64=<base64-p8-private-key>
-APPLE_IAP_PRODUCT_IDS=com.example.app.premium.monthly,com.example.app.premium.yearly
-
-GOOGLE_PLAY_PACKAGE_NAME=com.example.app
-GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64=<base64-service-account-json>
-GOOGLE_PLAY_PRODUCT_IDS=com.example.app.premium
-GOOGLE_PLAY_BASE_PLAN_IDS=monthly,yearly
+```yaml
+      - key: APPLE_IAP_BUNDLE_ID
+        value: com.example.app
+      - key: APPLE_IAP_APP_APPLE_ID
+        value: "1234567890"
+      - key: APPLE_IAP_ENVIRONMENT
+        value: Production
+      - key: APPLE_IAP_ISSUER_ID
+        value: <issuer-id>
+      - key: APPLE_IAP_KEY_ID
+        value: <key-id>
+      - key: APPLE_IAP_ROOT_CERTS_DIR
+        value: /app/backend/src/modules/billing/certs/apple
+      - key: APPLE_IAP_PRODUCT_IDS
+        value: com.example.app.premium.monthly,com.example.app.premium.yearly
+      - key: APPLE_IAP_PRIVATE_KEY_BASE64      # SECRET, set in the console
+      - key: GOOGLE_PLAY_PACKAGE_NAME
+        value: com.example.app
+      - key: GOOGLE_PLAY_PRODUCT_IDS
+        value: com.example.app.premium
+      - key: GOOGLE_PLAY_BASE_PLAN_IDS
+        value: monthly,yearly
+      - key: GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64   # SECRET, set in the console
 ```
 
-The generator treats each store as an atomic configuration group, rejects App Store Sandbox in a
-production spec, marks credential payloads as `SECRET`, and points Apple verification at the public
-root certificates bundled in the backend image. App Store credentials stay on the API. Google Play
-credentials also go to `maintenance:process` when Google Play is configured (and to
-`billing:google-play:reconcile` once subscriptions are turned on), but never to workers, unrelated cron jobs, static sites, or any `EXPO_PUBLIC_*`
-variable.
+Each store is an atomic group: half of one deploys an install that accepts purchases and verifies none of them. `APPLE_IAP_ENVIRONMENT` must be `Production` in a production spec - App Store Sandbox receipts would validate against the wrong service. `APPLE_IAP_ROOT_CERTS_DIR` points Apple verification at the root certificates bundled in the backend image. App Store credentials stay on the API. Google Play credentials also belong on `maintenance:process` when Google Play is configured, and on `billing:google-play:reconcile` once subscriptions are turned on, but never on workers, unrelated cron jobs, static sites, or any `EXPO_PUBLIC_*` variable.
 
 ## Own Server
 
@@ -284,93 +287,67 @@ doctl auth init
 7. DigitalOcean Managed Valkey only when horizontally scaled real-time features need Pub/Sub between backend instances.
 8. Production domains and DNS access for the authenticated webapp and API. Browser auth requires both custom hosts under one registrable site, for example `app.example.com` and `api.example.com`.
 
-Prefer an App Platform app spec so the backend service, static sites, env, domains, and database attachment stay reviewable. Create or update with:
+Prefer an App Platform app spec so the backend service, static sites, env, domains, and database attachment stay reviewable. The specs are committed in `.do/` and applied one surface at a time by `bun run deploy:do`.
 
-```bash
-doctl apps create --spec <path-to-spec.yaml>
-doctl apps update <app-id> --spec <path-to-spec.yaml>
-```
-
-Consult the current App Spec docs before applying a generated spec because provider fields and limits can change.
+Consult the current App Spec docs before applying a spec, because provider fields and limits change.
 
 ## Safe DigitalOcean App Spec Workflow
 
-Keep committed spec templates under `.do/*.yaml.example`. Generate concrete specs only into `.scratch/deploy` with:
+The spec is the shape of the deployment. The DigitalOcean console is where secret values live.
+
+Copy the templates the install needs, fill in the identifiers marked `REPLACE_WITH_*`, and commit them:
 
 ```bash
-bun run deploy:do:specs <backend-initial|backend-final|webapp|website|all>
+cp .do/api-app.yaml.example .do/api-app.yaml
+cp .do/webapp-app.yaml.example .do/webapp-app.yaml
+cp .do/website-app.yaml.example .do/website-app.yaml
 ```
 
-The generator rejects empty `value:` lines, unresolved `REPLACE_WITH_*` placeholders, wildcard/empty/path-bearing production CORS origins, non-generated production `JWT_SECRET` values, missing build-time static URLs, duplicate/too-short App Platform component names, and browser-auth URLs outside the declared registrable site. It also rejects two independent `*.ondigitalocean.app` hosts as a production browser-auth topology. Do not replace secrets or URLs with manual `sed`, `perl`, or shell one-liners.
-
-The generator also refuses to run unless the current checkout is on the configured deployment branch, the branch tracks a pushed upstream, the branch is not ahead/behind/diverged, and the worktree has no uncommitted or untracked changes.
-
-Concrete App Platform machine defaults live in [../scripts/prepare-do-specs.mjs](../scripts/prepare-do-specs.mjs), not in generated `.scratch` files. The `.do/*.yaml.example` templates intentionally keep budget-bearing values as placeholders so the generator can validate and test them. When changing default tiers, update the generator constants, generator tests, and this document in the same change.
-
-Minimum environment for spec generation:
+Then deploy a surface:
 
 ```bash
-export DO_GITHUB_REPO=owner/repo
-export DO_PROJECT_SLUG=project-slug
-export DO_GIT_BRANCH=master
-export DO_APP_REGION=fra
-export JWT_SECRET="$(openssl rand -hex 32)"
-export ADMIN_SEED_EMAIL=admin@example.com
-export ADMIN_SEED_PASSWORD='<unique 12-128 character bootstrap password>'
-export DO_AUTH_SITE_DOMAIN=example.com
-export DO_BACKEND_URL=https://api.example.com
-export DO_WEBAPP_URL=https://app.example.com
-# Optional when website/admin or another browser origin also calls the API:
-# export DO_ADDITIONAL_CORS_ORIGINS=https://website.example.com,https://admin.example.com
+export DO_EXPECTED_TEAM='<the DigitalOcean team that owns the app>'
+bun run deploy:do api        # or: webapp, website
 ```
 
-Optional API sizing overrides for an installed project:
+Every env entry that declares a `key` and no `value` is filled from the running app immediately before the update. `JWT_SECRET`, the `PRIVATE_STORAGE_*` credentials, and the `EMAIL_*` credentials are therefore set once in the DigitalOcean console and never pass through this repository, a shell history, or a file on disk. `--dry-run` runs every check and reports what would change without touching the app.
+
+The command refuses to deploy when:
+
+- the spec still contains a `REPLACE_WITH_*` placeholder, or an env entry whose value is an empty string, which reads as configured but is not;
+- `CORS_ORIGINS` uses a wildcard, a plaintext origin, or an origin with a path;
+- a `SCHEDULED` component runs a task that is not in [../backend/src/jobs.ts](../backend/src/jobs.ts), or a cadence under App Platform's 15-minute floor;
+- the checkout is not the branch the spec deploys, the branch is not pushed and in sync, or the worktree has uncommitted or untracked changes;
+- `DO_EXPECTED_TEAM` is unset, or does not match the team the current `doctl` token is scoped to. The first run prints the exact value to export.
+
+It deliberately does not re-check `JWT_SECRET` strength, the storage driver, or the storage endpoint. Those are enforced where they are used: [../backend/src/env.ts](../backend/src/env.ts) refuses to boot on a weak or placeholder secret, on the filesystem driver under `NODE_ENV=production`, or on a remote endpoint that was never explicitly opened. A spec that gets them wrong fails at the first container start rather than silently.
+
+### The First Deploy
+
+There is no running app to copy secret values from yet, so the first deploy of the API takes three steps:
 
 ```bash
-export DO_API_INSTANCE_SIZE_SLUG=apps-s-1vcpu-1gb
-export DO_API_INSTANCE_COUNT=1
+# 1. Create the app. Secret values arrive empty, so its first deployment fails at the
+#    migrate job. That is expected: db:deploy refuses to finish without an administrator.
+export DO_PROJECT_ID=<project id>       # places a newly created app; not needed later
+bun run deploy:do api
+
+# 2. In the DigitalOcean console, set the API secrets - JWT_SECRET from `openssl rand -hex 32`,
+#    the PRIVATE_STORAGE_* credentials, the EMAIL_* credentials if this install sends email -
+#    and set ADMIN_SEED_EMAIL and ADMIN_SEED_PASSWORD on the migrate job.
+
+# 3. Deploy again. Every deploy from here on carries those values forward on its own.
+bun run deploy:do api
 ```
 
-Reuse the same `JWT_SECRET` for later `backend-final` updates unless the user intentionally wants to invalidate all existing sessions.
+Then delete `ADMIN_SEED_EMAIL` and `ADMIN_SEED_PASSWORD` from the migrate job in the console. They are needed exactly once; a later run would unlock and reset that administrator again. Everything else stays.
 
-`ADMIN_SEED_EMAIL` and `ADMIN_SEED_PASSWORD` are required only for
-`backend-initial`. The generator rejects missing, shorter-than-12,
-longer-than-128, blank, known-template, or repeated-pattern passwords. It writes
-both values as `SECRET` env only on the `migrate` `PRE_DEPLOY` job; they are
-never attached to the API, static webapp, workers, or cron components. Do not
-keep exporting the bootstrap password for `backend-final`. Spec generation and
-the pre-deploy bootstrap use the same validator; accepted password bytes,
-including intentional leading or trailing spaces, are passed through unchanged.
-
-Typical first deploy order:
+Attach `api.example.com` to the API app and wait for DNS and TLS before deploying the webapp: `VITE_API_URL` is baked into the bundle at build time, so the API host must be final first.
 
 ```bash
-# 1. Create backend with a temporary placeholder browser origin.
-bun run deploy:do:specs backend-initial
-doctl apps spec validate .scratch/deploy/backend-app.yaml >/dev/null
-doctl apps create --spec .scratch/deploy/backend-app.yaml
-
-# 2. Attach api.example.com to the backend app and wait for DNS/TLS, then create
-#    the webapp with its final API and anticipated webapp custom origins.
-export DO_AUTH_SITE_DOMAIN=example.com
-export DO_BACKEND_URL=https://api.example.com
-export DO_WEBAPP_URL=https://app.example.com
-bun run deploy:do:specs webapp
-doctl apps spec validate .scratch/deploy/webapp-static-app.yaml >/dev/null
-doctl apps create --spec .scratch/deploy/webapp-static-app.yaml
-
-# 3. Attach app.example.com to the webapp app and wait for DNS/TLS. Update
-#    backend CORS only with those final custom origins, then create website if active.
-bun run deploy:do:specs backend-final
-doctl apps spec validate .scratch/deploy/backend-app.yaml >/dev/null
-doctl apps update <backend-app-id> --spec .scratch/deploy/backend-app.yaml
-
-bun run deploy:do:specs website
-doctl apps spec validate .scratch/deploy/website-static-app.yaml >/dev/null
-doctl apps create --spec .scratch/deploy/website-static-app.yaml
+bun run deploy:do webapp
+bun run deploy:do website
 ```
-
-Generated specs are written with owner-only `0600` permissions because the backend spec contains `JWT_SECRET`. Keep validation output redirected, never attach the spec to logs or support tickets, and delete `.scratch/deploy/backend-app.yaml` after the create/update operation when it is no longer needed.
 
 Static Sites build from the connected Git branch, not from local `dist` folders. The branch must contain the full monorepo: root `package.json`, `bun.lock`, `backend`, `webapp`, `website`, `mobile`, and `packages/contracts`.
 
@@ -399,7 +376,7 @@ Backend service requirements:
 - Set `COOKIE_SECURE=true` for HTTPS production traffic.
 - Set `CORS_ORIGINS` to the exact deployed browser origins. Do not use `*`, empty values, or URLs with paths.
 - Attach DigitalOcean Managed PostgreSQL or provide its connection string as `DATABASE_URL`.
-- Set the complete `PRIVATE_STORAGE_*` group. It is required, not conditional: `bun run deploy:do:specs` refuses to generate a backend spec without it, because a backend deployed without a bucket crash-loops on startup.
+- Set the complete `PRIVATE_STORAGE_*` group. It is required, not conditional: a backend deployed without a bucket crash-loops on startup.
 - Add a complete App Store and/or Google Play IAP group only when native subscriptions are active; partial groups fail spec generation.
 - Keep the built-in limiter only for the default single-instance API. Use a shared limiter or trusted edge/WAF policy before increasing `instance_count`.
 
@@ -412,11 +389,12 @@ bun run db:deploy
 ```
 
 That command applies existing Prisma migrations, bootstraps or unlocks the first
-administrator when the initial job has seed credentials, and then requires at
-least one `admin` with a password credential. Later `backend-final` jobs receive
-no bootstrap credentials and therefore never reset the seed password, but still
-block a release if no login-capable administrator remains. Do not run `prisma
-migrate dev` in production and do not hand-write migration SQL.
+administrator when the job has seed credentials, and then requires at least one
+`admin` with a password credential. Once `ADMIN_SEED_EMAIL` and
+`ADMIN_SEED_PASSWORD` are removed from the console after the first deploy, later
+runs receive no bootstrap credentials and therefore never reset that password,
+but still block a release if no login-capable administrator remains. Do not run
+`prisma migrate dev` in production and do not hand-write migration SQL.
 
 ## Backend Worker And Cron
 
@@ -438,79 +416,27 @@ The backend ships as one Docker image with separate entrypoints:
 
 Keep API, worker, and cron in the same backend workspace so they share Prisma schema, generated Prisma client, env validation, contracts, and feature services. Do not create a second backend package or repository just to run background code.
 
-DigitalOcean App Platform supports non-routable worker components and scheduled job components in the same app spec. The committed backend template always includes the API service and `migrate` pre-deploy job. Optional worker and scheduled jobs are inserted by the generator only when explicitly configured:
+DigitalOcean App Platform supports non-routable worker components and scheduled job components in the same app spec. `.do/api-app.yaml` always carries the API service and the `migrate` pre-deploy job; a worker or a scheduled job is a block you add to that file, and [../.do/api-app.yaml.example](../.do/api-app.yaml.example) ships both commented out with the shape to copy.
 
-```bash
-# Add the push notification worker after Expo Push is active. The generic scheduler is accepted
-# as shipped: `schedules` already drains the task outbox every minute.
-export DO_BACKEND_WORKER_ENABLED=true
-export DO_BACKEND_WORKER_RUN_COMMAND="bun run start:worker:notifications"
-# Or run the in-repo scheduler instead - but only once `schedules` in backend/src/scheduler.ts has
-# an entry, otherwise the process exits immediately and the generator refuses the command.
+Give any component you add the same `DATABASE_URL` binding, `PRIVATE_STORAGE_*` group and `EMAIL_*` group as the API. None of that is conditional on what the job does: every runner builds storage and delivery through `createBackendRuntime`, so a worker or cron container without them fails the same startup validation the API would. An `EMAIL_*` group on the API alone is the worst version - the install accepts every password-reset request and delivers none of them, because the API is not the process that sends.
 
-# Add the combined maintenance job for production. With Google Play configured,
-# it also refreshes stale stored purchases; otherwise it only cleans auth sessions.
-export DO_BACKEND_CRON_NAME=maintenance
-export DO_BACKEND_CRON_TASK=maintenance:process
-# Or the outbox drain, if this install sends email - but read the cadence note below first.
-# export DO_BACKEND_CRON_TASK=outbox:drain
-export DO_BACKEND_CRON_SCHEDULE="*/15 * * * *"
-export DO_BACKEND_CRON_TIME_ZONE=UTC
+Use a worker component only after the process it runs has work to do. `schedules` ships with the outbox drain, so `bun run start:scheduler` is deployable as-is; `workerLoops` ships empty, so give it a loop before pointing a worker at `bun run start:worker`, or that process exits immediately and App Platform restarts it forever. The push notification worker, `bun run start:worker:notifications`, qualifies once the app sends push notifications.
 
-# If notifications use scheduled processing instead of the persistent worker,
-# add the independent notification recovery job alongside maintenance.
-export DO_BACKEND_NOTIFICATION_CRON_NAME=notification-recovery
-export DO_BACKEND_NOTIFICATION_CRON_SCHEDULE="*/15 * * * *"
-export DO_BACKEND_NOTIFICATION_CRON_TIME_ZONE=UTC
-
-bun run deploy:do:specs backend-final
-```
-
-Use worker components only after the process has work to do. The notification worker qualifies once the app sends push notifications. `schedules` ships with the outbox drain, so `bun run start:scheduler` is deployable as-is; `workerLoops` ships empty, so give it a loop before pointing a worker component at `bun run start:worker` - that process would exit immediately and App Platform would restart it forever. Any command is passed through as-is. Production should normally schedule `maintenance:process`; it removes stale auth sessions and expired password-reset tokens, redacts legacy terminal notification content, and - once subscriptions are turned on and the complete Google Play group is configured - reconciles stale stored purchase tokens in bounded batches. `auth:sessions:cleanup` remains available as a dedicated task and covers both sessions and reset tokens. `billing:google-play:reconcile` exists only after subscriptions are turned on (docs/IAP.md); spec generation rejects it until then, because scheduling an unregistered task deploys a job that fails on every run.
+Production should normally schedule `maintenance:process`. It removes stale auth sessions and expired password-reset tokens, redacts legacy terminal notification content, and - once subscriptions are turned on and the complete Google Play group is configured - reconciles stale stored purchase tokens in bounded batches. `auth:sessions:cleanup` remains available as a dedicated task covering sessions and reset tokens. `billing:google-play:reconcile` is not registered until subscriptions are turned on (docs/IAP.md), and `bun run deploy:do api` checks a scheduled component's task name against `backend/src/jobs.ts`, so scheduling it early is refused rather than deploying a job that fails on every run.
 
 Choose one notification-processing topology explicitly:
 
-- Preferred for timely delivery: deploy `bun run start:worker:notifications`. The independent notification scheduled job may still be used as a recovery pass.
-- Budget topology without a persistent notification worker: configure both the primary `maintenance:process` job and `DO_BACKEND_NOTIFICATION_CRON_*`. The second job is fixed to `notifications:process`, so maintenance and push processing cannot silently replace one another.
+- Preferred for timely delivery: a worker component running `bun run start:worker:notifications`. A scheduled `notifications:process` job may still be added as a recovery pass.
+- Budget topology without a persistent worker: schedule `maintenance:process` and a second, separate job fixed to `notifications:process`. Keep them as two components, so maintenance and push processing cannot silently replace one another.
 
-The generator rejects incomplete notification-job settings, schedules faster than DigitalOcean's supported 15-minute cadence, duplicate `notifications:process` cron definitions, and component-name collisions after normalization. All optional components use `backend/Dockerfile`, the repository-root build context, and the same managed PostgreSQL binding as the API. The generator gives Google Play credentials only to the API and a billing-capable scheduled task, while the notification worker and dedicated notification job receive only a configured `EXPO_PUSH_ACCESS_TOKEN`. Give every background component the same `PRIVATE_STORAGE_*` group as the API. It is not conditional on the job: every runner builds storage through `createBackendRuntime`, so a worker or cron container fails the same startup validation without it. The generator emits the group into all of these blocks.
+Optional-env ownership is now yours to keep in the spec, and it is a security boundary rather than tidiness:
 
-The generator enforces the current optional-env ownership explicitly:
-
-- API service: configured App Store, Google Play, and temporary `ENABLE_TEST_PUSH` values.
-- `bun run start:worker:notifications` and `notifications:process`: configured `EXPO_PUSH_ACCESS_TOKEN`, because these components call Expo's delivery API.
+- API service: the configured App Store and Google Play groups, and a temporary `ENABLE_TEST_PUSH`. That variable is API-only and accepts only `true` or `false`; delivery still belongs to the notification worker or cron.
+- `bun run start:worker:notifications` and `notifications:process`: a configured `EXPO_PUSH_ACCESS_TOKEN`, because these components call Expo's delivery API - and nothing else from the list above.
 - Google-enabled `maintenance:process`, and `billing:google-play:reconcile` once subscriptions are on: the complete Google Play group.
-- Other worker/cron commands: none of the Expo, store, or test-route env above.
+- Give worker and cron components neither `JWT_SECRET` nor cookie/CORS settings. Their background runtime loader uses a public non-signing compatibility value internally for shared module typing, so compromising a background component cannot disclose the key that mints access or offer-code tokens.
 
-Worker and cron components receive neither `JWT_SECRET` nor cookie/CORS settings. Their background runtime loader uses a public non-signing compatibility value internally for shared module typing, so compromise of a background component cannot disclose the API key used to mint access or offer-code tokens.
-
-`ENABLE_TEST_PUSH` accepts only `true` or `false` during spec generation and is always API-only; delivery still belongs to the notification worker or cron.
-
-An install that sends email exports the `EMAIL_*` group before generating the spec:
-
-```bash
-export EMAIL_DELIVERY=resend            # or postbox
-export EMAIL_FROM="Example <no-reply@example.com>"
-export EMAIL_RESEND_API_KEY=re_...
-```
-
-The generator emits them into the API, the worker, and the cron component alike, and adds
-`WEBAPP_ORIGIN` itself from the webapp URL you already supplied - every runner builds delivery
-through `createBackendRuntime`, and the runner is the process that actually sends, so a group on
-the API alone would deploy an install that accepts every reset request and delivers none of them.
-The credentials are marked `SECRET`. A half-configured group is refused at generation rather than
-becoming a crash loop after the migration job has already run, and `EMAIL_DELIVERY=console` is
-refused outright. Leave the group unset and no email keys are emitted at all: an install with no
-email is a legitimate install. See [EMAIL.md](EMAIL.md) for the provider groups and the failure
-contract.
-
-That floor decides how the task outbox runs here. A password-reset email arriving fifteen minutes
-after the user asked for it is not acceptable, so an install that wires an email provider must run
-`outbox:drain` from the **worker** component with `bun run start:scheduler` and a one-minute entry
-in `backend/src/scheduler.ts`, not from a scheduled job. An install with no provider can leave the
-drain on a slow schedule or not run it at all: nothing is queued while delivery is unconfigured.
-See [BACKGROUND_JOBS.md](BACKGROUND_JOBS.md), "Running the drain".
-
+Every App Platform schedule must stay at or above its 15-minute floor, and that floor decides how the task outbox runs here. A password-reset email arriving fifteen minutes after the user asked for it is not acceptable, so an install that wires an email provider runs `outbox:drain` from the **worker** component with `bun run start:scheduler` and the one-minute entry in `backend/src/scheduler.ts` - not from a scheduled job. An install with no provider can leave the drain on a slow schedule or not run it at all: nothing is queued while delivery is unconfigured. See [BACKGROUND_JOBS.md](BACKGROUND_JOBS.md), "Running the drain", and [EMAIL.md](EMAIL.md) for the provider groups and the failure contract.
 
 ## Real-Time And Horizontal Scaling
 
@@ -584,7 +510,7 @@ DigitalOcean Managed PostgreSQL uses TLS. The backend normalizes `sslmode=requir
 
 Production browser auth may be cross-origin, but it must remain same-site: use custom hosts under one registrable domain, such as `app.example.com` and `api.example.com`. Independent App Platform default hosts such as `app-abc.ondigitalocean.app` and `api-xyz.ondigitalocean.app` are different browser sites because `ondigitalocean.app` is a public suffix. A `SameSite=None` cookie can still be blocked by browser third-party-cookie policy, so default ingress hosts are supported only for initial provisioning and non-cookie health checks, not production browser auth.
 
-Both hosts must sit under one registrable site (`example.com` in the example). On DigitalOcean, set `DO_AUTH_SITE_DOMAIN` to that site, not to either host, and the deploy generator verifies that `DO_BACKEND_URL`, `DO_WEBAPP_URL`, and any additional credentialed CORS origins belong to it; on another hosting, check it yourself. The required runtime shape is:
+Both hosts must sit under one registrable site (`example.com` in the example). Nothing checks this for you on any hosting: verify that the `domains` entry in `.do/api-app.yaml`, the one in `.do/webapp-app.yaml`, and every origin in `CORS_ORIGINS` share the same registrable domain before the first deploy. Independent default hosts are the trap, because `ondigitalocean.app` is a public suffix and two apps under it are two different browser sites. The required runtime shape is:
 
 - backend cookies: `HttpOnly`, `Secure`, `SameSite=None`, scoped to `/api/auth`;
 - backend CORS: exact HTTPS origins only, `credentials: true`, no wildcard fallback;
@@ -669,11 +595,11 @@ bun run test
 bun run build
 ```
 
-For narrow deployment-only documentation or App Platform config work, run the subset that matches the affected surfaces, for example `bun run deploy:do:specs all`, `bun run build:webapp`, `bun run build:website`, or `bun run --cwd backend smoke:docker`.
+For narrow deployment-only documentation or App Platform config work, run the subset that matches the affected surfaces, for example `bun run deploy:do api --dry-run`, `bun run build:webapp`, `bun run build:website`, or `bun run --cwd backend smoke:docker`.
 
 After deployment:
 
-- verify `doctl apps spec validate <generated-spec.yaml>` passes for every generated spec before create/update;
+- verify `bun run deploy:do <target> --dry-run` passes for every surface before the real deploy;
 - verify `/health/live` and `/health/ready` on the backend public URL;
 - verify browser auth only from allowed `CORS_ORIGINS`;
 - verify `webapp` route refreshes hit the React catch-all instead of a static 404;
@@ -686,9 +612,11 @@ After deployment:
 ## Failure Modes This Template Guards Against
 
 - `GitHub user not authenticated`: App Platform GitHub integration was not connected or did not have repository access before `doctl apps create`.
-- Empty secrets or URLs in generated specs: `JWT_SECRET`, `CORS_ORIGINS`, and `VITE_API_URL` must be concrete before deployment.
-- Dirty or ambiguous release source: deployment tooling must stop when the worktree has uncommitted/untracked files, the checkout branch differs from `DO_GIT_BRANCH`, or the branch is not pushed and in sync.
-- Backend crash on startup: production requires a generated 64-or-more-character hexadecimal `JWT_SECRET`, so the spec generator must fail before App Platform deploys an unsafe value.
+- Empty secrets or URLs in a spec: `CORS_ORIGINS` and `VITE_API_URL` must be concrete before deployment, and an env entry with an empty-string value is refused because it reads as configured but is not.
+- Secrets in the repository: no spec carries a secret value. An entry with a key and no value is filled from the running app at deploy time, so credentials live only in the DigitalOcean console.
+- Dirty or ambiguous release source: deployment stops when the worktree has uncommitted or untracked files, the checkout is not the branch the spec deploys, or the branch is not pushed and in sync.
+- Deploying into the wrong DigitalOcean team: `DO_EXPECTED_TEAM` must match the team the current `doctl` token is scoped to.
+- Backend crash on startup: production requires a 64-or-more-character hexadecimal `JWT_SECRET`, which `backend/src/env.ts` enforces at boot, so an unsafe value fails the deployment instead of serving traffic.
 - Broken browser auth CORS: production CORS must use exact HTTPS origins, not wildcard or empty values.
 - Webapp calling its own `/api/*`: missing `VITE_API_URL` at static build time makes the bundle use the wrong origin.
 - Stale remote build dependencies: `.bun-version` pins the Static Site build runtime and build commands run `bun install --frozen-lockfile` before `bun run build:*`.

@@ -31,9 +31,6 @@
     "valibot": "^1.4.2",
     "yaml": "^2.9.0"
   },
-  "devDependencies": {
-    "tldts": "^7.4.10"
-  },
   "scripts": {
     "dev": "bun run --filter '*' --parallel dev",
     "dev:webapp": "bun run --cwd webapp dev",
@@ -51,7 +48,8 @@
     "static:precompress": "bun scripts/precompress-static.mjs",
     "lint": "bun run --cwd webapp lint && bun run --cwd mobile lint",
     "mobile:template:check": "bun scripts/check-mobile-template.mjs",
-    "deploy:do:specs": "bun scripts/prepare-do-specs.mjs",
+    "deploy:do": "bun scripts/deploy-do.mjs",
+    "release:yc": "bun scripts/release-yc.mjs",
     "storage:local:start": "bun scripts/storage-local.mjs start",
     "storage:local:status": "bun scripts/storage-local.mjs status",
     "storage:local:stop": "bun scripts/storage-local.mjs stop",

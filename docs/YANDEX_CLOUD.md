@@ -9,13 +9,19 @@ DigitalOcean is the choice for audiences outside Russia. Either way the decision
 The hosting choice is recorded in [CHECKLIST.md](../CHECKLIST.md) and only one path is kept. If the
 project runs on DigitalOcean or an own server, delete the Yandex tooling in one pass.
 
-**Delete this file.** One piece of backend code is Yandex-specific and needs a decision rather than
-a delete: `INGRESS_RATE_LIMIT_PROVIDER` in `backend/src/env.ts` accepts `yandex-sws`, and
+**Delete this file, `scripts/release-yc.mjs`, `scripts/release-yc.test.mjs`, and
+`backend/.env.deploy.example`, and drop the `release:yc` script from the root `package.json`.**
+
+One piece of backend code is Yandex-specific and needs a decision rather than a delete:
+`INGRESS_RATE_LIMIT_PROVIDER` in `backend/src/env.ts` accepts `yandex-sws`, and
 `backend/src/app.ts` turns the backend's own IP-keyed rate limits off when it is set, because Smart
 Web Security is doing that job at the edge. Keep the code and keep the value at its `local` default
 - on any other hosting `yandex-sws` would silently disable those limits with nothing replacing them.
 Delete the `yandex-sws` option and the checks around it only if you are sure no edge WAF will ever
 sit in front of this API; `backend/src/app.test.ts` and `backend/src/env.test.ts` cover it.
+
+Nothing else in `backend/` or `scripts/` is Yandex-only; the two mentions that remain (a comment in
+`backend/src/jobs.ts` and the provider-doc check) are deliberately provider-neutral and stay.
 
 **Then make the one conditional file deletion**, which depends on the path you kept rather than on this
 one. The static precompression tooling - `scripts/precompress-static.mjs`, its test, the
@@ -122,6 +128,41 @@ yc config list
 ```
 
 Use `yc config set folder-id <folder_ID>` when the active folder must be changed.
+
+## Releases
+
+Everything after this section provisions infrastructure **once**: registries, containers, buckets,
+gateways, timers, service accounts, databases. Those steps are a runbook, not a routine.
+
+Each subsequent release is one command:
+
+```bash
+cp backend/.env.deploy.example backend/.env.deploy   # once, then fill in the identifiers
+bun run release:yc release
+```
+
+It runs five phases in order - `build-push`, `migrate`, `deploy`, `publish-web`, `verify` - and
+records each one it finishes in `.scratch/release/<commit>.json`. A Yandex release is several
+independent operations and any of them can fail halfway, so `bun run release:yc status` shows what
+is done and re-running continues from there instead of redoing work. A single phase can be run on
+its own by name, and `--dry-run` prints the exact commands without touching the cloud.
+
+`backend/.env.deploy` holds identifiers, never credentials. The script never reads a secret: it
+reads the **active revision's environment** and carries it forward unchanged, altering only the
+image. That matters because container environment variables belong to a revision - a revision
+deployed without them starts with none, so a release that did not carry them would silently strip
+the production configuration. Runtime secrets therefore stay in the console or Lockbox, where you
+set them once.
+
+The release refuses to start when the worktree is dirty or the branch is not pushed and in sync,
+and when the active `yc` profile does not match the `YC_EXPECTED_CLOUD_ID` and
+`YC_EXPECTED_FOLDER_ID` recorded for the project. Releasing into the wrong folder is the expensive
+mistake here, and it is the one a correct-looking command makes silently.
+
+Two environment values cannot travel this path. `--environment` is parsed as CSV once an argument
+holds more than one `=`, so a value containing both `=` and `,` would be split into bogus
+variables; the script refuses such a value instead of deploying a mangled revision. Set that one in
+the console or Lockbox and it will be carried forward like any other.
 
 ## Backend API
 

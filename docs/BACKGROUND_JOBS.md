@@ -290,8 +290,9 @@ rather than building a rebuild pipeline. Neither hosting offers per-page ISR.
 
 ## Provider specifics
 
-- DigitalOcean: [docs/DEPLOYMENT.md](DEPLOYMENT.md) — "Backend Worker And Cron". `bun run deploy:do:specs`
-  generates the scheduled job or worker component and validates the schedule before you deploy.
+- DigitalOcean: [docs/DEPLOYMENT.md](DEPLOYMENT.md) — "Backend Worker And Cron". The scheduled job
+  or worker is a block in `.do/api-app.yaml`, and `bun run deploy:do api` validates its task name
+  and cadence before deploying.
 - Yandex Cloud: [docs/YANDEX_CLOUD.md](YANDEX_CLOUD.md) — "Automatic website rebuild". The baseline
   is manual build/upload; automatic rebuild requires a separate builder component before the
   capability can leave `absent`.
