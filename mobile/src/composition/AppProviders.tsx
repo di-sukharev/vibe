@@ -12,6 +12,7 @@ import {
   markPendingLogout,
   setStoredRefreshToken,
 } from '@/features/auth';
+import { AvatarProvider, createExpoAvatarPicker } from '@/features/avatar';
 // Subscriptions are turned off; see docs/IAP.md before uncommenting.
 // import { IapProvider } from '@/features/billing';
 import {
@@ -24,6 +25,7 @@ import {
   markStoredExpoPushTokenForCleanup,
   setPendingExpoPushTokenCleanup,
 } from '@/features/notifications';
+import { uploadFileWithFileSystem } from '@/platform/uploads/file-upload-sender';
 import { createMobileApis, SessionController } from './api';
 import { authTransportForPlatform } from './auth-transport';
 
@@ -43,6 +45,7 @@ export function AppProviders({ children }: PropsWithChildren) {
     setRefreshToken: setStoredRefreshToken,
   }));
   const [pushRegistrationCoordinator] = useState(() => new PushRegistrationCoordinator());
+  const [avatarPicker] = useState(() => createExpoAvatarPicker());
   const [apis] = useState(() =>
     createMobileApis({
       authTransport: authTransportForPlatform(Platform.OS),
@@ -67,11 +70,13 @@ export function AppProviders({ children }: PropsWithChildren) {
         session={session}
       >
         {/* Wrap this in <IapProvider api={apis.billing}> when turning subscriptions on. */}
-        <PushNotificationsProvider
-          api={apis.notifications}
-          registrationCoordinator={pushRegistrationCoordinator}>
-          {children}
-        </PushNotificationsProvider>
+        <AvatarProvider api={apis.avatar} picker={avatarPicker} send={uploadFileWithFileSystem}>
+          <PushNotificationsProvider
+            api={apis.notifications}
+            registrationCoordinator={pushRegistrationCoordinator}>
+            {children}
+          </PushNotificationsProvider>
+        </AvatarProvider>
       </AuthProvider>
     </QueryClientProvider>
   );

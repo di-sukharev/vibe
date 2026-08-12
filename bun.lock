@@ -46,10 +46,13 @@
         "expo-constants": "~57.0.8",
         "expo-dev-client": "~57.0.10",
         "expo-device": "~57.0.1",
+        "expo-file-system": "~57.0.2",
         "expo-font": "~57.0.1",
         "expo-glass-effect": "~57.0.1",
         "expo-iap": "4.6.0",
         "expo-image": "~57.0.1",
+        "expo-image-manipulator": "~57.0.9",
+        "expo-image-picker": "~57.0.9",
         "expo-linking": "~57.0.4",
         "expo-notifications": "~57.0.8",
         "expo-router": "~57.0.9",
@@ -1802,6 +1805,12 @@
     "expo-iap": ["expo-iap@4.6.0", "", { "peerDependencies": { "@amazon-devices/keplerscript-appstore-iap-lib": "~2.12.13", "@amazon-devices/package-manager-lib": "~1.0.1767254401", "expo": "*", "react": "*", "react-native": "*" }, "optionalPeers": ["@amazon-devices/keplerscript-appstore-iap-lib", "@amazon-devices/package-manager-lib"] }, "sha512-M8L/IeEIZr5h9Sqww+VBthOY3qnrejTHq5UfYSAM8mDZar7LwcuXaq6USf3HYajH9XrL32z0lsLFB8Kxi7Q4uQ=="],
 
     "expo-image": ["expo-image@57.0.2", "", { "dependencies": { "sf-symbols-typescript": "^2.2.0" }, "peerDependencies": { "expo": "*", "react": "*", "react-native": "*", "react-native-web": "*" }, "optionalPeers": ["react-native-web"] }, "sha512-SAHDJiQ/Sf8JJ6NJ5/RbSewo8HtQtIGn4bDEgcvipwIw5lPURP0vXPzIOIrZ/ZroZ0abPgwTaWmkspoEO8Sxcw=="],
+
+    "expo-image-loader": ["expo-image-loader@57.0.1", "", { "peerDependencies": { "expo": "*" } }, "sha512-uhrZKLT/cTl2mXyR28kPpVkS5O+PK9N1QA/07IFM4f5T4g0lTW1JHT3NEWwEEsGFldPmVX4j7LwUVVZxE+woug=="],
+
+    "expo-image-manipulator": ["expo-image-manipulator@57.0.9", "", { "dependencies": { "expo-image-loader": "~57.0.1" }, "peerDependencies": { "expo": "*" } }, "sha512-G/h0W9LM5Ju505rj2sQO7TdUi1Jz44ht0se66NB9VyZaSqAv+k3pP6eOAFNabf/LA8bAWO5c8p5Fpm1+CD49zg=="],
+
+    "expo-image-picker": ["expo-image-picker@57.0.9", "", { "dependencies": { "expo-image-loader": "~57.0.1" }, "peerDependencies": { "expo": "*" } }, "sha512-tXs3N/f1yDON31KbOsI6DZuLZU8rgxyAo/r0JJm0DG/KPv8sZBp+enVwbgc0SkJ++RAaAuUReUaErUWgfb+6IQ=="],
 
     "expo-json-utils": ["expo-json-utils@57.0.1", "", {}, "sha512-cgTe1NqzQdYs/WN+3nIY5IZg8s0pb0xaTUbhYvxQDn137GbwRfHoGM2se3m3Vsl4Qu+B9G4RPEK5WJDEU2Do7g=="],
 

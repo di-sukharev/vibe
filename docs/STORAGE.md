@@ -2,7 +2,7 @@
 
 Use this document when a product needs uploads, images, media, generated files, or downloadable assets.
 
-Private file storage is built into this template and switched on. The reference feature is the user avatar: one private image per user, replaceable and deletable, wired from the browser through to storage. Read it end to end before adding a second kind of upload — `webapp/src/features/avatar`, `backend/src/modules/uploads`, `backend/src/storage`.
+Private file storage is built into this template and switched on. The reference feature is the user avatar: one private image per user, replaceable and deletable, wired from both clients through to storage. Read it end to end before adding a second kind of upload — `webapp/src/features/avatar`, `mobile/src/features/avatar`, `mobile/src/platform/uploads`, `backend/src/modules/uploads`, `backend/src/storage`.
 
 ## Two Drivers, One Contract
 
@@ -111,11 +111,13 @@ Know the limit of that trade. The `uploads:pending:cleanup` job in [BACKGROUND_J
 
 ## CORS
 
-The browser uploads cross-origin, so both drivers have to allow the same request. `browserUploadAllowedHeaders` in `backend/src/storage/config.ts` is the single source: the API's CORS layer allows it plus `Authorization` (as `apiCorsAllowedHeaders`), and `scripts/storage-local.mjs` passes the bare list to `PutBucketCors` for the local container. A presigned URL carries its own authority, so the bucket rule never needs `Authorization`. A deployed bucket needs the equivalent rule — the deployed web origins, `GET`/`PUT`/`HEAD`, the `Content-Type` and `If-None-Match` headers, and `ETag` exposed.
+The browser uploads cross-origin, so both drivers have to allow the same request. (Only the browser: a native client is not subject to CORS at all, so none of this applies to the mobile app.) `browserUploadAllowedHeaders` in `backend/src/storage/config.ts` is the single source: the API's CORS layer allows it plus `Authorization` (as `apiCorsAllowedHeaders`), and `scripts/storage-local.mjs` passes the bare list to `PutBucketCors` for the local container. A presigned URL carries its own authority, so the bucket rule never needs `Authorization`. A deployed bucket needs the equivalent rule — the deployed web origins, `GET`/`PUT`/`HEAD`, the `Content-Type` and `If-None-Match` headers, and `ETag` exposed.
 
 ## Displaying A Private File
 
 The webapp loads an avatar with `fetch` and renders an object URL rather than pointing `<img src>` at the signed URL. `secureHeaders()` sets `Cross-Origin-Resource-Policy: same-origin` on the API, which blocks a no-cors image load from the web origin — that would break the filesystem driver while leaving S3 working, and two drivers behaving differently in a browser is the bug this whole layer exists to prevent. A CORS-mode fetch behaves identically on both, and keeps a time-limited credential out of the DOM.
+
+The mobile client needs none of that: `Cross-Origin-Resource-Policy` is a browser rule, and a native image loader does not enforce it, so `expo-image` points straight at the signed URL. It does need one thing the browser does not — an explicit `cacheKey`. expo-image keys its cache on the URL, and every read of the avatar returns a freshly signed URL, so without a key tied to the image's identity every refetch is a cache miss, every signature earns its own disk entry, and a stale cached response can hand the loader a URL that has already expired. `avatarCacheKey` in `mobile/src/features/avatar/image-source.ts` derives that key from `updatedAt` and `byteSize`, so a replaced photo can never be served from the previous one's entry.
 
 ## Public Assets And CDN
 
@@ -125,7 +127,9 @@ If a product needs public immutable assets — marketing images, downloadable re
 
 ## Images And Optimization
 
-The template stores the original upload and does not transform it. HEIC is accepted and stored, but browsers do not render it, so a product that wants HEIC photos displayed needs a conversion step.
+The backend stores what it is given and does not transform it. The web client uploads the file as picked, so HEIC from a desktop is stored as HEIC — and browsers do not render HEIC, so a product that wants those photos displayed on the web needs a conversion step.
+
+The mobile client normalizes before it asks for a ticket: `expo-image-manipulator` resizes the long edge to 512px and re-encodes as JPEG. That is why an iPhone photo — routinely HEIC and several megabytes — never reaches the 5 MB contract limit or the web client's HEIC gap. It is client-side convenience and **not** a substitute for verification: finalize still reads the magic bytes of whatever actually arrived. One consequence worth knowing: the backend's HEIC branch is now exercised only by the web client, so it is not dead code even though mobile no longer reaches it.
 
 When optimized images are required, generate app-owned variants in the backend or a worker and store them under stable keys such as `images/<entity>/<id>/<variant>.webp`. Use a library such as `sharp` only when actually implementing that. For dynamic transformation by URL, run an image proxy such as `imgproxy` against the bucket. Use Cloudinary or ImageKit only when the user explicitly chooses that tradeoff.
 

@@ -5,6 +5,17 @@ const plugins = [
   'expo-font',
   'expo-image',
   [
+    // Photo library only. The camera and microphone flags are false on purpose so the generated
+    // manifests do not claim permissions this app never uses - check Info.plist and
+    // AndroidManifest.xml after a prebuild if you change this.
+    'expo-image-picker',
+    {
+      cameraPermission: false,
+      microphonePermission: false,
+      photosPermission: 'Allow $(PRODUCT_NAME) to access your photos so you can set a profile photo.',
+    },
+  ],
+  [
     'expo-splash-screen',
     {
       backgroundColor: '#208AEF',

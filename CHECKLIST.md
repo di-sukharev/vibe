@@ -74,7 +74,7 @@ This project ships private file storage with user avatars, so answer these for t
 | Public, private, shared with selected people, or mixed? | _unanswered_ |
 | Who can upload, view, replace, and delete? | _unanswered_ |
 | Maximum file size and allowed file types | _unanswered_ |
-| Do images need thumbnails, resizing, format conversion, compression, cropping, or moderation? | _unanswered_ |
+| Do images need thumbnails, resizing, format conversion, compression, cropping, or moderation? | On the client only: the mobile app resizes to 512px and re-encodes as JPEG before upload, so phone photos fit the size limit and are readable on the web. No server-side transformation, no thumbnails, no moderation. |
 | How long do files live after the owning record is deleted? | _unanswered_ |
 | Should filenames be visible to users, or opaque? | _unanswered_ |
 
@@ -178,7 +178,7 @@ A capability with no row is `absent` by default. Add the row instead of assuming
 | Auth (email + password) | included | Template baseline. |
 | Admin roles | included | Roles and seeding in `backend`; admin UI in `webapp`. |
 | Password reset email delivery | included | Two providers behind one port, Yandex Cloud Postbox and Resend, selected by `EMAIL_DELIVERY`. It defaults to `disabled`, so a fresh install sends nothing and queues nothing; `console` prints messages locally. Delivery is durable: a request queues a `task_outbox` row and the shipped scheduler drains it every minute. Production needs an account with a provider and a deployed runner. Email is a backend concern; the mobile app never sends. See `docs/EMAIL.md`. |
-| File/media storage | included | Private uploads end to end, with user avatars as the worked example. Stores on local disk by default and on any S3-compatible bucket via `PRIVATE_STORAGE_*`, with no code change between them. Web only; the mobile app has no upload UI yet. See `docs/STORAGE.md`. |
+| File/media storage | included | Private uploads end to end on both clients, with user avatars as the worked example. Stores on local disk by default and on any S3-compatible bucket via `PRIVATE_STORAGE_*`, with no code change between them. See `docs/STORAGE.md`. |
 | Static asset precompression | included | `bun run static:precompress` writes `.br` and `.gz` next to the text assets in `webapp/dist` and `website/dist`, using `node:zlib` and no dependency. Deliberately outside `build`: only a proxy you run yourself reads those files, so the own-server path enables `gzip_static`/`precompressed` and the other two compress at their CDN - DigitalOcean's automatically, Yandex Cloud CDN with `--gzip-on`. Each hosting document says which applies. Browser surfaces only; the mobile app ships its bundle through Expo. |
 | Website build-time backend data | absent | The baseline landing content is repository-owned; add a shared public DTO and build fetch only when `website` needs database-backed information. |
 | Automatic SSG rebuild | absent | Durable desired/published revision state, single-flight deployment reconciliation, immutable atomic/blue-green release promotion, public-marker verification, and a provider adapter are not implemented. Yandex additionally needs a separate builder/upload component. See `docs/WEB_SURFACES.md`. |

@@ -12,6 +12,7 @@ This section may be updated during first-run bootstrap. If the root `README.md` 
 - Mobile is a user-only product surface. Administrator tools and the seeded
   administrator account belong to the browser webapp, not the mobile UI.
 - Authenticated users land on `/components`, which lives in the bottom tab shell with `/profile`.
+- `/profile` lets a signed-in user set, replace, and remove a profile photo. Picking a photo resizes it and re-encodes it as JPEG before upload, so phone photos fit the size limit and render on the web too.
 - `/details/[id]` is a stack screen outside the tabs and uses an in-screen back button at the top left.
 - `/paywall` renders the subscription flow, which ships **switched off**: `IapProvider` is not mounted, so the screen states that subscriptions are not enabled instead of offering a purchase. Turning it on is documented in `docs/IAP.md`.
 - Once enabled, App Store and Google Play subscriptions are working purchase paths, with App Store offer-code redemption on iOS. Google Play code redemption, signed promotional-offer purchases, alternative billing, and external purchase links are deferred.
@@ -53,6 +54,18 @@ bun run dev:backend
 bun run dev:mobile
 ```
 
+**On a physical device, set the storage URL too.** With the default filesystem storage driver the
+backend signs upload and download URLs against `PRIVATE_STORAGE_LOCAL_PUBLIC_URL`, which defaults
+to `http://127.0.0.1:<PORT>` — and on a phone that address is the phone. The avatar upload then
+fails in a way that looks like a bug in the feature. Set it next to `EXPO_PUBLIC_API_URL`:
+
+```bash
+# backend/.env - use the machine's LAN address, or 10.0.2.2 for the Android emulator
+PRIVATE_STORAGE_LOCAL_PUBLIC_URL="http://192.168.1.10:3000"
+```
+
+The iOS simulator hides this problem entirely, which is what makes it worth writing down.
+
 This mobile flow intentionally does not expose or use the development
 administrator. The same backend seed maintains that account only for the webapp.
 The demo entitlement is created only by the loopback-only development seed and
@@ -60,7 +73,7 @@ is never part of deployment.
 
 ## Stack
 
-- Expo SDK 55
+- Expo SDK 57
 - React Native
 - TypeScript
 - Expo Router
@@ -68,6 +81,7 @@ is never part of deployment.
 - TanStack Form
 - Expo SecureStore
 - Expo Notifications
+- Expo ImagePicker, ImageManipulator, and FileSystem (profile photo upload)
 - Expo Apple Authentication and React Native Google Sign-In for optional social auth
 - Expo IAP for App Store and Google Play subscription transport
 - Zod contracts from `@web-app-demo/contracts`
@@ -149,6 +163,12 @@ Backend product code sends real notifications by calling `enqueuePushNotificatio
 
 ## Development Build
 
+Adding or changing a native module means a **new development build** — reloading JavaScript is not
+enough, and an existing dev client throws at import time. The profile photo feature added
+`expo-image-picker`, `expo-image-manipulator`, and `expo-file-system`, and an `expo-image-picker`
+config plugin that writes `NSPhotoLibraryUsageDescription`. If you pull that change, rebuild before
+opening the profile screen. Run `bun run --cwd mobile doctor` after any Expo dependency change.
+
 1. Sign up or log in to an Expo account.
 2. Check EAS CLI availability with `bunx eas-cli --version`.
 3. Log in with `bunx eas-cli login`.
@@ -217,9 +237,19 @@ Stable selectors live in `src/constants/testIds.ts`, the flow is `.maestro/flows
 
 ## Practice
 
+The profile photo has no Maestro flow: choosing a photo opens the operating system's own picker,
+a native modal outside the app's view hierarchy that Maestro cannot drive. The upload protocol,
+the 412-is-success rule, the normalization plan, and the error copy are covered by unit tests
+instead, with the picker behind a port; the native round trip is verified by hand on a dev build.
+
+File uploads follow the same split as the API layer: `src/platform/uploads` owns the transfer
+protocol and knows nothing about what is being uploaded, while `src/features/avatar` owns the
+endpoints, the photo picker, and the UI. A second kind of upload reuses the protocol instead of
+copying it.
+
 Use TanStack Query for server state, TanStack Form for forms, and shared Zod schemas for validation. Native iOS/Android use `/api/auth/token/*`: the refresh token is stored in `expo-secure-store` and the access token lives only in app memory. Logout first persists a non-secret pending marker beside that existing credential, then clears in-memory access/query state immediately. A confirmed revocation or terminal stale authority clears the refresh credential before clearing the marker; a timeout or network error retains both. On restart, bootstrap sees the marker before attempting refresh, remains anonymous, and boundedly retries logout with the retained credential and session-scoped push cleanup evidence. Expo Web follows the same marker protocol without copying its cookie authority into JavaScript: its refresh token stays in the backend-issued HttpOnly cookie and is never written to JavaScript storage. Expo Web serializes cookie-mutating auth requests through an exclusive Web Lock, with an in-process queue fallback. Successful register, login, and logout transitions increment a monotonic browser epoch inside that lock; storage/BroadcastChannel events invalidate other tabs, and refresh verifies both the captured epoch and the backend-issued `{ userId, sessionId }` identity before retrying an authenticated request. Bounded logout aborts its request at the timeout so it cannot retain the shared lock indefinitely. The native token transport does not use the browser coordinator.
 
-Product code lives in `src/features/auth`, `src/features/billing`, and `src/features/notifications`. `src/composition` builds the namespaced APIs and passes each provider only its own interface. `src/platform/api` owns endpoint-agnostic fetch, auth retry, base URL, and error parsing; each feature API owns its endpoint paths and schemas. Routes are thin wrappers that import features through public indexes. Run `bun run architecture:check` after boundary changes and `bun run doctor` (pinned to Expo Doctor 1.20.0) after Expo dependency changes.
+Product code lives in `src/features/auth`, `src/features/avatar`, `src/features/billing`, and `src/features/notifications`. `src/composition` builds the namespaced APIs and passes each provider only its own interface. `src/platform/api` owns endpoint-agnostic fetch, auth retry, base URL, and error parsing; each feature API owns its endpoint paths and schemas. Routes are thin wrappers that import features through public indexes. Run `bun run architecture:check` after boundary changes and `bun run doctor` (pinned to Expo Doctor 1.20.0) after Expo dependency changes.
 
 Mobile UI primitives live in `src/components/ui` and mirror the local Web ShadCN registry by file name. They are React Native-first implementations using native style props, controlled/uncontrolled values, and native touch patterns instead of DOM/Radix props such as `className` or `asChild`. The protected `/components` route is the local component catalog and the post-auth smoke surface.
 
@@ -257,7 +287,7 @@ use the installed product's recorded local test, typecheck, store-sandbox, and r
 For Expo, React Native, routing, secure storage, EAS, forms, server-state, or E2E questions, consult the current upstream documentation linked here first. This README describes this app's conventions; upstream docs are authoritative for platform behavior.
 
 - [Expo docs](https://docs.expo.dev/)
-- [Expo SDK 55 docs](https://docs.expo.dev/versions/latest/)
+- [Expo SDK 57 docs](https://docs.expo.dev/versions/latest/)
 - [Expo Router docs](https://docs.expo.dev/router/introduction/)
 - [Expo SecureStore docs](https://docs.expo.dev/versions/latest/sdk/securestore/)
 - [Expo AppleAuthentication docs](https://docs.expo.dev/versions/latest/sdk/apple-authentication/)

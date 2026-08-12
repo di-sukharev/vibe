@@ -5,6 +5,7 @@ import {
   SessionControls,
   useAuth,
 } from '@/features/auth';
+import { avatarCacheKey, AvatarControls, useAvatar } from '@/features/avatar';
 // Subscriptions are turned off; see docs/IAP.md before uncommenting.
 // import {
 //   SubscriptionSummary,
@@ -13,6 +14,7 @@ import {
 
 export default function ProfileScreen() {
   const auth = useAuth();
+  const avatar = useAvatar();
   // const iap = useSubscriptionIap();
 
   if (!auth.user) return null;
@@ -24,11 +26,16 @@ export default function ProfileScreen() {
       testID={TEST_IDS.profile.screen}
       title="Profile">
       <AccountSummary
+        avatarCacheKey={avatar.avatar ? avatarCacheKey(avatar.avatar) : undefined}
+        avatarTestID={TEST_IDS.profile.avatarPreview}
+        avatarUri={avatar.avatar?.downloadUrl ?? null}
         badge={auth.user.role === 'admin' ? 'Admin' : 'User'}
         description={`Member since ${formatAccountDate(auth.user.createdAt)}`}
         displayName={auth.user.displayName}
         email={auth.user.email}
       />
+
+      <AvatarControls />
 
       <AuthSessionErrorNotice />
 

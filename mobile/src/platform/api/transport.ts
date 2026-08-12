@@ -6,7 +6,7 @@ import { SessionGenerationChangedError } from '@/platform/session';
 const defaultApiBaseUrl = (process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000').replace(/\/$/, '');
 
 export type ApiRequestOptions = {
-  method?: 'GET' | 'POST';
+  method?: 'GET' | 'POST' | 'DELETE';
   body?: unknown;
   auth?: boolean;
   retryOnUnauthorized?: boolean;

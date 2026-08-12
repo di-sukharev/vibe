@@ -24,6 +24,7 @@ module.exports = defineConfig([
     files: [
       "src/features/auth/components/social-auth-buttons.tsx",
       "src/features/auth/provider.tsx",
+      "src/features/avatar/provider.tsx",
       "src/features/billing/provider.tsx",
       "src/features/notifications/provider.tsx",
     ],

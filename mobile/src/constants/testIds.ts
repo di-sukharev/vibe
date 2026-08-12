@@ -35,6 +35,11 @@ export const TEST_IDS = {
     screen: 'paywall.screen',
   },
   profile: {
+    avatarError: 'profile.avatar-error',
+    avatarNotice: 'profile.avatar-notice',
+    avatarPreview: 'profile.avatar-preview',
+    avatarRemoveButton: 'profile.avatar-remove-button',
+    avatarUploadButton: 'profile.avatar-upload-button',
     manageSubscriptionButton: 'profile.manage-subscription-button',
     screen: 'profile.screen',
   },
