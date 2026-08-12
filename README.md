@@ -235,7 +235,10 @@ Test runners use the separate Docker Compose `postgres_test` service and the `TE
 - `bun run lint` - run ESLint over the webapp and the mobile app.
 - `bun run architecture:check` - enforce the module/feature dependency boundaries.
 - `bun run build` - run production build/typecheck/export scripts for workspaces that define them.
-- `bun run architecture:check` - enforce backend module and client feature dependency boundaries.
+- `bun run static:precompress` - write `.br` and `.gz` next to the text assets in `webapp/dist` and
+  `website/dist`, after those builds. Deliberately not part of `build`: only a proxy you run
+  yourself reads those files, and DigitalOcean and Yandex compress at their CDN instead. See the
+  hosting document recorded in [CHECKLIST.md](CHECKLIST.md).
 - `bun audit` - list known vulnerabilities. It reports none today, and the `overrides` block in the
   root `package.json` is why: every entry there is a minimum version that closes an advisory in a
   transitive dependency nothing here imports directly. Treat that block as maintenance, not

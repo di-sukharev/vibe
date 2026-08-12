@@ -17,6 +17,30 @@ Web Security is doing that job at the edge. Keep the code and keep the value at 
 Delete the `yandex-sws` option and the checks around it only if you are sure no edge WAF will ever
 sit in front of this API; `backend/src/app.test.ts` and `backend/src/env.test.ts` cover it.
 
+**Then make the one conditional file deletion**, which depends on the path you kept rather than on this
+one. The static precompression tooling - `scripts/precompress-static.mjs`, its test, the
+`static:precompress` script in root `package.json`, and its `README.md` bullet - is own-server
+tooling, not Yandex tooling:
+
+- On the **own server** path keep all four and leave the `CHECKLIST.md` ledger row `included`, but
+  rewrite that row's Note and the `README.md` bullet: both currently explain the capability by
+  contrasting DigitalOcean and Yandex, and every trace of both providers is gone by the end of
+  setup. Name the proxy you actually run instead.
+- On **DigitalOcean** delete all four: App Platform Static Sites cannot select a precompressed
+  sibling, so the files would be published and never requested. Then keep the `CHECKLIST.md` row
+  rather than deleting it, set its State to `removed`, and rewrite its Note to say the tooling was
+  deleted and why. A deleted row leaves the capability `absent`, which reads as "not built yet",
+  and a Note still describing a working command invites the next agent to restore it. Finally,
+  clear what now points at a deleted command in `docs/DEPLOYMENT.md`. In "Own Server", cut the
+  whole tail of the "Static surfaces" bullet after "...SPA catch-all for the webapp." - every
+  sentence from "Then run" onward, plus the three sub-bullets under it - because all of it is about
+  serving `.br`/`.gz`; stopping earlier leaves "those files" without an antecedent and a colon
+  introducing a deleted list. In "CDN And Domains", replace the two sentences beginning "So a
+  Static Site cannot pick" and "Do not run" with `Confirm the CDN is compressing with the check in
+  "Validation".` Cut the ingress-rules sentence before them too - it exists only to explain the
+  conclusion those two sentences drew, and reads as a non-sequitur once they are gone. Everything
+  else in that section, including all the external-CDN guidance, stays.
+
 **Then edit these files** - one bullet each, so no link is left dangling:
 
 - `docs/STORAGE.md`: the "Yandex Cloud Alternative" section and the Yandex upstream links.
@@ -419,12 +443,31 @@ aws configure
 # Default region name: ru-central1
 ```
 
-Upload built assets to public website buckets:
+Upload built assets to public website buckets. Hashed assets go first and unhashed files last, so
+no page is ever live pointing at an asset that has not landed yet, and each pass carries the
+`Cache-Control` its filenames earn: Vite and Astro put a content hash in every asset name, which
+makes those objects safe to cache forever, while `index.html` keeps its name across releases and
+must be revalidated or the CDN serves the previous build indefinitely.
 
 ```bash
-aws --endpoint-url=https://storage.yandexcloud.net/ s3 cp --recursive webapp/dist/ s3://<webapp-bucket>/
-aws --endpoint-url=https://storage.yandexcloud.net/ s3 cp --recursive website/dist/ s3://<website-bucket>/
+endpoint=https://storage.yandexcloud.net/
+
+aws --endpoint-url=$endpoint s3 cp --recursive webapp/dist/assets/ s3://<webapp-bucket>/assets/ \
+  --exclude '*.br' --exclude '*.gz' --cache-control 'public, max-age=31536000, immutable'
+aws --endpoint-url=$endpoint s3 cp --recursive webapp/dist/ s3://<webapp-bucket>/ \
+  --exclude '*.br' --exclude '*.gz' --exclude 'assets/*' --cache-control 'public, max-age=0, must-revalidate'
+
+aws --endpoint-url=$endpoint s3 cp --recursive website/dist/_astro/ s3://<website-bucket>/_astro/ \
+  --exclude '*.br' --exclude '*.gz' --cache-control 'public, max-age=31536000, immutable'
+aws --endpoint-url=$endpoint s3 cp --recursive website/dist/ s3://<website-bucket>/ \
+  --exclude '*.br' --exclude '*.gz' --exclude '_astro/*' --cache-control 'public, max-age=0, must-revalidate'
 ```
+
+The `.br`/`.gz` exclusions matter because `bun run static:precompress` may have left those files in
+`dist`, and they have no use in a bucket. A bucket cannot negotiate an encoding: it returns the
+bytes it holds to every client, whatever the request asked for. So do not upload the variants, and
+do not set `Content-Encoding` on objects by hand either. Compression on this path belongs to the
+CDN - see "CDN And Domains" below.
 
 ### Automatic website rebuild
 
@@ -483,7 +526,17 @@ Authenticated browser traffic needs custom webapp and API Gateway hosts under th
 
 Cloud CDN can use an Object Storage bucket as an origin. Create a CDN resource, attach the public domain, configure caching rules, and point DNS to the CDN load balancer with a `CNAME` record. Do not use `ANAME` for CDN distribution domains.
 
-Use immutable asset filenames from Vite/Astro builds and long cache headers for hashed assets. Keep `index.html` cache short enough for releases to roll out quickly.
+Use immutable asset filenames from Vite/Astro builds and long cache headers for hashed assets. Keep `index.html` cache short enough for releases to roll out quickly. The upload commands above already set both.
+
+Enable compression on the CDN resource; this is what makes the text assets small on this hosting path:
+
+```bash
+yc cdn resource update --id <resource-id> --gzip-on
+```
+
+`--gzip-on` is mutually exclusive with `--fetch-compressed` and `--brotli-compression`. Prefer it over the alternatives, and never solve compression by storing gzipped objects in the bucket. Yandex documents why: an Object Storage origin does not send `Vary: Accept-Encoding`, so the first compressed response to enter the CDN cache is then served to every later client - including ones that never sent `Accept-Encoding` and cannot decode it. With `--gzip-on` the CDN always fetches uncompressed content from the bucket and compresses at the edge only for clients that asked, which keeps that trap shut.
+
+Without a CDN in front, a bare Object Storage website serves everything uncompressed. That is the tradeoff of skipping the CDN, not something the upload can fix.
 
 ## Transactional Email With Postbox
 
@@ -579,6 +632,7 @@ After deployment:
 - verify the private auth cleanup timer is active and its most recent scheduled invocation completed with task exit code `0`;
 - verify `webapp` route refreshes load the SPA fallback instead of a broken 404 page;
 - verify `website` static assets load from the production domain;
+- verify text assets arrive compressed - `curl -sI -H 'Accept-Encoding: br, gzip' <origin>/<hashed-asset>` must answer with a `content-encoding` header, and the same request without `Accept-Encoding` must not. Take the asset path from the built output of the surface under test: `webapp` hashes into `assets/`, `website` into `_astro/`. Pick a JavaScript or CSS bundle. Cloud CDN decides what to compress from the `Content-Type` the bucket returns, which the upload above infers from the file extension, so an object stored with the wrong type is the realistic way a correctly configured resource still answers uncompressed. Compression here is one manual `--gzip-on` with nothing to fail loudly if it was skipped, so this check is the only thing that catches it;
 - verify an avatar upload completes end to end against the production bucket, and that its
   download link expires and requires backend authorization.
 

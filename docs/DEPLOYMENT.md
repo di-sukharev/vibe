@@ -26,6 +26,24 @@ project runs on Yandex Cloud or an own server, delete the DigitalOcean tooling i
   tests - only the DigitalOcean generator reads runner collections
 - `.do/`
 
+**Then make the one conditional file deletion**, which depends on the path you kept rather than on this
+one. The static precompression tooling - `scripts/precompress-static.mjs`, its test, the
+`static:precompress` script in root `package.json`, and its `README.md` bullet - is own-server
+tooling, not DigitalOcean tooling:
+
+- On the **own server** path keep all four and leave the `CHECKLIST.md` ledger row `included`, but
+  rewrite that row's Note and the `README.md` bullet: both currently explain the capability by
+  contrasting DigitalOcean and Yandex, and every trace of both providers is gone by the end of
+  setup. Name the proxy you actually run instead.
+- On the **Yandex** path delete all four: Cloud CDN compresses at the edge there, so the files have
+  no reader and their tests would run for a path the project does not use. Then keep the
+  `CHECKLIST.md` row rather than deleting it, set its State to `removed`, and rewrite its Note to
+  say the tooling was deleted and why. A deleted row leaves the capability `absent`, which reads as
+  "not built yet", and a Note still describing a working command invites the next agent to restore
+  it. Delete the `README.md` bullet with the command. Both remaining mentions in this file - the
+  "Own Server" bullet and the "CDN And Domains" paragraph - sit in sections the Yandex path deletes
+  wholesale, so they need no separate edit.
+
 **Edit these files** - one bullet each, so nothing is left half-removed:
 
 - root `package.json`: drop the `deploy:do:specs` script. Leaving it behind points at a deleted
@@ -49,10 +67,15 @@ project runs on Yandex Cloud or an own server, delete the DigitalOcean tooling i
   half of the cadence sentence, and the two App Platform links. If the Yandex bullet is gone too, delete the
   now-empty "Provider specifics" heading.
 - `docs/YANDEX_CLOUD.md`, when that is the chosen path: the opening sentence comparing the two
-  providers, the Dockerfile line that says "the same as the DigitalOcean path", and the storage
-  paragraph's note that the service is named around the DigitalOcean default. Keep everything
-  else, including "Two details of the timer trigger cost people time" - those are Yandex traps,
-  not a comparison.
+  providers, the Dockerfile line that says "the same as the DigitalOcean path", the storage
+  paragraph's note that the service is named around the DigitalOcean default. One more, only
+  because the conditional deletion above removed that command on this path: in the paragraph after
+  the upload block, replace the first sentence - the one naming `bun run static:precompress` - with
+  ``The `.br`/`.gz` exclusions are belt-and-braces: such files have no use in a bucket.`` The rest of
+  that paragraph stays, including the warning against setting `Content-Encoding` by hand, which is
+  about buckets and not about the deleted script, and so do the exclusion flags in the commands.
+  Keep everything else, including "Two details of the timer trigger cost people time" -
+  those are Yandex traps, not a comparison.
 - `docs/IAP.md`: the DigitalOcean references in the store-credential and validation sections.
 - `docs/STORAGE.md`: the DigitalOcean provider specifics. Keep the upload flow, the private/public
   rules, and the storage-service guidance - they are about S3 and about this codebase, not about
@@ -210,7 +233,31 @@ managed platform here: every step below is yours to run and to keep running.
 - **TLS and domains.** Terminate TLS at the proxy (Caddy or nginx with certbot) and keep the API
   and the browser app under one registrable domain, as "Production Auth And CORS" requires.
 - **Static surfaces.** `bun run build:webapp` and `bun run build:website` produce plain directories;
-  serve them from the same proxy with `index.html` as the SPA catch-all for the webapp.
+  serve them from the same proxy with `index.html` as the SPA catch-all for the webapp. Then run
+  `bun run static:precompress`, which writes `.br` and `.gz` next to the text assets. This is the
+  one hosting path that reads those files, and it is worth the step: brotli at maximum quality
+  costs nothing per request because it already ran at build time, and it takes the largest asset in
+  `website/dist` from 885 KB to 192 KB. In Caddy, add `precompressed br gzip` inside the
+  `file_server` block - written on its own line, because a Caddyfile wants the opening brace last
+  on its line and the closing brace alone on its own. In nginx it is one line:
+  `gzip_static on; gzip_vary on; gzip_proxied any;`. Both only ever send a variant to a
+  client whose `Accept-Encoding` asked for it, and neither compresses anything itself, so an image
+  or a font is served untouched. Three nginx details that Caddy handles for you, each a default
+  that can make the feature do nothing or do harm without saying so:
+  - `gzip_vary` is `off`, so nginx sends an encoding-dependent response with no
+    `Vary: Accept-Encoding`, and any shared cache in front can hand the gzip copy to a client that
+    never asked and cannot decode it.
+  - `gzip_proxied` is `off`, which disables compression for every proxied request, and `gzip_static`
+    honours it. nginx calls a request proxied when it carries a `Via` header, so this costs nothing
+    while nginx faces the internet directly and silently disables the whole precompress step the
+    day anything is put in front of it - a CDN, a cache, another nginx.
+  - Neither `gzip_static` nor `brotli_static` is in a default nginx build, though the two directives
+    above are. `gzip_static` needs `--with-http_gzip_static_module`, which every distro, nginx.org
+    and Homebrew package already sets - but a source build does not, and nginx refuses to start on
+    a directive it does not know.
+    `brotli_static` is further out: it is not nginx's at all, but the third-party `ngx_brotli`
+    module. Without it nginx ignores the `.br` files and serves gzip, which is still most of the
+    win, so treat brotli on nginx as optional and gzip as the thing to verify first.
 - **Background jobs.** Run `bun run --cwd backend start:scheduler` as its own service - see
   [BACKGROUND_JOBS.md](BACKGROUND_JOBS.md) for the systemd and Docker recipes.
 - **Uploads.** `backend/src/storage` speaks S3 through a provider-neutral port, so any S3-compatible object storage
@@ -565,6 +612,8 @@ DigitalOcean Spaces and Spaces CDN do not provide first-party dynamic image tran
 
 For `webapp` and fully prerendered `website` output, App Platform Static Sites already use DigitalOcean's global CDN. This is the default path.
 
+Response compression belongs to that CDN, not to this repository. App Platform ingress rules can rewrite paths, but only as static path rules, and the only response headers a Static Site exposes are CORS - nothing can branch on `Accept-Encoding`. So a Static Site cannot pick a `.br` or `.gz` sibling for a request, and precompressed files placed in `output_dir` would be published and never served. Do not run `bun run static:precompress` on this path, and do not add it to `build`; confirm the CDN is compressing with the check in "Validation" instead. If a text asset comes back uncompressed, that is a question for DigitalOcean support, not a gap this repository can close.
+
 Use an external CDN only for explicit advanced needs such as custom WAF rules, bot filtering, custom rate limiting, or geographic traffic controls. If an external CDN is used in front of App Platform:
 
 - configure the custom domain on the CDN, not in App Platform;
@@ -629,6 +678,7 @@ After deployment:
 - verify browser auth only from allowed `CORS_ORIGINS`;
 - verify `webapp` route refreshes hit the React catch-all instead of a static 404;
 - verify `website` loads static assets from the deployed domain;
+- verify text assets arrive compressed - `curl -sI -H 'Accept-Encoding: br, gzip' <origin>/<hashed-asset>` must answer with a `content-encoding` header, and the same request without `Accept-Encoding` must not. Take the asset path from the built output of the surface under test: `webapp` hashes into `assets/`, `website` into `_astro/`. Pick one of the large bundles: whatever compresses on the chosen hosting has a size floor below which a variant costs more than it saves, so the smallest assets come back uncompressed on a perfectly configured setup and testing one reports a failure that is not one. Whoever compresses on the chosen hosting, this is the check that proves it reached the browser;
 - verify an avatar upload completes end to end against the production bucket, and that its download link expires and requires backend authorization;
 - verify Prisma migrations were applied exactly once to the production database.
 - verify the PRE_DEPLOY log confirms a login-capable administrator without printing bootstrap credentials.
