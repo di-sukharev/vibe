@@ -235,22 +235,29 @@ describe('auth contracts', () => {
       }),
     ).toMatchObject({ ok: true })
     expect(() => registerPushTokenRequestSchema.parse({ expoPushToken: 'not-a-token' })).toThrow()
+
+    // Each rejection below is paired with the payload that differs only in the field under test.
+    // Without the pair these assertions throw for a missing `installationSecret` instead, which is
+    // what they did until it was noticed: the generation fence and the token cap went unasserted.
+    const registration = {
+      expoPushToken: 'ExponentPushToken[test-token]',
+      installationId,
+      installationSecret,
+    }
+    expect(registerPushTokenRequestSchema.parse({ ...registration, generation: 1 })).toMatchObject({
+      generation: 1,
+    })
+    // Generation 0 would let a replayed registration tie with the live one instead of losing to it.
+    expect(() => registerPushTokenRequestSchema.parse({ ...registration, generation: 0 })).toThrow()
+
+    const tokens = (count: number) =>
+      Array.from({ length: count }, (_, index) => `ExponentPushToken[token-${index}]`)
+    const unregistration = { generation: 8, installationId, installationSecret }
+    expect(
+      unregisterPushTokenRequestSchema.parse({ ...unregistration, expoPushTokens: tokens(12) }),
+    ).toMatchObject({ expoPushTokens: tokens(12) })
     expect(() =>
-      registerPushTokenRequestSchema.parse({
-        expoPushToken: 'ExponentPushToken[test-token]',
-        generation: 0,
-        installationId,
-      }),
-    ).toThrow()
-    expect(() =>
-      unregisterPushTokenRequestSchema.parse({
-        expoPushTokens: Array.from(
-          { length: 13 },
-          (_, index) => `ExponentPushToken[token-${index}]`,
-        ),
-        generation: 8,
-        installationId,
-      }),
+      unregisterPushTokenRequestSchema.parse({ ...unregistration, expoPushTokens: tokens(13) }),
     ).toThrow()
     expect(() => internalNotificationHrefSchema.parse('https://example.com')).toThrow()
     expect(() => internalNotificationHrefSchema.parse('//example.com')).toThrow()
