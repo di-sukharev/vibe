@@ -49,7 +49,7 @@ describe('sendUploadTicket', () => {
   test('accepts every success status storage can answer with', async () => {
     for (const status of [200, 201, 204]) {
       const { send } = recordingSender(status);
-      expect(sendUploadTicket(ticket, source, { send })).resolves.toBeUndefined();
+      await expect(sendUploadTicket(ticket, source, { send })).resolves.toBeUndefined();
     }
   });
 
@@ -58,14 +58,14 @@ describe('sendUploadTicket', () => {
     // the upload is complete - reporting a failure would strand the caller on work that worked.
     const { send } = recordingSender(412);
 
-    expect(sendUploadTicket(ticket, source, { send })).resolves.toBeUndefined();
+    await expect(sendUploadTicket(ticket, source, { send })).resolves.toBeUndefined();
   });
 
   test('rejects the statuses that mean storage refused the bytes', async () => {
     for (const status of [400, 403, 404, 500]) {
       const { send } = recordingSender(status);
 
-      expect(sendUploadTicket(ticket, source, { send })).rejects.toMatchObject({
+      await expect(sendUploadTicket(ticket, source, { send })).rejects.toMatchObject({
         reason: 'transfer-failed',
       });
     }
@@ -86,10 +86,9 @@ describe('sendUploadTicket', () => {
     // The size is inside the signature, so sending would only earn an opaque 403 from storage.
     const { requests, send } = recordingSender(200);
 
-    expect(
+    await expect(
       sendUploadTicket(ticket, { ...source, byteSize: 71 }, { send }),
     ).rejects.toMatchObject({ reason: 'size-changed' });
-    await Promise.resolve();
 
     expect(requests).toHaveLength(0);
   });

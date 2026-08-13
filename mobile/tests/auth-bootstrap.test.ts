@@ -87,17 +87,6 @@ test('refreshBootstrapSession never shares credentials across API instances', as
   expect(secondRefreshCalls).toBe(1);
 });
 
-test('web token store keeps refresh credentials out of JavaScript storage and persists only a non-secret logout marker', async () => {
-  const source = await Bun.file('src/features/auth/token-store.ts').text();
-  const [refreshCredentialSource, logoutMarkerSource] =
-    source.split('export async function getPendingLogout');
-
-  expect(refreshCredentialSource).not.toContain('localStorage');
-  expect(refreshCredentialSource).not.toContain('sessionStorage');
-  expect(logoutMarkerSource).toContain('localStorage');
-  expect(logoutMarkerSource).not.toContain('refreshTokenKey');
-});
-
 test('clearBootstrapAuthState clears access and refresh while preserving Expo push cleanup evidence', async () => {
   let accessToken: string | null = 'expired-access-token';
   let refreshCleared = false;

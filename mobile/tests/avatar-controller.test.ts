@@ -134,10 +134,9 @@ describe('uploadPickedAvatar', () => {
     // picked size is carried through to the transfer rather than the ticket being trusted.
     const { api, send, steps } = createHarness({ ticketContentLength: 9999 });
 
-    expect(uploadPickedAvatar({ api, picked, send })).rejects.toMatchObject({
+    await expect(uploadPickedAvatar({ api, picked, send })).rejects.toMatchObject({
       reason: 'size-changed',
     });
-    await Promise.resolve();
 
     expect(steps).toEqual(['createUpload']);
   });
@@ -161,6 +160,6 @@ describe('uploadPickedAvatar', () => {
       },
     };
 
-    expect(uploadPickedAvatar({ api, picked, send })).rejects.toBe(failure);
+    await expect(uploadPickedAvatar({ api, picked, send })).rejects.toBe(failure);
   });
 });
