@@ -91,13 +91,13 @@ describe('uploadAvatarObject', () => {
     // the user on an upload that worked.
     globalThis.fetch = mock(async () => new Response(null, { status: 412 })) as unknown as typeof fetch
 
-    expect(uploadAvatarObject(ticket(2048), file('a.png', 'image/png', 2048))).resolves.toBeUndefined()
+    await expect(uploadAvatarObject(ticket(2048), file('a.png', 'image/png', 2048))).resolves.toBeUndefined()
   })
 
   test('reports a refused transfer', async () => {
     globalThis.fetch = mock(async () => new Response(null, { status: 403 })) as unknown as typeof fetch
 
-    expect(uploadAvatarObject(ticket(2048), file('a.png', 'image/png', 2048))).rejects.toMatchObject(
+    await expect(uploadAvatarObject(ticket(2048), file('a.png', 'image/png', 2048))).rejects.toMatchObject(
       { reason: 'transfer-failed' },
     )
   })
@@ -107,7 +107,7 @@ describe('uploadAvatarObject', () => {
       throw new TypeError('Failed to fetch')
     }) as unknown as typeof fetch
 
-    expect(uploadAvatarObject(ticket(2048), file('a.png', 'image/png', 2048))).rejects.toBeInstanceOf(
+    await expect(uploadAvatarObject(ticket(2048), file('a.png', 'image/png', 2048))).rejects.toBeInstanceOf(
       AvatarUploadError,
     )
   })
@@ -119,10 +119,9 @@ describe('uploadAvatarObject', () => {
       return new Response(null, { status: 200 })
     }) as unknown as typeof fetch
 
-    expect(uploadAvatarObject(ticket(2048), file('a.png', 'image/png', 4096))).rejects.toMatchObject(
+    await expect(uploadAvatarObject(ticket(2048), file('a.png', 'image/png', 4096))).rejects.toMatchObject(
       { reason: 'size-changed' },
     )
-    await Promise.resolve()
     expect(called).toBe(false)
   })
 })

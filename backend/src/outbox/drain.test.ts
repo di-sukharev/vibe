@@ -1,3 +1,13 @@
+/**
+ * Drain policy against a fake client: deadlines, the runtime budget, backlog reporting, and what
+ * happens when a result cannot be written down. These are timing behaviours a database adds
+ * nothing to.
+ *
+ * Anything the lease and the retention window decide - claiming, stale-lease recovery, attempt
+ * accounting, backoff, retention - belongs to `outbox.integration.test.ts` against real Postgres.
+ * `fake-outbox-prisma.ts` emulates `@updatedAt` on `updateMany` by hand, which is exactly the
+ * assumption a duplicate here would keep asserting after Prisma stopped honouring it.
+ */
 import { describe, expect, spyOn, test } from 'bun:test'
 
 import { drainTaskOutbox } from './drain'
@@ -23,24 +33,6 @@ async function drain(rows: FakeTaskRow[], handlers: TaskHandlerRegistry, options
 }
 
 describe('drainTaskOutbox', () => {
-  test('runs a due task and leaves an audit skeleton without its payload', async () => {
-    const rows = [taskRow({ id: 'a', type: 'test:work', payload: { email: 'a@example.com' } })]
-    const seen: unknown[] = []
-
-    const metrics = await drain(rows, registry(async ({ payload }) => void seen.push(payload)))
-
-    expect(seen).toEqual([{ email: 'a@example.com' }])
-    expect(metrics).toMatchObject({ claimed: 1, done: 1, skipped: 0, backlog: 0 })
-    expect(rows[0]).toMatchObject({
-      attempts: 1,
-      processingToken: null,
-      redactedAt: now,
-      status: 'done',
-    })
-    // Not inside toMatchObject: `{}` there is a subset match and would accept any payload.
-    expect(rows[0]?.payload).toEqual({})
-  })
-
   test('a handler that deliberately did nothing is skipped, not counted as done', async () => {
     // Without this split, a system where every task finds nothing to do looks healthy.
     const rows = [taskRow({ id: 'a', type: 'test:work' })]
@@ -49,31 +41,6 @@ describe('drainTaskOutbox', () => {
 
     expect(metrics).toMatchObject({ done: 0, skipped: 1 })
     expect(rows[0]?.status).toBe('skipped')
-  })
-
-  test('a stale lease is recovered before any claim, and does not burn an attempt', async () => {
-    // A deploy that kills a drain mid-pass must not spend one of the retries the caller was
-    // promised, so `attempts` survives the recovery untouched.
-    const rows = [
-      taskRow({
-        id: 'a',
-        type: 'test:work',
-        attempts: 2,
-        processingToken: 'gone',
-        status: 'processing',
-        updatedAt: new Date(now.getTime() - 10 * 60 * 1000),
-      }),
-    ]
-    let attemptSeen = 0
-
-    const metrics = await drain(
-      rows,
-      registry(async ({ attempt }) => void (attemptSeen = attempt)),
-    )
-
-    expect(metrics.recoveredStale).toBe(1)
-    expect(attemptSeen).toBe(3)
-    expect(rows[0]).toMatchObject({ attempts: 3, status: 'done' })
   })
 
   test('a lease that is still fresh is left alone', async () => {
@@ -91,45 +58,6 @@ describe('drainTaskOutbox', () => {
 
     expect(metrics).toMatchObject({ recoveredStale: 0, claimed: 0 })
     expect(rows[0]?.status).toBe('processing')
-  })
-
-  test('a failing task is retried later with the attempt counted', async () => {
-    const rows = [taskRow({ id: 'a', type: 'test:work' })]
-
-    const metrics = await drain(rows, registry(async () => {
-      throw new Error('provider unavailable')
-    }))
-
-    expect(metrics).toMatchObject({ transientFailed: 1, terminalFailed: 0 })
-    expect(rows[0]).toMatchObject({
-      attempts: 1,
-      lastError: 'provider unavailable',
-      processedAt: null,
-      processingToken: null,
-      status: 'pending',
-    })
-    expect(rows[0]!.scheduledFor.getTime()).toBe(now.getTime() + 120_000)
-    // The payload survives a retry: the next attempt needs it.
-    expect(rows[0]?.redactedAt).toBeNull()
-  })
-
-  test('the last permitted attempt gives up instead of scheduling another', async () => {
-    const rows = [taskRow({ id: 'a', type: 'test:work', attempts: 2 })]
-    const error = spyOn(console, 'error').mockImplementation(() => {})
-
-    try {
-      const metrics = await drain(
-        rows,
-        registry(async () => {
-          throw new Error('still failing')
-        }, { maxAttempts: 3 }),
-      )
-
-      expect(metrics).toMatchObject({ terminalFailed: 1, transientFailed: 0 })
-      expect(rows[0]).toMatchObject({ attempts: 3, redactedAt: now, status: 'failed' })
-    } finally {
-      error.mockRestore()
-    }
   })
 
   test('a handler that knows the work can never succeed stops immediately', async () => {
@@ -210,30 +138,6 @@ describe('drainTaskOutbox', () => {
     const metrics = await drain(rows, registry(async () => undefined), { limit: 1, maxRuntimeMs: 0 })
 
     expect(metrics).toMatchObject({ backlog: 2, claimed: 0, oldestPendingAgeSeconds: 300 })
-  })
-
-  test('terminal rows are deleted once they are older than the retention window', async () => {
-    const rows = [
-      taskRow({
-        id: 'recent',
-        type: 'test:work',
-        processedAt: new Date(now.getTime() - 1_000),
-        redactedAt: now,
-        status: 'done',
-      }),
-      taskRow({
-        id: 'ancient',
-        type: 'test:work',
-        processedAt: new Date(now.getTime() - 40 * 24 * 60 * 60 * 1000),
-        redactedAt: now,
-        status: 'done',
-      }),
-    ]
-
-    const metrics = await drain(rows, registry(async () => undefined))
-
-    expect(metrics).toMatchObject({ deleted: 1 })
-    expect(rows.map((row) => row.id)).toEqual(['recent'])
   })
 })
 

@@ -48,15 +48,9 @@ if (endpoint) {
 maybeDescribe('S3PrivateStorage live specifics', () => {
   const storage = new S3PrivateStorage(config)
 
-  test('addresses the bucket through the path, which a local server requires', async () => {
-    const upload = await storage.createUploadUrl({
-      key: createStorageObjectKey({ namespace: 'live' }),
-      contentType: 'image/png',
-      byteSize: pngFixture.byteLength,
-    })
-
-    expect(new URL(upload.url).pathname.startsWith(`/${config.bucket}/`)).toBe(true)
-  })
+  // Path-style addressing is signature maths with no server involved, so it is asserted exactly -
+  // host and full pathname - in `s3-storage.test.ts`. A live run should not spend a container on
+  // re-checking it more weakly.
 
   test('serves a ranged GET with a partial-content status', async () => {
     const key = createStorageObjectKey({ namespace: 'live' })

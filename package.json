@@ -59,7 +59,7 @@
     "typecheck:website": "bun run --cwd website typecheck",
     "typecheck:mobile": "bun run --cwd mobile typecheck",
     "typecheck:backend": "bun run --cwd backend typecheck",
-    "test": "bun run test:deploy && bun run test:contracts && bun run test:backend && bun run test:webapp && bun run test:mobile",
+    "test": "bun run test:deploy && bun run test:contracts && bun run test:backend && bun run test:webapp && bun run test:website && bun run test:mobile",
     "test:deploy": "bun test ./scripts/",
     "test:contracts": "bun run --cwd packages/contracts test",
     "test:backend": "bun run --cwd backend test",

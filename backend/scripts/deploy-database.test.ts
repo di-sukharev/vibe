@@ -32,17 +32,10 @@ describe('database deployment command', () => {
     }
   })
 
-  test('migrates and verifies an existing login-capable administrator', async () => {
-    const calls: string[] = []
-    await deployDatabase(
-      { DATABASE_URL: databaseUrl },
-      dependenciesRecording(calls),
-    )
-
-    expect(calls).toEqual(['migrate', 'create', 'assert', 'disconnect', 'log'])
-  })
-
   test('bootstraps paired strong credentials before verifying the administrator', async () => {
+    // The order is the rule: bootstrapping after the check would verify an account that did not
+    // exist yet, and either step before the migration would run against the old schema. Asserted
+    // as relative positions - `disconnect` and `log` land wherever they land.
     const calls: string[] = []
     await deployDatabase(
       {
@@ -53,14 +46,9 @@ describe('database deployment command', () => {
       dependenciesRecording(calls),
     )
 
-    expect(calls).toEqual([
-      'migrate',
-      'create',
-      'bootstrap:admin@example.com',
-      'assert',
-      'disconnect',
-      'log',
-    ])
+    expect(calls.indexOf('migrate')).toBe(0)
+    expect(calls.indexOf('bootstrap:admin@example.com')).toBeGreaterThan(calls.indexOf('migrate'))
+    expect(calls.indexOf('assert')).toBeGreaterThan(calls.indexOf('bootstrap:admin@example.com'))
   })
 })
 

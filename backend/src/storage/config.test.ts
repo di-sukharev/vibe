@@ -1,11 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import { loadEnv } from '../env'
-import {
-  browserUploadAllowedHeaders,
-  deriveLocalSigningKey,
-  privateStorageConfigFromEnv,
-} from './config'
+import { deriveLocalSigningKey, privateStorageConfigFromEnv } from './config'
 
 const base = {
   DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
@@ -81,8 +77,4 @@ describe('deriveLocalSigningKey', () => {
   test('changes when the JWT secret rotates, so old upload URLs stop verifying', () => {
     expect(deriveLocalSigningKey('secret-one')).not.toEqual(deriveLocalSigningKey('secret-two'))
   })
-})
-
-describe('browser upload CORS headers', () => {
-
 })

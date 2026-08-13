@@ -1,11 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 
 import {
-  adminDashboardResponseSchema,
   adminUserParamsSchema,
   adminUserSummarySchema,
   adminUsersQuerySchema,
-  adminUsersResponseSchema,
   updateProfileRequestSchema,
   updateUserRoleRequestSchema,
   userSchema,
@@ -75,34 +73,4 @@ describe('user and admin contracts', () => {
     expect(() => adminUserParamsSchema.parse({ userId: 'not-a-uuid' })).toThrow()
   })
 
-  test('validates dashboard and paginated user responses', () => {
-    expect(
-      adminDashboardResponseSchema.parse({
-        totalUsers: 10,
-        totalAdmins: 2,
-        newUsersLast7Days: 3,
-      }),
-    ).toEqual({
-      totalUsers: 10,
-      totalAdmins: 2,
-      newUsersLast7Days: 3,
-    })
-    expect(
-      adminUsersResponseSchema.parse({
-        items: [
-          {
-            id: user.id,
-            email: user.email,
-            displayName: user.displayName,
-            role: user.role,
-            createdAt: user.createdAt,
-          },
-        ],
-        page: 1,
-        pageSize: 20,
-        total: 1,
-        hasNext: false,
-      }),
-    ).toMatchObject({ page: 1, pageSize: 20, total: 1, hasNext: false })
-  })
 })

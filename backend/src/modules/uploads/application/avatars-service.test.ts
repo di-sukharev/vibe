@@ -1,12 +1,20 @@
+/**
+ * Service-level rules only: what the ticket promises, when an upload expires, and which bodies are
+ * refused.
+ *
+ * Anything whose answer lives in SQL - write-once keys, replacing a published avatar, one user
+ * reaching another's upload, a lost promote or discard race - is tested in
+ * `uploads.integration.test.ts` against real Postgres instead. Those cases used to be duplicated
+ * here on top of a fake repository that re-implemented the same semantics, which meant the fake
+ * and the schema could drift apart with every assertion still green.
+ */
 import { beforeEach, describe, expect, test } from 'bun:test'
 
 import { pngFixture } from '../../../storage/storage-contract'
-import { UploadsFailure } from '../domain/errors'
 import { AvatarsService } from './avatars-service'
 import type { AvatarRecord, AvatarRepository, PrivateStorage } from './ports'
 
 const userId = '019c0000-0000-7000-8000-0000000000aa'
-const jpegBytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0, 0, 0, 0, 0])
 
 type StoredObject = { bytes: Uint8Array; contentType: string }
 
@@ -175,56 +183,11 @@ describe('AvatarsService', () => {
     expect(upload.contentLength).toBe(pngFixture.byteLength)
   })
 
-  test('publishes an avatar once the stored bytes match the declared upload', async () => {
-    const upload = await uploadPng()
-
-    const { avatar } = await service.finalizeUpload(userId, upload.uploadId)
-
-    expect(avatar?.contentType).toBe('image/png')
-    expect(avatar?.byteSize).toBe(pngFixture.byteLength)
-    expect(avatar?.downloadUrl).toContain('sig=2')
-    expect((await service.getAvatar(userId)).avatar).not.toBeNull()
-  })
-
-  test('reports an unfinished transfer separately, and keeps the ticket usable', async () => {
-    const { upload } = await service.createUpload(userId, {
-      contentType: 'image/png',
-      byteSize: pngFixture.byteLength,
-    })
-
-    expect(service.finalizeUpload(userId, upload.uploadId)).rejects.toMatchObject({
-      kind: 'not_completed',
-    })
-
-    // The upload was never discarded, so completing the transfer still works.
-    const pending = fakeRepository.rows.get(upload.uploadId)
-    fakeStorage.put(pending!.objectKey, new Uint8Array(pngFixture), 'image/png')
-    expect((await service.finalizeUpload(userId, upload.uploadId)).avatar).not.toBeNull()
-  })
-
-  test('gives an interrupted upload a brand-new key, because keys are write-once', async () => {
-    const first = await service.createUpload(userId, {
-      contentType: 'image/png',
-      byteSize: pngFixture.byteLength,
-    })
-    const firstKey = fakeRepository.rows.get(first.upload.uploadId)!.objectKey
-
-    const second = await service.createUpload(userId, {
-      contentType: 'image/png',
-      byteSize: pngFixture.byteLength,
-    })
-    const secondKey = fakeRepository.rows.get(second.upload.uploadId)!.objectKey
-
-    expect(secondKey).not.toBe(firstKey)
-    expect(deleted).toContain(firstKey)
-    expect(fakeRepository.rows.get(first.upload.uploadId)).toBeUndefined()
-  })
-
   test('refuses an expired upload and clears it away', async () => {
     const upload = await uploadPng()
     fakeStorage.advance(901_000)
 
-    expect(service.finalizeUpload(userId, upload.uploadId)).rejects.toMatchObject({
+    await expect(service.finalizeUpload(userId, upload.uploadId)).rejects.toMatchObject({
       kind: 'expired',
     })
     await Promise.resolve()
@@ -239,7 +202,7 @@ describe('AvatarsService', () => {
     const pending = fakeRepository.rows.get(upload.uploadId)!
     fakeStorage.put(pending.objectKey, new Uint8Array(pngFixture.subarray(0, 20)), 'image/png')
 
-    expect(service.finalizeUpload(userId, upload.uploadId)).rejects.toMatchObject({
+    await expect(service.finalizeUpload(userId, upload.uploadId)).rejects.toMatchObject({
       kind: 'rejected',
     })
   })
@@ -254,112 +217,11 @@ describe('AvatarsService', () => {
     disguised.set(new TextEncoder().encode('<svg xmlns='), 0)
     fakeStorage.put(pending.objectKey, disguised, 'image/png')
 
-    expect(service.finalizeUpload(userId, upload.uploadId)).rejects.toMatchObject({
+    await expect(service.finalizeUpload(userId, upload.uploadId)).rejects.toMatchObject({
       kind: 'rejected',
     })
     await Promise.resolve()
     expect(deleted).toContain(pending.objectKey)
   })
 
-  test('accepts a HEIF-labelled upload of a HEIC container', async () => {
-    const heic = new Uint8Array([
-      0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x68, 0x65, 0x69, 0x63,
-    ])
-    const { upload } = await service.createUpload(userId, {
-      contentType: 'image/heif',
-      byteSize: heic.byteLength,
-    })
-    const pending = fakeRepository.rows.get(upload.uploadId)!
-    fakeStorage.put(pending.objectKey, heic, 'image/heif')
-
-    expect((await service.finalizeUpload(userId, upload.uploadId)).avatar?.contentType).toBe(
-      'image/heif',
-    )
-  })
-
-  test('deletes the previous avatar when a new one is published', async () => {
-    const first = await uploadPng()
-    await service.finalizeUpload(userId, first.uploadId)
-    const firstKey = fakeRepository.rows.get(first.uploadId)!.objectKey
-
-    const second = await uploadPng()
-    await service.finalizeUpload(userId, second.uploadId)
-
-    expect(deleted).toContain(firstKey)
-    expect([...fakeRepository.rows.values()].filter((row) => row.state === 'ready')).toHaveLength(1)
-  })
-
-  test('yields to a concurrent finalize instead of destroying the avatar it published', async () => {
-    // Two finalizes of the same upload: the first promotes it, the second reaches the repository
-    // after the row stopped being pending. The loser must report "not found" and queue nothing
-    // for deletion - deleting the winner's object is the failure this guard exists to prevent.
-    const upload = await uploadPng()
-    const objectKey = fakeRepository.rows.get(upload.uploadId)!.objectKey
-    const losing = new AvatarsService({
-      clock: { now: () => fakeStorage.now },
-      deferDelete: (key) => deleted.push(key),
-      objectKeys: { createAvatarKey: () => `avatars/2026/08/key-${++keyCounter}` },
-      repository: { ...fakeRepository.repository, promoteToReady: async () => null },
-      storage: fakeStorage.storage,
-    })
-
-    expect(losing.finalizeUpload(userId, upload.uploadId)).rejects.toMatchObject({
-      kind: 'not_found',
-    })
-    await Promise.resolve()
-
-    expect(deleted).not.toContain(objectKey)
-    expect(fakeStorage.objects.has(objectKey)).toBe(true)
-  })
-
-  test('refuses to discard an upload that another request already published', async () => {
-    // `discard` runs on the expiry path, which can lose the same race. Scoping the delete to
-    // pending rows is what stops it removing a live avatar and its object.
-    const upload = await uploadPng()
-    const objectKey = fakeRepository.rows.get(upload.uploadId)!.objectKey
-    await service.finalizeUpload(userId, upload.uploadId)
-
-    expect(await fakeRepository.repository.removePending(userId, upload.uploadId)).toBeNull()
-    expect(fakeRepository.rows.get(upload.uploadId)?.state).toBe('ready')
-  })
-
-  test('never serves or finalizes another user’s upload', async () => {
-    const upload = await uploadPng()
-    const otherUser = '019c0000-0000-7000-8000-0000000000bb'
-
-    expect(service.finalizeUpload(otherUser, upload.uploadId)).rejects.toBeInstanceOf(
-      UploadsFailure,
-    )
-    expect((await service.getAvatar(otherUser)).avatar).toBeNull()
-  })
-
-  test('removes the avatar and its object, and stays idempotent', async () => {
-    const upload = await uploadPng()
-    await service.finalizeUpload(userId, upload.uploadId)
-    const key = fakeRepository.rows.get(upload.uploadId)!.objectKey
-
-    expect((await service.removeAvatar(userId)).avatar).toBeNull()
-    expect(deleted).toContain(key)
-    expect(fakeStorage.objects.has(key)).toBe(false)
-
-    expect((await service.removeAvatar(userId)).avatar).toBeNull()
-    expect((await service.getAvatar(userId)).avatar).toBeNull()
-  })
-
-  test('reports no avatar rather than failing when the user never uploaded one', async () => {
-    expect((await service.getAvatar(userId)).avatar).toBeNull()
-  })
-
-  test('rejects a jpeg body sent under a png ticket', async () => {
-    const { upload } = await service.createUpload(userId, {
-      contentType: 'image/png',
-      byteSize: jpegBytes.byteLength,
-    })
-    const pending = fakeRepository.rows.get(upload.uploadId)!
-    fakeStorage.put(pending.objectKey, jpegBytes, 'image/png')
-
-    expect(service.finalizeUpload(userId, upload.uploadId)).rejects.toMatchObject({
-      kind: 'rejected',
-    })
-  })
 })

@@ -310,26 +310,27 @@ test('Yandex SWS ingress delegates IP request limits while retaining body limits
 })
 
 test('admin user reads share one bounded budget across filters, sessions, and client addresses', async () => {
-  const readLimitMax = 120
+  // The budget is keyed by administrator, so changing the filter, the session token, or the client
+  // address must not buy more reads - otherwise rotating any of the three walks straight past the
+  // limit. Two reads is enough to show that: `http/security.test.ts` owns the window arithmetic,
+  // and proving a counter can reach 120 costs 500 in-process requests to learn nothing more.
+  const readLimitMax = 2
   const harness = await createAdminDirectoryTestApp({ readLimitMax })
-  const statuses: number[] = []
-  let firstLimited: Response | undefined
+  const read = (index: number) => harness.app.request(`/api/admin/users?q=user-${index}`, {
+    headers: {
+      Authorization: `Bearer ${harness.tokens.primary[index % harness.tokens.primary.length]}`,
+      'Do-Connecting-Ip': `203.0.113.${index + 1}`,
+    },
+  })
 
-  for (let index = 0; index < 500; index += 1) {
-    const response = await harness.app.request(`/api/admin/users?q=user-${index}`, {
-      headers: {
-        Authorization: `Bearer ${harness.tokens.primary[index % harness.tokens.primary.length]}`,
-        'Do-Connecting-Ip': `203.0.113.${index % 200 + 1}`,
-      },
-    })
-    statuses.push(response.status)
-    if (response.status === 429 && !firstLimited) firstLimited = response
-  }
+  expect((await read(0)).status).toBe(200)
+  expect((await read(1)).status).toBe(200)
 
-  expect(statuses.filter((status) => status === 200)).toHaveLength(readLimitMax)
-  expect(statuses.filter((status) => status === 429)).toHaveLength(500 - readLimitMax)
+  const limited = await read(2)
+
+  expect(limited.status).toBe(429)
+  expect(limited.headers.get('retry-after')).toBeTruthy()
   expect(harness.listUsersCalls).toBe(readLimitMax)
-  expect(firstLimited?.headers.get('retry-after')).toBeTruthy()
 })
 
 test('admin user read budgets are isolated by administrator', async () => {

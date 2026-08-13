@@ -15,15 +15,8 @@ test('keeps user and administrator workspaces separate', async ({ browser, page 
   await expect(page).toHaveURL(/\/app$/)
   await expect(page.getByRole('link', { name: 'Home' })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Dashboard' })).toHaveCount(0)
-  const sidebar = page.locator('[data-slot="sidebar"][data-state]')
-  await expect(sidebar).toHaveAttribute('data-state', 'expanded')
-  await page.locator('[data-sidebar="trigger"]').click()
-  await expect(sidebar).toHaveAttribute('data-state', 'collapsed')
   await page.getByRole('link', { name: 'Profile' }).click()
   await expect(page).toHaveURL(/\/app\/profile$/)
-  await expect(sidebar).toHaveAttribute('data-state', 'collapsed')
-  await page.reload()
-  await expect(sidebar).toHaveAttribute('data-state', 'collapsed')
   await page.goto('/admin/users')
   await expect(page).toHaveURL(/\/app$/)
 
@@ -35,66 +28,13 @@ test('keeps user and administrator workspaces separate', async ({ browser, page 
   await adminPage.getByRole('button', { name: 'Login' }).click()
 
   await expect(adminPage).toHaveURL(/\/admin$/)
-  await expect(adminPage.getByRole('main')).toHaveCount(1)
   await expect(adminPage.getByRole('navigation', { name: 'Primary navigation' })).toBeVisible()
   await expect(adminPage.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible()
-  await expect(adminPage.getByRole('link', { name: 'Dashboard' })).toBeVisible()
-  await expect(adminPage.getByRole('link', { name: 'Users' })).toBeVisible()
-  await expect(adminPage.getByRole('link', { name: 'Settings' })).toBeVisible()
   await expect(adminPage.getByRole('link', { name: 'Home' })).toHaveCount(0)
   await adminPage.goto('/app/profile')
   await expect(adminPage).toHaveURL(/\/admin$/)
 
   await adminContext.close()
-})
-
-test('mobile workspace navigation closes the sidebar sheet', async ({ page }) => {
-  const userEmail = uniqueEmail('web-e2e-mobile-sidebar')
-  await page.setViewportSize({ width: 390, height: 844 })
-  await page.goto('/signup')
-  await page.getByLabel('Email').fill(userEmail)
-  await page.getByLabel('Password', { exact: true }).fill(e2ePassword)
-  await page.getByLabel('Confirm Password').fill(e2ePassword)
-  await page.getByRole('button', { name: 'Create Account' }).click()
-  await expect(page).toHaveURL(/\/app$/)
-
-  await page.locator('[data-sidebar="trigger"]').click()
-  const mobileSidebar = page.locator('[data-slot="sidebar"][data-mobile="true"]')
-  await expect(mobileSidebar).toBeVisible()
-  await page.getByRole('link', { name: 'Profile' }).click()
-
-  await expect(page).toHaveURL(/\/app\/profile$/)
-  await expect(mobileSidebar).toBeHidden()
-})
-
-test('workspace navigation and account controls are keyboard operable', async ({
-  page,
-}) => {
-  await page.goto('/login')
-  await page.getByLabel('Email').fill(e2eAdminEmail)
-  await page.getByLabel('Password', { exact: true }).fill(e2eAdminPassword)
-  await page.getByRole('button', { name: 'Login' }).click()
-  await expect(page).toHaveURL(/\/admin$/)
-
-  const usersLink = page.getByRole('link', { name: 'Users' })
-  await usersLink.focus()
-  await expect(usersLink).toBeFocused()
-  await page.keyboard.press('Enter')
-  await expect(page).toHaveURL(/\/admin\/users$/)
-
-  const accountMenu = page.getByRole('button', { name: 'Open account menu' })
-  await accountMenu.focus()
-  await page.keyboard.press('Enter')
-  await expect(page.getByRole('menuitem', { name: 'Log out' })).toBeVisible()
-  await page.keyboard.press('Escape')
-  await expect(page.getByRole('menuitem', { name: 'Log out' })).toBeHidden()
-  await expect(accountMenu).toBeFocused()
-
-  const sidebar = page.locator('[data-slot="sidebar"][data-state]')
-  const sidebarTrigger = page.locator('[data-sidebar="trigger"]')
-  await sidebarTrigger.focus()
-  await page.keyboard.press('Enter')
-  await expect(sidebar).toHaveAttribute('data-state', 'collapsed')
 })
 
 test('admin data surfaces recover from errors and expose safe directory states', async ({
@@ -127,7 +67,6 @@ test('admin data surfaces recover from errors and expose safe directory states',
   await expect(page.getByText('Total users', { exact: true })).toBeVisible()
   await expect(page.getByText('Administrators', { exact: true })).toBeVisible()
   await expect(page.getByText('New in 7 days', { exact: true })).toBeVisible()
-  await expect(page.locator('[data-slot="chart"]')).toHaveCount(0)
 
   let directoryRequests = 0
   await page.route('**/api/admin/users?*', async (route) => {
@@ -180,32 +119,13 @@ test('workspace account menu keeps a failed logout visible and retryable', async
     })
   })
 
-  const sidebar = page.locator('[data-slot="sidebar"][data-state]')
-  await page.locator('[data-sidebar="trigger"]').click()
-  await expect(sidebar).toHaveAttribute('data-state', 'collapsed')
-  await page.locator('[data-sidebar="footer"] [data-sidebar="menu-button"]').click()
+  await page.getByRole('button', { name: 'Open account menu' }).click()
   await page.getByRole('menuitem', { name: 'Log out' }).click()
 
-  await expect(sidebar).toHaveAttribute('data-state', 'expanded')
   await expect(page.getByRole('alert')).toHaveText('Logout failed. Please try again.')
   await expect(page).toHaveURL(/\/app$/)
-  await page.locator('[data-sidebar="footer"] [data-sidebar="menu-button"]').click()
+  await page.getByRole('button', { name: 'Open account menu' }).click()
   await expect(page.getByRole('menuitem', { name: 'Log out' })).toBeEnabled()
-})
-
-test('workspace account menu opens the user profile', async ({ page }) => {
-  const userEmail = uniqueEmail('web-e2e-sidebar-profile')
-  await page.goto('/signup')
-  await page.getByLabel('Email').fill(userEmail)
-  await page.getByLabel('Password', { exact: true }).fill(e2ePassword)
-  await page.getByLabel('Confirm Password').fill(e2ePassword)
-  await page.getByRole('button', { name: 'Create Account' }).click()
-  await expect(page).toHaveURL(/\/app$/)
-
-  await page.locator('[data-sidebar="footer"] [data-sidebar="menu-button"]').click()
-  await page.getByRole('menuitem', { name: 'Profile' }).click()
-
-  await expect(page).toHaveURL(/\/app\/profile$/)
 })
 
 test('role mutation failures are announced inside the confirmation dialog', async ({

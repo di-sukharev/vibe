@@ -44,10 +44,12 @@ describe('canonicalStorageUrlString', () => {
 
 describe('signStorageUrl', () => {
   test('is a stable golden vector, so a signing change cannot pass unnoticed', () => {
+    // Pinned to a literal, not to another call of the same function: comparing the signer with
+    // itself passes whatever the algorithm becomes, which is the one regression this test exists
+    // to catch. Every URL signed before a change that alters this value stops verifying.
     expect(signStorageUrl(signingKey, uploadClaims)).toBe(
-      signStorageUrl(signingKey, { ...uploadClaims }),
+      'f0bb9b65978cded2455fbb8d1210438fba1d4d44138652e5b4d7eb3461bcfb42',
     )
-    expect(signStorageUrl(signingKey, uploadClaims)).toHaveLength(64)
   })
 
   test('changes when any single claim changes', () => {

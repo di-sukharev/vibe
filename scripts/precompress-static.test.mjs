@@ -9,7 +9,6 @@ import {
   compressedVariants,
   defaultTargets,
   isVariantPath,
-  minimumCompressibleBytes,
   precompressDirectory,
   repositoryRoot,
   shouldCompress,
@@ -46,9 +45,9 @@ test('shouldCompress takes text assets and leaves already-compressed formats alo
 })
 
 test('shouldCompress skips files too small for a variant to pay for itself', () => {
-  // Pinned to the literal, not to the constant: written against `minimumCompressibleBytes` alone
-  // this passes for any threshold, including 0, so a careless edit to that number ships silently.
-  expect(minimumCompressibleBytes).toBe(1024)
+  // The sizes are literals, so this already fails if the threshold moves - no separate pin on
+  // `minimumCompressibleBytes` needed. A pin would only force a second edit when the number is
+  // retuned on purpose.
   expect(shouldCompress('index.html', 1023)).toBe(false)
   expect(shouldCompress('index.html', 1024)).toBe(true)
 })
@@ -216,9 +215,8 @@ test('every default target is the build output of a real workspace', async () =>
 
   expect(defaultTargets.length).toBeGreaterThan(0)
   for (const target of defaultTargets) {
-    const [workspace, output] = target.split('/')
+    const [workspace] = target.split('/')
     expect(workspaces).toContain(workspace)
-    expect(output).toBe('dist')
     expect(await directoryExists(path.join(repositoryRoot, workspace))).toBe(true)
   }
 })

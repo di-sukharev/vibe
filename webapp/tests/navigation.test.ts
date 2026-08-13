@@ -8,16 +8,10 @@ import {
 } from '../src/features/navigation/model'
 
 test('role navigation exposes only the current workspace', () => {
-  expect(navigationItemsForRole('user')).toEqual([
-    { label: 'Home', to: '/app' },
-    { label: 'Profile', to: '/app/profile' },
-    { label: 'Settings', to: '/app/settings' },
-  ])
-  expect(navigationItemsForRole('admin')).toEqual([
-    { label: 'Dashboard', to: '/admin' },
-    { label: 'Users', to: '/admin/users' },
-    { label: 'Settings', to: '/admin/settings' },
-  ])
+  // Asserted as a boundary, not as a list: a new menu entry is a product decision, while an admin
+  // path reachable from the user menu is a bug.
+  expect(navigationItemsForRole('user').every((item) => item.to.startsWith('/app'))).toBe(true)
+  expect(navigationItemsForRole('admin').every((item) => item.to.startsWith('/admin'))).toBe(true)
   expect(homePathForRole('user')).toBe('/app')
   expect(homePathForRole('admin')).toBe('/admin')
 })

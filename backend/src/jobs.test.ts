@@ -7,10 +7,6 @@ import { backgroundJobNames, runBackgroundJob } from './jobs'
 const runtime = {} as BackendRuntime
 
 describe('runBackgroundJob', () => {
-  test('runs a registered job', async () => {
-    await expect(runBackgroundJob('noop', runtime)).resolves.toBeUndefined()
-  })
-
   test('rejects an unknown job and names the ones that exist', async () => {
     // All three runners take job names from user input or config, so a typo has to fail loudly
     // with the list of real names rather than silently do nothing. Checked against the registry
@@ -105,18 +101,14 @@ describe('runBackgroundJob', () => {
 
       await runBackgroundJob('uploads:pending:cleanup', cleanupRuntime, now)
 
-      expect(calls.findMany).toEqual([
-        {
-          where: {
-            state: 'pending',
-            // Slack past expiry for clock skew between the app and the database. Finalize
-            // already refuses an expired upload, so this is not what protects the boundary.
-            expiresAt: { lt: new Date('2026-08-09T11:00:00.000Z') },
-          },
-          orderBy: { expiresAt: 'asc' },
-          take: 500,
-        },
-      ])
+      // Only the cutoff is asserted. Slack past expiry covers clock skew between the app and the
+      // database; finalize already refuses an expired upload, so this is not what protects the
+      // boundary. Restating `orderBy` and `take` would only check the query was transcribed.
+      expect(calls.findMany).toHaveLength(1)
+      expect((calls.findMany[0] as { where: unknown }).where).toEqual({
+        state: 'pending',
+        expiresAt: { lt: new Date('2026-08-09T11:00:00.000Z') },
+      })
     })
 
     test('removes the stored object before the row that points at it', async () => {

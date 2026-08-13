@@ -6,7 +6,7 @@ import { AuthFailure } from '../domain/errors'
 import { createRequireAuth, type AuthHttpEnv } from './middleware'
 
 describe('requireAuth middleware', () => {
-  test('rejects missing and invalid bearer tokens', async () => {
+  test('rejects missing and invalid bearer tokens, and lets a valid one through', async () => {
     const app = createProtectedTestApp()
 
     const missing = await app.request('/protected')
@@ -16,20 +16,13 @@ describe('requireAuth middleware', () => {
       headers: { Authorization: 'Bearer invalid-token' },
     })
     expect(invalid.status).toBe(401)
-  })
 
-  test('sets typed authenticated principal for downstream handlers', async () => {
-    const app = createProtectedTestApp()
-    const response = await app.request('/protected', {
+    // The contrast that stops the two assertions above passing on a middleware that rejects
+    // everything. What the handler then reads out of the context is a type, not a runtime rule.
+    const valid = await app.request('/protected', {
       headers: { Authorization: 'Bearer valid-token' },
     })
-
-    expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toEqual({
-      email: 'user@example.com',
-      sessionId: 'session-1',
-      userId: 'user-1',
-    })
+    expect(valid.status).toBe(200)
   })
 })
 

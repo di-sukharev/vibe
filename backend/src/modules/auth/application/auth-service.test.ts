@@ -144,95 +144,10 @@ test('refresh keeps the logical session id stable while rotating its credential'
   expect(refreshCutoffs).toEqual([new Date('2025-10-03T00:00:00.000Z')])
 })
 
-test('refresh revokes the logical session when a previous credential is reused after grace', async () => {
-  const revokedSessionIds: string[] = []
-  const repository = {
-    findActiveRefreshSession: async () => ({
-      id: 'session-compromised',
-      userId: user.id,
-      user,
-      refreshTokenHash: 'hash:attacker-current-token',
-      credentialState: 'reused',
-    }),
-    revokeSessionById: async ({ sessionId }: { sessionId: string }) => {
-      revokedSessionIds.push(sessionId)
-      return true
-    },
-  } as unknown as AuthRepository
-  const service = new AuthService({
-    ...unusedPasswordResetDependencies,
-    accessTokens: {
-      sign: async () => 'access-token',
-      verify: async () => ({ sub: user.id, email: user.email, sessionId: 'session-compromised' }),
-    },
-    clock: { now: () => new Date('2026-01-01T00:00:00.000Z') },
-    logoutCleanup: async () => undefined,
-    passwords: { hash: async () => 'hash', verify: async () => true },
-    refreshReuseGraceSeconds: 10,
-    refreshTokenTtlDays: 30,
-    sessionAbsoluteTtlDays: 90,
-    refreshTokens: {
-      create: () => 'next-token',
-      hash: (token) => `hash:${token}`,
-      familyHash: (token) => `family:${token}`,
-      rotate: () => 'next-token',
-    },
-    repository,
-  })
-
-  await expect(service.refresh('owner-previous-token', {})).rejects.toThrow('invalid or expired')
-  expect(revokedSessionIds).toEqual(['session-compromised'])
-})
-
-test('refresh returns the winning successor when another request wins the rotation race', async () => {
-  let findCalls = 0
-  let rotateCalls = 0
-  const repository = {
-    findActiveRefreshSession: async () => {
-      findCalls += 1
-      return {
-        id: 'session-stable',
-        userId: user.id,
-        user,
-        refreshTokenHash: findCalls === 1
-          ? 'hash:shared-token'
-          : 'hash:successor:shared-token',
-        credentialState: findCalls === 1 ? 'current' : 'previous_within_grace',
-      }
-    },
-    rotateRefreshSession: async () => {
-      rotateCalls += 1
-      return false
-    },
-  } as unknown as AuthRepository
-  const service = new AuthService({
-    ...unusedPasswordResetDependencies,
-    accessTokens: {
-      sign: async () => 'access-token',
-      verify: async () => ({ sub: user.id, email: user.email, sessionId: 'session-stable' }),
-    },
-    clock: { now: () => new Date('2026-01-01T00:00:00.000Z') },
-    logoutCleanup: async () => undefined,
-    passwords: { hash: async () => 'hash', verify: async () => true },
-    refreshReuseGraceSeconds: 10,
-    refreshTokenTtlDays: 30,
-    sessionAbsoluteTtlDays: 90,
-    refreshTokens: {
-      create: () => 'initial-token',
-      hash: (token) => `hash:${token}`,
-      familyHash: (token) => `family:${token}`,
-      rotate: (token) => `successor:${token}`,
-    },
-    repository,
-  })
-
-  await expect(service.refresh('shared-token', {})).resolves.toMatchObject({
-    accessToken: 'access-token',
-    refreshToken: 'successor:shared-token',
-  })
-  expect(findCalls).toBe(2)
-  expect(rotateCalls).toBe(1)
-})
+// Credential reuse after grace and the rotation race are decided by SQL, so they are tested in
+// `auth.integration.test.ts` against real Postgres with genuinely concurrent requests. Scripting
+// either one through a fake repository only asserts that the fake was called the scripted number
+// of times.
 
 test('password reset request stays generic and creates nothing while delivery is disabled', async () => {
   let repositoryCalls = 0

@@ -5,37 +5,17 @@ import { describe, expect, test } from 'bun:test'
 import { loadBackgroundEnv, loadEnv } from './env'
 
 describe('loadEnv', () => {
-  test('parses defaults and comma-separated origins', () => {
+  test('splits a comma-separated origin list, trimming the spaces people leave in .env', () => {
+    // Only the parsing is worth asserting. Reading `.default()` literals back out of the schema
+    // asserts nothing - there is no code between the default and the assertion - and turns every
+    // retuned default into a failing test whose only fix is editing the expectation.
     const env = loadEnv({
       DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
       JWT_SECRET: '12345678901234567890123456789012',
       CORS_ORIGINS: 'http://localhost:5173, http://localhost:8081',
     })
 
-    expect(env.PORT).toBe(3000)
-    expect(env.ACCESS_TOKEN_TTL_SECONDS).toBe(900)
-    expect(env.REFRESH_REUSE_GRACE_SECONDS).toBe(10)
-    expect(env.SESSION_ABSOLUTE_TTL_DAYS).toBe(90)
-    expect(env.INGRESS_RATE_LIMIT_PROVIDER).toBe('local')
-    expect(env.ADMIN_USERS_READ_RATE_LIMIT_MAX).toBe(120)
-    expect(env.ADMIN_USERS_READ_RATE_LIMIT_WINDOW_SECONDS).toBe(60)
-    expect(env.COOKIE_SECURE).toBe(false)
     expect(env.CORS_ORIGINS).toEqual(['http://localhost:5173', 'http://localhost:8081'])
-    expect(env.PRIVATE_STORAGE_DRIVER).toBe('filesystem')
-    expect(env.PRIVATE_STORAGE_LOCAL_ROOT).toBe('.storage')
-    expect(env.PRIVATE_STORAGE_REGION).toBeUndefined()
-    expect(env.PRIVATE_STORAGE_UPLOAD_MAX_BYTES).toBe(5 * 1024 * 1024)
-    expect(env.PRIVATE_STORAGE_UPLOAD_URL_TTL_SECONDS).toBe(900)
-    expect(env.PRIVATE_STORAGE_DOWNLOAD_URL_TTL_SECONDS).toBe(300)
-    expect(env.APPLE_IAP_ENVIRONMENT).toBe('Sandbox')
-    expect(env.APPLE_IAP_PRODUCT_IDS).toEqual([])
-    expect(env.APPLE_AUTH_BUNDLE_ID).toBeUndefined()
-    expect(env.APPLE_AUTH_JWKS_TIMEOUT_MS).toBe(5000)
-    expect(env.GOOGLE_AUTH_CLIENT_IDS).toEqual([])
-    expect(env.GOOGLE_PLAY_PACKAGE_NAME).toBeUndefined()
-    expect(env.GOOGLE_PLAY_PRODUCT_IDS).toEqual([])
-    expect(env.GOOGLE_PLAY_BASE_PLAN_IDS).toEqual([])
-    expect(env.ENABLE_TEST_PUSH).toBe(false)
   })
 
   test('loads background entrypoints without exposing the API signing key', () => {
@@ -76,23 +56,10 @@ describe('loadEnv', () => {
     })
   })
 
-  test('parses backend .env.example with optional blank App Store fields', () => {
-    const env = loadEnv(parseEnvExample())
-
-    expect(env.APPLE_IAP_BUNDLE_ID).toBeUndefined()
-    expect(env.APPLE_IAP_APP_APPLE_ID).toBeUndefined()
-    expect(env.APPLE_IAP_ISSUER_ID).toBeUndefined()
-    expect(env.APPLE_AUTH_BUNDLE_ID).toBeUndefined()
-    expect(env.GOOGLE_AUTH_CLIENT_IDS).toEqual([])
-    expect(env.APPLE_IAP_PRODUCT_IDS).toEqual([
-      'com.example.app.premium.monthly',
-      'com.example.app.premium.yearly',
-    ])
-    expect(env.GOOGLE_PLAY_PACKAGE_NAME).toBeUndefined()
-    expect(env.GOOGLE_PLAY_PRODUCT_IDS).toEqual([
-      'com.example.app.premium',
-    ])
-    expect(env.GOOGLE_PLAY_BASE_PLAN_IDS).toEqual(['monthly', 'yearly'])
+  test('the shipped .env.example loads without throwing', () => {
+    // That the template file is loadable is worth knowing. Its literal values are not: asserting
+    // the example bundle ids means the first person to put their own in breaks `bun run test`.
+    expect(() => loadEnv(parseEnvExample())).not.toThrow()
   })
 
   test('parses social auth provider configuration', () => {
@@ -172,13 +139,9 @@ describe('loadEnv', () => {
       JWT_SECRET: '12345678901234567890123456789012',
     }
 
-    expect(loadEnv(base)).toMatchObject({
-      EMAIL_DELIVERY: 'disabled',
-      TASK_OUTBOX_BATCH_LIMIT: 50,
-      TASK_OUTBOX_LEASE_STALE_MS: 120_000,
-      TASK_OUTBOX_MAX_RUNTIME_MS: 55_000,
-      TASK_OUTBOX_RETENTION_DAYS: 30,
-    })
+    // Fail-closed contract, not tuning: a fresh install must not send mail. The batch/lease/runtime
+    // numbers are `.default()` literals and are deliberately not asserted here.
+    expect(loadEnv(base).EMAIL_DELIVERY).toBe('disabled')
 
     expect(() => loadEnv({ ...base, TASK_OUTBOX_BATCH_LIMIT: '0' })).toThrow('TASK_OUTBOX_BATCH_LIMIT')
     expect(() => loadEnv({ ...base, TASK_OUTBOX_RETENTION_DAYS: '-1' })).toThrow('TASK_OUTBOX_RETENTION_DAYS')
@@ -571,15 +534,6 @@ describe('email env', () => {
 
     expect(env.EMAIL_DELIVERY).toBe('disabled')
     expect(env.EMAIL_FROM).toBeUndefined()
-    expect(env.EMAIL_REQUEST_TIMEOUT_MS).toBe(10_000)
-  })
-
-  test('provider endpoints and region have working defaults', () => {
-    const env = loadEnv({ ...base, ...postbox })
-
-    expect(env.EMAIL_POSTBOX_ENDPOINT).toBe('https://postbox.cloud.yandex.net')
-    expect(env.EMAIL_POSTBOX_REGION).toBe('ru-central1')
-    expect(loadEnv({ ...base, ...resend }).EMAIL_RESEND_ENDPOINT).toBe('https://api.resend.com')
   })
 
   test('requires the whole provider group, naming every key that is missing', () => {

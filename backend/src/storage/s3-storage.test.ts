@@ -82,17 +82,17 @@ describe('S3PrivateStorage presigned uploads', () => {
   test('rejects sizes, types, keys, and lifetimes it must not sign', async () => {
     const storage = new S3PrivateStorage(localConfig)
 
-    expect(storage.createUploadUrl({ ...uploadInput, byteSize: 0 })).rejects.toThrow(StorageError)
-    expect(
+    await expect(storage.createUploadUrl({ ...uploadInput, byteSize: 0 })).rejects.toThrow(StorageError)
+    await expect(
       storage.createUploadUrl({ ...uploadInput, byteSize: localConfig.uploadMaxBytes + 1 }),
     ).rejects.toThrow(StorageError)
-    expect(storage.createUploadUrl({ ...uploadInput, contentType: 'nope' })).rejects.toThrow(
+    await expect(storage.createUploadUrl({ ...uploadInput, contentType: 'nope' })).rejects.toThrow(
       StorageError,
     )
-    expect(storage.createUploadUrl({ ...uploadInput, key: '../escape' })).rejects.toThrow(
+    await expect(storage.createUploadUrl({ ...uploadInput, key: '../escape' })).rejects.toThrow(
       StorageError,
     )
-    expect(
+    await expect(
       storage.createUploadUrl({ ...uploadInput, expiresInSeconds: 8 * 24 * 60 * 60 }),
     ).rejects.toThrow(StorageError)
   })

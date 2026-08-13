@@ -232,8 +232,6 @@ async function main() {
   return runAgainstLocalStorage('bun', ['run', '--cwd', 'webapp', 'e2e'], { anyOrigin: true })
 }
 
-export { corsOrigins, envBlock, start as startLocalStorage }
-
 if (import.meta.main) {
   await main()
 }

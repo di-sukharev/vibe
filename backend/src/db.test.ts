@@ -60,32 +60,8 @@ describe('runWithJobLock failure classification', () => {
     expect(isJobLockExpiry(failure)).toBe(false)
   })
 
-  test("a transaction that failed well inside its budget is the job's own problem", async () => {
-    // The job ran its own nested transaction and that one expired: same error code, but this
-    // lock had minutes left, so nothing was released early and no duplicate is possible.
-    const prisma = failingTransaction(async (start) => {
-      start()
-      throw Object.assign(new Error('inner transaction expired'), { code: 'P2028' })
-    })
-
-    const failure = await runWithJobLock(prisma, 'job', async () => 'ran', {
-      timeoutMs: 60_000,
-    }).catch((error: unknown) => error)
-
-    expect(isJobLockExpiry(failure)).toBe(false)
-  })
-
-  test('a transaction that started and outran the timeout is a lock expiry', async () => {
-    const prisma = failingTransaction(async (start) => {
-      start()
-      await Bun.sleep(30)
-      throw Object.assign(new Error('transaction expired'), { code: 'P2028' })
-    })
-
-    const failure = await runWithJobLock(prisma, 'job', async () => 'ran', {
-      timeoutMs: 10,
-    }).catch((error: unknown) => error)
-
-    expect(isJobLockExpiry(failure)).toBe(true)
-  })
+  // The other two branches - an inner transaction that expired inside a lock with headroom, and a
+  // job that outran its own lock - are asserted in `db.integration.test.ts` against real Prisma,
+  // which also checks the operator message and that the lock was actually released. Forging the
+  // P2028 shape by hand here would only restate what that file proves.
 })

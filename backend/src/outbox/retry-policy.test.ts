@@ -20,16 +20,10 @@ describe('nextAttemptDelayMs', () => {
     expect(delays).toEqual([120_000, 240_000, 480_000, 900_000, 900_000, 900_000])
   })
 
-  test('jitter only ever adds, so the first delay clears the password-reset cooldown', () => {
-    // The 60-second cooldown in createPasswordResetToken silently swallows a second request for
-    // the same account. A retry landing inside it would be dropped and the user would never get
-    // a working link, so this lower bound is a correctness property, not tuning.
-    const cooldownMs = 60 * 1000
-
-    for (const random of [noJitter, fullJitter, () => 0.5, () => 0.01]) {
-      expect(nextAttemptDelayMs(1, random)).toBeGreaterThan(cooldownMs)
-    }
-  })
+  // The first delay must clear the password-reset cooldown, and that lower bound is asserted in
+  // `modules/auth/password-reset-cooldown.test.ts` against the real `passwordResetCooldownSeconds`.
+  // A copy of the number here would stay green when the cooldown is raised past the backoff, which
+  // is the only way that invariant ever breaks.
 
   test('jitter spreads a retry by up to half its delay and never beyond', () => {
     // After an outage every row comes due at once; without spread they stampede together.

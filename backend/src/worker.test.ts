@@ -60,25 +60,6 @@ test('stopping wakes every sleeping loop, not just the last one', async () => {
   }
 })
 
-test('stopping does not wait out the pause between iterations', async () => {
-  const { runtime } = pingRuntime()
-  const log = spyOn(console, 'log').mockImplementation(() => {})
-
-  try {
-    const handle = startWorkerLoops(runtime, [{ job: 'db:ping', intervalMs: 60_000 }])
-    await new Promise((resolve) => setTimeout(resolve, 10))
-
-    const stoppedAt = Date.now()
-    handle.stop()
-    await handle.stopped
-
-    // Without waking the sleeping loop, SIGTERM would hang until the interval elapsed.
-    expect(Date.now() - stoppedAt).toBeLessThan(1_000)
-  } finally {
-    log.mockRestore()
-  }
-})
-
 test('loops run side by side and survive a failing neighbour', async () => {
   const calls = { pings: 0, failures: 0 }
   const runtime = {

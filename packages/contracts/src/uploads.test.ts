@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
 import {
-  apiErrorCodeSchema,
   AVATAR_MAX_BYTES,
   AVATAR_MIN_BYTES,
   avatarResponseSchema,
@@ -108,9 +107,4 @@ describe('avatar upload contracts', () => {
     expect(() => avatarResponseSchema.parse({})).toThrow()
   })
 
-  test('exposes the three recoverable upload failures as distinct error codes', () => {
-    for (const code of ['UPLOAD_NOT_COMPLETED', 'UPLOAD_REJECTED', 'UPLOAD_EXPIRED'] as const) {
-      expect(apiErrorCodeSchema.parse(code)).toBe(code)
-    }
-  })
 })

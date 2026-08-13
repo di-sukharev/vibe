@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
 import { TerminalTaskError } from './errors'
-import { defaultLeaseStaleMs, defaultTaskDeadlineMs } from './retry-policy'
 import { isTaskType, requireTaskHandler, taskHandlers, taskTypeNames } from './handlers'
 import type { TaskHandlerRegistry } from './handlers'
 
