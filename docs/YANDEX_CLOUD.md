@@ -124,8 +124,13 @@ Manual prerequisites for the user:
 ```bash
 curl -sSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash
 yc init --username=<email_address>
-yc config list
+yc config get cloud-id
+yc config get folder-id
 ```
+
+One key at a time rather than `yc config list`: the list prints the profile's OAuth token next to
+the ids, and terminal output gets pasted into chats, tickets and screenshots. That token is full
+access to the cloud.
 
 Use `yc config set folder-id <folder_ID>` when the active folder must be changed.
 
@@ -141,28 +146,73 @@ cp backend/.env.deploy.example backend/.env.deploy   # once, then fill in the id
 bun run release:yc release
 ```
 
-It runs five phases in order - `build-push`, `migrate`, `deploy`, `publish-web`, `verify` - and
-records each one it finishes in `.scratch/release/<commit>.json`. A Yandex release is several
-independent operations and any of them can fail halfway, so `bun run release:yc status` shows what
-is done and re-running continues from there instead of redoing work. A single phase can be run on
-its own by name, and `--dry-run` prints the exact commands without touching the cloud.
+It runs four phases in order - `build-push`, `deploy`, `publish-web`, `verify` - and records each
+one it finishes in `.scratch/release/<commit>.json`. A Yandex release is several independent
+operations and any of them can fail halfway, so `bun run release:yc status` shows what is done and
+re-running continues from there instead of redoing work. A single phase can be run on its own by
+name, and `--dry-run` prints the commands without touching the cloud, with environment values
+hidden.
+
+**Migrations are not one of the phases.** Apply them before releasing, from a protected operator
+environment, as described under "Managed PostgreSQL" below. The script holds no `DATABASE_URL` by
+design, so it could not confirm a migration succeeded even if it triggered one, and a phase that
+looks like it guarantees ordering without doing so is worse than an honest gap. DigitalOcean gets
+that guarantee for free from App Platform's `PRE_DEPLOY` job kind; Yandex has no equivalent.
 
 `backend/.env.deploy` holds identifiers, never credentials. The script never reads a secret: it
-reads the **active revision's environment** and carries it forward unchanged, altering only the
-image. That matters because container environment variables belong to a revision - a revision
-deployed without them starts with none, so a release that did not carry them would silently strip
-the production configuration. Runtime secrets therefore stay in the console or Lockbox, where you
-set them once.
+reads the live revision and carries its environment, sizing, core fraction, concurrency, timeout
+and service account forward, altering only the image. That matters because those settings belong to
+a revision - `yc serverless container revision deploy` is 32 imperative flags with no declarative
+spec input, so anything not passed reverts to a default, and a release that did not carry them
+would silently strip the production configuration. Runtime secrets therefore stay in the console or
+Lockbox, where you set them once.
+
+Because that shape invites exactly the error of reproducing settings from memory, the script does
+the opposite: it declares the fields it re-passes and **refuses** any revision carrying something
+else - Lockbox `secrets`, a `connectivity` network attachment, mounts, custom scaling, a custom
+entrypoint, or a field Yandex adds after this was written. It names the field and stops, so a
+container richer than the template's shipped shape gets deployed from the console or Terraform
+rather than quietly rebuilt without half of itself.
+
+`verify` checks that the image just built is the one the active revision serves, and only then that
+`/health/ready` answers. The image check is what stops the readiness check from lying: a release
+whose `deploy` never took effect still answers 200 from the previous revision, while the static
+surfaces published in the same run are already the new ones.
 
 The release refuses to start when the worktree is dirty or the branch is not pushed and in sync,
 and when the active `yc` profile does not match the `YC_EXPECTED_CLOUD_ID` and
 `YC_EXPECTED_FOLDER_ID` recorded for the project. Releasing into the wrong folder is the expensive
 mistake here, and it is the one a correct-looking command makes silently.
 
-Two environment values cannot travel this path. `--environment` is parsed as CSV once an argument
-holds more than one `=`, so a value containing both `=` and `,` would be split into bogus
-variables; the script refuses such a value instead of deploying a mangled revision. Set that one in
-the console or Lockbox and it will be carried forward like any other.
+**`deploy` rolls the API container only.** The background jobs in "Background Jobs And The Cleanup
+Timer" run as their own task-runtime containers built from the same image, and they keep serving
+whatever tag they were provisioned with until someone redeploys them. Left behind across a few
+releases they run old code against a migrated schema, and because `outbox:drain` is the process
+that sends password-reset and verification email, the symptom is email quietly stopping.
+
+Redeploy each of them **from the console** after a release: open the container, edit the active
+revision, change only the image tag to the one this release pushed. The console builds the new
+revision from the current one, so the environment, service account and entrypoint are preserved.
+
+Do not do it with `yc serverless container revision deploy` by hand. That command builds a revision
+only from the flags given, so it needs the container's whole environment re-supplied on the command
+line - which means production `DATABASE_URL` and `JWT_SECRET` in shell history on every release,
+exactly what the rest of this path exists to avoid, and omitting them wipes the container's
+configuration with no warning.
+
+They are not in the release script because each carries a `--command`/`--args` entrypoint, which is
+the shape `deploy` deliberately refuses to reproduce. Teaching it those flags is a change worth
+making from a real payload rather than from guesswork.
+
+Some environment values cannot travel this path at all. `--environment` is parsed as CSV once an
+argument holds more than one `=`, and in that branch a comma splits the value into bogus variables
+while a quote is a parse error that echoes the whole `KEY=value` to the terminal. The script
+refuses such a value rather than deploying a mangled revision or printing a credential. In practice
+this is a database password containing `"` or `,` in a URL that also carries query parameters: the
+fix is to change the password, because setting it in the console does not help - the script reads
+the environment back from the live revision, so it would refuse again on the next release. Moving
+it to Lockbox does not help either: that makes the revision unreproducible here by design, and the
+release will tell you to deploy this container from the console or Terraform.
 
 ## Backend API
 
@@ -417,10 +467,16 @@ yc serverless container revision deploy \
   --memory 256MB \
   --execution-timeout 60s \
   --service-account-id <cleanup_runtime_service_account_ID> \
-  --environment DATABASE_URL='<production_database_url>',JWT_SECRET='<production_jwt_secret>',CORS_ORIGINS=https://app.example.com,COOKIE_SECURE=true,SESSION_ABSOLUTE_TTL_DAYS=90,SESSION_RETENTION_DAYS=7
+  --environment COOKIE_SECURE=true,SESSION_ABSOLUTE_TTL_DAYS=90,SESSION_RETENTION_DAYS=7
 ```
 
-Configure the cleanup revision with the same production `DATABASE_URL`, `JWT_SECRET`, `PRIVATE_STORAGE_*` group, session TTL, retention, network, and Lockbox policy as the API revision. The storage variables are not optional here either: the cleanup container runs the same image, so it fails the same startup validation without them, and `uploads:pending:cleanup` needs storage to do its work. Prefer Lockbox or the console instead of putting real secrets into shell history. Do not make the cleanup container public.
+Then set the secret half of the environment - `DATABASE_URL`, `JWT_SECRET`, and the
+`PRIVATE_STORAGE_*` credentials - **in the console or Lockbox**, not on this command line. Passing
+them here puts production credentials into shell history, and `--environment` is comma-separated, so
+any value containing a comma silently splits into bogus variables; a second entry in `CORS_ORIGINS`
+is the case that catches people. Set `CORS_ORIGINS` there too for that reason.
+
+Configure the cleanup revision with the same production `DATABASE_URL`, `JWT_SECRET`, `PRIVATE_STORAGE_*` group, session TTL, retention, network, and Lockbox policy as the API revision. The storage variables are not optional here either: the cleanup container runs the same image, so it fails the same startup validation without them, and `uploads:pending:cleanup` needs storage to do its work. Do not make the cleanup container public.
 
 Create a narrowly scoped service account for the timer, grant it invocation access only to the cleanup container, and schedule the task daily at 03:00 UTC. Yandex timer expressions have six fields and use UTC:
 

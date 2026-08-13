@@ -22,8 +22,9 @@ project runs on Yandex Cloud or an own server, delete the DigitalOcean tooling i
 
 **Delete these files**
 
-- `scripts/deploy-do.mjs`, `scripts/deploy-do.test.mjs`, and `scripts/do-cron.mjs` - the cron
-  validator has no other reader
+- `scripts/deploy-do.mjs`, `scripts/deploy-do.test.mjs`, `scripts/do-cron.mjs`, and
+  `scripts/do-cron.test.mjs` - the cron validator has no other reader, and leaving its test behind
+  breaks `bun run test` on a module that is gone
 - `.do/`
 
 **Then make the one conditional file deletion**, which depends on the path you kept rather than on this
@@ -310,15 +311,22 @@ export DO_EXPECTED_TEAM='<the DigitalOcean team that owns the app>'
 bun run deploy:do api        # or: webapp, website
 ```
 
-Every env entry that declares a `key` and no `value` is filled from the running app immediately before the update. `JWT_SECRET`, the `PRIVATE_STORAGE_*` credentials, and the `EMAIL_*` credentials are therefore set once in the DigitalOcean console and never pass through this repository, a shell history, or a file on disk. `--dry-run` runs every check and reports what would change without touching the app.
+Every env entry that declares a `key` and no `value` - including a bare `value:`, which YAML reads as null - is filled from the running app immediately before the update. `JWT_SECRET`, the `PRIVATE_STORAGE_*` credentials, and the `EMAIL_*` credentials are therefore set once in the DigitalOcean console and never pass through this repository, a shell history, or a file on disk. `--dry-run` reports what would change without touching the app. It runs every check except the release-source one, so that a spec can be validated while it is still being edited; a green dry run does not promise the real deploy will start on a dirty or unpushed checkout.
+
+The spec is the **whole** environment, not a set of overrides. A variable added in the console but absent from the spec is removed on the next deploy, so add the key to the spec first and then set its value. The values are read from the app's current spec rather than its last successful deployment: a console edit whose deployment failed is still the operator's intent, and carrying the older one back would silently undo it.
 
 The command refuses to deploy when:
 
 - the spec still contains a `REPLACE_WITH_*` placeholder, or an env entry whose value is an empty string, which reads as configured but is not;
 - `CORS_ORIGINS` uses a wildcard, a plaintext origin, or an origin with a path;
 - a `SCHEDULED` component runs a task that is not in [../backend/src/jobs.ts](../backend/src/jobs.ts), or a cadence under App Platform's 15-minute floor;
+- the running app has a component the spec no longer declares, since applying it would delete that component and every secret on it. Pass `--allow-remove` when that is the intent;
+- the app exists but none of the spec's components came back from `doctl apps get`, which means the read did not return what was expected and every secret would deploy empty;
+- either side uses the app-level `envs` block. This script works per component, so an app-level variable would be dropped with no line of output. Put those variables on the components that need them;
 - the checkout is not the branch the spec deploys, the branch is not pushed and in sync, or the worktree has uncommitted or untracked changes;
 - `DO_EXPECTED_TEAM` is unset, or does not match the team the current `doctl` token is scoped to. The first run prints the exact value to export.
+
+Adding a component is reported rather than refused - a new worker legitimately starts with its secrets unset - but the report names it, because an addition and a rename look identical from the spec alone and a rename deletes the old component. A variable the running app has and the spec does not is reported the same way: the spec is authoritative, so applying it removes that variable, and the report is what turns a silent loss into a visible one.
 
 It deliberately does not re-check `JWT_SECRET` strength, the storage driver, or the storage endpoint. Those are enforced where they are used: [../backend/src/env.ts](../backend/src/env.ts) refuses to boot on a weak or placeholder secret, on the filesystem driver under `NODE_ENV=production`, or on a remote endpoint that was never explicitly opened. A spec that gets them wrong fails at the first container start rather than silently.
 
@@ -341,6 +349,8 @@ bun run deploy:do api
 ```
 
 Then delete `ADMIN_SEED_EMAIL` and `ADMIN_SEED_PASSWORD` from the migrate job in the console. They are needed exactly once; a later run would unlock and reset that administrator again. Everything else stays.
+
+From then on every deploy prints one line naming those two keys as having no value and deploying empty. That is the correct steady state, not a problem to fix - the report states what is true rather than telling you to restore them. Do not tune it out, though: it shares a channel with the report that a variable set in the console is about to be deleted, which is the one worth reading.
 
 Attach `api.example.com` to the API app and wait for DNS and TLS before deploying the webapp: `VITE_API_URL` is baked into the bundle at build time, so the API host must be final first.
 

@@ -202,13 +202,20 @@ services:
         type: SECRET
       # Transactional email. Delete this group when EMAIL_DELIVERY is absent; keep it whole
       # otherwise, because a half-configured provider accepts password-reset requests and silently
-      # sends nothing. `postbox` also needs EMAIL_POSTBOX_REGION; `resend` needs neither key below.
+      # sends nothing. For `resend`, replace the two postbox keys below with EMAIL_RESEND_API_KEY.
+      #
+      # This file is the whole environment, not a set of overrides: a variable added in the console
+      # but missing here is removed on the next deploy. Add the key here first, then set its value.
       - key: EMAIL_DELIVERY
         value: REPLACE_WITH_EMAIL_DELIVERY
         scope: RUN_TIME
         type: GENERAL
       - key: EMAIL_FROM
         value: REPLACE_WITH_EMAIL_FROM
+        scope: RUN_TIME
+        type: GENERAL
+      - key: EMAIL_POSTBOX_REGION
+        value: ru-central1
         scope: RUN_TIME
         type: GENERAL
       - key: EMAIL_POSTBOX_ACCESS_KEY_ID
