@@ -10,11 +10,16 @@ import { SectionCard } from './SectionCard';
 
 type AccountSummaryProps = {
   action?: ReactNode;
-  /** Cache key for the photo. Required alongside `avatarUri` when the URI is short-lived. */
-  avatarCacheKey?: string;
+  /**
+   * A photo to show instead of the initials. Presentational: this component fetches nothing.
+   *
+   * The URI and its cache key travel as one value because a signed URI is re-signed on every
+   * read: keyed on the URI alone, every refetch would miss the cache and a cached entry could
+   * hand the loader an already-expired signature. Two optional props would let a caller supply
+   * the URI without the key and reintroduce exactly that.
+   */
+  avatarImage?: { cacheKey: string; headers?: Record<string, string>; uri: string } | null;
   avatarTestID?: string;
-  /** A photo to show instead of the initials. Presentational: this component fetches nothing. */
-  avatarUri?: string | null;
   badge?: string;
   description?: string;
   displayName: string | null;
@@ -24,9 +29,8 @@ type AccountSummaryProps = {
 
 export function AccountSummary({
   action,
-  avatarCacheKey,
+  avatarImage,
   avatarTestID,
-  avatarUri,
   badge,
   description,
   displayName,
@@ -44,13 +48,20 @@ export function AccountSummary({
             initials show while the photo loads and remain if it never does.
           */}
           <AvatarFallback>{accountInitials(displayName, email)}</AvatarFallback>
-          {avatarUri ? (
+          {avatarImage ? (
             <AvatarImage
-              // Decorative: the name it stands for is read out right beside it.
+              // Decorative: the name it stands for is read out right beside it. Both props are
+              // needed. `accessible` is what hides it on iOS and Android, and react-native-web
+              // does not forward that prop at all - on web the `<img>` is labelled from
+              // `accessibilityLabel`, so without an empty one it ships with no `alt` and a
+              // screen reader announces the blob: URL next to the name it repeats. `alt` is not
+              // the web answer here: expo-image reads it only for a placeholder node, which
+              // this avatar does not render.
               accessible={false}
+              accessibilityLabel=""
               cachePolicy="memory-disk"
               contentFit="cover"
-              source={{ cacheKey: avatarCacheKey, uri: avatarUri }}
+              source={avatarImage}
               transition={120}
             />
           ) : null}

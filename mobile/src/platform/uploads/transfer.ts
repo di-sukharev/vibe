@@ -16,7 +16,9 @@ export type UploadTransferFailure =
   /** The bytes on disk are no longer the size the ticket was signed for. */
   | 'size-changed'
   /** The request never reached storage, or storage refused it. */
-  | 'transfer-failed';
+  | 'transfer-failed'
+  /** The picked file could not be read, so there is nothing to sign a ticket for. */
+  | 'unreadable-file';
 
 export class UploadTransferError extends Error {
   readonly reason: UploadTransferFailure;

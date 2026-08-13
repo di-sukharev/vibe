@@ -25,9 +25,9 @@ import {
   markStoredExpoPushTokenForCleanup,
   setPendingExpoPushTokenCleanup,
 } from '@/features/notifications';
-import { uploadFileWithFileSystem } from '@/platform/uploads/file-upload-sender';
 import { createMobileApis, SessionController } from './api';
 import { authTransportForPlatform } from './auth-transport';
+import { uploadFileAccessForPlatform } from './upload-file-access';
 
 export function AppProviders({ children }: PropsWithChildren) {
   const [queryClient] = useState(
@@ -45,7 +45,8 @@ export function AppProviders({ children }: PropsWithChildren) {
     setRefreshToken: setStoredRefreshToken,
   }));
   const [pushRegistrationCoordinator] = useState(() => new PushRegistrationCoordinator());
-  const [avatarPicker] = useState(() => createExpoAvatarPicker());
+  const [uploads] = useState(() => uploadFileAccessForPlatform(Platform.OS));
+  const [avatarPicker] = useState(() => createExpoAvatarPicker(uploads));
   const [apis] = useState(() =>
     createMobileApis({
       authTransport: authTransportForPlatform(Platform.OS),
@@ -70,7 +71,7 @@ export function AppProviders({ children }: PropsWithChildren) {
         session={session}
       >
         {/* Wrap this in <IapProvider api={apis.billing}> when turning subscriptions on. */}
-        <AvatarProvider api={apis.avatar} picker={avatarPicker} send={uploadFileWithFileSystem}>
+        <AvatarProvider api={apis.avatar} picker={avatarPicker} send={uploads.send}>
           <PushNotificationsProvider
             api={apis.notifications}
             registrationCoordinator={pushRegistrationCoordinator}>

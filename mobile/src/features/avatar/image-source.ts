@@ -46,3 +46,30 @@ export function avatarResizePlan(
 export function avatarCacheKey(avatar: Pick<Avatar, 'byteSize' | 'updatedAt'>) {
   return `avatar-${avatar.updatedAt}-${avatar.byteSize}`;
 }
+
+/**
+ * The stored avatar as an image source, or `null` when there is none.
+ *
+ * The URI and its key are built in one place so a caller cannot pass the signed URI on its own
+ * and lose the cache identity that makes it usable.
+ *
+ * The web build needs one more thing. There the signed URL is fetched by a real browser, and
+ * with the filesystem driver it is served by the API, which sets `Cross-Origin-Resource-Policy:
+ * same-origin` - so a plain `<img src>` load is blocked and the avatar silently stays as
+ * initials. Giving the source headers makes `expo-image` load it with `fetch` instead, and a
+ * CORS request is not subject to that rule. It is the same reason `webapp` renders an object URL
+ * rather than pointing an `<img>` at the signed URL, and it keeps the two storage drivers
+ * behaving identically in a browser instead of only S3 working.
+ *
+ * `Accept` is a CORS-safelisted request header, so this adds no preflight and needs no entry in
+ * the API's allow-list. Native builds keep the direct path, which `expo-image` can cache.
+ */
+export function avatarImageSource(avatar: Avatar | null, platform: string) {
+  if (!avatar) return null;
+
+  return {
+    cacheKey: avatarCacheKey(avatar),
+    ...(platform === 'web' ? { headers: { Accept: 'image/*' } } : {}),
+    uri: avatar.downloadUrl,
+  };
+}

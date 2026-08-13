@@ -14,7 +14,11 @@ import { useAuth } from '@/features/auth';
 import type { UploadSender } from '@/platform/uploads';
 import type { AvatarApiPort } from './api';
 import { uploadPickedAvatar } from './avatar-controller';
-import { avatarRemoveErrorMessage, avatarUploadErrorMessage } from './avatar-messages';
+import {
+  avatarPickErrorMessage,
+  avatarRemoveErrorMessage,
+  avatarUploadErrorMessage,
+} from './avatar-messages';
 import type { AvatarPickerPort } from './picker';
 
 /**
@@ -33,9 +37,18 @@ export type AvatarWrite = 'remove' | 'upload';
 type AvatarContextValue = {
   avatar: Avatar | null;
   error: { message: string; write: AvatarWrite } | null;
+  /**
+   * The photo has never been read, so `avatar` says nothing about whether one exists.
+   *
+   * Deliberately not "the last read failed": a refetch that fails while an answer is already
+   * cached leaves the screen correct, and both write failures trigger such a refetch - so the
+   * wider reading would put a "photo could not be loaded" alert next to the photo.
+   */
+  isUnavailable: boolean;
   isRemoving: boolean;
   isUploading: boolean;
   notice: string | null;
+  reload: () => void;
   removeAvatar: () => Promise<void>;
   uploadAvatar: () => Promise<void>;
 };
@@ -89,8 +102,19 @@ export function AvatarProvider({
     enabled: Boolean(userId),
     queryFn: () => api.getAvatar(),
     queryKey: avatarQueryKey(userId ?? ''),
-    // Comfortably inside the download URL's lifetime, so a cached response never hands the
-    // image loader a signature that has already expired.
+    // Marks the response stale; it does not refetch. This provider is mounted at the root and
+    // never remounts, and nothing here wires focus or connectivity refetching, so on a device
+    // this query runs about once per session. On iOS and Android what then keeps the photo on
+    // screen past the download URL's five-minute life is not this number but `avatarCacheKey`:
+    // expo-image resolves by that key and never asks for the URL again. The web build ignores
+    // `cacheKey` entirely and holds the image in the object URL that `expo-image` builds from
+    // its own fetch, which dies with the component - so there a remount after five minutes
+    // re-requests an expired signature. Both cases end at the fallback initials until the next
+    // launch, and neither is visible to this provider: the query succeeded, only the image
+    // loader failed, so `reload` is not offered for them. Accepted because the photo is
+    // decorative and every action stays correct. A product that needs the picture itself to
+    // recover should refetch on foreground, the way billing's `AppState` listener does, rather
+    // than retry from the image's own error - which loops when storage is what is broken.
     staleTime: 60_000,
   });
 
@@ -98,6 +122,18 @@ export function AvatarProvider({
     () => accountScope !== null && isAccountScopeCurrent(accountScope),
     [accountScope, isAccountScopeCurrent],
   );
+
+  /**
+   * Re-reads the stored photo.
+   *
+   * The only recovery this feature has. A read failure is terminal without it - `retry` is off
+   * app-wide, this query has no refetch trigger, and nothing else invalidates its key - so a
+   * launch during a dropped connection would otherwise show initials, hide the Remove button,
+   * and stay that way until the app is restarted.
+   */
+  const reload = useCallback(() => {
+    if (userId) void queryClient.invalidateQueries({ queryKey: avatarQueryKey(userId) });
+  }, [queryClient, userId]);
 
   const commit = useCallback(
     (response: AvatarResponse, successNotice: string) => {
@@ -112,19 +148,25 @@ export function AvatarProvider({
     setError(null);
     setNotice(null);
 
-    let picked;
-    try {
-      picked = await picker.pick();
-    } catch (pickFailure) {
-      setError({ message: avatarUploadErrorMessage(pickFailure), write: 'upload' });
-      return;
-    }
-
-    // Cancelling is not a failure; nothing on screen should change.
-    if (!picked) return;
-
+    // Set before the picker opens, not after it returns. On a device the picker is a modal the
+    // screen cannot be tapped through, but in a browser the file dialog leaves the page live, so
+    // a second press would start a second ticket and a second transfer.
     setIsUploading(true);
+
     try {
+      let picked;
+      try {
+        picked = await picker.pick();
+      } catch (pickFailure) {
+        if (ownsOperation()) {
+          setError({ message: avatarPickErrorMessage(pickFailure), write: 'upload' });
+        }
+        return;
+      }
+
+      // Cancelling is not a failure; nothing on screen should change.
+      if (!picked) return;
+
       const response = await uploadPickedAvatar({
         api,
         isCancelled: () => !ownsOperation(),
@@ -138,11 +180,18 @@ export function AvatarProvider({
       // message changes, so a working avatar is never lost to a bad attempt.
       if (ownsOperation()) {
         setError({ message: avatarUploadErrorMessage(uploadFailure), write: 'upload' });
+        // The write may have committed and only its response been lost. Re-reading keeps the
+        // screen honest about what the server actually holds, whichever way it went.
+        reload();
       }
     } finally {
-      setIsUploading(false);
+      // Guarded like every other write here. A slow upload can settle after its owner has been
+      // replaced, and clearing the flag unconditionally would stop the *new* account's spinner
+      // and re-enable its button mid-transfer. The scope-change effect above already cleared
+      // this flag for the new session, so there is nothing left here to clean up.
+      if (ownsOperation()) setIsUploading(false);
     }
-  }, [api, commit, ownsOperation, picker, send]);
+  }, [api, commit, ownsOperation, picker, reload, send]);
 
   const removeAvatar = useCallback(async () => {
     setError(null);
@@ -155,28 +204,33 @@ export function AvatarProvider({
     } catch (removeFailure) {
       if (ownsOperation()) {
         setError({ message: avatarRemoveErrorMessage(removeFailure), write: 'remove' });
+        reload();
       }
     } finally {
-      setIsRemoving(false);
+      if (ownsOperation()) setIsRemoving(false);
     }
-  }, [api, commit, ownsOperation]);
+  }, [api, commit, ownsOperation, reload]);
 
   const value = useMemo(
     () => ({
       avatar: avatarQuery.data?.avatar ?? null,
       error,
       isRemoving,
+      isUnavailable: avatarQuery.isLoadingError,
       isUploading,
       notice,
+      reload,
       removeAvatar,
       uploadAvatar,
     }),
     [
       avatarQuery.data,
+      avatarQuery.isLoadingError,
       error,
       isRemoving,
       isUploading,
       notice,
+      reload,
       removeAvatar,
       uploadAvatar,
     ],

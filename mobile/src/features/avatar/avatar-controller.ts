@@ -17,6 +17,11 @@ export async function uploadPickedAvatar(input: {
   picked: PickedAvatar;
   send: UploadSender;
 }): Promise<AvatarResponse | null> {
+  // The picker can sit open for a long time. Checking before the first call keeps a pending
+  // upload row from being minted - with the new session's token - for an account that never
+  // asked for one.
+  if (input.isCancelled?.()) return null;
+
   const { upload } = await input.api.createUpload({
     byteSize: input.picked.byteSize,
     contentType: input.picked.contentType,

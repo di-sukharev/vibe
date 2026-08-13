@@ -247,6 +247,14 @@ protocol and knows nothing about what is being uploaded, while `src/features/ava
 endpoints, the photo picker, and the UI. A second kind of upload reuses the protocol instead of
 copying it.
 
+Reading a file is the one part that differs per platform, so it is a port: `UploadFileAccess`
+pairs "measure the bytes" with "send the bytes", and `AppProviders` picks `nativeFileAccess` or
+`webFileAccess` once from `Platform.OS`. They travel together because a ticket is signed for one
+exact byte count - measuring with one platform's reader and sending with the other's produces an
+opaque 403 from storage. This matters because `expo-file-system` is a warn-only stub on web while
+the picker and manipulator work there, so `bun run web` would otherwise reach the upload with a
+valid image and no way to read it.
+
 Use TanStack Query for server state, TanStack Form for forms, and shared Zod schemas for validation. Native iOS/Android use `/api/auth/token/*`: the refresh token is stored in `expo-secure-store` and the access token lives only in app memory. Logout first persists a non-secret pending marker beside that existing credential, then clears in-memory access/query state immediately. A confirmed revocation or terminal stale authority clears the refresh credential before clearing the marker; a timeout or network error retains both. On restart, bootstrap sees the marker before attempting refresh, remains anonymous, and boundedly retries logout with the retained credential and session-scoped push cleanup evidence. Expo Web follows the same marker protocol without copying its cookie authority into JavaScript: its refresh token stays in the backend-issued HttpOnly cookie and is never written to JavaScript storage. Expo Web serializes cookie-mutating auth requests through an exclusive Web Lock, with an in-process queue fallback. Successful register, login, and logout transitions increment a monotonic browser epoch inside that lock; storage/BroadcastChannel events invalidate other tabs, and refresh verifies both the captured epoch and the backend-issued `{ userId, sessionId }` identity before retrying an authenticated request. Bounded logout aborts its request at the timeout so it cannot retain the shared lock indefinitely. The native token transport does not use the browser coordinator.
 
 Product code lives in `src/features/auth`, `src/features/avatar`, `src/features/billing`, and `src/features/notifications`. `src/composition` builds the namespaced APIs and passes each provider only its own interface. `src/platform/api` owns endpoint-agnostic fetch, auth retry, base URL, and error parsing; each feature API owns its endpoint paths and schemas. Routes are thin wrappers that import features through public indexes. Run `bun run architecture:check` after boundary changes and `bun run doctor` (pinned to Expo Doctor 1.20.0) after Expo dependency changes.

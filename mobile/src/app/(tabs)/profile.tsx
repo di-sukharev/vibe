@@ -1,3 +1,6 @@
+import { useMemo } from 'react';
+import { Platform } from 'react-native';
+
 import { AccountSummary, ScreenShell } from '@/components/dashboard';
 import { TEST_IDS } from '@/constants/testIds';
 import {
@@ -5,7 +8,7 @@ import {
   SessionControls,
   useAuth,
 } from '@/features/auth';
-import { avatarCacheKey, AvatarControls, useAvatar } from '@/features/avatar';
+import { avatarImageSource, AvatarControls, useAvatar } from '@/features/avatar';
 // Subscriptions are turned off; see docs/IAP.md before uncommenting.
 // import {
 //   SubscriptionSummary,
@@ -17,6 +20,14 @@ export default function ProfileScreen() {
   const avatar = useAvatar();
   // const iap = useSubscriptionIap();
 
+  // Kept stable across renders on purpose. On web this object identity is what expo-image keys
+  // its fetch effect on, so a fresh one per render would re-download the signed photo on every
+  // spinner or notice change. Above the early return, since it is a hook.
+  const avatarImage = useMemo(
+    () => avatarImageSource(avatar.avatar, Platform.OS),
+    [avatar.avatar],
+  );
+
   if (!auth.user) return null;
 
   return (
@@ -26,9 +37,8 @@ export default function ProfileScreen() {
       testID={TEST_IDS.profile.screen}
       title="Profile">
       <AccountSummary
-        avatarCacheKey={avatar.avatar ? avatarCacheKey(avatar.avatar) : undefined}
+        avatarImage={avatarImage}
         avatarTestID={TEST_IDS.profile.avatarPreview}
-        avatarUri={avatar.avatar?.downloadUrl ?? null}
         badge={auth.user.role === 'admin' ? 'Admin' : 'User'}
         description={`Member since ${formatAccountDate(auth.user.createdAt)}`}
         displayName={auth.user.displayName}

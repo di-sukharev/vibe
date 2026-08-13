@@ -75,10 +75,40 @@ describe('uploadPickedAvatar', () => {
     expect(response?.avatar).toEqual(avatar);
   });
 
+  /** Reports the session as gone from the nth check onwards, so each step can be probed. */
+  function cancelledFromCheck(nth: number) {
+    let checks = 0;
+    return () => {
+      checks += 1;
+      return checks >= nth;
+    };
+  }
+
+  test('mints nothing when the session is already gone', async () => {
+    // The picker can sit open for minutes. A ticket requested afterwards is written against the
+    // new session's token and belongs to an account that never asked for it.
+    const { api, send, steps } = createHarness();
+
+    const response = await uploadPickedAvatar({
+      api,
+      isCancelled: cancelledFromCheck(1),
+      picked,
+      send,
+    });
+
+    expect(response).toBeNull();
+    expect(steps).toEqual([]);
+  });
+
   test('stops before sending when the session changes after the ticket', async () => {
     const { api, send, steps } = createHarness();
 
-    const response = await uploadPickedAvatar({ api, isCancelled: () => true, picked, send });
+    const response = await uploadPickedAvatar({
+      api,
+      isCancelled: cancelledFromCheck(2),
+      picked,
+      send,
+    });
 
     expect(response).toBeNull();
     expect(steps).toEqual(['createUpload']);
@@ -86,14 +116,10 @@ describe('uploadPickedAvatar', () => {
 
   test('stops before finalizing when the session changes during the transfer', async () => {
     const { api, send, steps } = createHarness();
-    let calls = 0;
 
     const response = await uploadPickedAvatar({
       api,
-      isCancelled: () => {
-        calls += 1;
-        return calls > 1;
-      },
+      isCancelled: cancelledFromCheck(3),
       picked,
       send,
     });

@@ -36,8 +36,10 @@ export const TEST_IDS = {
   },
   profile: {
     avatarError: 'profile.avatar-error',
+    avatarLoadError: 'profile.avatar-load-error',
     avatarNotice: 'profile.avatar-notice',
     avatarPreview: 'profile.avatar-preview',
+    avatarReloadButton: 'profile.avatar-reload-button',
     avatarRemoveButton: 'profile.avatar-remove-button',
     avatarUploadButton: 'profile.avatar-upload-button',
     manageSubscriptionButton: 'profile.manage-subscription-button',

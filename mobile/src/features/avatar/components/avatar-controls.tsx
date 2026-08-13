@@ -19,7 +19,7 @@ export function AvatarControls() {
 
   return (
     <SectionCard
-      description="Pick a JPEG, PNG, or HEIC photo. It is resized and re-encoded before it is uploaded, so any photo from this device fits."
+      description="Pick any photo. It is resized and re-encoded as JPEG before it is uploaded, so anything from this device fits."
       title="Profile photo">
       <View style={[styles.controls, { gap: theme.spacing.md }]}>
         <View style={[styles.actions, { gap: theme.spacing.sm }]}>
@@ -50,6 +50,36 @@ export function AvatarControls() {
             </Button>
           ) : null}
         </View>
+
+        {/*
+          A failed read is not cosmetic: without the answer the card offers "Upload photo" to
+          someone who already has one and hides Remove entirely. Saying so, with the one action
+          that recovers, beats silently misrepresenting the account.
+        */}
+        {avatar.isUnavailable ? (
+          <View style={{ gap: theme.spacing.sm }}>
+            <Alert testID={TEST_IDS.profile.avatarLoadError} variant="destructive">
+              <AlertTitle>Profile photo could not be loaded</AlertTitle>
+              <AlertDescription>
+                Your current photo is unknown, so the actions above may not match it.
+              </AlertDescription>
+            </Alert>
+            {/*
+              Outside the Alert, matching ScreenState. Alert sets `accessible` on its container,
+              which groups its children into one element for a screen reader - a button nested
+              inside it cannot be focused, and this is the only recovery this feature has.
+            */}
+            <View style={styles.actions}>
+              <Button
+                accessibilityLabel="Retry loading the profile photo"
+                testID={TEST_IDS.profile.avatarReloadButton}
+                variant="outline"
+                onPress={avatar.reload}>
+                Try again
+              </Button>
+            </View>
+          </View>
+        ) : null}
 
         {avatar.error ? (
           <Alert testID={TEST_IDS.profile.avatarError} variant="destructive">

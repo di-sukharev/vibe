@@ -6,7 +6,7 @@ import {
   UploadTransferError,
   type UploadRequest,
   type UploadSender,
-} from '@/platform/uploads/transfer';
+} from '../src/platform/uploads/transfer';
 
 const ticket: UploadTicket = {
   contentLength: 70,

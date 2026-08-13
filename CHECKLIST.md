@@ -74,7 +74,7 @@ This project ships private file storage with user avatars, so answer these for t
 | Public, private, shared with selected people, or mixed? | _unanswered_ |
 | Who can upload, view, replace, and delete? | _unanswered_ |
 | Maximum file size and allowed file types | _unanswered_ |
-| Do images need thumbnails, resizing, format conversion, compression, cropping, or moderation? | On the client only: the mobile app resizes to 512px and re-encodes as JPEG before upload, so phone photos fit the size limit and are readable on the web. No server-side transformation, no thumbnails, no moderation. |
+| Do images need thumbnails, resizing, format conversion, compression, cropping, or moderation? | _unanswered_ |
 | How long do files live after the owning record is deleted? | _unanswered_ |
 | Should filenames be visible to users, or opaque? | _unanswered_ |
 
