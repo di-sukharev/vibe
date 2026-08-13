@@ -55,9 +55,14 @@ describe('auth contracts', () => {
   })
 
   test('rejects invalid auth request payloads', () => {
-    expect(() =>
-      registerRequestSchema.parse({ email: 'not-an-email', password: 'short', displayName: 'A' }),
-    ).toThrow()
+    // One violation per payload. A payload breaking all three rules at once throws whichever rule
+    // you delete, so it asserts none of them.
+    const valid = { email: 'user@example.com', password: 'password123', displayName: 'Jane' }
+
+    expect(registerRequestSchema.parse(valid)).toMatchObject({ email: 'user@example.com' })
+    expect(() => registerRequestSchema.parse({ ...valid, email: 'not-an-email' })).toThrow()
+    expect(() => registerRequestSchema.parse({ ...valid, password: 'short' })).toThrow()
+    expect(() => registerRequestSchema.parse({ ...valid, displayName: 'A' })).toThrow()
     expect(() =>
       loginRequestSchema.parse({ email: 'user@example.com', password: 'short' }),
     ).toThrow()

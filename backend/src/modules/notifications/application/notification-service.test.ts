@@ -78,13 +78,8 @@ describe('NotificationService', () => {
     ])
   })
 
-  test('forwards bounded terminal-data repair to the outbox owner', async () => {
-    const { calls, dependencies } = createDependencies()
-    const service = new NotificationService(dependencies)
-
-    expect(await service.redactTerminalData({ limit: 25 })).toBe(2)
-    expect(calls).toEqual([
-      { name: 'redact-terminal-data', value: { limit: 25 } },
-    ])
-  })
+  // `redactTerminalData` is a one-line delegation, and the only caller (jobs.ts) passes no
+  // options at all. That `limit` really bounds the batch is asserted in
+  // `notifications.integration.test.ts` against real Postgres. Asserting here that a stub returned
+  // what the stub returns, for an argument the test just handed it, catches nothing.
 })
