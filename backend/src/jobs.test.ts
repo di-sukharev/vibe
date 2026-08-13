@@ -199,59 +199,7 @@ describe('runBackgroundJob', () => {
     }])
   })
 
-  // Uncomment with the billing cron task (docs/IAP.md):
-  // test('selects stale Google Play purchases through the bounded reconcile task', async () => {
-  //   const calls: unknown[] = []
-  //   const log = spyOn(console, 'log').mockImplementation(() => {})
-  //   const reconcileRuntime = {
-  //     env: { APPLE_IAP_ENVIRONMENT: 'Sandbox' },
-  //     prisma: {
-  //       $queryRaw: async () => [{
-  //         dueCount: 7n,
-  //         oldestDueAt: new Date('2026-07-17T08:00:00.000Z'),
-  //       }],
-  //       googlePlaySubscriptionPurchase: {
-  //         findMany: async (input: unknown) => {
-  //           calls.push(input)
-  //           return []
-  //         },
-  //       },
-  //     },
-  //   } as unknown as BackendRuntime
-  //
-  //   try {
-  //     await runBackgroundJob(
-  //       'billing:google-play:reconcile',
-  //       reconcileRuntime,
-  //       new Date('2026-07-17T10:00:00.000Z'),
-  //     )
-  //
-  //     expect(calls).toHaveLength(1)
-  //     expect(calls[0]).toMatchObject({
-  //       where: {
-  //         OR: [
-  //           { reconcileAttemptedAt: null },
-  //           { reconcileAttemptedAt: { lt: new Date('2026-07-17T09:45:00.000Z') } },
-  //         ],
-  //       },
-  //       orderBy: [
-  //         { reconcileAttemptedAt: { sort: 'asc', nulls: 'first' } },
-  //         { id: 'asc' },
-  //       ],
-  //       take: 100,
-  //     })
-  //     expect(log).toHaveBeenCalledWith(
-  //       'Job billing:google-play:reconcile completed.',
-  //       expect.objectContaining({
-  //         backlogDue: 7,
-  //         backlogOldestAgeSeconds: 7_200,
-  //         backlogOldestDueAt: new Date('2026-07-17T08:00:00.000Z'),
-  //       }),
-  //     )
-  //   } finally {
-  //     log.mockRestore()
-  //   }
-  // })
+  // The billing reconcile task lived here commented out; docs/IAP.md says what to switch on.
 
   test('maintenance runs session cleanup, push-token upkeep, and terminal redaction in one task', async () => {
     const calls = {
@@ -315,7 +263,6 @@ describe('runBackgroundJob', () => {
         cleanup: 1,
         passwordResetCleanup: 1,
         pushTokenMaintenanceQueries: 2,
-        // reconcile: 1,
         terminalRedactionSelection: 1,
       })
       expect(log).toHaveBeenCalledWith(

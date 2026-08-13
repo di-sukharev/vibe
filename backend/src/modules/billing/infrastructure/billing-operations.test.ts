@@ -1,3 +1,11 @@
+// @parked-test
+//
+// Subscriptions ship switched off: the tables are commented out in prisma/schema/billing.prisma,
+// the routes are not mounted in src/app.ts, and this module is typed through hand-written
+// stand-ins. Until docs/IAP.md is followed and billing is turned on, these suites assert a
+// feature nobody runs, so they are parked rather than deleted - remove the marker above and they
+// come back with the capability.
+
 // While the billing tables are commented out in prisma/schema/billing.prisma, this module
 // types the client through its own stand-ins; see infrastructure/prisma-billing-types.ts.
 import { Environment, OfferType, Status, Type, type JWSTransactionDecodedPayload, type ResponseBodyV2DecodedPayload } from '@apple/app-store-server-library'

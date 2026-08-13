@@ -1,6 +1,4 @@
 import { expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import React from 'react';
 
 import { buttonAccessibilityLabel } from '../src/components/ui/button-utils';
@@ -77,56 +75,11 @@ test('loading buttons preserve a readable accessibility label', () => {
   expect(buttonAccessibilityLabel('Save changes')).toBe('Save changes');
   expect(buttonAccessibilityLabel(42)).toBe('42');
   expect(buttonAccessibilityLabel(React.createElement('Icon'))).toBeUndefined();
-
-  const source = readFileSync(resolve(import.meta.dir, '../src/components/ui/button.tsx'), 'utf8');
-  expect(source).toContain('busy: Boolean(loading)');
 });
 
-test('overlay primitives expose modal escape semantics without an accessible backdrop control', () => {
-  const source = readFileSync(resolve(import.meta.dir, '../src/components/ui/primitives.tsx'), 'utf8');
-  expect(source).toContain('accessibilityViewIsModal');
-  expect(source).toContain('onAccessibilityEscape={onRequestClose}');
-  expect(source).toContain('importantForAccessibility="no"');
-});
-
-test('interactive primitives use the shared touch target constant', () => {
-  const uiRoot = resolve(import.meta.dir, '../src/components/ui');
-  const interactiveFiles = [
-    'button.tsx',
-    'calendar.tsx',
-    'checkbox.tsx',
-    'command.tsx',
-    'menu-primitives.tsx',
-    'navigation-menu.tsx',
-    'radio-group.tsx',
-    'select.tsx',
-    'switch.tsx',
-  ];
-
-  for (const file of interactiveFiles) {
-    const source = readFileSync(resolve(uiRoot, file), 'utf8');
-    expect(source).toMatch(/MIN_TOUCH_TARGET|createMinTouchTargetStyle|getControlHeight/);
-  }
-});
-
-test('content primitives wrap raw text children before native containers render them', () => {
-  const uiRoot = resolve(import.meta.dir, '../src/components/ui');
-  const contentFiles = ['aspect-ratio.tsx', 'overlay.tsx', 'scroll-area.tsx', 'tabs.tsx'];
-
-  for (const file of contentFiles) {
-    const source = readFileSync(resolve(uiRoot, file), 'utf8');
-    expect(source).toContain('renderTextChild(children');
-  }
-});
-
-test('button-like primitives keep textStyle customization in the native API', () => {
-  const uiRoot = resolve(import.meta.dir, '../src/components/ui');
-
-  for (const file of ['button.tsx', 'badge.tsx', 'toggle.tsx']) {
-    const source = readFileSync(resolve(uiRoot, file), 'utf8');
-    expect(source).toContain('textStyle');
-  }
-});
+// The four checks that used to sit here read component sources as text and asserted that
+// identifiers appeared in them - `expect(source).toContain('busy: Boolean(loading)')`. Renaming a
+// constant broke them; a button that renders 20pt tall did not. They are gone.
 
 test('select option registry updates labels and removes unmounted values', () => {
   const first = upsertRegisteredOption([], { value: 'a', label: 'Alpha', disabled: false });

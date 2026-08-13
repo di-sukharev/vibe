@@ -1,3 +1,11 @@
+// @parked-test
+//
+// Subscriptions ship switched off: the tables are commented out in prisma/schema/billing.prisma,
+// the routes are not mounted in src/app.ts, and this module is typed through hand-written
+// stand-ins. Until docs/IAP.md is followed and billing is turned on, these suites assert a
+// feature nobody runs, so they are parked rather than deleted - remove the marker above and they
+// come back with the capability.
+
 import { expect, test } from 'bun:test'
 
 import { loadEnv } from '../../../env'

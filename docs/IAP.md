@@ -24,7 +24,7 @@ Most steps below are commented-out blocks waiting for you, and `rg -l 'docs/IAP.
    helper in `billing.integration.test.ts` in favour of calling `createApp` directly. Then drop the
    header comments that describe the stand-ins - `rg -l prisma-billing-types` finds them, including
    the ones in `billing-routes.test.ts` and `infrastructure/billing-operations.test.ts`, and the
-   parked-marker note at the top of `billing.integration.test.ts`.
+   parked-marker notes at the top of every suite in that directory.
 4. Uncomment the billing wiring in `backend/src/app.ts`: the module import, the two verifier
    options, `createBillingModule`, the `/api/iap` and `/api/webhooks` routes, their ingress groups,
    and the webhook limit constants.
@@ -32,15 +32,16 @@ Most steps below are commented-out blocks waiting for you, and `rg -l 'docs/IAP.
    `maintenance:process` rows in
    `backend/src/jobs.ts`. Keep the module import inside the job body: `jobs.ts` must stay
    type-only at the top level, so tooling can read the registry without a database.
-6. Restore the tests: the parked cases in `backend/src/app.test.ts` (ingress and the OpenAPI paths),
-   `backend/src/jobs.test.ts` (its mock and the two env keys, plus a `reconcile: 0` counter in the
-   `calls` initializer, which is asserted but has no commented line to restore), and the
-   entitlement assertion in `backend/src/modules/users/users.integration.test.ts`. Nothing
-   else in the suite needs touching: the job-list assertion reads the registry, and the parked-suite
-   assertion reads `billing.prisma`, so neither hard-codes a list that step 1 invalidates. Then
-   delete the
-   `@parked-test` line at the top of `backend/src/modules/billing/billing.integration.test.ts` so
-   both test runners pick it up again (it already typechecks, so nothing else is needed).
+6. Restore the tests. Delete the `@parked-test` line from the header of every suite under
+   `backend/src/modules/billing/`, and move `mobile/tests/parked/*` up into `mobile/tests/`; both
+   runners pick them up again with no further edit. Add back what a switched-off capability cannot
+   carry: the App Store webhook ingress cases in `backend/src/app.test.ts`, the Google Play
+   reconcile case in `backend/src/jobs.test.ts` plus a `reconcile: 1` counter in the `calls`
+   assertion beside it, and the entitlement assertion in
+   `backend/src/modules/users/users.integration.test.ts`. `git log -p` on those three files has the
+   removed versions. Nothing else needs touching: the job-list assertion reads the registry, and
+   the parked-suite assertion reads `billing.prisma`, so neither hard-codes a list step 1
+   invalidates.
 7. Schedule the job where it is deployed. On DigitalOcean add a `SCHEDULED` component running
    `bun run start:cron -- billing:google-play:reconcile` to `.do/api-app.yaml`, with the complete
    Google Play group in its `envs`. `bun run deploy:do api` validates job names against
@@ -71,17 +72,15 @@ reference them. Remove all of it in one pass:
   `packages/contracts/src/index.ts`, and the `IAP_*` codes in `packages/contracts/src/errors.ts`
 - the commented wiring in `backend/src/app.ts` and `backend/src/jobs.ts`, plus the
   `@apple/app-store-server-library` dependency in `backend/package.json`
-- the parked comment blocks that would otherwise point at deleted code: the ingress and OpenAPI
-  cases plus the Yandex rows in `backend/src/app.test.ts`, the reconcile case in
-  `backend/src/jobs.test.ts`, the entitlement assertion in
+- the notes that would otherwise point at deleted code: the removed-suite notes in
+  `backend/src/app.test.ts` and `backend/src/jobs.test.ts`, the entitlement assertion in
   `backend/src/modules/users/users.integration.test.ts`, the `IapProvider` lines in
   `mobile/src/composition/AppProviders.tsx`, and the billing block in
   `mobile/src/app/(tabs)/profile.tsx`
 - the billing entry in `mobile/src/composition/api.ts`, plus the paywall checks and `paywallPath`
-  constants in `mobile/scripts/e2e/maestro-policy-audit.mjs` and `mobile/tests/maestro-policy-audit.test.ts`
+  constants in `mobile/scripts/e2e/maestro-policy-audit.mjs`
 - the billing cases in `mobile/tests/api.test.ts` and `mobile/tests/select-registration.test.tsx`;
-  the whole of `mobile/tests/iap*.test.*`, `mobile/tests/offer-code-controller.test.ts`,
-  `mobile/tests/paywall-view-state.test.ts`, and `mobile/tests/workspace-surfaces.test.ts`
+  the whole of `mobile/tests/parked/` and `mobile/tests/offer-code-controller.test.ts`
   (entirely billing)
 - the commented store credential groups and the `IAP_*` and `WEBHOOK_*` entries in
   `.do/api-app.yaml.example`, plus the store paragraphs in `docs/DEPLOYMENT.md`

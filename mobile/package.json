@@ -10,7 +10,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "test": "bun test tests",
+    "test": "bun test tests --path-ignore-patterns='**/tests/parked/**'",
     "typecheck": "tsc --noEmit",
     "build": "expo export --platform web",
     "doctor": "bunx expo-doctor@latest .",

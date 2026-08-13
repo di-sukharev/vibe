@@ -153,71 +153,8 @@ test('CORS preflight allows the standard mutation methods exposed by the client 
   expect(response.headers.get('access-control-allow-methods')).toContain('PATCH')
 })
 
-// Uncomment with the billing routes in src/app.ts (docs/IAP.md):
-// test('App Store webhook ingress rejects oversized bodies before billing work', async () => {
-//   const app = createApp({
-//     env: { ...env, WEBHOOK_BODY_LIMIT_BYTES: 32 },
-//     prisma: {} as DbClient,
-//   })
-//   const response = await app.request('/api/webhooks/app-store', {
-//     method: 'POST',
-//     headers: { 'Content-Type': 'application/json' },
-//     body: JSON.stringify({ signedPayload: 'x'.repeat(64) }),
-//   })
-//
-//   expect(response.status).toBe(413)
-// })
-
-// Uncomment with the billing routes in src/app.ts (docs/IAP.md):
-// test('App Store webhook ingress has an independent bounded request rate', async () => {
-//   const app = createApp({
-//     env: { ...env, WEBHOOK_RATE_LIMIT_MAX: 1 },
-//     prisma: {} as DbClient,
-//   })
-//   const request = () => app.request('/api/webhooks/app-store', {
-//     method: 'POST',
-//     headers: { 'Content-Type': 'application/json' },
-//     body: JSON.stringify({}),
-//   })
-//
-//   expect((await request()).status).not.toBe(429)
-//   const limited = await request()
-//   expect(limited.status).toBe(429)
-//   expect(limited.headers.get('retry-after')).toBeTruthy()
-// })
-
-// Uncomment with the billing routes in src/app.ts (docs/IAP.md):
-// test('IAP ingress rejects oversized bodies before authentication and validation', async () => {
-//   const app = createApp({
-//     env: { ...env, IAP_BODY_LIMIT_BYTES: 32 },
-//     prisma: {} as DbClient,
-//   })
-//   const response = await app.request('/api/iap/app-store/transactions', {
-//     method: 'POST',
-//     headers: { 'Content-Type': 'application/json' },
-//     body: JSON.stringify({ signedTransactionInfo: 'x'.repeat(64) }),
-//   })
-//
-//   expect(response.status).toBe(413)
-// })
-
-// Uncomment with the billing routes in src/app.ts (docs/IAP.md):
-// test('IAP ingress has an independent bounded request rate', async () => {
-//   const app = createApp({
-//     env: { ...env, IAP_RATE_LIMIT_MAX: 1 },
-//     prisma: {} as DbClient,
-//   })
-//   const request = () => app.request('/api/iap/app-store/transactions', {
-//     method: 'POST',
-//     headers: { 'Content-Type': 'application/json' },
-//     body: JSON.stringify({ signedTransactionInfo: 'signed-transaction' }),
-//   })
-//
-//   expect((await request()).status).not.toBe(429)
-//   const limited = await request()
-//   expect(limited.status).toBe(429)
-//   expect(limited.headers.get('retry-after')).toBeTruthy()
-// })
+// The App Store webhook ingress suite lived here commented out; docs/IAP.md says what to switch
+// on, and git log -p has the tests. Commented tests compile for nobody.
 
 test('account mutations reject oversized bodies before authentication', async () => {
   const app = createApp({

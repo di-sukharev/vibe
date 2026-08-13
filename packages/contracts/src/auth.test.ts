@@ -1,5 +1,4 @@
 import { describe, expect, test } from 'bun:test'
-import { z } from 'zod'
 
 import {
   apiErrorSchema,
@@ -140,38 +139,10 @@ describe('auth contracts', () => {
     expect(meResponseSchema.parse({ user: validUser })).toEqual({ user: validUser })
   })
 
-  test('keeps refresh and push contracts compatible across a phased client rollout', () => {
-    const legacyCookieRefreshResponseSchema = z.object({ accessToken: z.string() }).strict()
-    const legacyTokenRefreshResponseSchema = legacyCookieRefreshResponseSchema.extend({
-      refreshToken: z.string(),
-    })
-    const currentCookieResponse = cookieRefreshResponseSchema.parse({
-      accessToken: 'access-token',
-    })
-    const currentTokenResponse = tokenRefreshResponseSchema.parse({
-      accessToken: 'access-token',
-      refreshToken: 'refresh-token',
-    })
-
-    expect(legacyCookieRefreshResponseSchema.parse(currentCookieResponse)).toEqual({
-      accessToken: 'access-token',
-    })
-    expect(legacyTokenRefreshResponseSchema.parse(currentTokenResponse)).toEqual({
-      accessToken: 'access-token',
-      refreshToken: 'refresh-token',
-    })
-    expect(registerPushTokenRequestSchema.parse({
-      expoPushToken: 'ExponentPushToken[legacy-rollout]',
-      platform: 'ios',
-    })).toEqual({
-      expoPushToken: 'ExponentPushToken[legacy-rollout]',
-      platform: 'ios',
-    })
-    expect(unregisterPushTokenRequestSchema.parse({
-      expoPushToken: 'ExponentPushToken[legacy-rollout]',
-    })).toEqual({
-      expoPushToken: 'ExponentPushToken[legacy-rollout]',
-    })
+  test('an old client that sends only `ok` still gets `applied` derived for it', () => {
+    // The hand-written "legacy" schemas that used to sit here were written in this file on both
+    // sides, so they asserted one local literal against another. This is the part that carries a
+    // rule: the field a client of the previous version never sends is filled in for it.
     expect(pushMutationResponseSchema.parse({ ok: true })).toEqual({
       applied: true,
       ok: true,
