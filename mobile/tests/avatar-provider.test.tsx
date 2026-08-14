@@ -12,9 +12,10 @@ import { createRoot, type Root } from 'react-dom/client';
  * spinner when an in-flight write outlives its account - live here and cannot be observed from
  * anywhere else.
  *
- * The DOM shim below is deliberately a copy of the one in `iap-provider.test.tsx` and
- * `select-registration.test.tsx` rather than a shared helper: every file under `tests/` is
- * self-contained, and this file is where the copy is cheaper than the coupling.
+ * The DOM shim below is deliberately a copy of the one in `select-registration.test.tsx`
+ * rather than a shared helper: every file under `tests/` is self-contained, and this file is
+ * where the copy is cheaper than the coupling. `parked/iap-provider.test.tsx` carries a third
+ * copy, which is what makes the point - a shared helper would have been parked with it.
  */
 
 type FakeElement = FakeNode & {

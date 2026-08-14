@@ -5,9 +5,9 @@ import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test';
  * was actually written second. Getting it backwards signs a ticket for the original photo's size
  * and the upload can then never satisfy its own signature, which storage reports as a bare 403.
  *
- * Both Expo modules are substituted at their boundary, the way `iap-provider.test.tsx` substitutes
- * `expo-iap`. The fakes record what they were asked for; nothing here asserts what a real picker
- * or manipulator does with the request.
+ * Both Expo modules are substituted at their boundary, the way `select-registration.test.tsx`
+ * substitutes `react-native`. The fakes record what they were asked for; nothing here asserts
+ * what a real picker or manipulator does with the request.
  */
 
 type ManipulateCall = { resizes: unknown[]; uri: string };
