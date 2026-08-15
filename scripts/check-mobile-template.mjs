@@ -51,7 +51,7 @@ if (import.meta.main) {
   }
 
   for (const args of [
-    ['run', 'test:deploy'],
+    ['run', 'test:infra'],
     ['run', 'test:contracts'],
     ['run', 'test:backend:unit'],
     ['run', 'test:mobile'],

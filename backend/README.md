@@ -61,9 +61,9 @@ Keep an explicit username and password in Prisma connection URLs even on local n
 `bun run prisma:seed` (or `bun run dev:seed` from the repository root) is the
 explicit local development seed. It requires the paired `DEV_SEED_ADMIN_*` and
 `DEV_SEED_USER_*` email/password values from `backend/.env`, creates login-ready
-administrator and ordinary-user accounts, and gives only the ordinary user a
-non-expiring `DevelopmentSeed` premium entitlement for mobile exploration. The
-command rejects `NODE_ENV=production` and any non-loopback PostgreSQL URL.
+administrator and ordinary-user accounts, gives the ordinary user a local-only
+`DevelopmentSeed` premium entitlement, and rejects `NODE_ENV=production` and any
+non-loopback PostgreSQL URL.
 
 The development seed is idempotent: unchanged passwords preserve their hashes,
 active sessions, and push registrations. Replacing a configured credential
@@ -71,8 +71,9 @@ updates its Argon2id hash and revokes stale authentication and push authority.
 The committed values are public local defaults and must never be reused in a
 deployed environment.
 
-Production remains a separate path. `bun run db:deploy` applies migrations,
-optionally bootstraps only the first administrator from paired
+Production remains a separate path. `bun run db:deploy` checks migration ownership before Prisma,
+applies migrations, removes unsafe PostgreSQL `PUBLIC` privileges for both cloud paths, reconciles a
+separate DigitalOcean runtime role back to DML-only access, and optionally bootstraps only the first administrator from paired
 `ADMIN_SEED_EMAIL` and `ADMIN_SEED_PASSWORD`, then fails unless at least one
 administrator has a password credential. Production bootstrap rejects blank,
 known-placeholder, and repeated-pattern passwords in addition to enforcing the
@@ -80,52 +81,56 @@ known-placeholder, and repeated-pattern passwords in addition to enforcing the
 
 `COOKIE_SECURE=false` is appropriate for local HTTP; production requires `COOKIE_SECURE=true` with exact HTTPS origins in `CORS_ORIGINS`. Production browser auth uses `SameSite=None; Secure` refresh cookies, so wildcard, empty, HTTP, or path-bearing CORS origins are invalid. Every cookie-backed auth write (`register`, `login`, `refresh`, and `logout`) also requires a trusted `Origin` in production cookie mode.
 
-Auth and authenticated account-management writes use `AUTH_BODY_LIMIT_BYTES` and `AUTH_RATE_LIMIT_*`; authenticated IAP ingress uses independent `IAP_BODY_LIMIT_BYTES` and `IAP_RATE_LIMIT_*` controls; App Store webhook ingress has separate, burst-tolerant `WEBHOOK_BODY_LIMIT_BYTES` and `WEBHOOK_RATE_LIMIT_*` controls. `INGRESS_RATE_LIMIT_PROVIDER=local` applies those IP-keyed budgets through bounded in-process fixed-window limiters and is the default for local development and DigitalOcean. `INGRESS_RATE_LIMIT_PROVIDER=yandex-sws` disables only those backend ingress budgets after the documented Smart Web Security ARL policy is active; body limits and application-owned budgets remain enabled. The full Yandex rule table, response contract, rollout, rollback, and official documentation links are in [../docs/YANDEX_CLOUD.md](../docs/YANDEX_CLOUD.md).
-
-Invalid webhook signatures release and delete their provisional idempotency claim, so attacker-controlled payloads are not retained. A conflicting cross-account claim for an existing Expo token quarantines delivery without transferring installation ownership; the authorized installation can re-enable the token by registering with its secret. `TRUST_PROXY=false` uses the direct Bun connection address. Behind a trusted proxy, set `TRUST_PROXY=true` together with the provider's authoritative `TRUSTED_PROXY_CLIENT_IP_HEADER`; use `TRUSTED_PROXY_CLIENT_IP_POSITION=last` only when the provider appends the client to a comma-separated chain. DigitalOcean App Platform uses `do-connecting-ip`, while the documented Yandex Serverless Containers path uses the last `X-Forwarded-For` value. Client IP resolution is still required for session metadata when SWS owns ingress limiting. The default App Platform shape is one API instance. Before horizontally scaling local rate-limit mode, move rate-limit state to a shared trusted store or edge/WAF layer.
-
 `WEBAPP_ORIGIN` is the public browser-app origin used to compose transactional links such as password reset. It defaults to the first `CORS_ORIGINS` entry. Email delivery is provider-neutral and built in one place, `createEmailDelivery` in `src/email`, so the API and the `outbox:drain` job share it. `EMAIL_DELIVERY` selects one of four drivers: `disabled` (the default), `console`, `postbox` for Yandex Cloud Postbox, and `resend`. `console` prints messages instead of sending them so a reset link can be followed locally, and production refuses it. With delivery disabled, password-reset requests still return the same generic accepted response and do not create tokens. The provider groups, the failure classification, and the live suites are in [../docs/EMAIL.md](../docs/EMAIL.md).
 
-`REFRESH_TOKEN_TTL_DAYS` is the sliding credential lifetime, while `SESSION_ABSOLUTE_TTL_DAYS` limits the total logical session lifetime. `REFRESH_REUSE_GRACE_SECONDS` tolerates a short concurrent refresh race; replaying the immediately previous credential after that window revokes the logical session. Keep the grace window short (the default is 10 seconds). Run `maintenance:process` on a schedule to delete revoked, sliding-expired, and absolute-expired rows after `SESSION_RETENTION_DAYS`, remove expired password-reset tokens, and redact terminal notification payloads (it also reconciles Google Play purchases once subscriptions are turned on); `auth:sessions:cleanup` remains available when auth cleanup needs its own schedule.
+Auth, IAP, and webhook ingress use separate body and rate-limit budgets. `INGRESS_RATE_LIMIT_PROVIDER=local` keeps the bounded in-process limiters enabled; `yandex-sws` is valid only after the documented Smart Web Security policy replaces them at the edge. `TRUST_PROXY=false` uses the direct Bun connection address. Behind a trusted proxy, set `TRUST_PROXY=true` together with the provider's authoritative client-IP header. DigitalOcean uses `do-connecting-ip`; the documented Yandex path uses the last `X-Forwarded-For` value.
 
-Mobile social auth ships switched off: the route is defined but not mounted and the buttons are not rendered (see [../docs/SOCIAL_AUTH.md](../docs/SOCIAL_AUTH.md)). Once enabled, configure `APPLE_AUTH_BUNDLE_ID`, `APPLE_AUTH_JWKS_TIMEOUT_MS`, and `GOOGLE_AUTH_CLIENT_IDS` only when the Expo app should offer Apple or Google sign-in. These values are provider identifiers, not secrets. Full setup: [../docs/SOCIAL_AUTH.md](../docs/SOCIAL_AUTH.md).
+`REFRESH_TOKEN_TTL_DAYS` is the sliding credential lifetime, while `SESSION_ABSOLUTE_TTL_DAYS` limits the total logical session lifetime. `REFRESH_REUSE_GRACE_SECONDS` tolerates a short concurrent refresh race; replaying an older family credential after that window revokes the logical session. The mobile schedule runs `maintenance:process`, which combines auth cleanup with notification redaction and, once enabled, bounded Google Play reconciliation.
+
+Mobile social auth ships switched off: routes and buttons stay unmounted until the product enables
+them. Configure Apple/Google identifiers only then; see [../docs/SOCIAL_AUTH.md](../docs/SOCIAL_AUTH.md).
+
+Expo Push is implemented but inert until EAS and provider credentials are configured. The API only
+registers installations and enqueues durable messages; `notifications:process` or
+`start:worker:notifications` owns delivery and receipt polling. Native subscriptions likewise ship
+switched off; enable or delete them as one product capability using [../docs/IAP.md](../docs/IAP.md).
 
 Private file storage is on by default and needs no configuration: `PRIVATE_STORAGE_DRIVER=filesystem` stores uploads under `backend/.storage`, so `bun run dev` works with no cloud account and no Docker. Switch to `s3` to develop against the local container (`bun run storage:local:start`) or a real bucket; production refuses the filesystem driver. The full rule set and the upload contract are in [../docs/STORAGE.md](../docs/STORAGE.md).
-
-Expo Push is optional at first run, but the backend foundation is ready. APNs and FCM credentials are configured in Expo/EAS for the mobile project; the notification worker or cron needs `EXPO_PUSH_ACCESS_TOKEN` only when Expo push security is enabled, while the enqueue-only API does not. Active registrations are bounded per account by `PUSH_TOKEN_MAX_PER_USER` (default 10), including under concurrent requests. Each app installation uses a persistent opaque UUID, a separate secret whose hash is stored by the backend, and a monotonically increasing generation. Registration and deactivation are serialized by account, Expo token, and installation in PostgreSQL, so an older request cannot reclaim a token after a newer account has taken over the same device, while knowledge of an Expo token alone cannot delete or steal another installation. If local installation storage is reset while Expo returns the same token, the same account can atomically bind it to a new installation and deactivate the obsolete one. On an account switch, the unchanged token can move only with the same installation secret and a newer generation; a delayed request from the previous account is then stale. A launch registration also serves as a bounded heartbeat: an older device evicted by the per-account cap can restore itself the next time it opens, evicting the least-recent remaining registration under the same cap. Product code should use the public notifications module in `src/modules/notifications/index.ts` after committing the domain event, with a stable per-user `dedupeKey`, `title`, `body`, and optional `data.href`.
-Registration rechecks the authenticated session inside the same per-user database fence used by every terminal session revocation, so a late mobile registration cannot recreate a token after logout or refresh-token replay detection. Immediately before an Expo send, the worker acquires the same account, token, and installation fences, rechecks session-bound authority, and holds admission until the bounded provider call finishes. Therefore a completed terminal revocation or authorized account transfer cannot be followed by a send admitted from an older snapshot; if the provider already returned a ticket, the worker persists it before honoring shutdown to avoid duplicate delivery. Legacy unbound registrations are fail-closed until the current app re-registers them with installation and session authority. Session maintenance removes unbound, expired, revoked, orphaned, and cross-user registrations before applying the configured auth-session retention window.
-Once every delivery reaches a terminal state, the backend removes the raw Expo token and redacts the outbox title, body, and data. Delivery status and provider metadata remain available for operational diagnosis without retaining notification content indefinitely.
-
-Native IAP ships switched off - the module is complete, its tables are commented out, and its routes are not mounted (see [../docs/IAP.md](../docs/IAP.md)). Once enabled, App Store and Google Play verification require complete credential and product/base-plan allowlist groups; the default Docker image already includes Apple's public root certificates. Production App Store verification is environment-pinned. When Google Play is configured, scheduled `maintenance:process` also refreshes stale stored purchase tokens in bounded batches. Follow [../docs/IAP.md](../docs/IAP.md); the store groups live in `.do/api-app.yaml`, with the two credential payloads set as `SECRET` values in the DigitalOcean console rather than in the spec.
 
 ## Runtime Entrypoints
 
 The backend is one workspace with one Prisma schema and one Dockerfile, but it has separate runtime entrypoints:
 
 - API: `bun run start:api`, backed by `src/index.ts`.
-- Jobs: declared once in `src/jobs.ts` and shared by the runners below. `noop`, `db:ping`, `notifications:process`, `auth:sessions:cleanup`, `uploads:pending:cleanup`, `outbox:drain`, and the recommended combined `maintenance:process` ship with the template; see [../docs/BACKGROUND_JOBS.md](../docs/BACKGROUND_JOBS.md). `billing:google-play:reconcile` is registered only after subscriptions are turned on (see [../docs/IAP.md](../docs/IAP.md)); until then `bun run deploy:do api` refuses to schedule it.
-- Cron: `bun run start:cron -- <job>`, backed by `src/cron.ts`. Runs one job and exits, for a provider timer to call.
-- Scheduler: `bun run start:scheduler`, backed by `src/scheduler.ts`. Keeps schedules in the repository instead of a cloud console. Ships with one entry, `outbox:drain` every minute, so it is deployable as-is; `bun run dev` runs it next to the API, so a queued email leaves in development without a second terminal.
-- Worker: `bun run start:worker`, backed by `src/worker.ts`. A loop over `workerLoops`, for work that must run more often than once a minute. Ships empty, so give it a loop before deploying it as an App Platform worker - a process that exits immediately gets restarted forever.
-- Notification worker: `bun run start:worker:notifications`, backed by `src/worker.ts notifications`, drains pending push outbox rows and checks Expo receipts continuously. It is not a `workerLoop` because it needs more than an interval: shutdown aborts active Expo HTTP calls, stops before the receipt phase or another claim, and caps an outbox pass below `SHUTDOWN_GRACE_SECONDS` so runtime termination still has time to persist the fenced retry state. It logs non-zero delivery/receipt activity and failures, plus a sparse five-minute heartbeat while idle rather than one log per poll.
+- Jobs: declared once in `src/jobs.ts` and shared by the runners below. The mobile line adds `notifications:process` and combined `maintenance:process` to the baseline registry; see [../docs/BACKGROUND_JOBS.md](../docs/BACKGROUND_JOBS.md).
+- Cron: `bun run start:cron -- <job>`, backed by `src/cron.ts`. CLI mode runs one job and exits;
+  Yandex Terraform starts the same executor in HTTP mode so a failed job returns non-2xx to the
+  timer trigger.
+- Scheduler: `bun run start:scheduler`, backed by `src/scheduler.ts`. Keeps schedules in the repository instead of a cloud console. `bun run dev` runs it next to the API, so a queued email leaves in development without a second terminal.
+- Worker: `bun run start:worker`, backed by `src/worker.ts`. A loop for work that must run more often than once a minute. `src/job-schedules.json` ships task-outbox and push processing every minute, upload cleanup hourly, and combined auth/notification maintenance every 15 minutes; `bun run dev` starts that scheduler alongside the API, and Terraform deploys the matching production runner. The loop worker ships empty, so give it a loop before deploying it - a process that exits immediately gets restarted forever.
+- Notification worker: `bun run start:worker:notifications` continuously drains the Expo outbox and checks receipts with abort-aware shutdown. The default mobile schedule also runs `notifications:process` every minute, so a separate persistent worker is optional when that latency is acceptable.
 
-All entrypoints use `src/runtime.ts` for env loading, Prisma creation, and cleanup, so backend services can be shared without duplicating Prisma schema or database setup. The three background entrypoints - cron, scheduler, and worker - use the background loader, which deliberately replaces any inherited `JWT_SECRET` with a public non-signing placeholder; their deployment components receive no API signing key.
+All entrypoints use `src/runtime.ts` for env loading, Prisma creation, and cleanup. Background entrypoints use `createBackgroundRuntime`, which never uses the API's signing key.
 
 ## Push Notifications API
 
-- `POST /api/notifications/push-token` atomically claims an installation generation for the current user and replaces that installation's previous Expo token.
-- `POST /api/notifications/push-token/unregister` advances the installation generation to a durable inactive tombstone and removes its known tokens. It returns `applied: false` when a newer generation already won.
-- `POST /api/notifications/test-push` queues one test push for the current user when `ENABLE_TEST_PUSH=true`. It is disabled by default, limited durably to one enqueue per user per minute, and never runs delivery inside the API request; use the notification worker or cron to process it.
+- `POST /api/notifications/push-token` registers one authorized installation generation.
+- `POST /api/notifications/push-token/unregister` advances it to an inactive tombstone.
+- `POST /api/notifications/test-push` queues a bounded test message only while `ENABLE_TEST_PUSH=true`.
 
-Push delivery is durable: `PushNotificationOutbox` stores the queued message, `PushDelivery` stores Expo ticket/receipt state, delayed receipts are checked with backoff, transient Expo failures are retried, and `DeviceNotRegistered` disables stale tokens.
-
-Delivery is at-least-once across the send-to-ticket-persistence boundary: Expo may accept a request immediately before the worker stops, leaving no persisted ticket and causing a retry. Payloads and deep-link destinations must therefore be idempotent. Opening the same link twice must be safe, and a duplicate notification must never repeat an irreversible business action.
+Push is durable and at-least-once across the Expo send/ticket boundary. Deep-link destinations and
+notification effects must therefore remain idempotent.
 
 Primary keys use database-generated UUIDv7 values in PostgreSQL (`@default(dbgenerated("uuidv7()")) @db.Uuid`). Use UUIDv7 consistently for new primary keys and foreign-key references that point at them; do not introduce new `cuid()`, `uuid()`, `serial`, or `bigserial` IDs into this template. PostgreSQL 18+ is required anywhere the backend schema is applied so IDs are generated consistently through Prisma, raw SQL, imports, and future non-Prisma writers.
 
 ## Deployment
 
-Production deployment for the backend uses DigitalOcean App Platform with DigitalOcean Managed PostgreSQL by default. Follow the shared runbook in [../docs/DEPLOYMENT.md](../docs/DEPLOYMENT.md) instead of duplicating provider-specific steps here. The root `bun run deploy:do api` command applies the committed `.do/api-app.yaml`, taking secret values from the running app; never put a secret value in a spec. If `CHECKLIST.md` records Yandex Cloud, use [../docs/YANDEX_CLOUD.md](../docs/YANDEX_CLOUD.md) instead.
+Production infrastructure is Terraform under [../infra](../infra/README.md). Follow the shared safety and release contract in [../docs/DEPLOYMENT.md](../docs/DEPLOYMENT.md), then the provider runbook selected in `CHECKLIST.md`: [DigitalOcean](../docs/DIGITALOCEAN.md) or [Yandex Cloud](../docs/YANDEX_CLOUD.md). One `bun run release -- <provider>` build uses `backend/Dockerfile`, gates promotion on `db:deploy`, deploys the API and scheduled work, and verifies readiness. Never put a secret in committed tfvars or backend configuration.
+
+When adopting a legacy database, run `bun run db:adopt-owner` first for a read-only public-schema
+ownership inventory. The exact confirmation and `-- --apply` sequence lives in
+[../docs/DEPLOYMENT.md](../docs/DEPLOYMENT.md); normal deployment never transfers ownership
+implicitly.
 
 ## Auth API
 
@@ -136,8 +141,8 @@ Production deployment for the backend uses DigitalOcean App Platform with Digita
 - `POST /api/auth/logout`
 - `POST /api/auth/token/register`
 - `POST /api/auth/token/login`
-- `POST /api/auth/token/social/apple` (mounted only when social sign-in is turned on)
-- `POST /api/auth/token/social/google` (mounted only when social sign-in is turned on)
+- `POST /api/auth/token/social/apple` (mounted only when social sign-in is enabled)
+- `POST /api/auth/token/social/google` (mounted only when social sign-in is enabled)
 - `POST /api/auth/token/refresh`
 - `POST /api/auth/token/logout`
 - `POST /api/auth/password-reset/request`
@@ -152,11 +157,7 @@ Production deployment for the backend uses DigitalOcean App Platform with Digita
 
 `GET /api/admin/users` has a separate in-memory read budget, keyed by administrator ID and shared across that administrator's sessions and search filters. It defaults to 120 requests per 60 seconds through `ADMIN_USERS_READ_RATE_LIMIT_*` and does not consume the account-mutation budget. The store is process-local; use shared rate-limit state when the API runs in multiple backend processes and global enforcement is required.
 
-Passwords are hashed through `Bun.password` with Argon2id. Access tokens are short-lived JWTs through `jose`. Initial refresh tokens are random; rotated successors are opaque, domain-separated HMAC values derived with the server secret so concurrent uses of the same credential receive the same successor. The database stores the current and immediately previous SHA-256 hashes plus a family locator hash. Refresh atomically rotates the credential inside the same logical session, so another browser tab's still-valid access token is not revoked. Reuse of any older family credential after the short race-tolerance window revokes that session as potentially compromised.
-
-Successful cookie refresh responses keep the established `{ accessToken }` shape; token refresh adds only the rotated refresh credential required by native storage. Clients compare the `userId` and `sessionId` claims in the current and refreshed access tokens before replacing local state or retrying an authenticated request. Keeping the response additive-free preserves phased rollout compatibility with installed strict-parser clients.
-
-Social auth users use the provider subject as the stable identity key. The backend does not automatically link social identities to existing password accounts by email; if the email already exists, social signup returns `AUTH_EMAIL_ALREADY_EXISTS`.
+Passwords are hashed through `Bun.password` with Argon2id. Access tokens are short-lived JWTs through `jose`. Initial refresh tokens are random; rotated successors are opaque, domain-separated HMAC values derived with the server secret so concurrent uses of the same credential receive the same successor. Only current and immediately previous SHA-256 hashes are stored in the database. Refresh atomically rotates the credential inside the same logical session, so another browser tab's still-valid access token is not revoked. Reuse of the previous credential after the short race-tolerance window revokes that session as potentially compromised.
 
 Password reset uses a random 32-byte, 30-minute token. Only its SHA-256 hash is stored, requests are limited to one token per account per minute, and account lookup plus email delivery run after the generic response so response timing does not reveal whether an email exists. The API runtime drains accepted background tasks during graceful shutdown; every task has a deadline, server and task draining share one absolute shutdown deadline, and email adapters must honor the supplied `AbortSignal`. Timed-out work stays tracked while abort cleanup settles inside the remaining shutdown budget. Delivery remains best-effort across abrupt process loss, so clients keep the generic retryable experience. A failed reset email invalidates its token and is reported through the background-task error boundary. A successful confirmation atomically changes the Argon2id password hash, consumes every outstanding reset token, revokes every active session, clears the browser refresh cookie, and does not sign the user in automatically. Reset links place the raw token in the URL fragment so it is not sent in the initial HTTP request or referrer. Scheduled auth cleanup removes expired reset-token rows.
 
@@ -173,19 +174,17 @@ cannot demote the acting administrator or leave the system without an
 administrator, and revokes every session of the affected user only when the role
 actually changes. Role/bootstrap authority changes and existing-account session
 issuance share a per-user fence; login re-reads the current user and re-verifies
-the password before inserting a session. Push admission has a shared, bounded
-transaction budget, and authority transitions have a larger budget so they can
-wait for an already-admitted provider call before revoking delivery authority.
+the password before inserting a session.
 Admin list responses expose only `id`, `email`, `displayName`,
 `role`, and `createdAt`.
 
 ## Architecture
 
-`src/index.ts` only starts the API server. `src/runtime.ts` loads env and creates the Prisma client for API, worker, and cron entrypoints. `src/app.ts` is the composition root. Product contexts live under `src/modules/<context>` and expose only `index.ts` across context boundaries. Auth is the authentication/principal golden path; the separate users context owns profiles, admin directory reads, and role policy. Billing and notifications demonstrate the same boundaries for provider-heavy and asynchronous contexts: `transport` owns Hono/HTTP, `application` owns use cases and orchestration through narrow ports, optional `domain` code stays pure, and `infrastructure` owns Prisma and provider adapters. Context-wide `*Operations` facades and forwarding-only application services are not part of the pattern. Route factories capture dependencies in closures; request context contains only the authenticated principal. Run `bun run architecture:check` to enforce these dependency rules. `src/db.ts` normalizes DigitalOcean Managed PostgreSQL URLs that use `sslmode=require` so the Prisma PostgreSQL adapter uses libpq-compatible TLS handling.
+`src/index.ts` only starts the API server. `src/runtime.ts` loads env and creates the Prisma client for API, worker, and cron entrypoints. `src/app.ts` is the composition root. Product contexts live under `src/modules/<context>` and expose only `index.ts` across context boundaries. Auth is the authentication/principal golden path; the separate users context owns profiles, admin directory reads, and role policy. `transport` owns Hono/HTTP, `application` owns use cases and ports, optional `domain` code stays pure, and `infrastructure` owns Prisma and token/password adapters. Route factories capture dependencies in closures; request context contains only the authenticated principal. Run `bun run architecture:check` to enforce these dependency rules. `src/db.ts` normalizes DigitalOcean Managed PostgreSQL URLs that use `sslmode=require` so the Prisma PostgreSQL adapter uses libpq-compatible TLS handling.
 
-The storage service lives in `src/storage` and wraps DigitalOcean Spaces through S3-compatible SDK calls. Product-specific upload routes should validate ownership and permissions, then delegate object key generation, presigned upload/download URLs, public CDN URL construction, and deletion to that service.
+The storage service lives in `src/storage` and wraps private S3-compatible storage. Product-specific upload routes should validate ownership and permissions, then delegate object key generation, presigned upload/download URLs, and deletion to that service. Terraform creates a dedicated private media bucket and scoped runtime credentials on either supported cloud.
 
-Prisma migration SQL is not written by hand. Change the relevant file in `prisma/schema/` - `base.prisma` for core models, or the file owning an optional capability - then run `bun run prisma:migrate`.
+Prisma migration SQL is not written by hand. Change `prisma/schema.prisma`, then run `bun run prisma:migrate`.
 
 ## Current Upstream Documentation
 
@@ -199,7 +198,6 @@ For backend framework, ORM, auth, validation, and runtime questions, consult the
 - [PostgreSQL docs](https://www.postgresql.org/docs/)
 - [Zod docs](https://zod.dev/)
 - [jose documentation](https://github.com/panva/jose)
-- [Google Auth Library for Node.js](https://docs.cloud.google.com/nodejs/docs/reference/google-auth-library/latest/google-auth-library/oauth2client)
 - [Docker Compose docs](https://docs.docker.com/compose/)
 - [PostgreSQL Docker Official Image](https://hub.docker.com/_/postgres)
 - [DigitalOcean Spaces docs](https://docs.digitalocean.com/products/spaces/)

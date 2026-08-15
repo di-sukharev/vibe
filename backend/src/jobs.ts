@@ -18,7 +18,7 @@ import type { BackendRuntime } from './runtime'
  * body, which also keeps a module's SDKs out of the runs that do not use them.
  *
  * Jobs say what to do; they never say when or where. Three processes run this same registry:
- *   - `cron.ts`      - one shot, triggered by a provider timer (DigitalOcean job, Yandex trigger, system cron)
+ *   - `cron.ts`      - one-job executor for CLI/system cron or Yandex's HTTP timer adapter
  *   - `scheduler.ts` - a timer inside a long-running process, for a VPS or a cloud worker
  *   - `worker.ts`    - a loop, for work that must run more often than once a minute or in parallel
  *

@@ -25,6 +25,7 @@
     "prisma:deploy": "prisma migrate deploy",
     "prisma:seed": "prisma db seed",
     "db:deploy": "bun scripts/deploy-database.ts",
+    "db:adopt-owner": "bun scripts/adopt-database-owner.ts",
     "prisma:validate": "prisma validate",
     "start:scheduler": "bun src/scheduler.ts"
   },

@@ -1,8 +1,13 @@
 import { Cron } from 'croner'
 
 import { defaultJobLockTimeoutMs, isJobLockExpiry, runWithJobLock } from './db'
+import scheduleDefinitions from './job-schedules.json' with { type: 'json' }
 import { createBackgroundRuntime, type BackendRuntime } from './runtime'
-import { runBackgroundJob, type BackgroundJobName } from './jobs'
+import {
+  isBackgroundJobName,
+  runBackgroundJob,
+  type BackgroundJobName,
+} from './jobs'
 
 export type ScheduleEntry = {
   /** Standard cron expression; croner also accepts a leading seconds field. */
@@ -20,20 +25,20 @@ export type ScheduleEntry = {
 /**
  * What this process runs, and the worked example for adding your own.
  *
- * Deploying it is still a choice: a VPS under systemd or Docker, or a cloud worker component. An
- * install that never deploys it queues password-reset emails that nobody sends. See
+ * Both cloud Terraform stacks deploy a runner for these definitions. An own server must supervise
+ * this scheduler under systemd or Docker; otherwise durable work queues but never drains. See
  * docs/BACKGROUND_JOBS.md, "Running the drain".
  */
-export const schedules: ScheduleEntry[] = [
-  // Every minute, because the work in the queue is a password-reset email and a link that
-  // arrives a quarter of an hour late is a broken reset. `TASK_OUTBOX_MAX_RUNTIME_MS` defaults to
-  // 55s precisely so one pass finishes inside one tick, and `protect` below stops a slow pass
-  // from overlapping itself. `timeoutMs` is deliberately left at the 15-minute default: an
-  // operator may raise the pass budget to ten minutes, and a lock shorter than the run it guards
-  // would expire mid-pass and let another instance in.
-  { expression: '* * * * *', job: 'outbox:drain' },
-  // { expression: '0 3 * * *', job: 'auth:sessions:cleanup' },
-]
+export const schedules: ScheduleEntry[] = scheduleDefinitions.map(
+  ({ expression, job, lockTimeoutMs }) => {
+    if (!isBackgroundJobName(job)) {
+      throw new Error(
+        `job-schedules.json references unknown background job "${job}"`,
+      )
+    }
+    return { expression, job, timeoutMs: lockTimeoutMs }
+  },
+)
 
 export type ScheduledJob = { entry: ScheduleEntry; cron: Cron }
 
@@ -80,18 +85,28 @@ export function startSchedules(
   }
 }
 
-export async function runScheduledJob(runtime: BackendRuntime, entry: ScheduleEntry) {
-  try {
-    const outcome = await runWithJobLock(
-      runtime.prisma,
-      entry.job,
-      () => runBackgroundJob(entry.job, runtime),
-      { timeoutMs: entry.timeoutMs ?? defaultJobLockTimeoutMs },
-    )
+export async function runLockedBackgroundJob(
+  runtime: BackendRuntime,
+  entry: ScheduleEntry,
+) {
+  const outcome = await runWithJobLock(
+    runtime.prisma,
+    entry.job,
+    () => runBackgroundJob(entry.job, runtime),
+    { timeoutMs: entry.timeoutMs ?? defaultJobLockTimeoutMs },
+  )
 
-    if (!outcome.ranHere) {
-      console.log(`Scheduler skipped ${entry.job}: its lock is held elsewhere.`)
-    }
+  if (!outcome.ranHere) {
+    console.log(`Scheduler skipped ${entry.job}: its lock is held elsewhere.`)
+  }
+}
+
+export async function runScheduledJob(
+  runtime: BackendRuntime,
+  entry: ScheduleEntry,
+) {
+  try {
+    await runLockedBackgroundJob(runtime, entry)
   } catch (error) {
     // One failing job must not take the scheduler down; the next tick tries again.
     if (isJobLockExpiry(error)) {
@@ -115,7 +130,7 @@ export async function main() {
     // Only reachable once a project empties `schedules`, which is a legitimate thing to do.
     // Nothing to wait for, so do not linger as a process that a supervisor will restart forever.
     console.log(
-      'Scheduler started with no schedules. Add entries to `schedules` in src/scheduler.ts; see docs/BACKGROUND_JOBS.md.',
+      'Scheduler started with no schedules. Add entries to src/job-schedules.json; see docs/BACKGROUND_JOBS.md.',
     )
     await runtime.close()
     return
@@ -131,7 +146,9 @@ export async function main() {
   const stop = async (signal: string) => {
     if (stopping) return
     stopping = true
-    console.log(`Scheduler received ${signal}; stopping after in-flight jobs finish.`)
+    console.log(
+      `Scheduler received ${signal}; stopping after in-flight jobs finish.`,
+    )
     await stopSchedules()
     await runtime.close()
     process.exit(0)

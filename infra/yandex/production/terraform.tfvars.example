@@ -1,0 +1,39 @@
+cloud_id    = "REPLACE_WITH_YC_CLOUD_ID"
+folder_id   = "REPLACE_WITH_YC_FOLDER_ID"
+project_slug = "example-product"
+git_branch   = "master"
+
+backend_image_name = "backend"
+
+# Required: supply the migration-owner password, both runtime slot passwords, and `jwt_secret`
+# through TF_VAR_*. Do not assign
+# them in this copied file because terraform.tfvars has higher precedence than environment
+# variables. Rotate only the inactive slot; the wrapper protects the slot used by live runtime.
+database_active_slot            = "blue"
+database_owner_password_version = 1
+database_blue_password_version  = 1
+database_green_password_version = 1
+
+api_domain               = "api.example.com"
+api_certificate_id       = "REPLACE_WITH_CERTIFICATE_ID"
+webapp_domain            = "app.example.com"
+webapp_certificate_id    = "REPLACE_WITH_CERTIFICATE_ID"
+website_domain           = "www.example.com"
+website_certificate_id   = "REPLACE_WITH_CERTIFICATE_ID"
+dns_zone_id              = null
+dns_zone_domain          = "example.com"
+
+enable_cdn               = false
+route_static_through_cdn = false
+
+# Bucket names always equal their HTTPS custom domains. Direct HTTPS stays configured as the
+# rollback origin if CDN is enabled later.
+webapp_bucket_name  = "app.example.com"
+website_bucket_name = "www.example.com"
+media_bucket_name   = "example-product-prod-media-globally-unique"
+
+email_delivery = "disabled"
+email_from     = null
+
+# Runtime/migration digests and one-time administrator values are release-owned inputs. The
+# wrapper writes them only inside the separate migration/runtime Terraform roots.

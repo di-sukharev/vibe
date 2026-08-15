@@ -1,0 +1,5 @@
+cloud_id          = "REPLACE_WITH_YC_CLOUD_ID"
+folder_id         = "REPLACE_WITH_YC_FOLDER_ID"
+zone              = "ru-central1-a"
+project_slug      = "example-product"
+state_bucket_name = "example-product-terraform-state-globally-unique"

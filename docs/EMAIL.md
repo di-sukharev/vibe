@@ -63,7 +63,7 @@ EMAIL_RESEND_ENDPOINT=https://api.resend.com
 
 This follows the hosting already recorded in [CHECKLIST.md](../CHECKLIST.md), not a separate preference:
 
-- **Yandex Cloud, or any data-residency requirement → Postbox.** Same account, same static access keys as object storage, and the mail never leaves the region. Postbox speaks the Amazon SESv2 API, so the driver signs its requests with AWS SigV4 under service `ses`. It also offers SMTP, with a different credential — the template uses the API because SMTP would mean adding a mail client dependency for no gain. Default quotas start at one message per second and 200 per day; raise them in the console before a launch. See [YANDEX_CLOUD.md](YANDEX_CLOUD.md).
+- **Yandex Cloud, or any data-residency requirement → Postbox.** It stays in the selected cloud; Terraform creates a dedicated sender key directly in Lockbox rather than reusing storage credentials. Postbox speaks the Amazon SESv2 API, so the driver signs its requests with AWS SigV4 under service `ses`. It also offers SMTP, with a different credential — the template uses the API because SMTP would mean adding a mail client dependency for no gain. Check and raise the account's current quotas before launch. See [YANDEX_CLOUD.md](YANDEX_CLOUD.md).
 - **Anything else → Resend.** A bearer token and one JSON POST, with a verified sending domain.
 
 Both are transactional-email services, not marketing platforms, which is what the shipped messages are.
@@ -116,7 +116,7 @@ After that, run the app itself against the provider and complete a real password
 - The reset token travels in the URL **fragment**, which browsers never send to a server, so it stays out of access logs and referrers.
 - Reset requests answer identically whether or not the account exists, and enqueue identically, so response timing reveals nothing.
 - `task_outbox` briefly holds the address someone typed into the reset form, which may match no account. The row's payload is blanked and `redacted_at` stamped the moment the task reaches a terminal state, usually within the minute; what remains is a hash-derived dedupe key, not an address. `TASK_OUTBOX_RETENTION_DAYS` deletes the skeleton afterwards.
-- Provider credentials are ordinary secrets: they belong in the deployment's environment, never in the repository. Rotating them takes effect on the next process start.
+- Provider credentials are ordinary secrets: DigitalOcean injects them as secret app variables and Yandex binds them from Lockbox; they never belong in the repository. Rotating them takes effect on the next runtime revision/process start.
 - A single `to` address per message is the port's whole model. There is no cc, no bcc, and no batch send, so one message can never reach an unintended recipient through a shared list.
 
 ## Current Upstream Documentation

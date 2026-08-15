@@ -27,25 +27,32 @@ A job is declared once, in `backend/src/jobs.ts`. It says *what* to do and never
 ```ts
 export const backgroundJobs = {
   'auth:sessions:cleanup': async ({ env, prisma }, now) => { /* … */ },
+  'notifications:process': async (runtime) => { /* … */ },
   'uploads:pending:cleanup': async ({ prisma, privateStorage }, now) => { /* … */ },
+  'maintenance:process': async (runtime, now) => { /* … */ },
 } satisfies Record<string, BackgroundJob>
 ```
 
-Three processes run that same registry. Which one you use is a hosting decision, not a code change.
+The recurring schedule is declared once in `backend/src/job-schedules.json`, including the standard
+five-field expression and Yandex's six-field expression. The scheduler and Yandex Terraform both
+read this file, so a timing change cannot drift between providers.
+
+Three processes run the same job registry. Which one you use is a hosting decision, not a new job.
 
 | Process | Shape | Use it when |
 | --- | --- | --- |
-| `backend/src/cron.ts` | One shot: starts, runs one job, exits. | A provider timer already exists — a DigitalOcean scheduled job, a Yandex timer trigger, a system crontab. Cheapest option: nothing runs between ticks. |
+| `backend/src/cron.ts` | One-job executor: CLI mode exits; Yandex mode exposes it through a tiny HTTP adapter. | A provider timer or system cron exists. No job runs between ticks/calls. |
 | `backend/src/scheduler.ts` | Long-running process with timers inside. | You want schedules to live in the repository instead of a cloud console, or you run on your own server. Also the natural fit for a cloud worker component. |
 | `backend/src/worker.ts` | Long-running loop. | Work must run more often than once a minute, must run continuously, or several jobs should run side by side. No cron expression goes below one minute — this is the way around that. |
 
-The scheduler ships with **one** entry, `outbox:drain` every minute, which is the worked example
-for the rest of this document and the reason a password-reset email leaves at all. The worker
-ships **empty**: `workerLoops` contains only a commented example, so an install that never needs
-sub-minute work pays nothing for it.
-
-Neither process starts itself. Shipping the entry decides *what* runs; a deployment still has to
-run the process — see "Running the drain" below.
+The mobile schedule ships with `outbox:drain` and `notifications:process` every minute,
+abandoned-upload cleanup hourly at minute 15, and `maintenance:process` every 15 minutes. That
+combined maintenance job cleans auth state and redacts terminal notification payloads; after native
+subscriptions are enabled it can also own bounded Google Play reconciliation. The loop worker ships
+**empty**: `workerLoops` contains only a commented example, so an install that never needs
+sub-minute work pays nothing for it. Terraform deploys the scheduler as a DigitalOcean worker and
+the same `cron.ts` executor as Yandex HTTP job containers/timer triggers. An own server still has to
+supervise `scheduler.ts`.
 
 ## The push pipeline is the exception
 
@@ -57,25 +64,31 @@ mid-send with its retry state unpersisted, and quiet periods emit a sparse heart
 log line per poll. It lives in `worker.ts` alongside the loops, selected by the `notifications`
 argument.
 
-The same work is also available as the `notifications:process` job in the registry, for installs
-that would rather have a provider timer poke it every few minutes than keep a process alive. That
-is the trade: timely delivery versus one less thing to supervise.
+The same work is also the scheduled `notifications:process` job in the registry. The default
+one-minute schedule means a separate persistent worker is optional; use it only when the product
+needs lower latency than the scheduled topology provides.
 
 ## Adding a job
 
 1. Add an entry to `backgroundJobs` in `backend/src/jobs.ts`.
 2. Cover it with a fake Prisma client the way `auth:sessions:cleanup` is covered in
    `backend/src/jobs.test.ts`; a job with real logic deserves its own test file next to it.
-3. Give it a runner — see the next section.
+3. If it is recurring, add its two cron dialects to `backend/src/job-schedules.json`; Terraform and
+   the scheduler will consume the same entry. If it is sub-minute, add a deliberate worker loop.
 
 Run it once by hand at any time: `bun run --cwd backend start:cron -- <job>`.
 
 ## Choosing a runner, with the honest trade-offs
 
-**Provider timer + `cron.ts`.** The platform owns the schedule, so a crashed container does not
-stop the next tick. In return the schedule lives outside your repository, and each provider has its
-own dialect: DigitalOcean App Platform refuses anything more frequent than every 15 minutes, and
-Yandex timer triggers take a six-field UTC expression, not the five-field one you are used to.
+**Provider timer + `cron.ts`.** The platform owns execution, so a crashed invocation does not stop
+the next tick. Yandex timer triggers take a six-field UTC expression; both forms remain versioned
+in `job-schedules.json` together with the lock and provider-execution budgets, and Terraform
+creates the triggers. The executor takes the same PostgreSQL advisory lock as the scheduler, so a
+retry or adjacent tick skips while the previous invocation still owns it. CLI mode exits nonzero
+on failure. Yandex runs `cron.ts --http <job>` because command/task mode always returns HTTP 200;
+the adapter instead returns 503 so the trigger's configured retries can observe the failure.
+DigitalOcean's baseline uses the scheduler worker because its durable outbox must run more often
+than the scheduled-job cadence permits.
 
 **`scheduler.ts` on your own server or a cloud worker.** Schedules are versioned and reviewed with
 the code, local runs behave exactly like production, and moving between providers touches nothing.
@@ -93,11 +106,12 @@ fall behind its own interval.
 
 Whatever you pick, keep locked jobs short. The advisory lock is held by an open transaction for
 the length of the run, so a long job holds a connection - and, more importantly, the lock only
-lasts as long as `timeoutMs` (15 minutes by default). A job that outruns it loses the lock while
-still working: another instance can start the same job, and the first one then fails with a
-transaction-expired error after its side effects have already landed. The scheduler recognises that
-case and says so in the log instead of reporting a generic failure, but the fix is yours: raise
-`timeoutMs` for that entry, or make the job idempotent.
+lasts as long as `timeoutMs` (15 minutes only for undeclared/manual jobs; production schedules set
+explicit budgets). A job that outruns it loses the lock while still working: another instance can
+start the same job, and the first one then fails with a transaction-expired error after its side
+effects have already landed. The scheduler recognises that case and says so in the log; the
+one-shot runner exits nonzero for its provider. Raise the shared schedule budget or make the job
+idempotent before increasing its workload.
 
 ## Running the scheduler on your own server
 
@@ -192,27 +206,25 @@ on whether an account exists is an oracle for which addresses are registered.
 
 ### Running the drain
 
-`outbox:drain` is an ordinary job, so every runner in the table above can run it. The template
-ships the second row already configured - `schedules` in `scheduler.ts` runs it every minute, and
-`bun run dev` starts that process next to the API. What is left is deploying it. Latency is
-whatever the schedule allows:
+`outbox:drain` is an ordinary job, so every runner in the table above can run it. `bun run dev`
+starts the shared scheduler next to the API; both Terraform production stacks also deploy the
+matching runner. Latency is whatever the schedule allows:
 
 | Hosting | How | Achievable |
 | --- | --- | --- |
 | Local development | `bun run dev` runs the scheduler alongside the API | 1 minute |
-| Own server, Yandex Cloud | the shipped `scheduler.ts` entry, or a timer trigger `* * ? * * *` | 1 minute |
-| DigitalOcean worker component | `bun run start:scheduler`, accepted as shipped | 1 minute |
-| DigitalOcean scheduled job | `*/15 * * * *` | **15 minutes - the platform floor** |
+| Own server | supervised `scheduler.ts` | 1 minute |
+| Yandex Cloud | Terraform timer trigger `* * ? * * *` invokes HTTP-mode `cron.ts` | 1 minute |
+| DigitalOcean | Terraform App Platform worker runs `start:scheduler` | 1 minute |
 | Anywhere, sub-minute | a `workerLoops` entry with `intervalMs` | seconds |
 
-**A password-reset email arriving fifteen minutes late is not acceptable**, so a DigitalOcean
-install that wires an email provider needs the worker component, not the scheduled job. An install
-with no provider can leave the drain on a slow schedule, or not run it at all - the table stays
-empty because `requestPasswordReset` writes nothing while delivery is unconfigured.
+**A password-reset email arriving fifteen minutes late is not acceptable**, which is why the
+DigitalOcean Terraform stack always creates the worker rather than a scheduled job. With email
+delivery disabled, `requestPasswordReset` writes no outbox row, but the same minute runner remains
+useful for future durable task types.
 
-The worker component and the loop worker are different things: the component runs
-`bun run start:scheduler`, which the deployment generator accepts as shipped, while
-`bun run start:worker` stays refused until `workerLoops` has an entry.
+The App Platform worker and the loop worker are different things: the component runs
+`bun run start:scheduler`; `bun run start:worker` remains idle until `workerLoops` has an entry.
 
 If you use a `workerLoops` entry, leave `singleInstance` off. It looks like the careful choice and
 is the wrong one: the job lock would serialise the whole outbox across instances and throw away
@@ -279,8 +291,8 @@ feature:
   `/v2/apps/{app_id}/deployments`, tracks the returned deployment to success, and reconciles the
   deployed revision. The build runs from your branch, so database content appears only when the
   site fetches it at build time.
-- **Yandex Object Storage** has no remote build. The shipped path supports manual local
-  build/upload only. Automatic rebuild remains unavailable until the project adds the dedicated,
+- **Yandex Object Storage** has no remote build. The operator-invoked unified release builds and
+  uploads locally. Automatic rebuild remains unavailable until the project adds the dedicated,
   authenticated builder described in `YANDEX_CLOUD.md`; the backend runtime container must not
   grow a website toolchain and broad storage credentials for this purpose.
 
@@ -290,12 +302,10 @@ rather than building a rebuild pipeline. Neither hosting offers per-page ISR.
 
 ## Provider specifics
 
-- DigitalOcean: [docs/DEPLOYMENT.md](DEPLOYMENT.md) — "Backend Worker And Cron". The scheduled job
-  or worker is a block in `.do/api-app.yaml`, and `bun run deploy:do api` validates its task name
-  and cadence before deploying.
-- Yandex Cloud: [docs/YANDEX_CLOUD.md](YANDEX_CLOUD.md) — "Automatic website rebuild". The baseline
-  is manual build/upload; automatic rebuild requires a separate builder component before the
-  capability can leave `absent`.
+- DigitalOcean: [DIGITALOCEAN.md](DIGITALOCEAN.md) — Terraform deploys the scheduler worker with
+  the API image and database environment.
+- Yandex Cloud: [YANDEX_CLOUD.md](YANDEX_CLOUD.md) — Terraform reads `job-schedules.json` and
+  creates one HTTP job container and timer trigger per entry.
 
 ## Upstream documentation
 

@@ -4,7 +4,7 @@ The CSR browser client provides authenticated, role-specific workspaces. It need
 
 ## Project Surface Status
 
-This section may be updated during first-run bootstrap. Once [CHECKLIST.md](../CHECKLIST.md) reports an install in progress or completed and its *Active surfaces* section leaves webapp unmarked, add a short note here explaining that browser work is intentionally paused. When the user activates webapp, mark it there, then remove or rewrite that note before starting browser development.
+This section may be updated during first-run bootstrap. Once [CHECKLIST.md](../CHECKLIST.md) reports an install in progress or completed and its _Active surfaces_ section leaves webapp unmarked, add a short note here explaining that browser work is intentionally paused. When the user activates webapp, mark it there, then remove or rewrite that note before starting browser development.
 
 ## Stack
 
@@ -49,7 +49,7 @@ VITE_API_URL=http://localhost:3000
 
 ## Deployment
 
-Production deployment for the browser app uses DigitalOcean App Platform Static Sites from the full Git monorepo branch with `bun install --frozen-lockfile && bun run build:webapp`, `webapp/dist`, and `index.html` as the SPA catch-all by default. Deploy with `bun run deploy:do webapp`, which applies the committed `.do/webapp-app.yaml`; App Platform builds from Git, not from local `dist`. Follow the shared runbook in [../docs/DEPLOYMENT.md](../docs/DEPLOYMENT.md). If `CHECKLIST.md` records Yandex Cloud, deploy the built `webapp/dist` output through Yandex Object Storage static website hosting plus Cloud CDN by following [../docs/YANDEX_CLOUD.md](../docs/YANDEX_CLOUD.md).
+The selected Terraform stack owns production hosting. DigitalOcean creates an App Platform Static Site that builds the wrapper-owned immutable `infra-release/<commit>` branch and uses `index.html` as the SPA catch-all. Yandex builds `webapp/dist` from a `git archive` of the same captured commit and publishes immutable assets before the page shell to an Object Storage website bucket; Cloud CDN is opt-in. Use `bun run release -- <digitalocean|yandex>` and follow [../docs/DEPLOYMENT.md](../docs/DEPLOYMENT.md).
 
 ## Practice
 

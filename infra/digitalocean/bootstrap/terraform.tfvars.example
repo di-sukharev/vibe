@@ -1,0 +1,3 @@
+project_slug      = "example-product"
+spaces_region     = "fra1"
+state_bucket_name = "example-product-terraform-state-globally-unique"

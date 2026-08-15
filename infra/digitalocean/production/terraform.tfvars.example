@@ -1,0 +1,28 @@
+project_slug    = "example-product"
+app_region      = "fra"
+database_region = "fra1"
+spaces_region   = "fra1"
+
+github_repo = "owner/repository"
+git_branch  = "master"
+
+registry_name            = "example-product-registry"
+backend_image_repository = "backend"
+
+api_domain     = "api.example.com"
+webapp_domain  = "app.example.com"
+website_domain = "www.example.com"
+dns_zone       = null
+
+media_bucket_name = "example-product-prod-media-globally-unique"
+
+# Required: supply `jwt_secret` through TF_VAR_jwt_secret. Do not add an assignment here because
+# terraform.tfvars has higher precedence and would override the environment value.
+
+email_delivery = "disabled"
+email_from     = null
+
+# For Resend, pass `extra_runtime_secret_env` through TF_VAR_extra_runtime_secret_env as JSON.
+
+# Runtime digests, immutable source branches, and one-time administrator values are release-owned
+# inputs. The wrapper writes them only inside the separate runtime/static Terraform roots.

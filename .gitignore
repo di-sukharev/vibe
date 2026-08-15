@@ -53,6 +53,20 @@ backend/certs/
 .aws/
 .gcloud/
 
+# Terraform working data and secret-bearing local inputs
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+!*.tfvars.json.example
+*.backend.hcl
+!*.backend.hcl.example
+crash.log
+crash.*.log
+
 # Prisma generated client
 backend/src/generated/prisma/
 backend/.prisma-generate.lock

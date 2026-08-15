@@ -32,6 +32,15 @@ GoogleService-Info.plist
 backend/certs
 .aws
 .gcloud
+infra
+!infra/yandex/static.Dockerfile
+**/.terraform
+**/*.tfstate
+**/*.tfstate.*
+**/*.tfplan
+**/*.tfvars
+**/*.tfvars.json
+**/*.backend.hcl
 webapp/e2e/.artifacts
 mobile/.maestro/reports
 *.log

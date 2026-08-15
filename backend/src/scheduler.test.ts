@@ -1,14 +1,24 @@
 import { expect, spyOn, test } from 'bun:test'
 
-import { runScheduledJob, startSchedules, type ScheduleEntry } from './scheduler'
+import scheduleDefinitions from './job-schedules.json' with { type: 'json' }
+import {
+  runScheduledJob,
+  schedules,
+  startSchedules,
+  type ScheduleEntry,
+} from './scheduler'
 import type { BackendRuntime } from './runtime'
 
 function runtimeWithLock(options: { acquired: boolean }) {
-  const calls = { transactions: 0 }
+  const calls = { transactions: 0, transactionTimeouts: [] as number[] }
 
   const prisma = {
-    $transaction: async (run: (tx: unknown) => Promise<unknown>) => {
+    $transaction: async (
+      run: (tx: unknown) => Promise<unknown>,
+      transactionOptions: { timeout: number },
+    ) => {
       calls.transactions += 1
+      calls.transactionTimeouts.push(transactionOptions.timeout)
       return run({
         $queryRaw: async () => [{ acquired: options.acquired }],
       })
@@ -21,6 +31,33 @@ function runtimeWithLock(options: { acquired: boolean }) {
 
 const pingEntry: ScheduleEntry = { expression: '* * * * *', job: 'db:ping' }
 
+test('the production scheduler runs every required maintenance job in UTC', () => {
+  expect(schedules).toEqual([
+    { expression: '* * * * *', job: 'outbox:drain', timeoutMs: 240_000 },
+    {
+      expression: '* * * * *',
+      job: 'notifications:process',
+      timeoutMs: 240_000,
+    },
+    {
+      expression: '15 * * * *',
+      job: 'uploads:pending:cleanup',
+      timeoutMs: 900_000,
+    },
+    {
+      expression: '*/15 * * * *',
+      job: 'maintenance:process',
+      timeoutMs: 240_000,
+    },
+  ])
+  expect(
+    scheduleDefinitions.every(
+      ({ lockTimeoutMs, yandexExecutionTimeoutSeconds }) =>
+        lockTimeoutMs > yandexExecutionTimeoutSeconds * 1_000,
+    ),
+  ).toBe(true)
+})
+
 test('a scheduled job runs when this process wins the lock', async () => {
   const { calls, runtime } = runtimeWithLock({ acquired: true })
   const log = spyOn(console, 'log').mockImplementation(() => {})
@@ -29,6 +66,7 @@ test('a scheduled job runs when this process wins the lock', async () => {
     await runScheduledJob(runtime, pingEntry)
 
     expect(calls.transactions).toBe(1)
+    expect(calls.transactionTimeouts).toEqual([15 * 60 * 1_000])
     expect(log).toHaveBeenCalledWith('Job db:ping completed.')
   } finally {
     log.mockRestore()
@@ -44,7 +82,9 @@ test('a scheduled job is skipped while another process holds the lock', async ()
   try {
     await runScheduledJob(runtime, pingEntry)
 
-    expect(log).toHaveBeenCalledWith('Scheduler skipped db:ping: its lock is held elsewhere.')
+    expect(log).toHaveBeenCalledWith(
+      'Scheduler skipped db:ping: its lock is held elsewhere.',
+    )
     expect(log).not.toHaveBeenCalledWith('Job db:ping completed.')
   } finally {
     log.mockRestore()
@@ -100,7 +140,9 @@ test('a job that outran its lock is reported as a duplicate-run risk, not a gene
       $transaction: async (run: (tx: unknown) => Promise<unknown>) => {
         await run({ $queryRaw: async () => [{ acquired: true }] })
         await Bun.sleep(30)
-        throw Object.assign(new Error('transaction expired'), { code: 'P2028' })
+        throw Object.assign(new Error('transaction expired'), {
+          code: 'P2028',
+        })
       },
       $queryRaw: async () => [{ '?column?': 1 }],
     },
@@ -112,7 +154,9 @@ test('a job that outran its lock is reported as a duplicate-run risk, not a gene
     await runScheduledJob(runtime, { ...pingEntry, timeoutMs: 10 })
 
     expect(String(error.mock.calls[0]?.[0])).toContain('past its 10ms lock')
-    expect(String(error.mock.calls[0]?.[0])).toContain('Another instance may have started it too')
+    expect(String(error.mock.calls[0]?.[0])).toContain(
+      'Another instance may have started it too',
+    )
   } finally {
     error.mockRestore()
     log.mockRestore()
@@ -125,7 +169,9 @@ test('a transaction failure inside a job is not blamed on the lock', async () =>
   const runtime = {
     prisma: {
       $transaction: async () => {
-        throw Object.assign(new Error('inner transaction expired'), { code: 'P2028' })
+        throw Object.assign(new Error('inner transaction expired'), {
+          code: 'P2028',
+        })
       },
     },
   } as unknown as BackendRuntime
@@ -134,7 +180,9 @@ test('a transaction failure inside a job is not blamed on the lock', async () =>
   try {
     await runScheduledJob(runtime, { ...pingEntry, timeoutMs: 60_000 })
 
-    expect(String(error.mock.calls[0]?.[0])).toBe('Scheduler job db:ping failed.')
+    expect(String(error.mock.calls[0]?.[0])).toBe(
+      'Scheduler job db:ping failed.',
+    )
   } finally {
     error.mockRestore()
   }
@@ -160,7 +208,9 @@ test('shutdown waits for a job that is already running', async () => {
 
   try {
     // Every second, so the tick lands inside the test rather than at the top of a minute.
-    const handle = startSchedules(runtime, [{ expression: '* * * * * *', job: 'db:ping' }])
+    const handle = startSchedules(runtime, [
+      { expression: '* * * * * *', job: 'db:ping' },
+    ])
     await Bun.sleep(1_100)
 
     let drained = false
@@ -191,7 +241,9 @@ test('one job can be scheduled more than once', () => {
   ])
 
   try {
-    expect(handle.jobs.map((job) => job.cron.nextRun()?.getTime())).not.toContain(undefined)
+    expect(
+      handle.jobs.map((job) => job.cron.nextRun()?.getTime()),
+    ).not.toContain(undefined)
     expect(handle.jobs).toHaveLength(2)
   } finally {
     void handle.stop()

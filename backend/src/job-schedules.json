@@ -1,0 +1,34 @@
+[
+  {
+    "key": "outbox",
+    "job": "outbox:drain",
+    "expression": "* * * * *",
+    "yandexExpression": "* * ? * * *",
+    "lockTimeoutMs": 240000,
+    "yandexExecutionTimeoutSeconds": 180
+  },
+  {
+    "key": "notifications",
+    "job": "notifications:process",
+    "expression": "* * * * *",
+    "yandexExpression": "* * ? * * *",
+    "lockTimeoutMs": 240000,
+    "yandexExecutionTimeoutSeconds": 180
+  },
+  {
+    "key": "uploads",
+    "job": "uploads:pending:cleanup",
+    "expression": "15 * * * *",
+    "yandexExpression": "15 * ? * * *",
+    "lockTimeoutMs": 900000,
+    "yandexExecutionTimeoutSeconds": 840
+  },
+  {
+    "key": "maintenance",
+    "job": "maintenance:process",
+    "expression": "*/15 * * * *",
+    "yandexExpression": "*/15 * ? * * *",
+    "lockTimeoutMs": 240000,
+    "yandexExecutionTimeoutSeconds": 180
+  }
+]

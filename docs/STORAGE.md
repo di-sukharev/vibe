@@ -8,10 +8,10 @@ Private file storage is built into this template and switched on. The reference 
 
 Everything above the storage layer talks to one provider-neutral port, `backend/src/storage/port.ts`. Two drivers implement it:
 
-| `PRIVATE_STORAGE_DRIVER` | What it is | What it needs |
-| --- | --- | --- |
-| `filesystem` (default) | Files on the local disk, served by the backend through signed URLs | Nothing. No cloud account, no Docker |
-| `s3` | Any S3-compatible endpoint | Credentials, or the local container below |
+| `PRIVATE_STORAGE_DRIVER` | What it is                                                         | What it needs                             |
+| ------------------------ | ------------------------------------------------------------------ | ----------------------------------------- |
+| `filesystem` (default)   | Files on the local disk, served by the backend through signed URLs | Nothing. No cloud account, no Docker      |
+| `s3`                     | Any S3-compatible endpoint                                         | Credentials, or the local container below |
 
 The point of the split is that moving from one to the other is a configuration change, never a code change. The filesystem driver is not a stub: it issues time-limited signed URLs, refuses unsigned reads with `403`, and makes every upload key write-once. A development driver more permissive than production would hide exactly the bugs it exists to surface.
 
@@ -69,7 +69,7 @@ PRIVATE_STORAGE_DOWNLOAD_URL_TTL_SECONDS=300
 `backend/src/env.ts` refuses to start on an incoherent combination rather than failing at the first upload:
 
 - **Production refuses the filesystem driver.** An App Platform container's disk does not survive a deploy, so a production app that ships uploads must have a bucket.
-- **A non-loopback endpoint needs `PRIVATE_STORAGE_ALLOW_REMOTE_ENDPOINT=true`.** This is the whole safety story in one rule: outside production a stray `.env` cannot point a development machine at a real bucket, and production stays fail-closed until someone opens the gate on purpose. The committed DigitalOcean spec `.do/api-app.yaml` sets it explicitly, so opening the gate is a visible line in a reviewed file rather than a flag someone passed once.
+- **A non-loopback endpoint needs `PRIVATE_STORAGE_ALLOW_REMOTE_ENDPOINT=true`.** This is the whole safety story in one rule: outside production a stray `.env` cannot point a development machine at a real bucket, and production stays fail-closed until someone opens the gate on purpose. Both providers' Terraform runtime roots set it explicitly in the reviewed environment shape.
 - **Production requires HTTPS and a non-loopback endpoint.**
 - **The five S3 settings are all-or-nothing**, and setting any of them under the filesystem driver is an error rather than something quietly ignored.
 - **A local endpoint requires path-style addressing**, because it cannot resolve `<bucket>.<host>`.
@@ -160,6 +160,14 @@ When optimized images are required, generate app-owned variants in the backend o
 
 - Never commit storage credentials. The local container's credentials are fixed, fake, and loopback-only by design.
 - Use a limited-access key scoped to the app's bucket.
+- The Yandex Terraform path enforces that scope with exact-access-key bucket policies: static
+  publishers can sync only their two website buckets without deleting buckets or object versions,
+  and the runtime key can read/write/delete only ordinary media objects. Separate anonymous
+  rules expose list/read only on the two static-site buckets. They intentionally admit the HTTP
+  request from Yandex Cloud CDN to its website-bucket origin; user-facing domains still redirect
+  to HTTPS. The dedicated IaC service account can
+  manage configuration only on its three application buckets, is denied bucket deletion, cannot
+  delete object versions, and is never injected into the application.
 - Validate content type, size, owner, and permissions before issuing any URL, and verify the stored object before publishing it.
 - Generate object keys server-side. Never trust a client-provided path.
 - Keep emails, names, customer ids, and other personal data out of bucket names, object keys, metadata, and tags.
