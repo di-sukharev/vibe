@@ -122,7 +122,10 @@ removed route stops being publicly current while old hashed assets remain availa
 that loaded the previous HTML during rollout. Bucket versioning preserves deleted/replaced mutable
 objects for recovery and expires those noncurrent versions after 30 days. Hashed objects remain
 current by design; prune them only with a separately reviewed retention policy if their storage
-cost becomes material.
+cost becomes material. Each surface also publishes a revalidated release marker containing the
+captured commit. Final verification reads that marker through the public domain with a cache-busting
+query and requires an exact match, so a healthy stale CDN object or misdirected DNS target cannot be
+reported as the new release.
 
 The static publisher key is a sensitive Terraform output consumed in memory by the release
 process. Its exact-key bucket policies cover only the two public static buckets and cannot delete a
@@ -190,7 +193,10 @@ runtime slot before every foundation plan/apply. It refuses a version or passwor
 slot, including after a failed release. It also fingerprints the JWT secret and refuses to replace
 it after a runtime exists: the application currently accepts one signing key, so safe JWT rotation
 requires a future keyring/overlap change rather than invalidating every session or destroying both
-slot versions. Do not bypass the wrapper with raw `terraform apply` for credential rotation.
+slot versions. If the runtime state no longer reports a slot, the wrapper checks the provider for
+the project's deployed API/job containers and fails closed while any remain; recover or import the
+runtime state instead of treating it as a first release. Do not bypass the wrapper with raw
+`terraform apply` for credential rotation.
 
 ## Operations
 

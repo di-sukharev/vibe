@@ -65,7 +65,7 @@
     "typecheck:backend": "bun run --cwd backend typecheck",
     "test": "bun run test:infra && bun run test:contracts && bun run test:backend && bun run test:webapp && bun run test:website && bun run test:mobile",
     "test:infra": "bun test ./scripts/",
-    "test:terraform": "node scripts/terraform-test.mjs",
+    "test:terraform": "bun scripts/terraform-test.mjs",
     "test:contracts": "bun run --cwd packages/contracts test",
     "test:backend": "bun run --cwd backend test",
     "test:backend:unit": "bun run --cwd backend test:unit",

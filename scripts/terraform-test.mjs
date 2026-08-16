@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 
 import { spawn, spawnSync } from 'node:child_process'
 import {
@@ -31,8 +31,10 @@ const testDirectory = mkdtempSync(
   resolve(tmpdir(), 'vibecoding-terraform-test-'),
 )
 const pluginCacheDirectory = resolve(testDirectory, 'plugin-cache')
+const immediateHolderScript = resolve(testDirectory, 'immediate-holder.mjs')
 const spawnedProcesses = new Set()
 mkdirSync(pluginCacheDirectory)
+writeFileSync(immediateHolderScript, '')
 
 try {
   for (const [index, relativeRoot] of roots.entries()) {
@@ -178,12 +180,11 @@ function spawnTerraformApply({
   releaseSignal,
   parentPid,
 }) {
-  const holderCommand = [
-    process.execPath,
-    resolve(repoRoot, 'scripts', 'infra-lease-holder.mjs'),
-  ]
-    .map(shellSingleQuote)
-    .join(' ')
+  const holderScript = resolve(
+    repoRoot,
+    'scripts',
+    'infra-lease-holder.mjs',
+  )
   return spawnCaptured(
     'terraform',
     [
@@ -193,7 +194,8 @@ function spawnTerraformApply({
       '-lock-timeout=1s',
       `-state=${statePath}`,
       `-var=owner_token=${owner}`,
-      `-var=holder_command=${holderCommand}`,
+      `-var=holder_executable=${process.execPath}`,
+      `-var=holder_script=${holderScript}`,
       `-var=ready_signal=${readySignal}`,
       `-var=release_signal=${releaseSignal}`,
       `-var=parent_pid=${parentPid}`,
@@ -212,7 +214,8 @@ function spawnImmediateTerraformApply({ root, environment, statePath, owner }) {
       '-lock-timeout=1s',
       `-state=${statePath}`,
       `-var=owner_token=${owner}`,
-      '-var=holder_command=true',
+      `-var=holder_executable=${process.execPath}`,
+      `-var=holder_script=${immediateHolderScript}`,
       `-var=ready_signal=${resolve(testDirectory, `${owner}-ready`)}`,
       `-var=release_signal=${resolve(testDirectory, `${owner}-release`)}`,
       `-var=parent_pid=${process.pid}`,
@@ -272,10 +275,6 @@ function assertSuccessfulLeaseResult(label, result) {
       `${label} failed: ${result.error?.message || result.stderr || result.stdout}`,
     )
   }
-}
-
-function shellSingleQuote(value) {
-  return `'${String(value).replaceAll("'", `'"'"'`)}'`
 }
 
 function delay(milliseconds) {

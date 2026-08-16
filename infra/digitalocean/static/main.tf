@@ -43,12 +43,6 @@ resource "digitalocean_app" "webapp" {
         type  = "GENERAL"
       }
 
-      env {
-        key   = "RELEASE_REVISION"
-        value = var.release_revision
-        scope = "BUILD_TIME"
-        type  = "GENERAL"
-      }
     }
   }
 }
@@ -97,12 +91,6 @@ resource "digitalocean_app" "website" {
         type  = "GENERAL"
       }
 
-      env {
-        key   = "RELEASE_REVISION"
-        value = var.release_revision
-        scope = "BUILD_TIME"
-        type  = "GENERAL"
-      }
     }
   }
 }

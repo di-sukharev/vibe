@@ -274,7 +274,7 @@ run "cdn_requires_domain_named_buckets" {
     webapp_bucket_name = "unrelated-webapp-bucket"
   }
 
-  expect_failures = [check.direct_static_domains_match_bucket_names]
+  expect_failures = [var.webapp_bucket_name]
 }
 
 run "zone_apex_is_rejected" {
@@ -285,7 +285,7 @@ run "zone_apex_is_rejected" {
     website_bucket_name = "example.com"
   }
 
-  expect_failures = [check.domains_are_cname_safe_subdomains]
+  expect_failures = [var.dns_zone_domain]
 }
 
 run "cdn_route_without_resources_is_rejected" {
@@ -293,7 +293,7 @@ run "cdn_route_without_resources_is_rejected" {
 
   variables { route_static_through_cdn = true }
 
-  expect_failures = [check.cdn_route_requires_resources]
+  expect_failures = [var.route_static_through_cdn]
 }
 
 run "first_bucket_bootstrap_is_explicit" {

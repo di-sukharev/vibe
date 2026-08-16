@@ -24,6 +24,11 @@ variable "git_branch" {
 variable "primary_zone" {
   type    = string
   default = "ru-central1-a"
+
+  validation {
+    condition     = contains(keys(var.subnets), var.primary_zone)
+    error_message = "subnets must contain primary_zone for the single-host PostgreSQL cluster."
+  }
 }
 
 variable "subnets" {
@@ -181,6 +186,14 @@ variable "dns_zone_domain" {
     condition     = can(regex("^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$", var.dns_zone_domain))
     error_message = "dns_zone_domain must be a lowercase DNS zone such as example.com, without a trailing dot."
   }
+
+  validation {
+    condition = alltrue([
+      for domain in [var.api_domain, var.webapp_domain, var.website_domain] :
+      domain != var.dns_zone_domain && endswith(domain, ".${var.dns_zone_domain}")
+    ])
+    error_message = "api_domain, webapp_domain, and website_domain must be CNAME-safe subdomains of dns_zone_domain; this minimal topology does not support a zone apex."
+  }
 }
 
 variable "enable_cdn" {
@@ -193,6 +206,11 @@ variable "route_static_through_cdn" {
   description = "Routes static domains to provisioned CDN resources. Keep false while creating or draining CDN."
   type        = bool
   default     = false
+
+  validation {
+    condition     = !var.route_static_through_cdn || var.enable_cdn
+    error_message = "route_static_through_cdn requires enable_cdn=true so DNS never points at a missing CDN resource."
+  }
 }
 
 variable "storage_bootstrap_access" {
@@ -203,6 +221,13 @@ variable "storage_bootstrap_access" {
 
 variable "webapp_bucket_name" {
   type = string
+
+  validation {
+    condition = (
+      var.webapp_bucket_name == var.webapp_domain && var.website_bucket_name == var.website_domain
+    )
+    error_message = "Static bucket names must equal their custom domains so direct HTTPS remains a CDN rollback path."
+  }
 }
 
 variable "website_bucket_name" {
@@ -220,6 +245,11 @@ variable "email_delivery" {
   validation {
     condition     = contains(["disabled", "postbox"], var.email_delivery)
     error_message = "Yandex production supports disabled or postbox email delivery."
+  }
+
+  validation {
+    condition     = var.email_delivery == "disabled" || var.email_from != null
+    error_message = "email_delivery=postbox requires email_from."
   }
 }
 

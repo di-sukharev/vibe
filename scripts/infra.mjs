@@ -31,11 +31,12 @@ const protectedResourcePatterns = [
   /digitalocean_container_registry\.production/,
   /digitalocean_database_(cluster|db|firewall|user)\./,
   /digitalocean_spaces_bucket\.(media|terraform_state)/,
-  /digitalocean_spaces_key\.terraform_state/,
+  /digitalocean_spaces_key\.(media|terraform_state)/,
   /yandex_mdb_postgresql_(cluster|database|user)\./,
   /yandex_storage_bucket\.(media|terraform_state)/,
   /yandex_storage_bucket_policy\.terraform_state/,
-  /yandex_iam_service_account(_static_access_key)?\.terraform_state/,
+  /yandex_iam_service_account\.terraform_state/,
+  /yandex_iam_service_account_static_access_key\.(media|postbox|terraform_state)/,
   /yandex_lockbox_secret\.(media|migration_database|runtime|postbox)/,
 ]
 
@@ -287,9 +288,9 @@ export async function withProductionMutationLease(acquire, operation) {
   let result
   let operationError
   try {
-    lease.assertHeld?.()
+    await lease.assertHeld?.()
     result = await operation(lease)
-    lease.assertHeld?.()
+    await lease.assertHeld?.()
   } catch (error) {
     operationError = error
   }
@@ -309,8 +310,12 @@ export function productionMutationNeedsLease(options) {
   return options.command === 'import' && options.rootName !== 'bootstrap'
 }
 
-function assertProductionMutationLease(options) {
-  options.mutationLease?.assertHeld?.()
+async function assertProductionMutationLease(options) {
+  await options.mutationLease?.assertHeld?.()
+}
+
+export async function yieldToProcessEvents() {
+  await new Promise((resolveTurn) => setTimeout(resolveTurn, 0))
 }
 
 export function bootstrapStateMode({
@@ -417,6 +422,32 @@ export function yandexDatabaseRotationProblems({
   return []
 }
 
+export function yandexRuntimeStateProblems({
+  foundationMetadata,
+  deployedContainerNames,
+  projectSlug,
+}) {
+  if (!foundationMetadata) return []
+
+  const prefix = `${projectSlug}-prod-`
+  const migrationName = `${prefix}migration`
+  const runtimeNames = [
+    ...new Set(
+      (deployedContainerNames ?? []).filter(
+        (name) =>
+          typeof name === 'string' &&
+          name.startsWith(prefix) &&
+          name !== migrationName,
+      ),
+    ),
+  ].sort()
+  if (runtimeNames.length === 0) return []
+
+  return [
+    `Yandex runtime state has no credential slot, but deployed runtime containers still exist: ${runtimeNames.join(', ')}. Recover or import the runtime state before changing foundation credentials.`,
+  ]
+}
+
 export function safeYandexSecretVersionDestroyAddresses(liveSlot) {
   const slots = ['blue', 'green']
   const inactiveSlots = liveSlot
@@ -428,6 +459,14 @@ export function safeYandexSecretVersionDestroyAddresses(liveSlot) {
     ),
     'yandex_lockbox_secret_version_hashed.migration_database',
   ]
+}
+
+export function protectedYandexSecretVersionDestroyAddresses(liveSlot) {
+  if (!liveSlot) return []
+  if (!['blue', 'green'].includes(liveSlot)) {
+    throw new Error(`Unknown Yandex database credential slot: ${liveSlot}`)
+  }
+  return [`yandex_lockbox_secret_version_hashed.runtime["${liveSlot}"]`]
 }
 
 const yandexFoundationCleanupAddresses = [
@@ -459,8 +498,13 @@ export function safeTerraformOutputs(provider, outputs) {
   )
 }
 
-export function planSafetyProblems(plan, allowedDestroyAddresses = []) {
+export function planSafetyProblems(
+  plan,
+  allowedDestroyAddresses = [],
+  protectedDestroyAddresses = [],
+) {
   const allowed = new Set(allowedDestroyAddresses)
+  const protectedAddresses = new Set(protectedDestroyAddresses)
   const problems = []
 
   for (const resource of plan?.resource_changes ?? []) {
@@ -469,9 +513,9 @@ export function planSafetyProblems(plan, allowedDestroyAddresses = []) {
 
     const address = resource.address
     const operation = actions.includes('create') ? 'replaced' : 'deleted'
-    const protectedResource = protectedResourcePatterns.some((pattern) =>
-      pattern.test(address),
-    )
+    const protectedResource =
+      protectedAddresses.has(address) ||
+      protectedResourcePatterns.some((pattern) => pattern.test(address))
 
     if (protectedResource) {
       problems.push(
@@ -653,6 +697,14 @@ export function staticUploadSteps({
   ]
 }
 
+export function writeYandexStaticReleaseMarkers(artifactRoot, commit) {
+  for (const surface of ['webapp', 'website']) {
+    const markerDirectory = resolve(artifactRoot, surface, '.well-known')
+    mkdirSync(markerDirectory, { recursive: true })
+    writeFileSync(resolve(markerDirectory, 'release-revision'), `${commit}\n`)
+  }
+}
+
 export function sanitizedBuildEnvironment(source = process.env) {
   const secretNames = [
     /^TF_VAR_/,
@@ -816,6 +868,7 @@ function terraformPlan({
   env,
   apply,
   allowedDestroyAddresses,
+  protectedDestroyAddresses = [],
   label,
   requireNoChanges = false,
 }) {
@@ -858,7 +911,11 @@ function terraformPlan({
         log: false,
       }),
     )
-    const safetyProblems = planSafetyProblems(plan, allowedDestroyAddresses)
+    const safetyProblems = planSafetyProblems(
+      plan,
+      allowedDestroyAddresses,
+      protectedDestroyAddresses,
+    )
     if (safetyProblems.length > 0) {
       throw new Error(
         `Terraform plan was refused:\n- ${safetyProblems.join('\n- ')}`,
@@ -1041,10 +1098,6 @@ function writeOperationsBackendConfiguration(paths) {
   )
 }
 
-function shellSingleQuote(value) {
-  return `'${String(value).replaceAll("'", `'"'"'`)}'`
-}
-
 function boundedProcessOutput(current, chunk) {
   return `${current}${String(chunk)}`.slice(-16_000)
 }
@@ -1074,12 +1127,11 @@ async function acquireProductionMutationLease(provider) {
       '-backend-config=backend.backend.hcl',
     ])
 
-    const holderCommand = [
-      process.execPath,
-      resolve(repoRoot, 'scripts', 'infra-lease-holder.mjs'),
-    ]
-      .map(shellSingleQuote)
-      .join(' ')
+    const holderScript = resolve(
+      repoRoot,
+      'scripts',
+      'infra-lease-holder.mjs',
+    )
     child = spawn(
       'terraform',
       [
@@ -1088,7 +1140,8 @@ async function acquireProductionMutationLease(provider) {
         '-input=false',
         '-lock-timeout=1s',
         `-var=owner_token=${owner}`,
-        `-var=holder_command=${holderCommand}`,
+        `-var=holder_executable=${process.execPath}`,
+        `-var=holder_script=${holderScript}`,
         `-var=ready_signal=${readySignal}`,
         `-var=release_signal=${releaseSignal}`,
         `-var=parent_pid=${process.pid}`,
@@ -1150,7 +1203,8 @@ async function acquireProductionMutationLease(provider) {
       )
     }
 
-    const assertHeld = () => {
+    const assertHeld = async () => {
+      await yieldToProcessEvents()
       if (settled) {
         throw new Error(
           `The ${provider} production mutation lease was lost before the operation completed`,
@@ -1161,7 +1215,7 @@ async function acquireProductionMutationLease(provider) {
       assertHeld,
       async release() {
         try {
-          assertHeld()
+          await assertHeld()
           writePrivateFile(releaseSignal, owner)
           const outcome = await completion
           if (outcome.error || outcome.code !== 0) {
@@ -1580,11 +1634,59 @@ function yandexDesiredDatabaseMetadata(tfvars, environment = process.env) {
   }
 }
 
+function yandexDeployedContainerNames(tfvars) {
+  const raw = runCommand(
+    'yc',
+    [
+      'serverless',
+      'container',
+      'list',
+      '--folder-id',
+      String(tfvars.folder_id),
+      '--format',
+      'json',
+    ],
+    { capture: true, sensitiveOutput: true, log: false },
+  )
+  let parsed
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    throw new Error(
+      'Could not verify Yandex runtime state because yc returned invalid container JSON',
+    )
+  }
+  const containers = Array.isArray(parsed) ? parsed : parsed?.containers
+  if (!Array.isArray(containers)) {
+    throw new Error(
+      'Could not verify Yandex runtime state because yc returned no container list',
+    )
+  }
+  return containers
+    .map((container) => container?.name)
+    .filter((name) => typeof name === 'string')
+}
+
 function assertSafeYandexDatabaseRotation(context) {
   if (context.provider !== 'yandex') return null
   const runtimeOutputs = readManagedRootOutputs(context, 'runtime')
   const liveSlot = runtimeOutputs.database_credential_slot
-  if (!liveSlot) return null
+  if (!liveSlot) {
+    const foundationMetadata = context.outputs.database_credential_metadata
+    const problems = yandexRuntimeStateProblems({
+      foundationMetadata,
+      deployedContainerNames: foundationMetadata
+        ? yandexDeployedContainerNames(context.tfvars)
+        : [],
+      projectSlug: context.tfvars.project_slug,
+    })
+    if (problems.length > 0) {
+      throw new Error(
+        `Unsafe Yandex database rotation:\n- ${problems.join('\n- ')}`,
+      )
+    }
+    return null
+  }
 
   const problems = yandexDatabaseRotationProblems({
     current: context.outputs.database_credential_metadata,
@@ -1722,6 +1824,10 @@ async function planProduction(provider, options) {
     provider === 'yandex'
       ? safeYandexSecretVersionDestroyAddresses(liveSlot)
       : []
+  const protectedSecretVersionDestroyAddresses =
+    provider === 'yandex'
+      ? protectedYandexSecretVersionDestroyAddresses(liveSlot)
+      : []
   const safeFoundationCleanupAddresses =
     provider === 'yandex' ? safeYandexFoundationDestroyAddresses() : []
   const bootstrapAccessPath = resolve(
@@ -1745,6 +1851,7 @@ async function planProduction(provider, options) {
         ...safeSecretVersionDestroyAddresses,
         ...safeFoundationCleanupAddresses,
       ],
+      protectedDestroyAddresses: protectedSecretVersionDestroyAddresses,
       label: `${provider}-foundation`,
     })
   } finally {
@@ -1762,6 +1869,10 @@ async function applyFoundation(provider, options) {
     provider === 'yandex'
       ? safeYandexSecretVersionDestroyAddresses(liveSlot)
       : []
+  const protectedSecretVersionDestroyAddresses =
+    provider === 'yandex'
+      ? protectedYandexSecretVersionDestroyAddresses(liveSlot)
+      : []
   const safeFoundationCleanupAddresses =
     provider === 'yandex' ? safeYandexFoundationDestroyAddresses() : []
   const bootstrapAccessPath = resolve(
@@ -1778,7 +1889,7 @@ async function applyFoundation(provider, options) {
   }
 
   try {
-    assertProductionMutationLease(options)
+    await assertProductionMutationLease(options)
     terraformPlan({
       root: context.paths.productionRoot,
       env: context.env,
@@ -1788,13 +1899,14 @@ async function applyFoundation(provider, options) {
         ...safeSecretVersionDestroyAddresses,
         ...safeFoundationCleanupAddresses,
       ],
+      protectedDestroyAddresses: protectedSecretVersionDestroyAddresses,
       label: `${provider}-foundation`,
     })
-    assertProductionMutationLease(options)
+    await assertProductionMutationLease(options)
     if (options.dryRun || !firstYandexBucketApply) return
 
     rmSync(bootstrapAccessPath)
-    assertProductionMutationLease(options)
+    await assertProductionMutationLease(options)
     terraformPlan({
       root: context.paths.productionRoot,
       env: context.env,
@@ -1804,9 +1916,10 @@ async function applyFoundation(provider, options) {
         ...safeSecretVersionDestroyAddresses,
         ...safeFoundationCleanupAddresses,
       ],
+      protectedDestroyAddresses: protectedSecretVersionDestroyAddresses,
       label: 'yandex-foundation-tighten-storage-access',
     })
-    assertProductionMutationLease(options)
+    await assertProductionMutationLease(options)
   } finally {
     if (existsSync(bootstrapAccessPath)) rmSync(bootstrapAccessPath)
   }
@@ -1844,6 +1957,11 @@ export function importReleaseInputs(provider, rootName, options) {
     if (!/^infra-release\/[0-9a-f]{40}$/.test(options.sourceBranch ?? '')) {
       throw new Error(
         'static import requires --source-branch=infra-release/<40-char-sha>',
+      )
+    }
+    if (options.sourceBranch !== `infra-release/${options.releaseRevision}`) {
+      throw new Error(
+        'static import release revision and source branch must identify the same commit',
       )
     }
     return {
@@ -1885,7 +2003,7 @@ export function nonImportableResourceProblem(provider, resourceAddress) {
   return `${resourceType} does not support import in the pinned provider and its secret cannot be recovered. Import the surrounding bucket/service account, create a new Terraform-owned key, switch and verify every consumer, then revoke the legacy key. See docs/DEPLOYMENT.md#existing-manually-created-infrastructure.`
 }
 
-function importResource(
+async function importResource(
   provider,
   rootName,
   resourceAddress,
@@ -1969,7 +2087,7 @@ function importResource(
     )
   }
 
-  assertProductionMutationLease(options)
+  await assertProductionMutationLease(options)
   runCommand(
     'terraform',
     ['import', '-input=false', resourceAddress, resourceId],
@@ -1978,7 +2096,7 @@ function importResource(
       env: { ...terraformEnvironment, ...context.env },
     },
   )
-  assertProductionMutationLease(options)
+  await assertProductionMutationLease(options)
   terraformPlan({
     root,
     env: context.env,
@@ -2065,7 +2183,7 @@ export function immutableReleaseBranch(commit) {
   return `infra-release/${commit}`
 }
 
-function ensureDigitalOceanReleaseBranch(source) {
+async function ensureDigitalOceanReleaseBranch(source, assertLeaseHeld) {
   const branch = immutableReleaseBranch(source.commit)
   const ref = `refs/heads/${branch}`
   const current = runCommand(
@@ -2083,7 +2201,9 @@ function ensureDigitalOceanReleaseBranch(source) {
     return branch
   }
 
+  await assertLeaseHeld()
   runCommand('git', ['push', source.remoteName, `${source.commit}:${ref}`])
+  await assertLeaseHeld()
   const verified = runCommand(
     'git',
     ['ls-remote', '--heads', source.remoteName, ref],
@@ -2101,12 +2221,18 @@ function repositoryForImage(provider, outputs) {
   return outputs.image_repository
 }
 
-function buildAndPushImage(provider, repository, commit) {
+async function buildAndPushImage(
+  provider,
+  repository,
+  commit,
+  assertLeaseHeld,
+) {
   if (provider === 'digitalocean') {
     runDigitalOceanCli(['registry', 'login', '--expiry-seconds', '1200'])
   } else {
     runCommand('yc', ['container', 'registry', 'configure-docker'])
   }
+  await assertLeaseHeld()
 
   const tag = `${repository}:${commit}`
   const archive = gitArchive(commit)
@@ -2128,7 +2254,9 @@ function buildAndPushImage(provider, repository, commit) {
       input: archive,
     },
   )
+  await assertLeaseHeld()
   runCommand('docker', ['push', tag], { env: sanitizedBuildEnvironment() })
+  await assertLeaseHeld()
 
   const inspected = runCommand(
     'docker',
@@ -2164,6 +2292,7 @@ function buildYandexStaticArtifacts(commit, outputs) {
       ],
       { cwd: repoRoot, env: sanitizedBuildEnvironment(), input: archive },
     )
+    writeYandexStaticReleaseMarkers(artifactRoot, commit)
     return artifactRoot
   } catch (error) {
     rmSync(artifactRoot, { recursive: true, force: true })
@@ -2213,7 +2342,12 @@ async function invokeYandexMigration(url) {
   }
 }
 
-function publishYandexStatic(outputs, env, artifactRoot) {
+async function publishYandexStatic(
+  outputs,
+  env,
+  artifactRoot,
+  assertLeaseHeld,
+) {
   const accessKey = outputs.static_publisher_access_key_id
   const secretKey = outputs.static_publisher_secret_access_key
   if (!accessKey || !secretKey)
@@ -2238,6 +2372,7 @@ function publishYandexStatic(outputs, env, artifactRoot) {
   ]
   for (const surface of surfaces) {
     for (const step of staticUploadSteps(surface)) {
+      await assertLeaseHeld()
       runCommand(step.command, step.args, { env: uploadEnvironment })
     }
   }
@@ -2260,6 +2395,52 @@ async function verifyUrl(name, url) {
     if (attempt < 12) await Bun.sleep(5_000)
   }
   throw new Error(`${name} verification failed at ${url}: ${lastStatus}`)
+}
+
+export async function verifyYandexStaticCommit(
+  outputs,
+  commit,
+  { fetchImpl = fetch, sleepImpl = Bun.sleep } = {},
+) {
+  for (const [name, url] of [
+    ['web app', outputs.webapp_url],
+    ['website', outputs.website_url],
+  ]) {
+    if (!url) throw new Error(`Terraform did not return ${name} URL`)
+    const markerUrl = new URL('/.well-known/release-revision', url)
+    markerUrl.searchParams.set('revision', commit)
+    let lastResult = 'no response'
+
+    for (let attempt = 1; attempt <= 12; attempt += 1) {
+      try {
+        const response = await fetchImpl(markerUrl, {
+          cache: 'no-store',
+          headers: { 'cache-control': 'no-cache' },
+          signal: AbortSignal.timeout(10_000),
+        })
+        if (response.ok) {
+          const actualCommit = (await response.text()).trim()
+          if (actualCommit === commit) {
+            lastResult = null
+            break
+          }
+          lastResult = `published ${actualCommit || 'an empty marker'}, expected ${commit}`
+        } else {
+          lastResult = `HTTP ${response.status}`
+          await response.body?.cancel()
+        }
+      } catch (error) {
+        lastResult = error instanceof Error ? error.message : String(error)
+      }
+      if (attempt < 12) await sleepImpl(5_000)
+    }
+
+    if (lastResult) {
+      throw new Error(
+        `${name} release verification failed at ${markerUrl}: ${lastResult}`,
+      )
+    }
+  }
 }
 
 export function activeDeploymentCommitProblems(
@@ -2356,6 +2537,7 @@ async function release(provider, options) {
     ? null
     : assertCleanReleaseSource(context.outputs.release_source, provider)
   const seed = seedVariables()
+  const assertLeaseHeld = () => assertProductionMutationLease(options)
 
   terraformPlan({
     root: context.paths.productionRoot,
@@ -2381,15 +2563,23 @@ async function release(provider, options) {
   assertCleanReleaseSource(context.outputs.release_source, provider, source.commit)
   const commit = source.commit
   const repository = repositoryForImage(provider, context.outputs)
-  assertProductionMutationLease(options)
-  const digest = buildAndPushImage(provider, repository, commit)
-  assertProductionMutationLease(options)
+  await assertProductionMutationLease(options)
+  const digest = await buildAndPushImage(
+    provider,
+    repository,
+    commit,
+    assertLeaseHeld,
+  )
+  await assertProductionMutationLease(options)
   assertCleanReleaseSource(context.outputs.release_source, provider, commit)
 
   if (provider === 'digitalocean') {
-    assertProductionMutationLease(options)
-    const sourceBranch = ensureDigitalOceanReleaseBranch(source)
-    assertProductionMutationLease(options)
+    await assertProductionMutationLease(options)
+    const sourceBranch = await ensureDigitalOceanReleaseBranch(
+      source,
+      assertLeaseHeld,
+    )
+    await assertProductionMutationLease(options)
     return executePromotionPipeline(provider, {
       async deployRuntime() {
         const runtimeRoot = writeManagedRootInputs(context, 'runtime', {
@@ -2404,7 +2594,7 @@ async function release(provider, options) {
           allowedDestroyAddresses: options.allowedDestroyAddresses,
           label: 'digitalocean-runtime-migration-gated',
         })
-        assertProductionMutationLease(options)
+        await assertProductionMutationLease(options)
 
         if (seed) {
           writeManagedRootInputs(context, 'runtime', {
@@ -2419,7 +2609,7 @@ async function release(provider, options) {
             allowedDestroyAddresses: options.allowedDestroyAddresses,
             label: 'digitalocean-remove-bootstrap-secret',
           })
-          assertProductionMutationLease(options)
+          await assertProductionMutationLease(options)
         }
         return terraformOutputs(runtimeRoot, context.env)
       },
@@ -2446,11 +2636,11 @@ async function release(provider, options) {
           allowedDestroyAddresses: options.allowedDestroyAddresses,
           label: 'digitalocean-static-after-migration',
         })
-        assertProductionMutationLease(options)
+        await assertProductionMutationLease(options)
         assertCleanReleaseSource(context.outputs.release_source, provider, commit)
-        assertProductionMutationLease(options)
-        ensureDigitalOceanReleaseBranch(source)
-        assertProductionMutationLease(options)
+        await assertProductionMutationLease(options)
+        await ensureDigitalOceanReleaseBranch(source, assertLeaseHeld)
+        await assertProductionMutationLease(options)
         return terraformOutputs(staticRoot, context.env)
       },
       async verify({ runtime, staticDeployment }) {
@@ -2526,8 +2716,14 @@ async function release(provider, options) {
       assertCleanReleaseSource(context.outputs.release_source, provider, commit)
       const artifactRoot = buildYandexStaticArtifacts(commit, promotedOutputs)
       try {
+        await assertLeaseHeld()
         assertCleanReleaseSource(context.outputs.release_source, provider, commit)
-        publishYandexStatic(promotedOutputs, context.env, artifactRoot)
+        await publishYandexStatic(
+          promotedOutputs,
+          context.env,
+          artifactRoot,
+          assertLeaseHeld,
+        )
       } finally {
         rmSync(artifactRoot, { recursive: true, force: true })
       }
@@ -2535,6 +2731,7 @@ async function release(provider, options) {
     },
     async verify({ staticDeployment }) {
       assertCleanReleaseSource(context.outputs.release_source, provider, commit)
+      await verifyYandexStaticCommit(staticDeployment, commit)
       await verifyDeployment(staticDeployment)
       console.log(
         `[infra] ${provider}: release ${commit} completed and verified.`,

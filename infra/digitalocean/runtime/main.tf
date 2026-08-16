@@ -38,13 +38,6 @@ locals {
   })
 }
 
-check "admin_seed_is_complete" {
-  assert {
-    condition     = (var.admin_seed_email == null) == (var.admin_seed_password == null)
-    error_message = "admin_seed_email and admin_seed_password must be supplied together or both omitted."
-  }
-}
-
 resource "digitalocean_app" "api" {
   project_id = var.project_id
 

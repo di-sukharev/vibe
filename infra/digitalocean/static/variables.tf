@@ -17,6 +17,11 @@ variable "source_branch" {
     condition     = can(regex("^infra-release/[0-9a-f]{40}$", var.source_branch))
     error_message = "source_branch must be the wrapper-owned immutable infra-release/<40-char-sha> branch."
   }
+
+  validation {
+    condition     = var.source_branch == "infra-release/${var.release_revision}"
+    error_message = "source_branch and release_revision must identify the same immutable commit."
+  }
 }
 variable "release_revision" {
   type = string

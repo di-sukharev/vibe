@@ -9,7 +9,8 @@ terraform {
 }
 
 variable "owner_token" { type = string }
-variable "holder_command" { type = string }
+variable "holder_executable" { type = string }
+variable "holder_script" { type = string }
 variable "ready_signal" { type = string }
 variable "release_signal" { type = string }
 variable "parent_pid" { type = number }
@@ -19,7 +20,8 @@ resource "terraform_data" "production_lease" {
   triggers_replace = [var.owner_token]
 
   provisioner "local-exec" {
-    command = var.holder_command
+    command     = "hold"
+    interpreter = [var.holder_executable, var.holder_script]
     environment = {
       INFRA_LEASE_OWNER          = var.owner_token
       INFRA_LEASE_READY_SIGNAL   = var.ready_signal

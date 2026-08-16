@@ -36,23 +36,6 @@ locals {
   })
 }
 
-check "domains_are_cname_safe_subdomains" {
-  assert {
-    condition = alltrue([
-      for domain in [var.api_domain, var.webapp_domain, var.website_domain] :
-      domain != var.dns_zone_domain && endswith(domain, ".${var.dns_zone_domain}")
-    ])
-    error_message = "Managed and documented external DNS require CNAME-safe subdomains; zone-apex domains need a different ANAME-capable non-CDN topology."
-  }
-}
-
-check "cdn_route_requires_resources" {
-  assert {
-    condition     = !var.route_static_through_cdn || var.enable_cdn
-    error_message = "route_static_through_cdn requires enable_cdn=true."
-  }
-}
-
 resource "yandex_serverless_container_iam_member" "gateway_api" {
   container_id = yandex_serverless_container.api.id
   role         = "serverless-containers.containerInvoker"

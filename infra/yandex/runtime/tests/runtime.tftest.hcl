@@ -134,7 +134,7 @@ run "cdn_route_without_resources_is_rejected" {
 
   variables { route_static_through_cdn = true }
 
-  expect_failures = [check.cdn_route_requires_resources]
+  expect_failures = [var.route_static_through_cdn]
 }
 
 run "zone_apex_is_rejected" {
@@ -142,5 +142,5 @@ run "zone_apex_is_rejected" {
 
   variables { website_domain = "example.com" }
 
-  expect_failures = [check.domains_are_cname_safe_subdomains]
+  expect_failures = [var.dns_zone_domain]
 }

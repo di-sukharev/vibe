@@ -23,12 +23,14 @@ run "static_uses_immutable_release_branch" {
     )
     error_message = "Both static apps must build the wrapper-owned immutable release branch."
   }
+}
 
-  assert {
-    condition = (
-      one([for env in digitalocean_app.webapp.spec[0].static_site[0].env : env.value if env.key == "RELEASE_REVISION"]) == var.release_revision &&
-      one([for env in digitalocean_app.website.spec[0].static_site[0].env : env.value if env.key == "RELEASE_REVISION"]) == var.release_revision
-    )
-    error_message = "Both static deployments must carry the exact release commit."
+run "immutable_branch_must_match_revision" {
+  command = plan
+
+  variables {
+    source_branch = "infra-release/ffffffffffffffffffffffffffffffffffffffff"
   }
+
+  expect_failures = [var.source_branch]
 }

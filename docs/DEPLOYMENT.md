@@ -250,6 +250,14 @@ create a new key; apply/release so every backend, runtime, and publisher consume
 state, media, and static publishing; only then revoke the legacy key. Never revoke the old state key
 before the new backend credential has completed a second init/plan.
 
+The wrapper also refuses replacement or deletion of either provider's active media key, Yandex
+Postbox key, or the active Yandex database/JWT secret version even with `--allow-destroy`. Those
+credentials cross the foundation/runtime state boundary, so replacing a single declared credential
+would revoke it before the separately deployed API and jobs switch. A real rotation must first add
+a second key/secret slot, apply only that addition, release and verify the new slot, and remove the
+old credential in a later reviewed foundation change. Do not temporarily weaken the protected
+resource list to turn that transition into one apply.
+
 Existing PostgreSQL objects also keep their original owner when a database resource is imported.
 Before the first Terraform-managed migration, inventory the `public` schema using a privileged
 legacy connection (the URL stays in the environment and is never printed):

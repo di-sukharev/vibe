@@ -20,46 +20,6 @@ locals {
   serverless_container_cidr = "198.19.0.0/16"
 }
 
-check "primary_zone_has_subnet" {
-  assert {
-    condition     = contains(keys(var.subnets), var.primary_zone)
-    error_message = "subnets must contain primary_zone for the single-host PostgreSQL cluster."
-  }
-}
-
-check "postbox_is_complete" {
-  assert {
-    condition     = var.email_delivery == "disabled" || var.email_from != null
-    error_message = "email_delivery=postbox requires email_from."
-  }
-}
-
-check "direct_static_domains_match_bucket_names" {
-  assert {
-    condition = (
-      var.webapp_bucket_name == var.webapp_domain && var.website_bucket_name == var.website_domain
-    )
-    error_message = "Static bucket names must equal their custom domains so direct HTTPS remains a CDN rollback path."
-  }
-}
-
-check "domains_are_cname_safe_subdomains" {
-  assert {
-    condition = alltrue([
-      for domain in [var.api_domain, var.webapp_domain, var.website_domain] :
-      domain != var.dns_zone_domain && endswith(domain, ".${var.dns_zone_domain}")
-    ])
-    error_message = "api_domain, webapp_domain, and website_domain must be CNAME-safe subdomains of dns_zone_domain; this minimal topology does not support a zone apex."
-  }
-}
-
-check "cdn_route_requires_resources" {
-  assert {
-    condition     = !var.route_static_through_cdn || var.enable_cdn
-    error_message = "route_static_through_cdn requires enable_cdn=true so DNS never points at a missing CDN resource."
-  }
-}
-
 resource "yandex_vpc_network" "production" {
   folder_id   = var.folder_id
   name        = "${local.name_prefix}-network"

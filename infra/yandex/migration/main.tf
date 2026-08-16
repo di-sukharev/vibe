@@ -18,13 +18,6 @@ locals {
   )
 }
 
-check "admin_seed_is_complete" {
-  assert {
-    condition     = (var.admin_seed_email == null) == (var.admin_seed_password == null)
-    error_message = "admin_seed_email and admin_seed_password must be supplied together or both omitted."
-  }
-}
-
 resource "yandex_lockbox_secret" "admin_seed" {
   count = var.admin_seed_email == null ? 0 : 1
 

@@ -11,6 +11,11 @@ variable "app_region" {
   description = "App Platform region slug."
   type        = string
   default     = "fra"
+
+  validation {
+    condition     = startswith(var.database_region, var.app_region) && var.spaces_region == var.database_region
+    error_message = "App Platform, database/VPC, and Spaces must use compatible DigitalOcean regions."
+  }
 }
 
 variable "database_region" {
@@ -106,6 +111,13 @@ variable "email_delivery" {
   validation {
     condition     = contains(["disabled", "resend"], var.email_delivery)
     error_message = "DigitalOcean production supports disabled or resend email delivery."
+  }
+
+  validation {
+    condition = var.email_delivery == "disabled" || (
+      var.email_from != null && contains(nonsensitive(keys(var.extra_runtime_secret_env)), "EMAIL_RESEND_API_KEY")
+    )
+    error_message = "email_delivery=resend requires email_from and EMAIL_RESEND_API_KEY in extra_runtime_secret_env."
   }
 }
 

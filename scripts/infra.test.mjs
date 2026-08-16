@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -20,6 +22,7 @@ import {
   parseSimpleAssignments,
   planSafetyProblems,
   prepareBootstrapBackend,
+  protectedYandexSecretVersionDestroyAddresses,
   finalizeStateRecovery,
   prepareStateRecoveryAccess,
   productionMutationNeedsLease,
@@ -36,8 +39,12 @@ import {
   stateKeyForRoot,
   stateRecoveryOutputs,
   staticUploadSteps,
+  verifyYandexStaticCommit,
   withProductionMutationLease,
   yandexDatabaseRotationProblems,
+  yandexRuntimeStateProblems,
+  writeYandexStaticReleaseMarkers,
+  yieldToProcessEvents,
 } from './infra.mjs'
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -216,6 +223,40 @@ describe('Terraform configuration helpers', () => {
     ])
   })
 
+  test('fails closed when Yandex runtime resources exist without runtime state', () => {
+    const foundationMetadata = {
+      fingerprints: { blue: 'blue', green: 'green', jwt: 'jwt' },
+      versions: { blue: 1, green: 1 },
+    }
+
+    expect(
+      yandexRuntimeStateProblems({
+        foundationMetadata: null,
+        deployedContainerNames: ['example-product-prod-api'],
+        projectSlug: 'example-product',
+      }),
+    ).toEqual([])
+    expect(
+      yandexRuntimeStateProblems({
+        foundationMetadata,
+        deployedContainerNames: ['example-product-prod-migration'],
+        projectSlug: 'example-product',
+      }),
+    ).toEqual([])
+    expect(
+      yandexRuntimeStateProblems({
+        foundationMetadata,
+        deployedContainerNames: [
+          'example-product-prod-api',
+          'example-product-prod-outbox',
+        ],
+        projectSlug: 'example-product',
+      }),
+    ).toEqual([
+      'Yandex runtime state has no credential slot, but deployed runtime containers still exist: example-product-prod-api, example-product-prod-outbox. Recover or import the runtime state before changing foundation credentials.',
+    ])
+  })
+
   test('allows replacement only for non-live Yandex Lockbox versions', () => {
     expect(safeYandexSecretVersionDestroyAddresses('blue')).toEqual([
       'yandex_lockbox_secret_version_hashed.runtime["green"]',
@@ -225,6 +266,9 @@ describe('Terraform configuration helpers', () => {
       'yandex_lockbox_secret_version_hashed.runtime["blue"]',
       'yandex_lockbox_secret_version_hashed.runtime["green"]',
       'yandex_lockbox_secret_version_hashed.migration_database',
+    ])
+    expect(protectedYandexSecretVersionDestroyAddresses('blue')).toEqual([
+      'yandex_lockbox_secret_version_hashed.runtime["blue"]',
     ])
   })
 
@@ -849,6 +893,20 @@ describe('release safety', () => {
             'yandex_iam_service_account_static_access_key.terraform_state',
           change: { actions: ['delete', 'create'] },
         },
+        {
+          address: 'digitalocean_spaces_key.media',
+          change: { actions: ['delete', 'create'] },
+        },
+        {
+          address:
+            'yandex_iam_service_account_static_access_key.media',
+          change: { actions: ['delete', 'create'] },
+        },
+        {
+          address:
+            'yandex_iam_service_account_static_access_key.postbox[0]',
+          change: { actions: ['delete', 'create'] },
+        },
       ],
     }
 
@@ -856,11 +914,37 @@ describe('release safety', () => {
       'yandex_mdb_postgresql_cluster.production',
       'yandex_storage_bucket.media',
       'yandex_iam_service_account_static_access_key.terraform_state',
+      'digitalocean_spaces_key.media',
+      'yandex_iam_service_account_static_access_key.media',
+      'yandex_iam_service_account_static_access_key.postbox[0]',
     ])
-    expect(problems).toHaveLength(3)
+    expect(problems).toHaveLength(6)
     expect(problems.every((problem) => problem.includes('protected'))).toBe(
       true,
     )
+  })
+
+  test('never accepts manual deletion of the active Yandex runtime secret version', () => {
+    const activeVersion =
+      'yandex_lockbox_secret_version_hashed.runtime["blue"]'
+    const plan = {
+      resource_changes: [
+        {
+          address: activeVersion,
+          change: { actions: ['delete', 'create'] },
+        },
+      ],
+    }
+
+    expect(
+      planSafetyProblems(
+        plan,
+        [activeVersion],
+        protectedYandexSecretVersionDestroyAddresses('blue'),
+      ),
+    ).toEqual([
+      `${activeVersion} is protected and would be replaced; this release path refuses it`,
+    ])
   })
 
   test('executes provider phases in migration-gated order', async () => {
@@ -955,6 +1039,54 @@ describe('release safety', () => {
     expect(events).toEqual(['assert-held', 'runtime', 'assert-held'])
   })
 
+  test('observes a lease process exit after a synchronous phase', async () => {
+    const events = []
+    let leaseChild
+    let settled = false
+
+    try {
+      await expect(
+        executePromotionPipeline(
+          'digitalocean',
+          {
+            deployRuntime: async () => {
+              events.push('runtime')
+              leaseChild = spawn(process.execPath, ['-e', 'process.exit(7)'], {
+                stdio: 'ignore',
+              })
+              leaseChild.once('close', () => {
+                settled = true
+              })
+              Atomics.wait(
+                new Int32Array(new SharedArrayBuffer(4)),
+                0,
+                0,
+                150,
+              )
+            },
+            tightenFoundation: async () => events.push('tighten'),
+            deployStatic: async () => events.push('static'),
+            verify: async () => events.push('verify'),
+          },
+          async () => {
+            await yieldToProcessEvents()
+            events.push('assert-held')
+            if (settled) throw new Error('production mutation lease was lost')
+          },
+        ),
+      ).rejects.toThrow('production mutation lease was lost')
+    } finally {
+      if (leaseChild && !settled) {
+        leaseChild.kill('SIGTERM')
+        await new Promise((resolveClose) =>
+          leaseChild.once('close', resolveClose),
+        )
+      }
+    }
+
+    expect(events).toEqual(['assert-held', 'runtime', 'assert-held'])
+  })
+
   test('pins DigitalOcean static source to one immutable commit branch', () => {
     const commit = '0123456789abcdef0123456789abcdef01234567'
     expect(immutableReleaseBranch(commit)).toBe(`infra-release/${commit}`)
@@ -1007,6 +1139,12 @@ describe('release safety', () => {
       release_revision: commit,
       source_branch: `infra-release/${commit}`,
     })
+    expect(() =>
+      importReleaseInputs('digitalocean', 'static', {
+        releaseRevision: commit,
+        sourceBranch: `infra-release/${'f'.repeat(40)}`,
+      }),
+    ).toThrow('must identify the same commit')
     expect(
       importReleaseInputs('yandex', 'migration', {
         runtimeImageDigest: digest,
@@ -1175,5 +1313,62 @@ describe('Yandex static publishing', () => {
     expect(steps[0].args).not.toContain('--delete')
     expect(steps[1].args.join(' ')).toContain('--exclude assets/*')
     expect(steps[1].args).toContain('--delete')
+  })
+
+  test('publishes and verifies the captured commit instead of accepting stale content', async () => {
+    const commit = '0123456789abcdef0123456789abcdef01234567'
+    const artifactRoot = mkdtempSync(resolve(tmpdir(), 'infra-static-marker-'))
+
+    try {
+      writeYandexStaticReleaseMarkers(artifactRoot, commit)
+      expect(
+        readFileSync(
+          resolve(artifactRoot, 'webapp', '.well-known', 'release-revision'),
+          'utf8',
+        ),
+      ).toBe(`${commit}\n`)
+      expect(
+        readFileSync(
+          resolve(artifactRoot, 'website', '.well-known', 'release-revision'),
+          'utf8',
+        ),
+      ).toBe(`${commit}\n`)
+    } finally {
+      rmSync(artifactRoot, { recursive: true, force: true })
+    }
+
+    const requestedUrls = []
+    await verifyYandexStaticCommit(
+      {
+        webapp_url: 'https://app.example.com',
+        website_url: 'https://www.example.com',
+      },
+      commit,
+      {
+        fetchImpl: async (url) => {
+          requestedUrls.push(String(url))
+          return new Response(`${commit}\n`, { status: 200 })
+        },
+        sleepImpl: async () => {},
+      },
+    )
+    expect(requestedUrls).toEqual([
+      `https://app.example.com/.well-known/release-revision?revision=${commit}`,
+      `https://www.example.com/.well-known/release-revision?revision=${commit}`,
+    ])
+
+    await expect(
+      verifyYandexStaticCommit(
+        {
+          webapp_url: 'https://app.example.com',
+          website_url: 'https://www.example.com',
+        },
+        commit,
+        {
+          fetchImpl: async () => new Response('stale-commit\n', { status: 200 }),
+          sleepImpl: async () => {},
+        },
+      ),
+    ).rejects.toThrow(`expected ${commit}`)
   })
 })

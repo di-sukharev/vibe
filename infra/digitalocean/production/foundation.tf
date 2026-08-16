@@ -3,22 +3,6 @@ locals {
   webapp_origin = "https://${var.webapp_domain}"
 }
 
-check "regions_are_compatible" {
-  assert {
-    condition     = startswith(var.database_region, var.app_region) && var.spaces_region == var.database_region
-    error_message = "App Platform, database/VPC, and Spaces must use compatible DigitalOcean regions."
-  }
-}
-
-check "email_is_complete" {
-  assert {
-    condition = var.email_delivery == "disabled" || (
-      var.email_from != null && contains(keys(var.extra_runtime_secret_env), "EMAIL_RESEND_API_KEY")
-    )
-    error_message = "email_delivery=resend requires email_from and EMAIL_RESEND_API_KEY in extra_runtime_secret_env."
-  }
-}
-
 resource "digitalocean_project" "production" {
   name        = "${var.project_slug} production"
   description = "Production infrastructure managed by Terraform."

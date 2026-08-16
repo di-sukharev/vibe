@@ -37,9 +37,26 @@ variable "dns_zone_id" {
   type     = string
   nullable = true
 }
-variable "dns_zone_domain" { type = string }
+variable "dns_zone_domain" {
+  type = string
+
+  validation {
+    condition = alltrue([
+      for domain in [var.api_domain, var.webapp_domain, var.website_domain] :
+      domain != var.dns_zone_domain && endswith(domain, ".${var.dns_zone_domain}")
+    ])
+    error_message = "Managed and documented external DNS require CNAME-safe subdomains; zone-apex domains need a different ANAME-capable non-CDN topology."
+  }
+}
 variable "enable_cdn" { type = bool }
-variable "route_static_through_cdn" { type = bool }
+variable "route_static_through_cdn" {
+  type = bool
+
+  validation {
+    condition     = !var.route_static_through_cdn || var.enable_cdn
+    error_message = "route_static_through_cdn requires enable_cdn=true."
+  }
+}
 variable "webapp_website_endpoint" { type = string }
 variable "webapp_website_domain" { type = string }
 variable "website_website_endpoint" { type = string }
