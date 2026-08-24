@@ -71,6 +71,16 @@ test('the mobile publication gate requires its three available capabilities', ()
     'Capability ledger is missing required capability "Social sign-in (Apple / Google)".',
   ])
 
+  const commentedCapabilities = validMobileChecklist.replace(
+    /(## 10\. Capability ledger\n\n)([\s\S]*?)(\n\n## 11\. Environment checks)/,
+    '$1<!--\n$2\n-->$3',
+  )
+  expect(validateMobileCapabilityContract(commentedCapabilities)).toEqual([
+    'Capability ledger is missing required capability "Payments / subscriptions".',
+    'Capability ledger is missing required capability "Push notifications".',
+    'Capability ledger is missing required capability "Social sign-in (Apple / Google)".',
+  ])
+
   const extraAvailable = validMobileChecklist.replace(
     /^(\| Real-time \/ WebSockets\s+\|) absent(\s+\|)/m,
     '$1 available$2',
@@ -89,14 +99,24 @@ test('the mobile publication gate requires its three available capabilities', ()
 })
 
 function mobileChecklist() {
-  return currentChecklist
-    .replace(
+  const checklistWithPayments = /^\| Payments \/ subscriptions\s+\|/m.test(currentChecklist)
+    ? currentChecklist
+    : currentChecklist.replace(
       /^(\| Browser checkout \/ payments\s+\| absent\s+\|.*)$/m,
       '$1\n| Payments / subscriptions        | available | Mobile store subscriptions are available. |',
     )
-    .replace(/^(\| Push notifications\s+\|) absent(\s+\|)/m, '$1 available$2')
+
+  return checklistWithPayments
     .replace(
-      /^(\| Social sign-in \(Apple \/ Google\)\s+\|) absent(\s+\|)/m,
+      /^(\| Payments \/ subscriptions\s+\|)\s*(?:included|available|absent|removed)(\s+\|)/m,
+      '$1 available$2',
+    )
+    .replace(
+      /^(\| Push notifications\s+\|)\s*(?:included|available|absent|removed)(\s+\|)/m,
+      '$1 available$2',
+    )
+    .replace(
+      /^(\| Social sign-in \(Apple \/ Google\)\s+\|)\s*(?:included|available|absent|removed)(\s+\|)/m,
       '$1 available$2',
     )
 }

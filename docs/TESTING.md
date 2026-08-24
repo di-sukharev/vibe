@@ -3,11 +3,12 @@
 The goal of this template's tests is to show future agents where behavior should be verified and how to keep E2E broad enough to protect valuable behavior without turning it into exhaustive matrices.
 
 `bun run check` is the canonical completion signal for an ordinary task. It runs
-`template:check -> architecture:check -> typecheck -> lint -> test`; because `test` includes the
-backend integration suite, both commands require Docker. `bun run template:check` is the fast,
-dependency-free guard for `CHECKLIST.md`, the capability ledger, equivalent `AGENTS.md` / `CLAUDE.md`
-instructions, and local Markdown file, directory, and heading links. Terraform remains an explicit
-optional signal through `bun run test:terraform` when its CLI is installed.
+`template:check -> architecture:check -> audit -> typecheck -> lint -> test`; the audit needs
+registry access, and because `test` includes the backend integration suite, the full gate also
+requires Docker. `bun run template:check` is the fast, dependency-free guard for `CHECKLIST.md`, the
+capability ledger, equivalent `AGENTS.md` / `CLAUDE.md` instructions, and local Markdown file,
+directory, and heading links. Terraform remains an explicit optional signal through
+`bun run test:terraform` when its CLI is installed.
 
 ## Pyramid
 

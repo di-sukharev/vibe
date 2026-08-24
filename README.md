@@ -227,10 +227,11 @@ Expo/EAS setup are documented in [mobile/README.md](mobile/README.md).
 Test runners use the separate Docker Compose `postgres_test` service and the `TEST_DATABASE_URL` shape from `backend/.env.example`. Webapp Playwright E2E starts `postgres_test`, applies migrations to `web_app_demo_test`, runs the browser flow, and tears down its test database volume by default.
 
 For an ordinary completed task, `bun run check` is the canonical local quality gate. It validates
-the reusable-template invariants first, then architecture boundaries, typecheck, lint, and the full
-test suite. The full suite includes backend integration tests, so Docker must be installed and the
-daemon running. Terraform validation remains a separate `bun run test:terraform` signal because it
-depends on the Terraform CLI rather than the normal application toolchain.
+the reusable-template invariants first, then architecture boundaries, dependency advisories,
+typecheck, lint, and the full test suite. The full suite includes backend integration tests, so
+Docker must be installed and the daemon running. The dependency audit needs registry access.
+Terraform validation remains a separate `bun run test:terraform` signal because it depends on the
+Terraform CLI rather than the normal application toolchain.
 
 ## Workspace Commands
 
@@ -240,8 +241,8 @@ depends on the Terraform CLI rather than the normal application toolchain.
 - `bun run dev:website` - start the Astro website project.
 - `bun run dev:mobile` - start the Expo mobile app.
 - `bun run dev:backend:s3` - start the backend against the local S3 container instead of the disk.
-- `bun run check` - canonical task-completion gate: template invariants, architecture, typecheck,
-  lint, and all tests; requires Docker for backend integration.
+- `bun run check` - canonical task-completion gate: template invariants, architecture, dependency
+  audit, typecheck, lint, and all tests; requires registry access and Docker for backend integration.
 - `bun run template:check` - validate checklist state, capability-ledger states, equivalent agent
   instructions, and local Markdown file, directory, and heading links.
 - `bun run typecheck` - run TypeScript checks across workspaces.
@@ -252,11 +253,16 @@ depends on the Terraform CLI rather than the normal application toolchain.
   `website/dist`, after those builds. Deliberately not part of `build`: only the own-server proxy
   reads those sidecars. Hosted releases upload/build the original assets and let their edge layer
   negotiate compression when available.
-- `bun audit` - list known vulnerabilities. It reports none today, and the `overrides` block in the
-  root `package.json` is why: every entry there is a minimum version that closes an advisory in a
-  transitive dependency nothing here imports directly. Treat that block as maintenance, not
-  configuration - after a dependency update, drop the floors one at a time and re-run `bun audit`;
-  the ones that stay quiet are no longer needed. `bun update` still moves everything within them.
+- `bun run audit` - fail on unreviewed dependency vulnerabilities. The `overrides` block in the root
+  `package.json` sets minimum safe versions for fixable transitive advisories. The mobile line also
+  carries two narrow, expiring exceptions for `image-size@1.2.1` because Metro uses it only for
+  local build assets and no patched npm release exists. The gate accepts only
+  `GHSA-w3rx-r6r6-pgpr` and `GHSA-5p2g-fcmc-qvqq`, verifies every lockfile resolution and reverse
+  installed-dependency path (Metro is the only direct consumer; only mobile reaches it), refuses
+  direct application use or graph drift, and expires after 2026-09-24. Track the upstream
+  [advisory-database issue](https://github.com/github/advisory-database/issues/9028), remove the
+  exceptions as soon as a fixed release reaches Expo/Metro, and re-run `bun run audit` after every
+  dependency update. `bun update` still moves override ranges within their safe floors.
 - Prisma is pinned to an exact `7.9.0` in `backend/package.json`, and that is deliberate: 7.9.1
   cannot be installed. `bun add @prisma/client@7.9.1` in an empty directory produces 12 KB and
   three files instead of 78 MB and seventeen, with an empty `runtime/`, so the generated client's

@@ -29,17 +29,23 @@ describe('template checklist validation', () => {
   })
 
   test('accepts the mobile template capability states without depending on a branch ref', () => {
-    const mobileChecklist = currentChecklist
-      .replace(
+    const checklistWithPayments = /^\| Payments \/ subscriptions\s+\|/m.test(currentChecklist)
+      ? currentChecklist
+      : currentChecklist.replace(
         /^(\| Browser checkout \/ payments\s+\| absent\s+\|.*)$/m,
         '$1\n| Payments / subscriptions        | available | Mobile store subscriptions are available. |',
       )
+    const mobileChecklist = checklistWithPayments
       .replace(
-        /^(\| Push notifications\s+\|) absent(\s+\|)/m,
+        /^(\| Payments \/ subscriptions\s+\|)\s*(?:included|available|absent|removed)(\s+\|)/m,
         '$1 available$2',
       )
       .replace(
-        /^(\| Social sign-in \(Apple \/ Google\)\s+\|) absent(\s+\|)/m,
+        /^(\| Push notifications\s+\|)\s*(?:included|available|absent|removed)(\s+\|)/m,
+        '$1 available$2',
+      )
+      .replace(
+        /^(\| Social sign-in \(Apple \/ Google\)\s+\|)\s*(?:included|available|absent|removed)(\s+\|)/m,
         '$1 available$2',
       )
 
@@ -69,6 +75,14 @@ describe('template checklist validation', () => {
     expect(validateChecklist(fencedHeading, { agents: currentAgents, claude: currentClaude })).toContain(
       'CHECKLIST.md is missing required heading "Project identity".',
     )
+
+    const commentedHeading = currentChecklist.replace(
+      '## 2. Product',
+      '<!--\n## 2. Product\n-->',
+    )
+    expect(
+      validateChecklist(commentedHeading, { agents: currentAgents, claude: currentClaude }),
+    ).toContain('CHECKLIST.md is missing required heading "Product".')
 
     const nestedShorterFence = `${currentChecklist}\n\`\`\`\`md\n\`\`\`\n**Install status:** \`completed 2026-08-16\`\n\`\`\`\``
     expect(validateChecklist(nestedShorterFence, { agents: currentAgents, claude: currentClaude })).toEqual([])
@@ -139,6 +153,14 @@ describe('template checklist validation', () => {
     expect(ledgerErrors).toContain(
       'Capability ledger must keep a three-column Markdown table separator.',
     )
+
+    const commentedLedger = currentChecklist.replace(
+      /(## 10\. Capability ledger\n\n)([\s\S]*?)(\n\n## 11\. Environment checks)/,
+      '$1<!--\n$2\n-->$3',
+    )
+    expect(
+      validateChecklist(commentedLedger, { agents: currentAgents, claude: currentClaude }),
+    ).toContain('Capability ledger must start with Capability, State, and Note columns.')
 
     const separatorShapedNote = currentChecklist.replace(
       /^\| Auth \(email \+ password\).*$/m,
