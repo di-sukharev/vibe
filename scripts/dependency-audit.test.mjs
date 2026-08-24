@@ -44,7 +44,7 @@ describe('dependency audit exceptions', () => {
   test('parses Bun JSON even when its banner is emitted after the report', () => {
     expect(
       parseAuditReport(
-        '{"image-size":[]}\n\u001b[1mbun audit\u001b[0m v1.3.14',
+        '{"image-size":[]}\n\u001b[1mbun audit\u001b[0m v1.4.0',
       ),
     ).toEqual({ 'image-size': [] })
   })

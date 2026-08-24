@@ -23,6 +23,11 @@ type WorkerSignalSource = {
   once(signal: WorkerSignal, listener: () => void): unknown
 }
 
+// Bun 1.4 adds a memoryPressure overload to Process that hides the inherited Node signal
+// overload during structural assignment. Narrow only at this boundary; the worker itself keeps a
+// small injectable contract that its shutdown behavior can test without a real process signal.
+const processWorkerSignals = process as unknown as WorkerSignalSource
+
 type WorkerLogger = Pick<Console, 'error' | 'log'>
 
 const defaultWorkerHeartbeatIntervalMs = 5 * 60 * 1_000
@@ -269,7 +274,7 @@ export function workerMode(argument: string | undefined): WorkerMode {
   process.exit(1)
 }
 
-export function listenForWorkerShutdown(source: WorkerSignalSource = process) {
+export function listenForWorkerShutdown(source: WorkerSignalSource = processWorkerSignals) {
   const controller = new AbortController()
   const abort = () => controller.abort()
 

@@ -1,4 +1,4 @@
-FROM oven/bun:1.3.14 AS build
+FROM oven/bun:1.4.0 AS build
 
 WORKDIR /app
 
@@ -13,7 +13,7 @@ WORKDIR /app/backend
 
 RUN DATABASE_URL="postgresql://superuser:superpassword@localhost:5432/web_app_demo?schema=public" bun run prisma:generate
 
-FROM oven/bun:1.3.14 AS production-dependencies
+FROM oven/bun:1.4.0 AS production-dependencies
 
 WORKDIR /app
 
@@ -21,7 +21,7 @@ COPY . .
 
 RUN bun install --frozen-lockfile --production --filter @web-app-demo/backend
 
-FROM oven/bun:1.3.14 AS runtime
+FROM oven/bun:1.4.0 AS runtime
 
 WORKDIR /app
 
