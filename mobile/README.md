@@ -292,11 +292,17 @@ bun run mobile:template:check -- --published
 ```
 
 The default check allows a clean candidate ahead of `origin/mobile`; `--published` additionally
-requires `HEAD` to equal that ref. Both verify current `origin/master`, the native App Store and
-Google Play paths, the cross-surface contract, equivalent agent instructions, the template ledger,
-and the relevant local suites. If the check fails, stop setup or template publication. After first-run setup
-changes capabilities to `included` or `removed`, do not use this template gate for product releases;
-use the installed product's recorded local test, typecheck, store-sandbox, and release runbooks.
+requires `HEAD` to equal that remote ref. Both require the `mobile` branch to contain current
+`origin/master`, the runnable mobile/IAP files, the cross-surface contract, equivalent agent
+instructions, and exactly the payments/push/social capability rows in the `available` state. They
+run the canonical `bun run check` gate across the synchronized mobile workspace — including
+template and architecture checks, typecheck, lint, and all tests with backend integration — followed
+by the Maestro flow-policy audit. If the command is missing or fails, stop setup or template-line
+publication and ask the template maintainer to synchronize the mobile line; do not improvise
+conflict resolution in a new product checkout. After first-run setup changes capabilities to
+`included` or `removed`, do not use this template gate for product releases; validate the installed
+product's active mobile paths with its recorded local test, typecheck, store-sandbox, and release
+runbooks instead.
 
 ## Current Upstream Documentation
 

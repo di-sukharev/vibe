@@ -83,20 +83,7 @@ const { primaryHref, primaryLabel, secondaryHref, secondaryLabel } = Astro.props
           <span class="text-xs font-bold text-white/55">Ваш проект</span>
         </CardHeader>
         <CardContent className="relative h-[27rem] overflow-hidden p-0 sm:h-[31rem]" data-hero-visual>
-          <HeroScene client:only="react">
-            <div
-              slot="fallback"
-              class="relative h-full min-h-[25rem] overflow-hidden bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.12),transparent_46%),linear-gradient(145deg,#151515,#070707)]"
-              data-hero-scene-fallback
-              aria-hidden="true"
-            >
-              <div class="absolute top-1/2 left-1/2 h-72 w-80 -translate-x-1/2 -translate-y-1/2 rotate-6 rounded-[42%] border-2 border-white/55"></div>
-              <div class="absolute top-1/2 left-1/2 h-48 w-60 -translate-x-1/2 -translate-y-1/2 -rotate-6 rounded-[40%] border border-white/35"></div>
-              <div class="absolute top-1/2 left-1/2 h-24 w-72 -translate-x-1/2 -translate-y-1/2 rotate-3 rounded-[50%] border-2 border-white/65"></div>
-              <div class="absolute top-1/2 left-1/2 size-16 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white/70"></div>
-              <div class="absolute top-1/2 left-1/2 size-6 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white/50"></div>
-            </div>
-          </HeroScene>
+          <HeroScene client:idle={{ timeout: 2500 }} />
 
           <div class="pointer-events-none absolute top-5 right-5 left-5 flex items-center justify-between gap-3" aria-hidden="true">
             <span class="rounded-full border border-white/10 bg-black/35 px-3 py-1.5 text-[0.68rem] font-bold tracking-[0.14em] text-white/75 uppercase backdrop-blur-md">

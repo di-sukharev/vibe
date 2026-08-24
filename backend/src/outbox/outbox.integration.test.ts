@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
+import { afterAll, beforeEach, describe, expect, spyOn, test } from 'bun:test'
 
 import { createPrisma } from '../db'
 import type { BackendRuntime } from '../runtime'
@@ -165,26 +165,36 @@ maybeDescribe('the task outbox against a real database', () => {
         },
       },
     }
-    const { id } = await enqueueTask(prisma, { type: 'test:work', dedupeKey: 'failing', payload: {} }, failing)
+    const error = spyOn(console, 'error').mockImplementation(() => {})
 
-    const first = await drainTaskOutbox(runtime, { handlers: failing, now: now(), random: () => 0 })
-    expect(first).toMatchObject({ transientFailed: 1 })
+    try {
+      const { id } = await enqueueTask(prisma, { type: 'test:work', dedupeKey: 'failing', payload: {} }, failing)
 
-    const retried = await prisma.taskOutbox.findUniqueOrThrow({ where: { id } })
-    expect(retried.status).toBe('pending')
-    expect(retried.scheduledFor.getTime()).toBeGreaterThan(Date.now())
-    expect(retried.lastError).toBe('provider unavailable')
+      const first = await drainTaskOutbox(runtime, { handlers: failing, now: now(), random: () => 0 })
+      expect(first).toMatchObject({ transientFailed: 1 })
 
-    // Jump the clock forward instead of waiting two minutes.
-    const later = new Date(Date.now() + 10 * 60 * 1000)
-    const second = await drainTaskOutbox(runtime, { handlers: failing, now: later })
+      const retried = await prisma.taskOutbox.findUniqueOrThrow({ where: { id } })
+      expect(retried.status).toBe('pending')
+      expect(retried.scheduledFor.getTime()).toBeGreaterThan(Date.now())
+      expect(retried.lastError).toBe('provider unavailable')
 
-    expect(second).toMatchObject({ terminalFailed: 1 })
-    expect(await prisma.taskOutbox.findUniqueOrThrow({ where: { id } })).toMatchObject({
-      attempts: 2,
-      redactedAt: expect.any(Date),
-      status: 'failed',
-    })
+      // Jump the clock forward instead of waiting two minutes.
+      const later = new Date(Date.now() + 10 * 60 * 1000)
+      const second = await drainTaskOutbox(runtime, { handlers: failing, now: later })
+
+      expect(second).toMatchObject({ terminalFailed: 1 })
+      expect(await prisma.taskOutbox.findUniqueOrThrow({ where: { id } })).toMatchObject({
+        attempts: 2,
+        redactedAt: expect.any(Date),
+        status: 'failed',
+      })
+      expect(error).toHaveBeenCalledWith(
+        `Task test:work ${id} gave up after 2 attempts.`,
+        expect.any(Error),
+      )
+    } finally {
+      error.mockRestore()
+    }
   })
 
   test('terminal rows keep their audit skeleton and lose their payload', async () => {

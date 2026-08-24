@@ -226,6 +226,12 @@ Expo/EAS setup are documented in [mobile/README.md](mobile/README.md).
 
 Test runners use the separate Docker Compose `postgres_test` service and the `TEST_DATABASE_URL` shape from `backend/.env.example`. Webapp Playwright E2E starts `postgres_test`, applies migrations to `web_app_demo_test`, runs the browser flow, and tears down its test database volume by default.
 
+For an ordinary completed task, `bun run check` is the canonical local quality gate. It validates
+the reusable-template invariants first, then architecture boundaries, typecheck, lint, and the full
+test suite. The full suite includes backend integration tests, so Docker must be installed and the
+daemon running. Terraform validation remains a separate `bun run test:terraform` signal because it
+depends on the Terraform CLI rather than the normal application toolchain.
+
 ## Workspace Commands
 
 - `bun run dev` - start all workspace projects in parallel dev mode.
@@ -234,6 +240,10 @@ Test runners use the separate Docker Compose `postgres_test` service and the `TE
 - `bun run dev:website` - start the Astro website project.
 - `bun run dev:mobile` - start the Expo mobile app.
 - `bun run dev:backend:s3` - start the backend against the local S3 container instead of the disk.
+- `bun run check` - canonical task-completion gate: template invariants, architecture, typecheck,
+  lint, and all tests; requires Docker for backend integration.
+- `bun run template:check` - validate checklist state, capability-ledger states, equivalent agent
+  instructions, and local Markdown file, directory, and heading links.
 - `bun run typecheck` - run TypeScript checks across workspaces.
 - `bun run lint` - run ESLint over the webapp and mobile app.
 - `bun run architecture:check` - enforce the module/feature dependency boundaries.
@@ -254,7 +264,10 @@ Test runners use the separate Docker Compose `postgres_test` service and the `TE
   180 typecheck errors that look nothing like a packaging problem. The published tarball is
   intact, so this is an install-side failure. `bun update` cannot move an exact pin; `bun update
 --latest` can, so check Prisma after one, and try 7.9.2 when it ships.
-- `bun run test` - run infrastructure, contract, backend, webapp, website, and mobile tests.
+- `bun run test` - run infrastructure, contract, backend, webapp, website, and mobile tests; requires
+  Docker because backend integration starts PostgreSQL.
+- `bun run test:terraform` - validate every Terraform root when the Terraform CLI is installed;
+  intentionally separate from `bun run check`.
 - `bun run test:infra` - run release orchestration and infrastructure safety tests (no cloud mutation).
 - `bun run test:contracts` - run shared Zod contract tests.
 - `bun run test:backend` - run backend unit and integration tests.

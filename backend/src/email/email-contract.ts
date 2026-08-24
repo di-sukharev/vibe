@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, spyOn, test } from 'bun:test'
 
 import { EmailDeliveryError } from './errors'
 import type { EmailDelivery, EmailDriverName, EmailMessage } from './port'
@@ -84,6 +84,23 @@ export function describeEmailContract(name: string, createSetup: () => EmailCont
       throw new Error('Expected the send to reject, but it resolved.')
     }
 
+    async function transportFailureFrom(provider: string, send: () => Promise<void>) {
+      const error = spyOn(console, 'error').mockImplementation(() => {})
+
+      try {
+        const failure = await failureFrom(send)
+
+        expect(error).toHaveBeenCalledTimes(1)
+        expect(String(error.mock.calls[0]?.[0]).toLowerCase()).toBe(
+          `${provider.toLowerCase()} transport failure:`,
+        )
+        expect(error.mock.calls[0]?.[1]).toBeInstanceOf(Error)
+        return failure
+      } finally {
+        error.mockRestore()
+      }
+    }
+
     test('identifies itself and reports that it can send', () => {
       const setup = createSetup()
       const delivery = setup.createDelivery(async () => setup.responses.accepted())
@@ -129,7 +146,7 @@ export function describeEmailContract(name: string, createSetup: () => EmailCont
 
     test('a transport failure is transient', async () => {
       const setup = createSetup()
-      const error = await failureFrom(() =>
+      const error = await transportFailureFrom(setup.driver, () =>
         setup
           .createDelivery(async () => {
             throw new Error(`getaddrinfo ENOTFOUND for ${contractMessage.to}`)
@@ -194,7 +211,7 @@ export function describeEmailContract(name: string, createSetup: () => EmailCont
 
     test('a request slower than the timeout is transient', async () => {
       const setup = createSetup()
-      const error = await failureFrom(() =>
+      const error = await transportFailureFrom(setup.driver, () =>
         setup
           .createDelivery(async (_url, init) => {
             await new Promise((resolve, reject) => {
@@ -236,7 +253,7 @@ export function describeEmailContract(name: string, createSetup: () => EmailCont
         return (originalRemove as (type: string, ...rest: never[]) => void)(type, ...rest)
       }) as typeof controller.signal.removeEventListener
 
-      const error = await failureFrom(() =>
+      const error = await transportFailureFrom(setup.driver, () =>
         setup
           .createDelivery(async (_url, init) => {
             await new Promise((_resolve, reject) => {
@@ -275,17 +292,29 @@ export function describeEmailContract(name: string, createSetup: () => EmailCont
         },
       ]
 
-      for (const respond of transports) {
-        const error = await failureFrom(() =>
-          setup
-            .createDelivery(respond)
-            .send(contractMessage, { signal: AbortSignal.timeout(5_000) }),
-        )
+      const transportError = spyOn(console, 'error').mockImplementation(() => {})
 
-        const reported = `${(error as Error).message} ${JSON.stringify((error as EmailDeliveryError).details)}`
-        expect(reported).not.toContain(contractMessage.to)
-        expect(reported).not.toContain(contractMessage.subject)
-        expect(reported).not.toContain(contractMessage.text)
+      try {
+        for (const respond of transports) {
+          const error = await failureFrom(() =>
+            setup
+              .createDelivery(respond)
+              .send(contractMessage, { signal: AbortSignal.timeout(5_000) }),
+          )
+
+          const reported = `${(error as Error).message} ${JSON.stringify((error as EmailDeliveryError).details)}`
+          expect(reported).not.toContain(contractMessage.to)
+          expect(reported).not.toContain(contractMessage.subject)
+          expect(reported).not.toContain(contractMessage.text)
+        }
+
+        expect(transportError).toHaveBeenCalledTimes(1)
+        expect(String(transportError.mock.calls[0]?.[0]).toLowerCase()).toBe(
+          `${setup.driver.toLowerCase()} transport failure:`,
+        )
+        expect(transportError.mock.calls[0]?.[1]).toBeInstanceOf(Error)
+      } finally {
+        transportError.mockRestore()
       }
     })
   })

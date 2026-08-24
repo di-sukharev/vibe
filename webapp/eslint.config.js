@@ -51,12 +51,34 @@ const childrenPassthroughElementNames = new Set([
   'section',
 ])
 
-const nativeTextOnlyElementNames = new Set([
+const technicalTextElementNames = new Set([
   'option',
+  'script',
+  'style',
+  'template',
+  'textarea',
+  'title',
 ])
 
 function isDomElementName(name) {
   return /^[a-z]/.test(name)
+}
+
+function isTechnicalTextElement(openingElement) {
+  const name = jsxNameToString(openingElement?.name)
+  if (technicalTextElementNames.has(name)) return true
+
+  let current = openingElement?.parent
+  while (current) {
+    if (
+      current.type === 'JSXElement' &&
+      jsxNameToString(current.openingElement?.name) === 'svg'
+    ) {
+      return true
+    }
+    current = current.parent
+  }
+  return false
 }
 
 function jsxNameToString(name) {
@@ -345,7 +367,7 @@ const typographyPolicyPlugin = {
 
           if (parentName === 'Typography') return
           if (!isDomElementName(parentName)) return
-          if (nativeTextOnlyElementNames.has(parentName)) return
+          if (isTechnicalTextElement(parentOpeningElement)) return
           if (isTypographySlotElement(parentOpeningElement)) return
 
           context.report({
@@ -431,7 +453,7 @@ const typographyPolicyPlugin = {
 
           if (parentName === 'Typography') return
           if (!isDomElementName(parentName)) return
-          if (nativeTextOnlyElementNames.has(parentName)) return
+          if (isTechnicalTextElement(parentOpeningElement)) return
           if (isTypographySlotElement(parentOpeningElement)) return
           if (!isLikelyTextExpression(node.expression, parentName)) return
 

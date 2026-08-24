@@ -2,6 +2,13 @@
 
 The goal of this template's tests is to show future agents where behavior should be verified and how to keep E2E broad enough to protect valuable behavior without turning it into exhaustive matrices.
 
+`bun run check` is the canonical completion signal for an ordinary task. It runs
+`template:check -> architecture:check -> typecheck -> lint -> test`; because `test` includes the
+backend integration suite, both commands require Docker. `bun run template:check` is the fast,
+dependency-free guard for `CHECKLIST.md`, the capability ledger, equivalent `AGENTS.md` / `CLAUDE.md`
+instructions, and local Markdown file, directory, and heading links. Terraform remains an explicit
+optional signal through `bun run test:terraform` when its CLI is installed.
+
 ## Pyramid
 
 - Contracts/unit: shared Zod schema matrices, env parsing, JWTs, password hashing, client API refresh/retry behavior, and token cleanup.
@@ -46,14 +53,17 @@ the Docker Postgres and runs in `test:integration`. Anything named `*.live.test.
 service or account that no runner starts for it - the local S3 container, or an email provider - and
 runs in `test:live`.
 Everything else named `*.test.ts` or `*.test.mjs` runs in `test:unit` with nothing installed. Name a
-test accordingly: `backend/scripts/test-files.mjs` owns the split. A suite belonging to a capability that ships switched
-off marks itself `@parked-test` in its opening comment and runs in no runner until that line is
-deleted; every suite under `backend/src/modules/billing/` is parked that way today. The mobile
-package has no marker mechanism, so it does the same thing with a directory: `mobile/tests/parked/`
-is excluded by `--path-ignore-patterns`, and moving a file out of it is the whole re-activation.
-The third category exists so `bun run test` stays runnable on a machine with no Docker daemon. A
-live test landing in the unit set would fail for everyone who has not started a container, and a red
-suite people learn to ignore is worse than no suite. Run the live tests deliberately:
+test accordingly: `backend/scripts/test-files.mjs` owns the split. A suite belonging to a capability
+that ships switched off marks itself `@parked-test` in its opening comment and runs in no runner
+until that line is deleted; every suite under `backend/src/modules/billing/` is parked that way
+today. The mobile package has no marker mechanism, so it does the same thing with a directory:
+`mobile/tests/parked/` is excluded by `--path-ignore-patterns`, and moving a file out of it is the
+whole re-activation.
+
+The third category keeps `bun run test:backend:unit` runnable without Docker. The root
+`bun run test` still requires Docker because it deliberately includes backend integration. A live
+test landing in the unit set would fail for everyone who has not configured that provider, so run
+live tests deliberately:
 
 ```bash
 bun run test:storage:s3          # starts the local S3 container and runs the storage contract
@@ -68,7 +78,30 @@ quietly passes without contacting anything proves nothing. See [STORAGE.md](STOR
 
 Contract tests live in `packages/contracts/src/*.test.ts` and protect shared request/response/error schemas used by backend, webapp, and mobile. Webapp and mobile unit tests live in each client `tests/` directory and cover API refresh/retry behavior that would be too expensive and brittle to fully exercise in E2E.
 
-Backend tests live next to their owning product modules. Integration tests exercise auth, users/admin RBAC, and notifications through application/transport boundaries and real PostgreSQL persistence. The billing suites are parked with their capability (docs/IAP.md) and run again once the tables are uncommented. The integration runner starts `postgres_test`, applies migrations, and covers session rotation, role guards, profile validation, last-admin/concurrent-demotion safety, role-change session revocation, seed idempotence, ownership, outbox retries, receipts, and stable error shapes. By default, the test database port is derived from the absolute repository path so parallel checkouts do not collide, and `TEST_DATABASE_URL` is derived from that port. Set `POSTGRES_TEST_PORT` and `TEST_DATABASE_URL` only when a fixed test database is required. Local database startup, credentials, and reset behavior are documented in [LOCAL_DATABASE.md](LOCAL_DATABASE.md).
+Backend tests live next to their owning product modules. Integration tests exercise auth,
+users/admin RBAC, and notifications through application/transport boundaries and real PostgreSQL
+persistence. The billing suites are parked with their capability ([IAP.md](IAP.md)) and run again
+once the tables are uncommented. Every managed invocation owns a unique
+`${COMPOSE_PROJECT_NAME}-integration-<run>` Compose project, starts `postgres_test`, waits for
+readiness, applies migrations, and runs every discovered integration file. Its `finally` cleanup
+removes only that run's service, exact `<run-project>_postgres_18_test_data` volume, and default
+network, including after a partial startup failure; it cannot remove another run's resources. It
+never stops the development database or optional local storage. The suites cover session rotation,
+role guards, profile validation, last-admin/concurrent-demotion safety, role-change session
+revocation, seed idempotence, ownership, outbox retries, receipts, and stable error shapes. Set
+`TEST_KEEP_DOCKER=1` to keep the runner-managed test database for investigation. Set
+`TEST_SKIP_DOCKER=1` together with an explicit `TEST_DATABASE_URL` to use an externally managed test
+database; the runner rejects the skip flag without that URL, and in this mode it neither starts nor
+removes Docker resources. By default, the test database port is derived from the absolute repository
+path so parallel checkouts do not collide, and `TEST_DATABASE_URL` is derived from that port. Set
+`POSTGRES_TEST_PORT` and `TEST_DATABASE_URL` only when a fixed test database is required. Local
+database startup, credentials, and reset behavior are documented in
+[LOCAL_DATABASE.md](LOCAL_DATABASE.md).
+
+Two managed integration runs from the same checkout use separate Compose projects but still target
+the same repository-derived host port. If one already owns that port, the other fails startup
+without tearing the owner down. To reuse a database another process manages, set
+`TEST_SKIP_DOCKER=1` with its explicit test-only URL.
 
 The integration and Docker smoke runners refuse database names that do not end with `_test` unless an override is set intentionally. This protects `web_app_demo` development data from test writes.
 

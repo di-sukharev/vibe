@@ -8,10 +8,9 @@ import { Glob } from 'bun'
  *
  * A test that needs the database is named `*.integration.test.ts`; a test that needs a service no
  * runner starts for it - the local S3 container, or an email provider - is named
- * `*.live.test.ts`; everything else runs with nothing installed. That third category is why
- * `bun run test` stays runnable on a machine with no Docker daemon: a live test landing in the
- * unit set would fail for everyone who has not started a container, which is the fastest way to
- * teach people to ignore a red suite.
+ * `*.live.test.ts`; everything else runs with nothing installed. That third category keeps the
+ * unit runner useful without Docker or provider credentials. The root `bun run test` still needs
+ * Docker because it intentionally includes the integration runner.
  *
  * A suite belonging to a capability that ships switched off - billing, for instance, whose tables
  * are commented out in the Prisma schema - marks itself `@parked-test` in its opening comment and

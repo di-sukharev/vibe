@@ -13,7 +13,7 @@
     "test": "bun test tests --path-ignore-patterns='**/tests/parked/**'",
     "typecheck": "tsc --noEmit",
     "build": "expo export --platform web",
-    "doctor": "bunx expo-doctor@latest .",
+    "doctor": "bunx expo-doctor@1.20.0 .",
     "e2e:maestro": "bun scripts/e2e/run-maestro.mjs",
     "e2e:maestro:audit": "bun scripts/e2e/maestro-policy-audit.mjs",
     "e2e:maestro:setup": "bash scripts/e2e/setup-maestro-cli.sh"

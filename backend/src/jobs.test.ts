@@ -128,11 +128,20 @@ describe('runBackgroundJob', () => {
       const { calls, runtime: cleanupRuntime } = createCleanupRuntime({
         failingKey: 'avatars/2026/07/one',
       })
+      const error = spyOn(console, 'error').mockImplementation(() => {})
 
-      await runBackgroundJob('uploads:pending:cleanup', cleanupRuntime, new Date())
+      try {
+        await runBackgroundJob('uploads:pending:cleanup', cleanupRuntime, new Date())
 
-      expect(calls.deletedObjects).toEqual(['avatars/2026/07/two'])
-      expect(calls.deleteMany).toEqual([{ where: { id: { in: ['upload-2'] } } }])
+        expect(calls.deletedObjects).toEqual(['avatars/2026/07/two'])
+        expect(calls.deleteMany).toEqual([{ where: { id: { in: ['upload-2'] } } }])
+        expect(error).toHaveBeenCalledWith(
+          'Job uploads:pending:cleanup could not delete avatars/2026/07/one:',
+          expect.any(Error),
+        )
+      } finally {
+        error.mockRestore()
+      }
     })
 
     test('does not issue a delete when every object failed', async () => {
@@ -147,10 +156,20 @@ describe('runBackgroundJob', () => {
           },
         },
       } as unknown as BackendRuntime
+      const error = spyOn(console, 'error').mockImplementation(() => {})
 
-      await runBackgroundJob('uploads:pending:cleanup', runtimeAllFailing, new Date())
+      try {
+        await runBackgroundJob('uploads:pending:cleanup', runtimeAllFailing, new Date())
 
-      expect(calls.deleteMany).toEqual([])
+        expect(calls.deleteMany).toEqual([])
+        expect(error).toHaveBeenCalledTimes(2)
+        expect(error.mock.calls.map(([message]) => String(message))).toEqual([
+          'Job uploads:pending:cleanup could not delete avatars/2026/07/one:',
+          'Job uploads:pending:cleanup could not delete avatars/2026/07/two:',
+        ])
+      } finally {
+        error.mockRestore()
+      }
     })
   })
 

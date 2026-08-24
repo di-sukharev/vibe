@@ -21,7 +21,7 @@
 
 - If instructions conflict, follow higher-priority system, developer, and user instructions first, then the nearest repository instructions.
 - Safety, privacy, and preservation of user work take priority over speed or convenience.
-- When editing this file, keep equivalent agent files such as `CLAUDE.md` aligned unless the difference is intentional and documented.
+- When editing this file, keep equivalent agent files such as `CLAUDE.md` aligned.
 
 ## Working With The User
 

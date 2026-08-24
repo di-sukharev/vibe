@@ -13,10 +13,12 @@ The website workspace is a separate Astro project for public, SEO-facing surface
 
 The landing page is composed from small Astro-owned sections under `src/components/landing`.
 The complete generated shadcn registry lives under `src/components/ui`; landing sections use only
-the primitives they need and keep product content in static HTML. The hero's R3F scene is the one
-intentional client-only enhancement and remains decorative; it must not own SEO-critical copy. Keep
-product copy and composition in the landing components, global tokens in `src/styles/global.css`,
-and page metadata in the layout/page.
+the primitives they need and keep product content in static HTML. The hero always renders its CSS
+fallback into the static SSG document and hydrates its lightweight shell with `client:idle`. That
+shell imports the R3F/Three Canvas only on viewports at least 1024 px wide when reduced motion is
+not requested, so mobile and reduced-motion visitors never download the 3D bundle. The scene stays
+decorative and must not own SEO-critical copy. Keep product copy and composition in the landing
+components, global tokens in `src/styles/global.css`, and page metadata in the layout/page.
 
 ## Rendering model
 
