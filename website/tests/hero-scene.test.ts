@@ -63,7 +63,13 @@ test('the R3F enhancement loads once and only while desktop motion is eligible',
   assert.deepEqual(eligibility, [false, true, false, true])
 })
 
-test('the static build keeps the fallback eager and the R3F scene lazy', { timeout: 30_000 }, () => {
+test('the static build keeps the fallback eager, the R3F scene lazy, and story styles isolated', { timeout: 30_000 }, () => {
+  const storySource = readFileSync(
+    resolve(websiteRoot, 'src/stories/ui/demos.tsx'),
+    'utf8',
+  )
+  assert.match(storySource, /h-\[34rem\]/)
+
   execFileSync('bun', ['run', 'build'], {
     cwd: websiteRoot,
     env: process.env,
@@ -76,6 +82,10 @@ test('the static build keeps the fallback eager and the R3F scene lazy', { timeo
   const scripts = readdirSync(assets)
     .filter((name) => name.endsWith('.js'))
     .map((name) => ({ name, source: readFileSync(resolve(assets, name), 'utf8') }))
+  const css = readdirSync(assets)
+    .filter((name) => name.endsWith('.css'))
+    .map((name) => readFileSync(resolve(assets, name), 'utf8'))
+    .join('\n')
   const canvasChunk = scripts.find(({ source }) => source.includes('data-hero-scene-canvas'))
   const shellUrl = html.match(
     /<astro-island[^>]*component-url="([^"]+\.js)"[^>]*>[\s\S]*?data-hero-scene/,
@@ -83,6 +93,7 @@ test('the static build keeps the fallback eager and the R3F scene lazy', { timeo
 
   assert.match(html, /data-hero-scene-fallback/)
   assert.match(html, /client="idle"/)
+  assert.ok(!css.includes('.h-\\[34rem\\]{'))
   assert.ok(canvasChunk, 'expected a separate R3F canvas chunk')
   assert.ok(shellUrl, 'expected the lightweight HeroScene island chunk')
   assert.doesNotMatch(html, new RegExp(escapeRegExp(canvasChunk.name)))

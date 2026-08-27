@@ -12,6 +12,8 @@
     "test": "bun test tests",
     "typecheck": "astro check",
     "preview": "astro preview",
+    "storybook": "storybook dev --port 6007 --no-open",
+    "storybook:build": "storybook build --output-dir storybook-static",
     "astro": "astro"
   },
   "dependencies": {

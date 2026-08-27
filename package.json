@@ -38,6 +38,11 @@
     "dev:website": "bun run --cwd website dev",
     "dev:mobile": "bun run --cwd mobile dev",
     "dev:backend": "bun run --cwd backend dev",
+    "storybook:webapp": "bun run --cwd webapp storybook",
+    "storybook:website": "bun run --cwd website storybook",
+    "storybook:build": "bun run storybook:build:webapp && bun run storybook:build:website",
+    "storybook:build:webapp": "bun run --cwd webapp storybook:build",
+    "storybook:build:website": "bun run --cwd website storybook:build",
     "dev:backend:s3": "bun scripts/storage-local.mjs dev-backend",
     "dev:seed": "bun run --cwd backend prisma:seed",
     "build": "bun run --filter '*' --sequential build",
@@ -82,5 +87,11 @@
     "e2e:webapp": "bun run --cwd webapp e2e",
     "e2e:webapp:s3": "bun scripts/storage-local.mjs e2e",
     "e2e:mobile": "bun run --cwd mobile e2e:maestro"
+  },
+  "devDependencies": {
+    "@storybook/addon-a11y": "10.5.10",
+    "@storybook/addon-docs": "10.5.10",
+    "@storybook/react-vite": "10.5.10",
+    "storybook": "10.5.10"
   }
 }

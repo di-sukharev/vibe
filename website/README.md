@@ -64,9 +64,17 @@ bun run typecheck
 bun run build
 bun run test
 bun run preview
+bun run storybook
+bun run storybook:build
 ```
 
 Astro publishes pages from `src/pages`. Static assets live in `public`.
+
+Storybook runs locally on port `6007` in the website's dark monochrome theme. It catalogs every
+React module in `src/components/ui` and non-production CTA, card-grid, FAQ/form, and content-block
+compositions. The current Astro landing sections and pages stay outside the catalog: Storybook uses
+the official React/Vite renderer only, adds no Astro adapter or hydration to the site, and its
+static output is not part of `website/dist`.
 
 ## Deployment
 

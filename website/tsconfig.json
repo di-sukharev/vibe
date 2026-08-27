@@ -5,7 +5,8 @@
     "**/*"
   ],
   "exclude": [
-    "dist"
+    "dist",
+    "storybook-static"
   ],
   "compilerOptions": {
     "baseUrl": ".",

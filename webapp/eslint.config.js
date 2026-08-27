@@ -513,7 +513,7 @@ const typographyPolicyPlugin = {
 }
 
 export default defineConfig([
-  globalIgnores(['dist', 'e2e/.artifacts']),
+  globalIgnores(['dist', 'storybook-static', 'e2e/.artifacts']),
   {
     files: ['**/*.{ts,tsx}'],
     plugins: {
@@ -548,6 +548,15 @@ export default defineConfig([
     // Official shadcn registry output is regenerated as a unit. Product-specific
     // composition and typography policy stay outside this directory.
     files: ['src/components/ui/**/*.{ts,tsx}'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
+      'typographyPolicy/use-typography-component': 'off',
+    },
+  },
+  {
+    // Stories deliberately use plain elements to demonstrate the UI primitives
+    // themselves instead of depending on product-level typography composition.
+    files: ['src/stories/**/*.{ts,tsx}'],
     rules: {
       'react-refresh/only-export-components': 'off',
       'typographyPolicy/use-typography-component': 'off',

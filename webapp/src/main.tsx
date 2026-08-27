@@ -6,7 +6,7 @@ import { createRoot } from 'react-dom/client'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { AuthProvider } from '@/features/auth'
 import App from './App'
-import './index.css'
+import './production.css'
 
 const queryClient = new QueryClient({
   defaultOptions: {

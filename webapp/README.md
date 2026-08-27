@@ -33,9 +33,18 @@ bun run test
 bun run e2e
 bun run e2e:ui
 bun run ui:info
+bun run storybook
+bun run storybook:build
 ```
 
-From the repository root, use `bun run dev:webapp`, `bun run build:webapp`, `bun run typecheck:webapp`, `bun run test:webapp`, and `bun run e2e:webapp`.
+From the repository root, use `bun run dev:webapp`, `bun run build:webapp`, `bun run typecheck:webapp`, `bun run test:webapp`, `bun run e2e:webapp`, `bun run storybook:webapp`, and `bun run storybook:build:webapp`.
+
+Storybook runs locally on port `6006`. It catalogs every module in `src/components/ui`, reusable
+route-independent components such as typography and dashboard composition, plus non-production
+examples of common forms, metrics, tables, and data states. Stories use the real global CSS,
+theme switcher, fonts, tooltips, and portals, but deliberately exclude routes, auth/API state, and
+feature components. The static catalog output is local validation only and is not part of the
+production Vite build.
 
 ## Env
 

@@ -91,7 +91,7 @@ This block exists only for fresh installs from the template. If this repository 
 ## Git And Remote Policy
 
 - Inspect `git remote -v` before any branch, commit, push, or PR workflow.
-- Work on `master` unless explicitly told otherwise. Do not create, switch to, or suggest new branches without request.
+- Use the repository's `main` or `master`; create, switch to, or suggest another branch only on explicit user request.
 - Treat this repository as a template for a new project by default, not as a pull request source for the template.
 - If `origin` points to the template repository and the user has not explicitly said they are contributing to the template, remove it with `git remote remove origin`.
 - Add the user's own GitHub repository as `origin` only when the user provides a URL or asks to create/publish the project.
