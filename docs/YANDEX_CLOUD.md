@@ -174,6 +174,109 @@ retries. Command/task mode is used only for the explicitly invoked migration bec
 returns HTTP 200 for that mode and exposes the process result through `X-Task-Exit-Code`; the release
 script checks that header before promotion.
 
+## Operator database access
+
+Use IAM authentication through the Yandex Cloud CLI for an interactive `psql` session. The
+`yc managed-postgresql connect` command runs a local PostgreSQL proxy, so it works with this
+template's private cluster: do not give the database host a public IP, add a `0.0.0.0/0` security
+group rule, download a database password from Lockbox, or create a bastion VM just for routine
+operator access.
+
+The cluster name is `<project_slug>-prod-postgres`. The database name is `project_slug` with every
+hyphen replaced by an underscore. For example, `project_slug = "example-app"` produces cluster
+`example-app-prod-postgres` and database `example_app`.
+
+Install `psql`, authenticate `yc` as the person who needs access, and confirm that the active cloud
+and folder match both Yandex tfvars files:
+
+```bash
+yc version
+yc managed-postgresql connect --help
+yc config get cloud-id
+yc config get folder-id
+yc iam whoami
+yc managed-postgresql cluster list
+```
+
+If the installed CLI does not have `yc managed-postgresql connect`, update it with
+`yc components update`. Do not authenticate this session as one of the Terraform runtime or
+migration service accounts: operator access is personal and auditable.
+
+### One-time access setup
+
+`yc iam whoami` prints the current subject type and ID. Give that output to a cloud administrator
+who can manage cluster access and users. The administrator grants the connector role on this exact
+cluster. For a Yandex account or an organization-local user:
+
+```bash
+yc managed-postgresql cluster add-access-binding \
+  --name <project_slug>-prod-postgres \
+  --role managed-postgresql.clusters.connector \
+  --user-account-id <iam_subject_id>
+```
+
+For a federated user, replace the last argument with:
+
+```bash
+--subject federatedUser:<iam_subject_id>
+```
+
+Then the administrator creates a PostgreSQL IAM user whose name is the same IAM subject ID. Start
+with read-only access; `mdb_read_all_data` permits `SELECT` over application data without granting
+read-all access to system catalogs or allowing DML/DDL:
+
+```bash
+yc managed-postgresql user create <iam_subject_id> \
+  --cluster-name <project_slug>-prod-postgres \
+  --auth-method auth-method-iam \
+  --permissions <project_slug_with_underscores> \
+  --grants mdb_read_all_data
+```
+
+The CLI creates the user with deletion protection set to `Same as cluster`, while this template
+protects the cluster. In the management console, open the cluster's **Users** tab, configure this
+new personal user, and set **Deletion protection** to **Disabled**. This does not weaken cluster or
+application-user protection; it only ensures that offboarding can remove this person's access.
+
+Create one IAM database user per person. Do not share the migration owner, reuse the blue/green
+application users, or grant `mdb_admin`/`mdb_superuser` for ordinary inspection. Schema changes
+remain release-owned and run through `bun run release -- yandex`; direct production writes require
+a separately reviewed, time-bounded access decision.
+
+### Connect and verify
+
+The operator can now connect without a database password or CA file:
+
+```bash
+yc managed-postgresql connect <project_slug>-prod-postgres \
+  --db <project_slug_with_underscores>
+```
+
+Inside `psql`, verify the identity, target database, and read-only grant before inspecting data:
+
+```sql
+SELECT current_user, current_database();
+SELECT pg_has_role(current_user, 'mdb_read_all_data', 'member') AS can_read_application_data;
+```
+
+Use `\q` to close the session and local proxy. If the CLI reports that its local proxy port is
+already occupied, repeat the connect command with `--port <free_local_port>`.
+
+Access created here is deliberately person-specific and is not one of the application's
+Terraform-managed credentials. During offboarding, delete the IAM database user and remove the
+matching connector binding; use the same `--user-account-id` or federated `--subject` form used
+when access was granted:
+
+```bash
+yc managed-postgresql user delete <iam_subject_id> \
+  --cluster-name <project_slug>-prod-postgres
+
+yc managed-postgresql cluster remove-access-binding \
+  --name <project_slug>-prod-postgres \
+  --role managed-postgresql.clusters.connector \
+  --user-account-id <iam_subject_id>
+```
+
 ## Database credential rotation
 
 The two runtime users make password rotation an expand/contract transition across independent
@@ -225,6 +328,10 @@ runtime state instead of treating it as a first release. Do not bypass the wrapp
 - [Serverless Containers operation modes](https://yandex.cloud/en/docs/serverless-containers/concepts/container)
 - [Timer trigger retries](https://yandex.cloud/en/docs/serverless-containers/concepts/trigger/)
 - [Managed Service for PostgreSQL](https://yandex.cloud/en/docs/managed-postgresql/)
+- [Connecting to Managed PostgreSQL with IAM](https://yandex.cloud/en/docs/managed-postgresql/operations/connect/clients#iam-auth)
+- [`yc managed-postgresql connect` CLI reference](https://yandex.cloud/en/docs/managed-postgresql/cli-ref/connect)
+- [Managing PostgreSQL users](https://yandex.cloud/en/docs/managed-postgresql/operations/cluster-users)
+- [Managed PostgreSQL roles](https://yandex.cloud/en/docs/managed-postgresql/concepts/roles)
 - [Object Storage static hosting](https://yandex.cloud/en/docs/storage/operations/hosting/setup)
 - [Cloud CDN](https://yandex.cloud/en/docs/cdn/)
 - [Lockbox](https://yandex.cloud/en/docs/lockbox/)

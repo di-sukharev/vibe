@@ -84,14 +84,8 @@ and report exact remaining account/domain authorizations without printing secret
 - `CHECKLIST.md` - the install intake questionnaire and the durable record of what this project needs, including which capabilities were deliberately removed.
 - `infra` - provider-specific Terraform bootstrap, stateful foundation, migration/runtime, and static release roots for DigitalOcean and Yandex Cloud.
 - `docker-compose.yml` - local PostgreSQL 18 through the official `postgres:18-alpine` image on port `54329`; test runners use a repository-derived port by default, or `POSTGRES_TEST_PORT` when set. PostgreSQL 18 is intentional because the backend schema uses strict database-generated UUIDv7 IDs.
-- `docs/BACKGROUND_JOBS.md` - the three ways to work off the request path, the durable task outbox, and how to run them.
-- `docs/TESTING.md` - the backend, Playwright, and mobile Maestro testing contract.
-- `docs/LOCAL_DATABASE.md` - cross-platform local PostgreSQL setup for Windows, macOS, and Linux.
-- `docs/EMAIL.md` - transactional email: the four drivers, Postbox and Resend, and how delivery reaches the outbox.
-- `docs/STORAGE.md` - private file storage: the filesystem and S3 drivers, the local S3 container, and the upload contract.
-- `docs/WEB_SURFACES.md` - the mandatory ownership contract for SSG product data, rebuilds, browser cart/checkout, and separate mobile payment paths.
-- `docs/YANDEX_CLOUD.md` - the Yandex Cloud hosting path, chosen when users or data must stay in Russia.
-- `docs/DIGITALOCEAN.md` - the DigitalOcean hosting path for audiences without Russian data residency.
+- `docs` - topic, architecture, testing, and production runbooks; use the complete
+  [documentation map](#documentation-map) to find the owning guide.
 
 ## Choosing `webapp` vs `website`
 
@@ -306,19 +300,42 @@ Terraform CLI rather than the normal application toolchain.
 - `bun run --cwd backend db:deploy` - production pre-deploy: migrate, optionally bootstrap the first administrator, and require a login-capable administrator.
 - `bun run --cwd backend db:adopt-owner` - read-only inventory for legacy PostgreSQL ownership; add the documented confirmation and `-- --apply` only for the reviewed one-time transfer.
 
-## Project READMEs
+## Documentation Map
 
-- [backend/README.md](backend/README.md) - API, auth, Prisma, and backend validation.
-- [docs/LOCAL_DATABASE.md](docs/LOCAL_DATABASE.md) - Docker Compose PostgreSQL setup and reset workflow.
-- [docs/EMAIL.md](docs/EMAIL.md) - transactional email: the four drivers, Postbox and Resend, and how delivery reaches the outbox.
-- [docs/STORAGE.md](docs/STORAGE.md) - private file storage: the filesystem and S3 drivers, the local S3 container, and the upload contract.
+Start with the closest owning document instead of copying its rules into another README.
+
+Project decisions:
+
+- [CHECKLIST.md](CHECKLIST.md) - product intake, active surfaces, hosting choice, and capability ledger.
+
+Engineering guides:
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - module boundaries, runtime shape, auth, clients, Prisma, and local infrastructure.
+- [docs/WEB_SURFACES.md](docs/WEB_SURFACES.md) - public data, SSG rebuilds, browser checkout, and mobile payment ownership.
+- [docs/TESTING.md](docs/TESTING.md) - test-level selection and the backend, Playwright, and mobile E2E contracts.
+- [docs/BACKGROUND_JOBS.md](docs/BACKGROUND_JOBS.md) - scheduled work, process-local tasks, and the durable task outbox.
+- [docs/LOCAL_DATABASE.md](docs/LOCAL_DATABASE.md) - Docker Compose PostgreSQL setup, test database, and local reset workflow.
+- [docs/EMAIL.md](docs/EMAIL.md) - transactional email drivers, durable delivery, retries, and live verification.
+- [docs/STORAGE.md](docs/STORAGE.md) - private filesystem/S3 storage, uploads, access, and cleanup.
+
+Mobile feature guides:
+
 - [docs/SOCIAL_AUTH.md](docs/SOCIAL_AUTH.md) - Apple and Google mobile social-auth setup.
 - [docs/IAP.md](docs/IAP.md) - switched-off App Store and Google Play subscription paths.
-- [docs/WEB_SURFACES.md](docs/WEB_SURFACES.md) - SSG product data, rebuilds, browser cart/checkout ownership, and mobile payment boundaries.
-- [docs/YANDEX_CLOUD.md](docs/YANDEX_CLOUD.md) - the Yandex Cloud hosting path, used when the checklist records it.
-- [webapp/README.md](webapp/README.md) - CSR browser client setup, env, and Playwright smoke.
+
+Delivery and infrastructure:
+
+- [infra/README.md](infra/README.md) - Terraform roots, state layout, release inputs, and infrastructure ownership.
+- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) - shared production safety, bootstrap, release, rollback, and recovery flow.
+- [docs/DIGITALOCEAN.md](docs/DIGITALOCEAN.md) - DigitalOcean-specific configuration and operations.
+- [docs/YANDEX_CLOUD.md](docs/YANDEX_CLOUD.md) - Yandex Cloud-specific configuration and operations.
+
+Workspace guides:
+
+- [backend/README.md](backend/README.md) - API, auth, Prisma, runtime entrypoints, and backend validation.
+- [webapp/README.md](webapp/README.md) - CSR browser client setup, architecture, and Playwright E2E.
+- [website/README.md](website/README.md) - Astro commands, rendering model, and publishing.
 - [mobile/README.md](mobile/README.md) - Expo, EAS, push, development-build, and Maestro setup.
-- [website/README.md](website/README.md) - Astro website commands, hybrid rendering, and publishing model.
 - [packages/contracts/README.md](packages/contracts/README.md) - shared schema and DTO rules.
 
 ## License
