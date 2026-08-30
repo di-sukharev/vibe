@@ -220,12 +220,13 @@ Expo/EAS setup are documented in [mobile/README.md](mobile/README.md).
 
 Test runners use the separate Docker Compose `postgres_test` service and the `TEST_DATABASE_URL` shape from `backend/.env.example`. Webapp Playwright E2E starts `postgres_test`, applies migrations to `web_app_demo_test`, runs the browser flow, and tears down its test database volume by default.
 
-For an ordinary completed task, `bun run check` is the canonical local quality gate. It validates
-the reusable-template invariants first, then architecture boundaries, dependency advisories,
-typecheck, lint, and the full test suite. The full suite includes backend integration tests, so
-Docker must be installed and the daemon running. The dependency audit needs registry access.
-Terraform validation remains a separate `bun run test:terraform` signal because it depends on the
-Terraform CLI rather than the normal application toolchain.
+Ordinary tasks use focused validation at the boundary that owns the changed behavior. The broad
+local regression, `bun run check`, belongs to explicit release/audit work or a genuinely
+cross-cutting change: it validates reusable-template invariants, architecture boundaries,
+dependency advisories, typecheck, lint, and the full test suite. The dependency audit needs registry
+access, and the full suite includes backend integration tests, so Docker must be installed and the
+daemon running. Terraform validation remains a separate `bun run test:terraform` signal because it
+depends on the Terraform CLI rather than the normal application toolchain.
 
 ## Workspace Commands
 
@@ -239,7 +240,7 @@ Terraform CLI rather than the normal application toolchain.
 - `bun run storybook:build` - statically build both local component catalogs; use
   `storybook:build:webapp` or `storybook:build:website` for one surface.
 - `bun run dev:backend:s3` - start the backend against the local S3 container instead of the disk.
-- `bun run check` - canonical task-completion gate: template invariants, architecture, dependency
+- `bun run check` - broad release/audit regression: template invariants, architecture, dependency
   audit, typecheck, lint, and all tests; requires registry access and Docker for backend integration.
 - `bun run template:check` - validate checklist state, capability-ledger states, equivalent agent
   instructions, and local Markdown file, directory, and heading links.
@@ -275,7 +276,8 @@ Terraform CLI rather than the normal application toolchain.
 - `bun run test:infra` - run release orchestration and infrastructure safety tests (no cloud mutation).
 - `bun run test:contracts` - run shared Zod contract tests.
 - `bun run test:backend` - run backend unit and integration tests.
-- `bun run test:backend:integration` - run DB-backed auth tests through `postgres_test`.
+- `bun run test:backend:integration` - run DB-backed tests through `postgres_test`; append a file
+  path relative to `backend/` and `-t "name"` for a focused task signal.
 - `bun run test:webapp` - run webapp client tests.
 - `bun run test:mobile` - run mobile client tests.
 - `bun run test:storage:s3` - run the storage contract against a real local S3 server (needs Docker).
@@ -289,8 +291,9 @@ Terraform CLI rather than the normal application toolchain.
 - `bun run infra:output -- <digitalocean|yandex>` - print only the safe operational Terraform outputs.
 - `bun run infra:plan -- <digitalocean|yandex>` - inspect a guarded production Terraform plan without applying it.
 - `bun run release -- <digitalocean|yandex>` - build, migrate, promote, publish, and verify one production release.
-- `bun run e2e:webapp` - run the Playwright journeys through backend + Vite.
-- `bun run e2e:webapp:s3` - run the same journeys against the local S3 container.
+- `bun run e2e:webapp` - run the full Playwright portfolio through backend + Vite; pass a spec and
+  `-g "name"` for a focused journey.
+- `bun run e2e:webapp:s3` - run the avatar Playwright journey against the local S3 container.
 - `bun run e2e:mobile` - run Maestro against an installed Expo development build and host-reachable Metro URL.
 - `bun run --cwd mobile e2e:maestro:audit` - audit the mobile flows and runner inputs for known flaky patterns.
 - `bun run storage:local:start|status|stop|env` - manage the optional local S3 container; `stop` keeps its volume.

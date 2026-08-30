@@ -12,7 +12,7 @@ import {
   postgresTestDataVolume,
   postgresTestService,
 } from '../../scripts/repo-env.mjs'
-import { backendTestFiles } from './test-files.mjs'
+import { backendTestFiles, selectBackendTestRun } from './test-files.mjs'
 
 const backendRoot = resolve(fileURLToPath(new URL('.', import.meta.url)), '..')
 const repositoryRoot = resolve(backendRoot, '..')
@@ -27,9 +27,15 @@ class CommandFailure extends Error {
 export async function runBackendIntegration({
   environment = process.env,
   integrationTestFiles,
+  testArgs = [],
   spawn = spawnSync,
   writeError = (message) => process.stderr.write(`${message}\n`),
 } = {}) {
+  const discoveredTestFiles = integrationTestFiles ?? backendTestFiles(backendRoot).integration
+  const selectedTestRun = discoveredTestFiles.length > 0
+    ? selectBackendTestRun(discoveredTestFiles, testArgs)
+    : undefined
+
   const managesDocker = environment.TEST_SKIP_DOCKER !== '1'
   if (!managesDocker && !environment.TEST_DATABASE_URL) {
     throw new Error('TEST_SKIP_DOCKER=1 requires TEST_DATABASE_URL')
@@ -141,12 +147,10 @@ export async function runBackendIntegration({
     run('bun', ['run', 'prisma:generate'], { env })
     run('bun', ['run', 'prisma:deploy'], { env })
 
-    const discoveredTestFiles = integrationTestFiles ?? backendTestFiles(backendRoot).integration
-    if (discoveredTestFiles.length === 0) {
+    if (!selectedTestRun) {
       throw new Error('No *.integration.test.* files found under backend/src or backend/scripts')
     }
-
-    run('bun', ['test', ...discoveredTestFiles], { env })
+    run('bun', ['test', ...selectedTestRun.testFiles, ...selectedTestRun.bunTestArgs], { env })
   } catch (error) {
     primaryFailure = error
   } finally {
@@ -175,7 +179,7 @@ function errorMessage(error) {
 
 if (import.meta.main) {
   try {
-    await runBackendIntegration()
+    await runBackendIntegration({ testArgs: process.argv.slice(2) })
   } catch (error) {
     process.stderr.write(`${errorMessage(error)}\n`)
     process.exitCode = error instanceof CommandFailure ? error.exitCode : 1

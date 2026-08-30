@@ -109,7 +109,7 @@ This block exists only for fresh installs from the template. If this repository 
 - For `Review`, inspect evidence and report concrete risks, recommendations, and file references. Do not edit unless asked.
 - For `Direct`, inspect the affected file and nearby usage, make the smallest coherent change, and run narrow validation when cheap.
 - For `Investigation`, reproduce or trace the failure path when possible. Identify the owning layer before patching, and stop to reframe if two attempts fail to move the primary signal.
-- For `TDD-first`, identify the important success, failure, boundary, permission, persistence, and recovery cases before implementation. Start with the highest-value failing test at the highest-confidence practical boundary, implement the minimum fix, make it green, then add only edge coverage that protects real risk.
+- For `TDD-first`, name the changed behavior or invariant and its directly coupled risks, then start with a failing test at the narrowest stable boundary that detects the regression. Reuse a focused existing check before editing when its current result clarifies the baseline.
 - Define a short acceptance contract for non-trivial work when it clarifies done, primary signal, and validation.
 
 ## Decision Rules
@@ -121,11 +121,10 @@ This block exists only for fresh installs from the template. If this repository 
 
 ## Acceptance Contract
 
-- For non-trivial work, define what done means before editing when it clarifies scope.
-- Include 3 to 5 observable pass/fail criteria.
-- Identify the primary signal, preferably user-visible behavior or runtime output.
-- Identify secondary signals such as tests, typecheck, lint, build, logs, or focused scripts.
-- Do not create ceremony for simple local tasks.
+- For non-trivial work, scope done to the changed behavior or invariant and its directly coupled risks.
+- Identify one decisive observable primary signal, preferably user-visible behavior or runtime output.
+- Add targeted secondary signals only for coupled risks; an acceptance criterion does not imply a separate automated test.
+- Keep the contract proportional to the task.
 
 ## Research Path
 
@@ -166,24 +165,14 @@ This block exists only for fresh installs from the template. If this repository 
 
 ## Testing And Validation
 
-- Run the smallest meaningful validation that covers the changed surface.
-- Run `bun run architecture:check` whenever module, feature, contracts, platform, or UI dependency boundaries change.
-- Use fast checks for feedback first: targeted tests, typecheck, lint, build, focused scripts, then wider suites only when needed.
-- Use existing test infrastructure. Do not invent a heavier layer unless clearly justified.
-- Validate after implementation and before closing the task.
-- For non-trivial behavior, account for important success, failure, boundary, permission, persistence, and recovery cases.
-- Prefer user-visible confidence over isolated implementation checks: favor E2E for important full flows when they can stay stable and maintainable, then integration/contract tests, then unit tests.
-- Use E2E for critical journeys and high-risk regressions such as auth/session behavior, persistence, navigation, and important empty/error/recovery states.
-- Choose the highest-confidence practical boundary: E2E for important user-visible cross-layer flows, integration/contract tests for API/auth/persistence/contracts, and unit tests for pure rules, schema matrices, token/env helpers, and retry/cache behavior.
-- Add or expand E2E only when it protects a plausible user-visible regression, can use stable selectors/data, avoids brittle timing or copy coupling, and will remain maintainable.
-- On frontend, E2E tests must cover business logic and meaningful product behavior: data creation or editing, permissions, validation, navigation, error/recovery states, persistence, and important state transitions.
-- Do not add automated tests for cosmetic UI details such as `className`, Tailwind classes, CSS property values, spacing, color, radius, shadows, animation timing, or visual-only layout. Validate cosmetic changes through code review, local runtime checks, or screenshots when useful.
-- If contracts or shared schemas change, validate producer and consumer sides.
-- Treat non-zero exits, runtime errors, unhandled promise rejections, failed assertions, type errors, lint errors, build failures, and timeouts as failed validation.
-- Do not declare success on proxy metrics alone. Green tests, lint, or typecheck are not enough if the primary user-visible signal is still broken.
-- If only secondary signals were checked, report partial validation.
-- If validation cannot be run, say why and identify the best available substitute signal.
-- Do not hide validation failures. Report what failed, what it means, and the next useful experiment.
+- Use the narrowest stable boundary that directly detects the failure, with targeted secondary checks for directly coupled risks.
+- Run a pre-change baseline when the same focused signal helps distinguish existing behavior from the task result; reuse it after the edit.
+- Place pure rules and isolated client logic in unit tests, shared wire shapes in contract tests, and route/auth/database behavior in backend integration tests.
+- Keep Playwright as a curated portfolio of a few product-critical client-to-API journeys plus targeted scenarios for risks that depend on a real browser, such as cookies, reloads, redirects, multiple tabs, navigation, or browser file transfer.
+- A focused, recorded manual browser pass can be the primary signal for visual or local interaction work; use code review or screenshots when they communicate the result better.
+- Finish by rerunning the signals that prove the changed behavior, widening from the concrete blast radius. Validate producer and consumer sides when a shared contract changes, and run `bun run architecture:check` when dependency boundaries change.
+- Treat broad repository regression as explicit release/audit work or as a secondary signal for a genuinely cross-cutting change, separate from ordinary task validation.
+- A primary signal passes only when the observable behavior is correct and its command exits cleanly. If it cannot run, report partial validation and the best available substitute; report every failed check plainly.
 
 ## Prisma Migrations
 

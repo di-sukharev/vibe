@@ -319,11 +319,11 @@ templates. The operator owns TLS, backups, restore tests, patching, monitoring, 
 
 ## Local validation
 
-Cloud mutation is never part of the local test suite. Validate the code and Terraform contracts:
+Cloud mutation is never part of the local test suite. A release is the explicit broad-regression
+trigger; validate the application and Terraform contracts before `infra:plan`:
 
 ```bash
-bun run test:infra
-bun run typecheck
+bun run check
 bun run test:terraform
 ```
 
