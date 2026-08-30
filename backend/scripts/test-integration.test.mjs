@@ -227,6 +227,36 @@ describe('backend integration Docker lifecycle', () => {
     expect(calls.some(({ command }) => command === 'docker')).toBe(false)
   })
 
+  test('forwards an exact focused file and name filter without widening the run', async () => {
+    const calls = []
+
+    await runBackendIntegration({
+      environment: { TEST_DATABASE_URL: testDatabaseUrl, TEST_SKIP_DOCKER: '1' },
+      integrationTestFiles: [integrationFile, 'src/other.integration.test.ts'],
+      testArgs: [`backend/${integrationFile}`, '-t', 'focused behavior'],
+      spawn: successfulSpawn(calls),
+    })
+
+    expect(calls.find(({ command, args }) => command === 'bun' && args[0] === 'test')?.args).toEqual([
+      'test',
+      integrationFile,
+      '-t',
+      'focused behavior',
+    ])
+    expect(calls.some(({ command }) => command === 'docker')).toBe(false)
+
+    const rejectedCalls = []
+    await expect(
+      runBackendIntegration({
+        environment: { TEST_DATABASE_URL: testDatabaseUrl, TEST_SKIP_DOCKER: '1' },
+        integrationTestFiles: [integrationFile],
+        testArgs: ['src/missing.integration.test.ts'],
+        spawn: successfulSpawn(rejectedCalls),
+      }),
+    ).rejects.toThrow('Focused backend test file was not discovered')
+    expect(rejectedCalls).toHaveLength(0)
+  })
+
   test('TEST_SKIP_DOCKER requires an explicit external test database URL', async () => {
     const calls = []
 

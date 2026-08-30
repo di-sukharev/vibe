@@ -152,13 +152,12 @@ Astro remains the default website stack because it is content-first, static-firs
 
 Backend unit/integration tests verify auth and users/admin RBAC behavior at their owning layers. Webapp E2E uses Playwright and starts a real backend + Vite through `webServer`, including a seeded administrator and session-revoking role promotion. Mobile E2E lives on the `mobile` branch and uses Maestro with stable React Native `testID` selectors.
 
-Client E2E protects valuable browser journeys and meaningful user-visible error and recovery states,
-but it is not the place for exhaustive validation matrices. Keep negative payload matrices,
-password/JWT/session rules, stable API error shapes, concurrency, and pure rules in their faster
-backend integration, contract, or unit layers. Follow [TESTING.md](TESTING.md) when choosing the
-highest useful behavioral boundary for new coverage.
+Client E2E is a curated portfolio of product journeys and failure mechanisms that depend on a real
+browser. Negative payload matrices, password/JWT rules, stable API error shapes, concurrency, and
+pure rules stay in their owning backend integration, contract, or unit layers. Follow
+[TESTING.md](TESTING.md) to choose the narrowest stable boundary that detects the task's regression.
 
-Run `bun run architecture:check` locally as part of every validation ladder. The dependency-free checker reports forbidden static imports as `path:line` and has fixture tests for each rule family. File length is deliberately not an architecture rule; ownership and dependency direction are.
+Run `bun run architecture:check` when module, feature, contract, platform, or UI dependency boundaries change. The dependency-free checker reports forbidden static imports as `path:line` and has fixture tests for each rule family. File length is deliberately not an architecture rule; ownership and dependency direction are.
 
 ## Prisma
 

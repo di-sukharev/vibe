@@ -118,12 +118,12 @@ Use the local `shadcn` devDependency pinned in `webapp/package.json` and `bun.lo
 
 ## E2E
 
-The Playwright tests live in `e2e/specs/auth.spec.ts` and
-`e2e/specs/rbac.spec.ts`. They verify auth validation, register/login, refresh
-after reload, profile/theme persistence, role-specific sidebar contents, safe
-return paths, cross-role redirects, seeded-admin login, admin data
-error-recovery and empty states, self-demotion protection, admin promotion,
-target-session revocation, and the existing concurrent-tab session behavior.
+The Playwright specs form a curated browser portfolio: the auth/profile session
+round trip, browser session coordination, role-safe navigation and promotion,
+and the avatar storage round trip. Pure validation, state matrices, API rules,
+and persistence edge cases stay at their owning contract, unit, or backend
+integration boundary. One browser journey may protect several related
+capabilities.
 
 The run starts Docker Compose `postgres_test`, applies migrations to
 `web_app_demo_test`, idempotently seeds the E2E administrator, starts the backend
@@ -136,8 +136,12 @@ First run:
 docker compose version
 docker info
 bun run e2e:install
-bun run e2e
+bun run e2e -- auth.spec.ts -g "registers, restores"
 ```
+
+Use the focused `spec -g "test name"` form for task validation. `bun run e2e`
+runs the full browser portfolio for explicit release/audit work or a genuinely
+cross-cutting browser change.
 
 Detailed runbook: [../docs/TESTING.md](../docs/TESTING.md).
 
