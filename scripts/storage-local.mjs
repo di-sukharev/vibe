@@ -35,7 +35,7 @@ const commands = new Set(['start', 'status', 'stop', 'env', 'dev-backend', 'test
 function printUsage() {
   process.stderr.write(
     [
-      'Usage: bun scripts/storage-local.mjs <command>',
+      'Usage: bun scripts/storage-local.mjs <command> [options]',
       '',
       '  start        start the local S3 container, create the bucket, apply CORS',
       '  status       report whether the container is up and the bucket reachable',
@@ -43,7 +43,7 @@ function printUsage() {
       '  env          print the PRIVATE_STORAGE_* block for this checkout',
       '  dev-backend  start storage, then run the backend against it',
       '  test         start storage, then run the live storage contract tests',
-      '  e2e          start storage, then run the web E2E suite against it',
+      '  e2e          start storage, then run the avatar browser journey with Playwright options',
       '',
     ].join('\n'),
   )
@@ -229,7 +229,44 @@ async function main() {
   if (command === 'test') {
     return runAgainstLocalStorage('bun', ['run', '--cwd', 'backend', 'test:live'])
   }
-  return runAgainstLocalStorage('bun', ['run', '--cwd', 'webapp', 'e2e'], { anyOrigin: true })
+
+  let playwrightArgs
+  try {
+    playwrightArgs = storageE2ePlaywrightArgs(process.argv.slice(3))
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
+    process.exit(1)
+  }
+  return runAgainstLocalStorage(
+    'bun',
+    ['run', '--cwd', 'webapp', 'e2e', '--', ...playwrightArgs],
+    { anyOrigin: true },
+  )
+}
+
+export function storageE2ePlaywrightArgs(args = []) {
+  const options = []
+
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index]
+
+    if (argument === '--') continue
+    if (argument === '-g' || argument === '--grep') {
+      const pattern = args[index + 1]
+      if (!pattern || pattern === '--') throw new Error(`${argument} requires a grep pattern`)
+      options.push(argument, pattern)
+      index += 1
+      continue
+    }
+    if (!argument.startsWith('-')) {
+      throw new Error(
+        `S3 browser validation keeps its file scope on avatar.spec.ts; use Playwright options, not "${argument}".`,
+      )
+    }
+    options.push(argument)
+  }
+
+  return ['e2e/specs/avatar.spec.ts', ...options]
 }
 
 if (import.meta.main) {

@@ -41,7 +41,7 @@ Then run the app or its tests against it:
 ```bash
 bun run dev:backend:s3     # backend against the local S3 server
 bun run test:storage:s3    # the live storage contract
-bun run e2e:webapp:s3      # the full browser journey against the local S3 server
+bun run e2e:webapp:s3      # the avatar browser journey against the local S3 server
 ```
 
 The container is SeaweedFS `weed mini`, pinned to a specific tag in `docker-compose.yml`, published on `127.0.0.1` only, with fixed and deliberately fake credentials. Its port is derived from this checkout's path so two clones never collide, and `PRIVATE_STORAGE_S3_PORT` overrides it. Versioning and object locking stay off: SeaweedFS mishandles conditional writes when they are enabled, and conditional writes are what make an upload key write-once.

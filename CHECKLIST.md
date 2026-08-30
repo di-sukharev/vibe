@@ -156,7 +156,7 @@ The user is a product owner, not an engineer. These are engineering decisions th
 - The selected Terraform launch profile, machine sizes, serverless/static shape, and when an HA or CDN upgrade is justified.
 - Which hosting the recorded audience implies: Russia means Yandex Cloud, elsewhere means DigitalOcean, and an explicit wish for full control means an own server. Explain the pick in product terms; never ask the owner to compare providers.
 - Managed Redis-compatible Pub/Sub only when real-time needs to scale across instances.
-- Test boundaries: E2E for important user journeys, integration for API/auth/persistence, unit for pure rules.
+- Test boundaries follow the failure mechanism: unit for pure/client rules, contracts for shared wire shapes, backend integration for route/auth/database behavior, and a curated browser portfolio for product-critical client-to-API journeys and real-browser risks.
 - Libraries, file layout, naming, refactors, and validation scope.
 
 ## 10. Capability ledger
