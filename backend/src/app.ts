@@ -1,5 +1,5 @@
 // Must run before imports that construct schemas. Keep the auto-compile side effect backend-only:
-// browser runtimes should not invoke eval-like code generation.
+// browser and Expo runtimes should not invoke eval-like code generation.
 import 'zod/compile'
 
 import { OpenAPIHono } from '@hono/zod-openapi'
