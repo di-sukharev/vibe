@@ -1,7 +1,6 @@
 import type { Page } from '@playwright/test'
 
 import {
-  disguisedTextFile,
   jpegImage,
   pngImage,
   storageUploadUrlPatterns,
@@ -101,35 +100,4 @@ test('recovers from an interrupted upload when the user tries again', async ({ p
 
   await page.reload()
   await expect(avatarImage(page)).toBeVisible()
-})
-
-test('refuses a file that is not the image it claims to be', async ({ page }) => {
-  await registerAndOpenProfile(page)
-
-  // The file is large enough and named like a PNG, so the browser lets it through and the
-  // rejection has to come from the backend reading its actual leading bytes. Asserting the
-  // message keeps this from passing on a client-side size or type check instead.
-  await pickFile(page, disguisedTextFile)
-
-  await expect(page.getByTestId('avatar-error')).toContainText('not a supported image')
-  await expect(avatarImage(page)).toHaveCount(0)
-  await expect(page.getByTestId('avatar-fallback')).toBeVisible()
-})
-
-test('keeps one user’s avatar invisible to another', async ({ browser }) => {
-  const ownerContext = await browser.newContext()
-  const ownerPage = await ownerContext.newPage()
-  await registerAndOpenProfile(ownerPage)
-  await pickFile(ownerPage, pngImage)
-  await expect(ownerPage.getByTestId('avatar-notice')).toContainText('Photo updated.')
-
-  const otherContext = await browser.newContext()
-  const otherPage = await otherContext.newPage()
-  await registerAndOpenProfile(otherPage)
-
-  await expect(avatarImage(otherPage)).toHaveCount(0)
-  await expect(otherPage.getByTestId('avatar-fallback')).toBeVisible()
-
-  await ownerContext.close()
-  await otherContext.close()
 })

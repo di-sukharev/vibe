@@ -8,6 +8,7 @@ import type {
   CookieAuthResponse,
   LoginRequest,
   MeResponse,
+  PasswordResetConfirmRequest,
   RegisterRequest,
 } from '@web-app-demo/contracts'
 
@@ -83,6 +84,22 @@ export async function logoutAuthenticatedSession({
 }) {
   const transition = await api.logout()
   if (!transition || !api.isSessionEpochCurrent(transition.sessionEpoch)) return
+  await clearAuthenticatedSession(queryClient, setAccessToken)
+}
+
+export async function confirmPasswordResetAndClearSession({
+  api,
+  input,
+  queryClient,
+  setAccessToken,
+}: {
+  api: Pick<AuthApi, 'confirmPasswordReset' | 'isSessionEpochCurrent'>
+  input: PasswordResetConfirmRequest
+  queryClient: QueryClient
+  setAccessToken: (accessToken: string | null) => void
+}) {
+  const transition = await api.confirmPasswordReset(input)
+  if (!api.isSessionEpochCurrent(transition.sessionEpoch)) return
   await clearAuthenticatedSession(queryClient, setAccessToken)
 }
 
