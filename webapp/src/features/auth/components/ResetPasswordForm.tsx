@@ -11,7 +11,13 @@ import { ApiRequestError } from '@/platform/api'
 import { useAuth } from '../use-auth'
 import { FormAlert } from './form-errors'
 import type { FieldErrors } from './form-model'
-import { clearFieldError, errorId, hasErrors, toFieldErrors } from './form-validation'
+import {
+  clearFieldError,
+  errorId,
+  hasErrors,
+  passwordConfirmationErrors,
+  toFieldErrors,
+} from './form-validation'
 import { PasswordInput } from './PasswordInput'
 
 export function ResetPasswordForm({ token }: { token: string }) {
@@ -37,9 +43,11 @@ export function ResetPasswordForm({ token }: { token: string }) {
         password: value.password,
       })
       const nextErrors = result.success ? {} : toFieldErrors(result.error.issues)
-      if (value.password !== value.confirmPassword) {
-        nextErrors.confirmPassword = [{ message: 'Passwords do not match' }]
-      }
+      const confirmationErrors = passwordConfirmationErrors(
+        value.password,
+        value.confirmPassword,
+      )
+      if (confirmationErrors) nextErrors.confirmPassword = confirmationErrors
       if (!result.success || hasErrors(nextErrors.confirmPassword)) {
         setFieldErrors(nextErrors)
         return

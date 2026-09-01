@@ -12,6 +12,13 @@ export function toFieldErrors(issues: z.ZodIssue[]): FieldErrors {
   }, {})
 }
 
+export function passwordConfirmationErrors(
+  password: string,
+  confirmation: string,
+): FormError[] | undefined {
+  return password === confirmation ? undefined : [{ message: 'Passwords do not match' }]
+}
+
 export function clearFieldError(
   field: FieldName,
   setFieldErrors: (updater: (errors: FieldErrors) => FieldErrors) => void,
