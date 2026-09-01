@@ -14,7 +14,8 @@ tags:
     commands:
       - tapOn: Open
 - extendedWaitUntil:
-    visible: Golden path template
+    visible:
+      id: ${NAME_INPUT_ID}
     timeout: 60000
 - tapOn:
     id: ${NAME_INPUT_ID}

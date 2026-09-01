@@ -242,13 +242,14 @@ a native modal outside the app's view hierarchy that Maestro cannot drive. The u
 the 412-is-success rule, the normalization plan, and the error copy are covered by unit tests
 instead, with the picker behind a port.
 
-What that leaves unproven is worth stating plainly. The **web** build has been driven end to end
-in a real browser - pick, resize to 512px, re-encode as JPEG, measure, ticket, PUT, finalize,
-display, replace, remove, reload, and an account switch that must not show the previous account's
-photo. The **native** round trip has not: `expo-file-system`'s upload, the OS picker itself, and
-the `PRIVATE_STORAGE_LOCAL_PUBLIC_URL` loopback trap below are reachable only from a device, and
-a simulator hides the last one because there `127.0.0.1` is the host. Run those by hand on a dev
-build before trusting them.
+What that leaves unproven is worth stating plainly. The retained **web** browser journey proves the
+real transfer, persistence after reload, replacement, removal, and interrupted-transfer retry on
+both filesystem and S3 storage. Cross-account avatar ownership and isolation stay at the backend
+integration boundary instead of being repeated in browser E2E. The **native** round trip has not
+been driven end to end: `expo-file-system`'s upload, the OS picker itself, and the
+`PRIVATE_STORAGE_LOCAL_PUBLIC_URL` loopback trap below are reachable only from a device, and a
+simulator hides the last one because there `127.0.0.1` is the host. Run those by hand on a dev build
+before trusting them.
 
 File uploads follow the same split as the API layer: `src/platform/uploads` owns the transfer
 protocol and knows nothing about what is being uploaded, while `src/features/avatar` owns the

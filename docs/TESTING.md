@@ -26,6 +26,7 @@ directory, and heading links. Terraform remains an explicit optional signal thro
 - Run a pre-change baseline when the same focused signal clarifies the current behavior, then reuse it after the edit.
 - Place pure rules and isolated client logic in unit tests, shared wire shapes in contract tests, and route/auth/database behavior in backend integration tests.
 - Keep Playwright as a small portfolio of product-critical client-to-API journeys plus failure mechanisms that depend on a real browser: cookies and session restore, reloads and redirects, multiple tabs, navigation, or browser file transfer and CORS.
+- Before adding browser or device E2E, name the neighboring lower-level coverage and the unique failure mechanism, or extend an existing journey. Mock-heavy validation, copy, success/error, loading, and empty-state matrices stay below E2E unless they uniquely exercise cookies, reloads, redirects, multiple tabs, navigation, file transfer or CORS, browser accessibility or focus, or native device input.
 - A focused manual browser pass records the route, starting state, action, and expected outcome; it can be the primary signal for visual or local interaction work.
 - Finish with the task-specific signals and widen from the concrete blast radius. Broad repository regression is a separate release/audit activity unless the change itself is genuinely cross-cutting.
 
@@ -278,7 +279,7 @@ Before changing Maestro startup, selectors, or E2E-only app behavior, run:
 bun run --cwd mobile e2e:maestro:audit
 ```
 
-The policy audit keeps the template from reintroducing known-bad patterns such as `hideKeyboard`, coordinate taps, missing dev-client `openLink`, stale `.maestro/.env.example`, or password automation that bypasses the user-facing visibility control.
+The policy audit covers the runner and active auth flow, not dormant product capabilities. It keeps the template from reintroducing known-bad patterns such as `hideKeyboard`, coordinate taps, missing dev-client `openLink`, stale `.maestro/.env.example`, or password automation that bypasses the user-facing visibility control.
 
 The template intentionally keeps the official mobile lane on Expo dev client because it does not commit generated native `ios`/`android` folders. A mature product may later move to a bundled iOS E2E app once native folders are owned by that project. That stronger lane should use a dedicated simulator bundle id, runner-owned build/install, one launch helper with `launchApp.clearState/clearKeychain`, isolated backend ports, typed seed manifests, post-run backend assertions, a machine-wide simulator lock, and no Metro/dev-client handoff.
 
