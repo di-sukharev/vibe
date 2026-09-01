@@ -107,6 +107,34 @@ test('password reset confirmation clears the current authenticated client sessio
   expect(queryClient.getQueryData([...sessionQueryKeys.all, 'orders'])).toBeUndefined()
 })
 
+test('stale password reset completion cannot clear a newer client session', async () => {
+  const queryClient = new QueryClient()
+  let accessToken: string | null = 'new-session-access-token'
+  queryClient.setQueryData(authQueryKeys.me(), { user })
+  queryClient.setQueryData([...sessionQueryKeys.all, 'orders'], [{ id: 'order-1' }])
+
+  await confirmPasswordResetAndClearSession({
+    api: {
+      confirmPasswordReset: async () => ({ data: undefined, sessionEpoch: 'old-session' }),
+      isSessionEpochCurrent: () => false,
+    },
+    input: {
+      token: 't'.repeat(43),
+      password: 'new-password-123',
+    },
+    queryClient,
+    setAccessToken: (nextAccessToken) => {
+      accessToken = nextAccessToken
+    },
+  })
+
+  expect(accessToken).toBe('new-session-access-token')
+  expect(queryClient.getQueryData(authQueryKeys.me())).toEqual({ user })
+  expect(queryClient.getQueryData([...sessionQueryKeys.all, 'orders'])).toEqual([
+    { id: 'order-1' },
+  ])
+})
+
 test('stale logout completion cannot clear a newer session epoch', async () => {
   const queryClient = new QueryClient()
   let accessToken: string | null = 'new-session-access-token'
