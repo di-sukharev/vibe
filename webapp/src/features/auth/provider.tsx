@@ -17,6 +17,7 @@ import {
 import { AuthApi } from './api'
 import {
   clearAuthenticatedSession,
+  confirmPasswordResetAndClearSession,
   useCurrentUserQuery,
   useLoginMutation,
   useLogoutMutation,
@@ -142,11 +143,14 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   const confirmPasswordReset = useCallback(
     async (input: PasswordResetConfirmRequest) => {
-      const transition = await api.confirmPasswordReset(input)
-      if (!api.isSessionEpochCurrent(transition.sessionEpoch)) return
-      await clearLocalSession()
+      await confirmPasswordResetAndClearSession({
+        api,
+        input,
+        queryClient,
+        setAccessToken,
+      })
     },
-    [api, clearLocalSession],
+    [api, queryClient, setAccessToken],
   )
 
   const retrySession = useCallback(async () => {

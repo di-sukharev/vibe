@@ -77,8 +77,8 @@ reference them. Remove all of it in one pass:
   `backend/src/modules/users/users.integration.test.ts`, the `IapProvider` lines in
   `mobile/src/composition/AppProviders.tsx`, and the billing block in
   `mobile/src/app/(tabs)/profile.tsx`
-- the billing entry in `mobile/src/composition/api.ts`, plus the paywall checks and `paywallPath`
-  constants in `mobile/scripts/e2e/maestro-policy-audit.mjs`
+- the billing entry in `mobile/src/composition/api.ts`; the Maestro policy audit is scoped to the
+  active auth flow and intentionally contains no dormant paywall paths or checks to remove
 - the billing cases in `mobile/tests/api.test.ts` and `mobile/tests/select-registration.test.tsx`;
   the whole of `mobile/tests/parked/` and `mobile/tests/offer-code-controller.test.ts`
   (entirely billing)

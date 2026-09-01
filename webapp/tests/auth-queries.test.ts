@@ -5,6 +5,7 @@ import {
   applyAuthenticatedSession,
   authQueryKeys,
   clearAuthenticatedSession,
+  confirmPasswordResetAndClearSession,
   logoutAuthenticatedSession,
   sessionQueryKeys,
 } from '../src/features/auth/queries'
@@ -70,6 +71,40 @@ test('failed server logout keeps the authenticated browser state intact', async 
 
   expect(accessToken).toBe('active-access-token')
   expect(queryClient.getQueryData([...sessionQueryKeys.all, 'orders'])).toEqual([{ id: 'order-1' }])
+})
+
+test('password reset confirmation clears the current authenticated client session', async () => {
+  const queryClient = new QueryClient()
+  let accessToken: string | null = 'active-access-token'
+  let submittedInput: { token: string; password: string } | undefined
+  queryClient.setQueryData(authQueryKeys.me(), { user })
+  queryClient.setQueryData([...sessionQueryKeys.all, 'orders'], [{ id: 'order-1' }])
+
+  await confirmPasswordResetAndClearSession({
+    api: {
+      confirmPasswordReset: async (input) => {
+        submittedInput = input
+        return { data: undefined, sessionEpoch: 'reset-session' }
+      },
+      isSessionEpochCurrent: (sessionEpoch) => sessionEpoch === 'reset-session',
+    },
+    input: {
+      token: 't'.repeat(43),
+      password: 'new-password-123',
+    },
+    queryClient,
+    setAccessToken: (nextAccessToken) => {
+      accessToken = nextAccessToken
+    },
+  })
+
+  expect(submittedInput).toEqual({
+    token: 't'.repeat(43),
+    password: 'new-password-123',
+  })
+  expect(accessToken).toBeNull()
+  expect(queryClient.getQueryData(authQueryKeys.me())).toBeUndefined()
+  expect(queryClient.getQueryData([...sessionQueryKeys.all, 'orders'])).toBeUndefined()
 })
 
 test('stale logout completion cannot clear a newer session epoch', async () => {
