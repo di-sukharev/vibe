@@ -7,16 +7,19 @@ import {
   cookieLogoutRequestSchema,
   cookieRefreshRequestSchema,
   cookieRefreshResponseSchema,
+  emailSchema,
   loginRequestSchema,
   meResponseSchema,
   passwordResetConfirmRequestSchema,
   passwordResetRequestResponseSchema,
   passwordResetRequestSchema,
+  passwordSchema,
   registerRequestSchema,
   tokenAuthResponseSchema,
   tokenLogoutRequestSchema,
   tokenRefreshRequestSchema,
   tokenRefreshResponseSchema,
+  userSchema,
 } from './index'
 
 const validUser = {
@@ -102,6 +105,38 @@ describe('auth contracts', () => {
     expect(() =>
       passwordResetConfirmRequestSchema.parse({ token, password: 'short' }),
     ).toThrow()
+  })
+
+  test('bounds the reset token at its upper end', () => {
+    const maxToken = 't'.repeat(256)
+    expect(
+      passwordResetConfirmRequestSchema.parse({ token: maxToken, password: 'new-password-123' })
+        .token,
+    ).toBe(maxToken)
+    expect(() =>
+      passwordResetConfirmRequestSchema.parse({
+        token: 't'.repeat(257),
+        password: 'new-password-123',
+      }),
+    ).toThrow()
+  })
+
+  test('bounds email and password length at both ends', () => {
+    const maxLocal = 'a'.repeat(254 - '@example.com'.length)
+    const maxEmail = `${maxLocal}@example.com`
+    expect(maxEmail.length).toBe(254)
+    expect(emailSchema.parse(maxEmail)).toBe(maxEmail)
+    expect(() => emailSchema.parse(`a${maxEmail}`)).toThrow()
+
+    const minPassword = 'p'.repeat(8)
+    const maxPassword = 'p'.repeat(128)
+    expect(passwordSchema.parse(minPassword)).toBe(minPassword)
+    expect(passwordSchema.parse(maxPassword)).toBe(maxPassword)
+    expect(() => passwordSchema.parse('p'.repeat(129))).toThrow()
+  })
+
+  test('rejects a createdAt that is not a valid ISO datetime', () => {
+    expect(() => userSchema.parse({ ...validUser, createdAt: '2026-05-11' })).toThrow()
   })
 
   test('keeps cookie requests empty and requires explicit token transport credentials', () => {

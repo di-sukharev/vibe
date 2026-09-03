@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import {
+  mobileReleaseErrors,
   runMobileValidation,
   validateMobileCapabilityContract,
 } from './check-mobile-template.mjs'
@@ -86,6 +87,46 @@ test('the mobile publication gate requires its three available capabilities', ()
   expect(validateMobileCapabilityContract(prototypeCapability)).toContain(
     'Capability "constructor" must not be "available" for this template.',
   )
+})
+
+test('mobileReleaseErrors refuses a wrong branch, dirty worktree, non-descendant, or unpublished mobile release', () => {
+  expect(
+    mobileReleaseErrors({
+      branch: 'master',
+      status: ' M app.tsx',
+      head: 'local-commit',
+      originMobile: 'remote-commit',
+      masterIsAncestor: false,
+      requirePublished: true,
+    }),
+  ).toEqual([
+    'current branch must be mobile',
+    'worktree and index must be clean',
+    'origin/master must be an ancestor of mobile HEAD',
+    'HEAD must equal the published origin/mobile ref',
+  ])
+
+  expect(
+    mobileReleaseErrors({
+      branch: 'mobile',
+      status: '',
+      head: 'same-commit',
+      originMobile: 'same-commit',
+      masterIsAncestor: true,
+      requirePublished: true,
+    }),
+  ).toEqual([])
+
+  expect(
+    mobileReleaseErrors({
+      branch: 'mobile',
+      status: '',
+      head: 'local-only-commit',
+      originMobile: 'remote-commit',
+      masterIsAncestor: true,
+      requirePublished: false,
+    }),
+  ).toEqual([])
 })
 
 function mobileChecklist() {

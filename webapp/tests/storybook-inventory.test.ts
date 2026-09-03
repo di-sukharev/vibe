@@ -30,7 +30,10 @@ test('production CSS excludes utilities used only by stories', { timeout: 30_000
   )
   assert.match(storySource, /h-\[34rem\]/)
 
-  execFileSync('bun', ['run', 'build'], {
+  // `vite build` alone reproduces the production CSS/Tailwind purge this test checks;
+  // `tsc -b` (the rest of the `build` script) is a separate, already-covered concern
+  // (`bun run typecheck`) and roughly 8x'd this test's runtime for no extra signal here.
+  execFileSync('bun', ['run', 'vite', 'build'], {
     cwd: workspaceRoot,
     env: process.env,
     stdio: 'pipe',

@@ -108,7 +108,7 @@ async function waitForBucket({ attempts = 90, delayMs = 1000 } = {}) {
   )
 }
 
-function corsOrigins({ anyOrigin = false } = {}) {
+export function corsOrigins({ anyOrigin = false } = {}) {
   // The E2E web server picks a port derived from this checkout's path, so an allowlist - even a
   // deliberately exported one - cannot name it. That run needs the permissive rule.
   if (anyOrigin) return ['*']
@@ -156,7 +156,7 @@ async function applyBucketCors({ anyOrigin = false } = {}) {
   }
 }
 
-function envBlock() {
+export function envBlock() {
   return Object.entries(localPrivateStorageEnv(port))
     .map(([name, value]) => `${name}=${value}`)
     .join('\n')

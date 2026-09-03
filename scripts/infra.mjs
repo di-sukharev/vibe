@@ -857,7 +857,12 @@ function terraformOutputs(root, env) {
   }).trim()
   if (!output) return {}
 
-  const parsed = JSON.parse(output)
+  let parsed
+  try {
+    parsed = JSON.parse(output)
+  } catch {
+    throw new Error('terraform output -json returned invalid JSON')
+  }
   return Object.fromEntries(
     Object.entries(parsed).map(([key, metadata]) => [key, metadata?.value]),
   )
@@ -902,15 +907,19 @@ function terraformPlan({
       )
     }
 
-    const plan = JSON.parse(
-      runCommand('terraform', ['show', '-json', planPath], {
-        cwd: root,
-        env: { ...terraformEnvironment, ...env },
-        capture: true,
-        sensitiveOutput: true,
-        log: false,
-      }),
-    )
+    const shownPlan = runCommand('terraform', ['show', '-json', planPath], {
+      cwd: root,
+      env: { ...terraformEnvironment, ...env },
+      capture: true,
+      sensitiveOutput: true,
+      log: false,
+    })
+    let plan
+    try {
+      plan = JSON.parse(shownPlan)
+    } catch {
+      throw new Error('terraform show -json returned invalid JSON')
+    }
     const safetyProblems = planSafetyProblems(
       plan,
       allowedDestroyAddresses,
@@ -2480,7 +2489,13 @@ async function verifyDigitalOceanStaticCommit(outputs, commit) {
         ['apps', 'list-deployments', appId, '--output', 'json'],
         { capture: true, log: false },
       )
-      problems = activeDeploymentCommitProblems(JSON.parse(raw), commit, name)
+      let deployments
+      try {
+        deployments = JSON.parse(raw)
+      } catch {
+        throw new Error(`${name} deployment list returned invalid JSON`)
+      }
+      problems = activeDeploymentCommitProblems(deployments, commit, name)
       if (problems.length === 0) break
       if (attempt < 12) await Bun.sleep(5_000)
     }

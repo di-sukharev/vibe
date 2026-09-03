@@ -26,6 +26,35 @@ import type { BackendRuntime } from './runtime'
  */
 export type BackgroundJob = (runtime: BackendRuntime, now: Date) => Promise<void>
 
+// A worker-pool of this many in-flight requests, not a fixed batch size: the next delete starts
+// the moment a slot frees up rather than waiting out the slowest item in a batch. 10 is a small
+// deliberate fraction of the 500-row page - enough that a slow object storage backend is not
+// hit with hundreds of requests at once, small enough to leave headroom for whatever else is
+// calling the same storage concurrently.
+const uploadDeleteConcurrency = 10
+
+// `run` must not throw - the only caller here catches its own errors and returns `null`
+// instead, which is what makes an item's failure not take down the rest of the pool.
+async function withConcurrency<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  run: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length)
+  let cursor = 0
+
+  async function worker() {
+    while (cursor < items.length) {
+      const index = cursor
+      cursor += 1
+      results[index] = await run(items[index])
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker))
+  return results
+}
+
 export const backgroundJobs = {
   noop: async () => {
     console.log('Job noop completed.')
@@ -74,15 +103,19 @@ export const backgroundJobs = {
     // delete would strand that object forever: the row is the only record of its key, so nothing
     // would ever look for it again. Keeping the row means the next run simply retries. Deletes
     // are idempotent, so a missing object still counts as removed and cannot block the queue.
-    const deletedIds: string[] = []
-    for (const upload of abandoned) {
+    // Bounded, not sequential and not unbounded: up to 500 rows one at a time can eat the job's
+    // timeout on a slow storage backend, and 500 at once can look like abuse to it. Each delete
+    // catches its own failure, so one slow or failing delete never aborts the ones behind it.
+    const deletions = await withConcurrency(abandoned, uploadDeleteConcurrency, async (upload) => {
       try {
         await privateStorage.storage.deleteObject(upload.objectKey)
-        deletedIds.push(upload.id)
+        return upload.id
       } catch (error) {
         console.error(`Job uploads:pending:cleanup could not delete ${upload.objectKey}:`, error)
+        return null
       }
-    }
+    })
+    const deletedIds = deletions.filter((id): id is string => id !== null)
 
     const rows =
       deletedIds.length > 0

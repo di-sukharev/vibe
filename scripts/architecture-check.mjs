@@ -17,10 +17,23 @@ const runtimeModulePattern = /\b(?:import|require)\s*\(\s*['"]([^'"]+)['"]\s*\)/
  * Packages that belong to a delivery mechanism, not to business rules. Application layers and the
  * shared contracts both refuse them, for the same reason and with the same list.
  */
-const frameworkPackages = ['@prisma/', 'hono', '@aws-sdk/', 'expo-', 'react', 'react-native', 'jose']
+const frameworkPackages = [
+  '@prisma/',
+  'pg',
+  'hono',
+  // Scoped siblings are separate packages: a 'hono' or '@aws-sdk/' entry does not cover them.
+  '@hono/',
+  '@aws-sdk/',
+  '@smithy/',
+  'expo-',
+  'react',
+  'react-native',
+  'jose',
+]
 const applicationForbiddenPackages = frameworkPackages
 const contractForbiddenPackages = frameworkPackages
-const transportForbiddenPackages = ['@prisma/', '@aws-sdk/', 'jose', 'pg']
+// Transport owns the HTTP framework, so it keeps hono; it still refuses persistence and provider SDKs.
+const transportForbiddenPackages = ['@prisma/', '@aws-sdk/', '@smithy/', 'jose', 'pg']
 
 export function checkArchitectureSources(files) {
   const violations = []
@@ -208,19 +221,118 @@ function resolveRepositoryImport(importer, specifier) {
 }
 
 function staticImports(source) {
+  const scannable = withoutComments(source)
   const imports = []
   for (const pattern of [importPattern, runtimeModulePattern]) {
-    for (const match of source.matchAll(pattern)) {
+    for (const match of scannable.matchAll(pattern)) {
       const specifier = match[1]
       if (!specifier) continue
       const specifierOffset = (match.index ?? 0) + match[0].lastIndexOf(specifier)
       imports.push({
         specifier,
-        line: source.slice(0, specifierOffset).split('\n').length,
+        line: scannable.slice(0, specifierOffset).split('\n').length,
       })
     }
   }
   return imports
+}
+
+/**
+ * Blanks out `//` and `/* *\/` comments so import scanning cannot match text that is commented
+ * out, while leaving everything else (including line numbers) untouched. String and template
+ * literals are tracked so a `//` inside one, such as a URL, is not mistaken for a comment.
+ *
+ * Known limit: does not disambiguate regex literals from division, so a `//` or `/*` inside a
+ * character class of a regex literal could be misread as a comment start. Real code cannot
+ * place a bare (unescaped) `//` in a regex body outside a character class, so this is rare;
+ * switch to a real tokenizer (e.g. the TypeScript scanner) if it ever bites.
+ */
+function withoutComments(source) {
+  let output = ''
+  let templateDepth = 0
+  const exprBraceDepth = []
+  let i = 0
+
+  while (i < source.length) {
+    const char = source[i]
+    const inTemplate = templateDepth > 0 && exprBraceDepth[templateDepth - 1] === -1
+
+    if (inTemplate) {
+      if (char === '\\') {
+        output += source.slice(i, i + 2)
+        i += 2
+      } else if (char === '`') {
+        templateDepth--
+        exprBraceDepth.pop()
+        output += char
+        i++
+      } else if (char === '$' && source[i + 1] === '{') {
+        exprBraceDepth[templateDepth - 1] = 0
+        output += '${'
+        i += 2
+      } else {
+        output += char
+        i++
+      }
+      continue
+    }
+
+    if (char === '/' && source[i + 1] === '/') {
+      const end = source.indexOf('\n', i)
+      const stop = end === -1 ? source.length : end
+      output += ' '.repeat(stop - i)
+      i = stop
+      continue
+    }
+
+    if (char === '/' && source[i + 1] === '*') {
+      const end = source.indexOf('*/', i + 2)
+      const stop = end === -1 ? source.length : end + 2
+      output += source.slice(i, stop).replace(/[^\n]/g, ' ')
+      i = stop
+      continue
+    }
+
+    if (char === "'" || char === '"') {
+      let j = i + 1
+      while (j < source.length && source[j] !== char) j += source[j] === '\\' ? 2 : 1
+      j = Math.min(j + 1, source.length)
+      output += source.slice(i, j)
+      i = j
+      continue
+    }
+
+    if (char === '`') {
+      templateDepth++
+      exprBraceDepth.push(-1)
+      output += char
+      i++
+      continue
+    }
+
+    if (templateDepth > 0 && char === '{') {
+      exprBraceDepth[templateDepth - 1]++
+      output += char
+      i++
+      continue
+    }
+
+    if (templateDepth > 0 && char === '}') {
+      if (exprBraceDepth[templateDepth - 1] === 0) {
+        exprBraceDepth[templateDepth - 1] = -1
+      } else {
+        exprBraceDepth[templateDepth - 1]--
+      }
+      output += char
+      i++
+      continue
+    }
+
+    output += char
+    i++
+  }
+
+  return output
 }
 
 async function collectSourceFiles(directory) {

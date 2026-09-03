@@ -17,7 +17,9 @@ export function createBackgroundTasks({
   const controllers = new Set<AbortController>()
   const report = (error: unknown) => {
     try {
-      onError(error)
+      // A `void` return type does not stop an async reporter from being passed in, so its rejection
+      // is contained here for the same reason a synchronous throw is.
+      void Promise.resolve(onError(error)).catch(() => undefined)
     } catch {
       // Error reporting must not create an unhandled rejection or detach task cleanup.
     }

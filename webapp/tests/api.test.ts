@@ -542,3 +542,62 @@ function accessTokenFor(subject: string, version: string) {
     btoa(JSON.stringify(value)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_')
   return `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode({ sub: subject, version })}.signature`
 }
+
+test('bootstrapAuthSession applies a refreshed access token to the session that asked for it', async () => {
+  let applied: string | null | undefined
+
+  await bootstrapAuthSession({
+    api: {
+      refresh: async () => ({ accessToken: 'fresh-access-token' }),
+      clearSession: async () => {
+        throw new Error('a healthy refresh must not clear the session')
+      },
+    },
+    shouldApply: () => true,
+    setAccessToken: (accessToken) => {
+      applied = accessToken
+    },
+  })
+
+  expect(applied).toBe('fresh-access-token')
+})
+
+test('bootstrapAuthSession discards a refresh that a newer browser session already superseded', async () => {
+  let applied = false
+  let cleared = false
+
+  await bootstrapAuthSession({
+    api: {
+      refresh: async () => ({ accessToken: 'stale-access-token' }),
+      clearSession: async () => {
+        cleared = true
+      },
+    },
+    shouldApply: () => false,
+    setAccessToken: () => {
+      applied = true
+    },
+  })
+
+  expect(applied).toBe(false)
+  expect(cleared).toBe(false)
+})
+
+test('bootstrapAuthSession leaves a superseded session alone when its own refresh is unauthorized', async () => {
+  let cleared = false
+
+  await bootstrapAuthSession({
+    api: {
+      refresh: async () => {
+        throw new ApiRequestError(401, 'UNAUTHORIZED', 'Invalid refresh token')
+      },
+      clearSession: async () => {
+        cleared = true
+      },
+    },
+    shouldApply: () => false,
+    setAccessToken: () => undefined,
+  })
+
+  expect(cleared).toBe(false)
+})

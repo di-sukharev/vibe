@@ -244,3 +244,54 @@ test('one job can be scheduled more than once', () => {
     void handle.stop()
   }
 })
+
+test('two entries for the same job share one database lock, so only one of them can ever run at a time', async () => {
+  // The test above only proves croner accepts the duplicate name. Whether that is actually safe
+  // depends on `runWithJobLock` keying its Postgres advisory lock by `entry.job` - proven against
+  // a real database in db.integration.test.ts:27-52 ("only one of two concurrent processes runs
+  // the job"), since a faked `$transaction` cannot tell a transaction-scoped lock from a
+  // session-scoped one. What a fake *can* catch is scheduler.ts routing entries to different lock
+  // keys - e.g. by `entry.expression` instead of `entry.job` - which would silently defeat that
+  // guarantee without ever failing loudly. This fake models one honest piece of Postgres's
+  // contract, held-per-key for the life of the transaction, and drives the real `runScheduledJob`
+  // / `runWithJobLock` code to check it.
+  const heldKeys = new Set<string>()
+  const runtime = {
+    prisma: {
+      $queryRaw: async () => {
+        await Bun.sleep(20)
+        return [{ '?column?': 1 }]
+      },
+      $transaction: async (run: (tx: unknown) => Promise<unknown>) => {
+        let acquiredKey: string | undefined
+        try {
+          return await run({
+            $queryRaw: async ({ values }: { values: unknown[] }) => {
+              const key = String(values[0])
+              if (heldKeys.has(key)) return [{ acquired: false }]
+              heldKeys.add(key)
+              acquiredKey = key
+              return [{ acquired: true }]
+            },
+          })
+        } finally {
+          if (acquiredKey) heldKeys.delete(acquiredKey)
+        }
+      },
+    },
+  } as unknown as BackendRuntime
+  const log = spyOn(console, 'log').mockImplementation(() => {})
+
+  const weekday: ScheduleEntry = { expression: '0 9 * * 1-5', job: 'db:ping' }
+  const weekend: ScheduleEntry = { expression: '0 12 * * 6,0', job: 'db:ping' }
+
+  try {
+    await Promise.all([runScheduledJob(runtime, weekday), runScheduledJob(runtime, weekend)])
+
+    const completions = log.mock.calls.filter(([message]) => message === 'Job db:ping completed.')
+    expect(completions).toHaveLength(1)
+    expect(log).toHaveBeenCalledWith('Scheduler skipped db:ping: its lock is held elsewhere.')
+  } finally {
+    log.mockRestore()
+  }
+})

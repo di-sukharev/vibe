@@ -3,6 +3,7 @@ import { Cron } from 'croner'
 import { defaultJobLockTimeoutMs, isJobLockExpiry, runWithJobLock } from './db'
 import scheduleDefinitions from './job-schedules.json' with { type: 'json' }
 import { createBackendRuntime, type BackendRuntime } from './runtime'
+import { createSignalShutdown } from './shutdown'
 import {
   isBackgroundJobName,
   runBackgroundJob,
@@ -142,20 +143,17 @@ export async function main() {
     )
   }
 
-  let stopping = false
-  const stop = async (signal: string) => {
-    if (stopping) return
-    stopping = true
+  const handleSignal = createSignalShutdown(async (signal) => {
     console.log(
       `Scheduler received ${signal}; stopping after in-flight jobs finish.`,
     )
     await stopSchedules()
     await runtime.close()
     process.exit(0)
-  }
+  })
 
-  process.on('SIGINT', () => void stop('SIGINT'))
-  process.on('SIGTERM', () => void stop('SIGTERM'))
+  process.on('SIGINT', () => handleSignal('SIGINT'))
+  process.on('SIGTERM', () => handleSignal('SIGTERM'))
 }
 
 if (import.meta.main) {

@@ -18,6 +18,7 @@ const positiveIntegerQuerySchema = (defaultValue: number, maximum?: number) =>
   z.coerce.number().int().positive().max(maximum ?? Number.MAX_SAFE_INTEGER).default(defaultValue)
 
 export const ADMIN_USERS_MAX_PAGE = 100
+export const ADMIN_USERS_MAX_PAGE_SIZE = 100
 
 export const adminUsersQuerySchema = z
   .object({
@@ -26,7 +27,7 @@ export const adminUsersQuerySchema = z
       z.string().trim().max(100).optional(),
     ),
     page: positiveIntegerQuerySchema(1, ADMIN_USERS_MAX_PAGE),
-    pageSize: positiveIntegerQuerySchema(20, 100),
+    pageSize: positiveIntegerQuerySchema(20, ADMIN_USERS_MAX_PAGE_SIZE),
   })
   .strict()
 
@@ -50,7 +51,7 @@ export const adminUsersResponseSchema = z
   .object({
     items: z.array(adminUserSummarySchema),
     page: z.number().int().positive().max(ADMIN_USERS_MAX_PAGE),
-    pageSize: z.number().int().positive().max(100),
+    pageSize: z.number().int().positive().max(ADMIN_USERS_MAX_PAGE_SIZE),
     total: z.number().int().nonnegative(),
     hasNext: z.boolean(),
   })

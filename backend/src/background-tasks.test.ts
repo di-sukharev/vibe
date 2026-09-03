@@ -84,3 +84,19 @@ test('bounded drain aborts pending work instead of blocking shutdown', async () 
   expect(aborted).toBe(true)
   await expect(backgroundTasks.drain()).resolves.toBe(true)
 })
+
+test('an error reporter that rejects asynchronously is contained like a synchronous throw', async () => {
+  const backgroundTasks = createBackgroundTasks({
+    onError: async () => {
+      throw new Error('the error reporter is down')
+    },
+  })
+
+  backgroundTasks.defer(async () => {
+    throw new Error('delivery failed')
+  })
+
+  expect(await backgroundTasks.drain()).toBe(true)
+  // An escaped rejection from the reporter fails this test on its own once the loop turns.
+  await new Promise((resolve) => setTimeout(resolve, 10))
+})

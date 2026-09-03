@@ -109,3 +109,87 @@ function check(files) {
 function file(path, source) {
   return { path, source }
 }
+
+describe('provider and framework denylist coverage', () => {
+  test('rejects the raw database driver from inner layers, not only from transport', () => {
+    const violations = check([
+      file('backend/src/modules/auth/application/service.ts', "import { Pool } from 'pg'"),
+      file('backend/src/modules/auth/domain/session.ts', "import { Pool } from 'pg'"),
+    ])
+
+    expect(violations.map((item) => item.rule)).toEqual([
+      'backend-application-dependencies',
+      'backend-domain-dependencies',
+    ])
+  })
+
+  test('rejects scoped framework packages that share a prefix with an allowed name', () => {
+    const violations = check([
+      file('backend/src/modules/auth/domain/session.ts', "import { createRoute } from '@hono/zod-openapi'"),
+      file('packages/contracts/src/auth.ts', "import { zValidator } from '@hono/zod-validator'"),
+    ])
+
+    expect(violations.map((item) => item.rule)).toEqual([
+      'backend-domain-dependencies',
+      'contracts-dependency-direction',
+    ])
+  })
+
+  test('keeps the provider SDK core out of transport and inner layers', () => {
+    const violations = check([
+      file('backend/src/modules/uploads/domain/signing.ts', "import { SignatureV4 } from '@smithy/signature-v4'"),
+      file('backend/src/modules/uploads/transport/routes.ts', "import { SignatureV4 } from '@smithy/signature-v4'"),
+    ])
+
+    expect(violations.map((item) => item.rule)).toEqual([
+      'backend-domain-dependencies',
+      'backend-transport-dependencies',
+    ])
+  })
+})
+
+describe('comments are not scanned for imports', () => {
+  test('ignores a forbidden require() call commented out on a single line', () => {
+    // Uses require(), not `import ... from`: the import pattern already requires the keyword to
+    // start the line, so it can never match text after `//` — this fixture must use a pattern
+    // that has no such anchor, or the test would pass even with comment-stripping disabled.
+    expect(check([
+      file('backend/src/modules/auth/domain/session.ts', "// const hono = require('hono')"),
+    ])).toEqual([])
+  })
+
+  test('ignores a forbidden require() call inside a block comment', () => {
+    expect(check([
+      file('backend/src/modules/auth/domain/session.ts', "/* const hono = require('hono') */"),
+    ])).toEqual([])
+  })
+
+  test('ignores an import sitting on its own line inside a multi-line block comment', () => {
+    expect(check([
+      file(
+        'backend/src/modules/auth/domain/session.ts',
+        "/* disable temporarily\nimport { Hono } from 'hono'\n*/",
+      ),
+    ])).toEqual([])
+  })
+
+  test('does not let a // inside a same-line URL string swallow a real require() call after it', () => {
+    const violations = check([
+      file(
+        'backend/src/modules/auth/domain/session.ts',
+        "const DOCS_URL = 'https://example.com'; const hono = require('hono')",
+      ),
+    ])
+    expect(violations.map((item) => item.rule)).toEqual(['backend-domain-dependencies'])
+  })
+
+  test('keeps line numbers correct across a multi-line block comment', () => {
+    const violations = check([
+      file(
+        'backend/src/modules/auth/domain/session.ts',
+        "/* a comment\nspanning lines */\nimport { Hono } from 'hono'",
+      ),
+    ])
+    expect(violations.map((item) => item.line)).toEqual([3])
+  })
+})

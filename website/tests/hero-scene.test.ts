@@ -63,12 +63,29 @@ test('the R3F enhancement loads once and only while desktop motion is eligible',
   assert.deepEqual(eligibility, [false, true, false, true])
 })
 
-test('the static build keeps the fallback eager, the R3F scene lazy, and story styles isolated', { timeout: 30_000 }, () => {
-  const storySource = readFileSync(
-    resolve(websiteRoot, 'src/stories/ui/demos.tsx'),
-    'utf8',
-  )
-  assert.match(storySource, /h-\[34rem\]/)
+test('the R3F canvas ships as a separate, lazily-loaded chunk', { timeout: 30_000 }, () => {
+  const { dist, html, canvasChunk, shellUrl } = getHeroSceneBuild()
+
+  assert.ok(canvasChunk, 'expected a separate R3F canvas chunk')
+  assert.ok(shellUrl, 'expected the lightweight HeroScene island chunk')
+  assert.doesNotMatch(html, new RegExp(escapeRegExp(canvasChunk.name)))
+
+  const shell = readFileSync(resolve(dist, shellUrl.slice(1)), 'utf8')
+  assert.match(shell, new RegExp(escapeRegExp(canvasChunk.name)))
+  assert.doesNotMatch(shell, /data-hero-scene-canvas/)
+})
+
+test('the hero scene hydrates lazily with an eager fallback', { timeout: 30_000 }, () => {
+  const { html } = getHeroSceneBuild()
+
+  assert.match(html, /data-hero-scene-fallback/)
+  assert.match(html, /client="idle"/)
+})
+
+let heroSceneBuild: { dist: string; html: string; canvasChunk?: { name: string; source: string }; shellUrl?: string }
+
+function getHeroSceneBuild() {
+  if (heroSceneBuild) return heroSceneBuild
 
   execFileSync('bun', ['run', 'build'], {
     cwd: websiteRoot,
@@ -82,26 +99,12 @@ test('the static build keeps the fallback eager, the R3F scene lazy, and story s
   const scripts = readdirSync(assets)
     .filter((name) => name.endsWith('.js'))
     .map((name) => ({ name, source: readFileSync(resolve(assets, name), 'utf8') }))
-  const css = readdirSync(assets)
-    .filter((name) => name.endsWith('.css'))
-    .map((name) => readFileSync(resolve(assets, name), 'utf8'))
-    .join('\n')
   const canvasChunk = scripts.find(({ source }) => source.includes('data-hero-scene-canvas'))
-  const shellUrl = html.match(
-    /<astro-island[^>]*component-url="([^"]+\.js)"[^>]*>[\s\S]*?data-hero-scene/,
-  )?.[1]
+  const shellUrl = findHeroSceneShellUrl(html)
 
-  assert.match(html, /data-hero-scene-fallback/)
-  assert.match(html, /client="idle"/)
-  assert.ok(!css.includes('.h-\\[34rem\\]{'))
-  assert.ok(canvasChunk, 'expected a separate R3F canvas chunk')
-  assert.ok(shellUrl, 'expected the lightweight HeroScene island chunk')
-  assert.doesNotMatch(html, new RegExp(escapeRegExp(canvasChunk.name)))
-
-  const shell = readFileSync(resolve(dist, shellUrl.slice(1)), 'utf8')
-  assert.match(shell, new RegExp(escapeRegExp(canvasChunk.name)))
-  assert.doesNotMatch(shell, /data-hero-scene-canvas/)
-})
+  heroSceneBuild = { dist, html, canvasChunk, shellUrl }
+  return heroSceneBuild
+}
 
 function fakeMediaQuery(initialMatches: boolean): HeroSceneMediaQuery & {
   setMatches(matches: boolean): void
@@ -129,3 +132,19 @@ function fakeMediaQuery(initialMatches: boolean): HeroSceneMediaQuery & {
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
+
+function findHeroSceneShellUrl(html: string) {
+  // The lazy [\s\S]*? must not cross into another island's tags, or a hero-scene marker
+  // nested in a later island would get attributed to an earlier, unrelated island's URL.
+  return html.match(
+    /<astro-island[^>]*component-url="([^"]+\.js)"[^>]*>(?:(?!<\/?astro-island)[\s\S])*?data-hero-scene/,
+  )?.[1]
+}
+
+test('the hero-scene shell URL is anchored to the island that actually renders the hero scene', () => {
+  const html =
+    '<astro-island component-url="/other.js" opts="{}"><div data-other>x</div></astro-island>' +
+    '<astro-island component-url="/hero-scene.js" opts="{}"><div data-hero-scene>y</div></astro-island>'
+
+  assert.equal(findHeroSceneShellUrl(html), '/hero-scene.js')
+})

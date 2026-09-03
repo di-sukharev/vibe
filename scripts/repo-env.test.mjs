@@ -1,6 +1,11 @@
 import { afterEach, expect, test } from 'bun:test'
 
-import { assertLocalPrivateStorageEndpoint, assertTestDatabaseUrl } from './repo-env.mjs'
+import {
+  assertLocalPrivateStorageEndpoint,
+  assertTestDatabaseUrl,
+  localPrivateStorageCorsRule,
+  postgresPortFromDatabaseUrl,
+} from './repo-env.mjs'
 
 const envKeys = ['TEST_ALLOW_NON_TEST_DATABASE']
 const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]))
@@ -55,4 +60,25 @@ test('assertLocalPrivateStorageEndpoint refuses anything not loopback, so this c
   ]) {
     expect(() => assertLocalPrivateStorageEndpoint(endpoint)).toThrow()
   }
+})
+
+test('localPrivateStorageCorsRule pairs the given origins with the backend-driven header lists', () => {
+  expect(
+    localPrivateStorageCorsRule(['http://localhost:5173'], ['content-type'], ['etag']),
+  ).toEqual({
+    AllowedOrigins: ['http://localhost:5173'],
+    AllowedMethods: ['GET', 'PUT', 'HEAD', 'DELETE'],
+    AllowedHeaders: ['content-type'],
+    ExposeHeaders: ['etag'],
+    MaxAgeSeconds: 600,
+  })
+})
+
+test('postgresPortFromDatabaseUrl reads an explicit port and falls back to the Postgres default', () => {
+  expect(
+    postgresPortFromDatabaseUrl('postgresql://user:pass@localhost:54329/app_test'),
+  ).toBe('54329')
+  expect(
+    postgresPortFromDatabaseUrl('postgresql://user:pass@localhost/app_test'),
+  ).toBe('5432')
 })

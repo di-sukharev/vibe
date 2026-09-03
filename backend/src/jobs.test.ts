@@ -171,6 +171,91 @@ describe('runBackgroundJob', () => {
         error.mockRestore()
       }
     })
+
+    test('bounds how many deletes run at once instead of firing all of them at the storage backend together', async () => {
+      // A sequential loop never overlaps (peak 1); an unbounded `Promise.all` over the full 500-row
+      // page would overlap all of them at once (peak === total). Neither is what this job wants.
+      const total = 40
+      const uploads = Array.from({ length: total }, (_, index) => ({
+        id: `upload-${index}`,
+        objectKey: `avatars/2026/07/${index}`,
+      }))
+      let inFlight = 0
+      let peakInFlight = 0
+      const deletedObjects: string[] = []
+
+      const runtime = {
+        prisma: {
+          userAvatar: {
+            findMany: async () => uploads,
+            deleteMany: async (input: { where: { id: { in: string[] } } }) => ({
+              count: input.where.id.in.length,
+            }),
+          },
+        },
+        privateStorage: {
+          storage: {
+            deleteObject: async (objectKey: string) => {
+              inFlight += 1
+              peakInFlight = Math.max(peakInFlight, inFlight)
+              await Bun.sleep(1)
+              deletedObjects.push(objectKey)
+              inFlight -= 1
+            },
+          },
+        },
+      } as unknown as BackendRuntime
+
+      await runBackgroundJob('uploads:pending:cleanup', runtime, new Date())
+
+      expect(deletedObjects).toHaveLength(total)
+      expect(peakInFlight).toBeGreaterThan(1)
+      expect(peakInFlight).toBeLessThan(total)
+    })
+
+    test('keeps working through the rest of the backlog when some deletes fail, instead of losing it silently', async () => {
+      // Failures spread across the run rather than clustered at the start: an implementation
+      // that lets one failing delete abort the pool (or a chunked one that aborts a whole batch)
+      // would lose every upload still queued behind it.
+      const total = 35
+      const uploads = Array.from({ length: total }, (_, index) => ({
+        id: `upload-${index}`,
+        objectKey: `avatars/2026/07/${index}`,
+      }))
+      const failingKeys = new Set(
+        [0, 9, 10, 19, 20, 34].map((index) => `avatars/2026/07/${index}`),
+      )
+      const deletedObjects: string[] = []
+
+      const runtime = {
+        prisma: {
+          userAvatar: {
+            findMany: async () => uploads,
+            deleteMany: async (input: { where: { id: { in: string[] } } }) => ({
+              count: input.where.id.in.length,
+            }),
+          },
+        },
+        privateStorage: {
+          storage: {
+            deleteObject: async (objectKey: string) => {
+              if (failingKeys.has(objectKey)) throw new Error('storage unavailable')
+              deletedObjects.push(objectKey)
+            },
+          },
+        },
+      } as unknown as BackendRuntime
+      const error = spyOn(console, 'error').mockImplementation(() => {})
+
+      try {
+        await runBackgroundJob('uploads:pending:cleanup', runtime, new Date())
+
+        expect(deletedObjects).toHaveLength(total - failingKeys.size)
+        expect(error).toHaveBeenCalledTimes(failingKeys.size)
+      } finally {
+        error.mockRestore()
+      }
+    })
   })
 
   test('deletes expired and revoked auth sessions after the retention window', async () => {

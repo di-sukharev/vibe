@@ -107,4 +107,23 @@ describe('avatar upload contracts', () => {
     expect(() => avatarResponseSchema.parse({})).toThrow()
   })
 
+  test('requires a positive integer contentLength on the upload ticket', () => {
+    for (const contentLength of [0, -1, 12.5]) {
+      expect(() => uploadTicketSchema.parse({ ...ticket, contentLength })).toThrow()
+    }
+    expect(uploadTicketSchema.parse({ ...ticket, contentLength: 1 }).contentLength).toBe(1)
+  })
+
+  test('rejects timestamp fields that are not valid ISO datetimes', () => {
+    expect(() => uploadTicketSchema.parse({ ...ticket, expiresAt: 'not-a-datetime' })).toThrow()
+    expect(() =>
+      avatarResponseSchema.parse({ avatar: { ...avatar, updatedAt: 'not-a-datetime' } }),
+    ).toThrow()
+    expect(() =>
+      avatarResponseSchema.parse({
+        avatar: { ...avatar, downloadUrlExpiresAt: 'not-a-datetime' },
+      }),
+    ).toThrow()
+  })
+
 })

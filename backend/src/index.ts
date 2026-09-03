@@ -1,6 +1,6 @@
 import { createApp } from './app'
 import { createBackendRuntime } from './runtime'
-import { shutdownBackend } from './shutdown'
+import { createSignalShutdown, shutdownBackend } from './shutdown'
 
 const runtime = createBackendRuntime()
 const app = createApp({
@@ -18,24 +18,14 @@ const server = Bun.serve({
 
 console.log(`Backend listening on ${server.url}`)
 
-let shuttingDown = false
-
-async function shutdown(signal: string) {
-  if (shuttingDown) return
-  shuttingDown = true
-
+const handleSignal = createSignalShutdown(async (signal) => {
   console.log(`Backend received ${signal}; shutting down`)
   await shutdownBackend(
     server,
     runtime,
     runtime.env.SHUTDOWN_GRACE_SECONDS * 1000,
   )
-}
-
-process.on('SIGINT', () => {
-  void shutdown('SIGINT')
 })
 
-process.on('SIGTERM', () => {
-  void shutdown('SIGTERM')
-})
+process.on('SIGINT', () => handleSignal('SIGINT'))
+process.on('SIGTERM', () => handleSignal('SIGTERM'))

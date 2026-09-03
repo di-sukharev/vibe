@@ -55,6 +55,12 @@ describe('user and admin contracts', () => {
     expect(() => adminUsersQuerySchema.parse({ pageSize: '101' })).toThrow()
   })
 
+  test('rejects a non-numeric page and an over-long search query', () => {
+    expect(() => adminUsersQuerySchema.parse({ page: 'abc' })).toThrow()
+    expect(adminUsersQuerySchema.parse({ q: 'a'.repeat(100) }).q).toBe('a'.repeat(100))
+    expect(() => adminUsersQuerySchema.parse({ q: 'a'.repeat(101) })).toThrow()
+  })
+
   test('exposes only the safe admin user summary and validates role changes', () => {
     const summary = {
       id: user.id,
@@ -71,6 +77,12 @@ describe('user and admin contracts', () => {
     expect(() => updateUserRoleRequestSchema.parse({ role: 'owner' })).toThrow()
     expect(adminUserParamsSchema.parse({ userId: user.id })).toEqual({ userId: user.id })
     expect(() => adminUserParamsSchema.parse({ userId: 'not-a-uuid' })).toThrow()
+  })
+
+  test('rejects an admin user summary with a createdAt that is not a valid ISO datetime', () => {
+    expect(() =>
+      adminUserSummarySchema.parse({ ...user, createdAt: 'not-a-datetime' }),
+    ).toThrow()
   })
 
 })

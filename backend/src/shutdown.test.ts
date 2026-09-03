@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 
-import { shutdownBackend, stopServerGracefully } from './shutdown'
+import { createSignalShutdown, shutdownBackend, stopServerGracefully } from './shutdown'
 
 test('stopServerGracefully lets in-flight work finish before forcing shutdown', async () => {
   const calls: boolean[] = []
@@ -45,3 +45,56 @@ test('shutdownBackend gives background cleanup only the remaining shared grace p
 
   expect(backgroundGrace).toBe(30)
 })
+
+test('createSignalShutdown runs the shutdown once no matter how many signals arrive', async () => {
+  const signals: string[] = []
+  const exits: number[] = []
+  const handle = createSignalShutdown(
+    async (signal) => {
+      signals.push(signal)
+    },
+    { exit: (code) => exits.push(code), log: () => undefined },
+  )
+
+  handle('SIGTERM')
+  handle('SIGINT')
+  await settle()
+
+  expect(signals).toEqual(['SIGTERM'])
+  expect(exits).toEqual([])
+})
+
+test('createSignalShutdown reports a failed shutdown and exits non-zero', async () => {
+  const logged: Array<[string, unknown]> = []
+  const exits: number[] = []
+  const failure = new Error('closing the database pool failed')
+  const handle = createSignalShutdown(
+    async () => {
+      throw failure
+    },
+    { exit: (code) => exits.push(code), log: (message, error) => logged.push([message, error]) },
+  )
+
+  handle('SIGTERM')
+  await settle()
+
+  expect(logged).toEqual([['Shutdown after SIGTERM failed.', failure]])
+  expect(exits).toEqual([1])
+})
+
+test('createSignalShutdown keeps a failed shutdown out of the unhandled rejection path', async () => {
+  const handle = createSignalShutdown(
+    async () => {
+      throw new Error('closing the database pool failed')
+    },
+    { exit: () => undefined, log: () => undefined },
+  )
+
+  handle('SIGTERM')
+  // An escaped rejection from the shutdown fails this test on its own once the loop turns.
+  await settle()
+})
+
+function settle() {
+  return new Promise((resolve) => setTimeout(resolve, 10))
+}

@@ -17,6 +17,7 @@ import {
   hasErrors,
   passwordConfirmationErrors,
   toFieldErrors,
+  unmappableIssueMessage,
 } from './form-validation'
 import { PasswordInput } from './PasswordInput'
 
@@ -43,6 +44,11 @@ export function ResetPasswordForm({ token }: { token: string }) {
         password: value.password,
       })
       const nextErrors = result.success ? {} : toFieldErrors(result.error.issues)
+      // The token has no input of its own, so its issues would otherwise reject the submit silently.
+      if (!result.success) {
+        const formLevelIssue = unmappableIssueMessage(result.error.issues)
+        if (formLevelIssue) setFormError(formLevelIssue)
+      }
       const confirmationErrors = passwordConfirmationErrors(
         value.password,
         value.confirmPassword,

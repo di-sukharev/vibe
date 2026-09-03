@@ -12,6 +12,15 @@ export function toFieldErrors(issues: z.ZodIssue[]): FieldErrors {
   }, {})
 }
 
+/**
+ * Issues whose path is not a rendered field have no input to attach to, so `toFieldErrors` drops
+ * them. Returning the message here keeps a rejected submit from showing nothing at all; callers
+ * pass it to their form-level alert.
+ */
+export function unmappableIssueMessage(issues: z.ZodIssue[]): string | undefined {
+  return issues.find((issue) => !isFieldName(issue.path[0]))?.message
+}
+
 export function passwordConfirmationErrors(
   password: string,
   confirmation: string,

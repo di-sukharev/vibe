@@ -17,7 +17,7 @@ function git(args) {
   return execFileSync('git', args, { cwd: repositoryRoot, encoding: 'utf8' }).trim()
 }
 
-function mobileReleaseErrors({ branch, status, head, originMobile, masterIsAncestor, requirePublished }) {
+export function mobileReleaseErrors({ branch, status, head, originMobile, masterIsAncestor, requirePublished }) {
   const errors = []
 
   if (branch !== 'mobile') errors.push('current branch must be mobile')
