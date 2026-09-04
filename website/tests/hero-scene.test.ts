@@ -6,6 +6,8 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 import {
+  getHeroSceneFallbackClassName,
+  getHeroSceneFrameloop,
   watchHeroSceneEnhancement,
   watchHeroSceneEligibility,
   type HeroSceneMediaQuery,
@@ -80,6 +82,18 @@ test('the hero scene hydrates lazily with an eager fallback', { timeout: 30_000 
 
   assert.match(html, /data-hero-scene-fallback/)
   assert.match(html, /client="idle"/)
+})
+
+test('the static fallback only hides once the canvas has mounted and rendered', () => {
+  assert.equal(getHeroSceneFallbackClassName(false), 'absolute inset-0')
+  assert.equal(getHeroSceneFallbackClassName(true), 'hidden')
+})
+
+test('the canvas frameloop stops off-screen and otherwise follows the motion preference', () => {
+  assert.equal(getHeroSceneFrameloop(false, false), 'never')
+  assert.equal(getHeroSceneFrameloop(false, true), 'never')
+  assert.equal(getHeroSceneFrameloop(true, false), 'always')
+  assert.equal(getHeroSceneFrameloop(true, true), 'demand')
 })
 
 let heroSceneBuild: { dist: string; html: string; canvasChunk?: { name: string; source: string }; shellUrl?: string }

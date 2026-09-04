@@ -224,4 +224,50 @@ describe('AvatarsService', () => {
     expect(deleted).toContain(pending.objectKey)
   })
 
+  test('publishes a verified upload as the ready avatar', async () => {
+    const upload = await uploadPng()
+
+    const { avatar } = await service.finalizeUpload(userId, upload.uploadId)
+
+    expect(avatar).toMatchObject({
+      contentType: 'image/png',
+      byteSize: pngFixture.byteLength,
+    })
+    expect(avatar?.downloadUrl).toContain('?sig=2')
+    expect(fakeRepository.rows.get(upload.uploadId)?.state).toBe('ready')
+  })
+
+  test('getAvatar reports null when there is nothing published yet', async () => {
+    const { avatar } = await service.getAvatar(userId)
+
+    expect(avatar).toBeNull()
+  })
+
+  test('getAvatar returns the published avatar', async () => {
+    const upload = await uploadPng()
+    await service.finalizeUpload(userId, upload.uploadId)
+
+    const { avatar } = await service.getAvatar(userId)
+
+    expect(avatar).toMatchObject({ contentType: 'image/png', byteSize: pngFixture.byteLength })
+  })
+
+  test('removeAvatar is a no-op success when there is nothing to remove', async () => {
+    const result = await service.removeAvatar(userId)
+
+    expect(result).toEqual({ avatar: null })
+    expect(deleted).toEqual([])
+  })
+
+  test('removeAvatar deletes the published avatar and reports it gone', async () => {
+    const upload = await uploadPng()
+    await service.finalizeUpload(userId, upload.uploadId)
+    const pending = fakeRepository.rows.get(upload.uploadId)!
+
+    const result = await service.removeAvatar(userId)
+
+    expect(result).toEqual({ avatar: null })
+    expect(deleted).toContain(pending.objectKey)
+    expect((await service.getAvatar(userId)).avatar).toBeNull()
+  })
 })

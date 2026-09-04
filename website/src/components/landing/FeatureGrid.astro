@@ -1,7 +1,7 @@
 ---
 import { Blocks, Layers3, Palette } from 'lucide-react'
 
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import SectionIntro from './SectionIntro.astro'
 
 const roles = [
@@ -41,7 +41,7 @@ const roles = [
             <span class="mb-3 grid size-10 place-items-center rounded-xl bg-white/10 text-white">
               <Icon className="size-5" aria-hidden="true" />
             </span>
-            <CardTitle className="text-lg font-bold">{title}</CardTitle>
+            <h3 class="font-heading text-lg leading-normal font-bold">{title}</h3>
           </CardHeader>
           <CardContent>
             <p class="leading-6 text-muted-foreground">{description}</p>

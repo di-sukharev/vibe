@@ -101,6 +101,85 @@ test('verifies an unchanged password before opening the session transaction', as
   expect(verificationContexts).toEqual([false])
 })
 
+test('rejects login when the password changed between the initial check and the session transaction', async () => {
+  // The transaction reads a fresh row. If its hash no longer matches the one already verified
+  // outside, the race must be treated as a password change, not as an unchanged password.
+  const changedUser = { ...user, passwordHash: 'different-password-hash' }
+  const repository = {
+    findUserByEmail: async () => user,
+    createSession: async (input: Parameters<AuthRepository['createSession']>[0]) => {
+      const authorized = await input.authorizeUser(changedUser)
+      return authorized ? { user, session: { id: 'session-created' } } : null
+    },
+  } as unknown as AuthRepository
+  const service = new AuthService({
+    ...unusedPasswordResetDependencies,
+    accessTokens: {
+      sign: async () => 'access-token',
+      verify: async () => ({ sub: user.id, email: user.email, sessionId: 'session-created' }),
+    },
+    clock: { now: () => new Date('2026-01-01T00:00:00.000Z') },
+    logoutCleanup: async () => undefined,
+    passwords: {
+      hash: async () => 'password-hash',
+      // The original plaintext re-checked against the changed hash: a password changed mid-flight
+      // does not match it, so this is what rejects the race.
+      verify: async (_password, passwordHash) => passwordHash === user.passwordHash,
+    },
+    projectUser,
+    refreshReuseGraceSeconds: 10,
+    refreshTokenTtlDays: 30,
+    sessionAbsoluteTtlDays: 90,
+    refreshTokens: {
+      create: () => 'refresh-token',
+      hash: (token) => `hash:${token}`,
+      familyHash: (token) => `family:${token}`,
+      rotate: (token) => `next:${token}`,
+    },
+    repository,
+  })
+
+  await expect(service.login({
+    email: user.email,
+    password: 'password123',
+  }, {})).rejects.toThrow('Invalid email or password')
+})
+
+test('login against an email with no account still runs a password verification', async () => {
+  // A response that skips verification whenever the email does not resolve lets an attacker learn
+  // which addresses have accounts purely from how fast the request comes back - the same
+  // enumeration `requestPasswordReset` is deliberately built to refuse.
+  const verifyCalls: string[] = []
+  const service = new AuthService({
+    ...unusedPasswordResetDependencies,
+    accessTokens: {} as never,
+    clock: { now: () => new Date('2026-01-01T00:00:00.000Z') },
+    logoutCleanup: async () => undefined,
+    passwords: {
+      hash: async () => 'password-hash',
+      verify: async (_password, passwordHash) => {
+        verifyCalls.push(passwordHash)
+        return false
+      },
+    },
+    projectUser,
+    refreshReuseGraceSeconds: 10,
+    refreshTokenTtlDays: 30,
+    sessionAbsoluteTtlDays: 90,
+    refreshTokens: {} as never,
+    repository: { findUserByEmail: async () => null } as unknown as AuthRepository,
+  })
+
+  await expect(service.login({
+    email: 'nobody@example.com',
+    password: 'password123',
+  }, {})).rejects.toThrow('Invalid email or password')
+  expect(verifyCalls).toHaveLength(1)
+  // Not a real account's hash - just something argon2id-shaped so the run costs what a real
+  // wrong-password check costs.
+  expect(verifyCalls[0]).not.toBe(user.passwordHash)
+})
+
 test('refresh keeps the logical session id stable while rotating its credential', async () => {
   const signedSessionIds: string[] = []
   const refreshCutoffs: Date[] = []
@@ -163,6 +242,40 @@ test('refresh keeps the logical session id stable while rotating its credential'
 
   expect(signedSessionIds).toEqual(['session-stable'])
   expect(refreshCutoffs).toEqual([new Date('2025-10-03T00:00:00.000Z')])
+})
+
+test('authenticateAccessToken resolves a valid token and rejects a broken or expired one', async () => {
+  const service = new AuthService({
+    ...unusedPasswordResetDependencies,
+    accessTokens: {
+      sign: async () => 'access-token',
+      verify: async (token) => {
+        if (token === 'broken-token') throw new Error('jwt malformed')
+        return { sub: user.id, email: user.email, sessionId: 'session-1' }
+      },
+    },
+    clock: { now: () => new Date('2026-01-01T00:00:00.000Z') },
+    logoutCleanup: async () => undefined,
+    passwords: { hash: async () => 'hash', verify: async () => true },
+    projectUser,
+    refreshReuseGraceSeconds: 10,
+    refreshTokenTtlDays: 30,
+    sessionAbsoluteTtlDays: 90,
+    refreshTokens: {} as never,
+    repository: {
+      findActiveAccessSession: async () => ({ id: 'session-1', user }),
+    } as unknown as AuthRepository,
+  })
+
+  await expect(service.authenticateAccessToken('valid-token')).resolves.toMatchObject({
+    id: user.id,
+    sessionId: 'session-1',
+  })
+  // A malformed or expired JWT must surface as the domain failure, not the raw jose error - the
+  // catch around `accessTokens.verify` is what turns one into the other.
+  await expect(service.authenticateAccessToken('broken-token')).rejects.toThrow(
+    'Access token is invalid or expired',
+  )
 })
 
 // Credential reuse after grace and the rotation race are decided by SQL, so they are tested in

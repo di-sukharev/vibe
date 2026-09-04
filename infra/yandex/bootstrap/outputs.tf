@@ -12,7 +12,8 @@ output "state_service_account_id" {
 }
 
 output "state_access_key_id" {
-  value = yandex_iam_service_account_static_access_key.terraform_state.access_key
+  value     = yandex_iam_service_account_static_access_key.terraform_state.access_key
+  sensitive = true
 }
 
 output "state_secret_access_key" {

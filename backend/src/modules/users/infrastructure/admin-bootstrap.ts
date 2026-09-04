@@ -4,6 +4,7 @@ import {
   userAuthorityTransitionTransactionOptions,
 } from '../../../db'
 import { Prisma } from '../../../generated/prisma/client'
+import { decideAdminAuthorityUpdate } from '../domain/admin-authority-policy'
 import type { AdminSeedConfig } from '../domain/admin-seed-config'
 
 export { parseAdminSeedConfig } from '../domain/admin-seed-config'
@@ -72,19 +73,21 @@ function updateExistingAdmin(
       config.password !== null &&
       existing.passwordHash !== null &&
       await matchesPassword(config.password, existing.passwordHash)
-    const passwordChanges = config.password !== null && !passwordMatches
-    const changesAuthenticationAuthority = existing.role !== 'admin' || passwordChanges
-    if (!changesAuthenticationAuthority) {
+
+    const patch = decideAdminAuthorityUpdate({
+      existingRole: existing.role,
+      passwordMatches,
+      requestedPasswordProvided: config.password !== null,
+      requestedPasswordHash,
+    })
+    if (!patch) {
       return { email: config.email, passwordHash: existing.passwordHash }
     }
     const now = new Date()
 
     const updated = await tx.user.update({
       where: { id: existing.id },
-      data: {
-        role: 'admin',
-        ...(passwordChanges ? { passwordHash: requestedPasswordHash! } : {}),
-      },
+      data: patch,
       select: { email: true, passwordHash: true },
     })
     await tx.authSession.updateMany({

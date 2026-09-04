@@ -1,6 +1,8 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import * as THREE from 'three'
+
+import { getHeroSceneFrameloop } from './hero-scene-loading'
 
 type Point3 = [number, number, number]
 
@@ -107,6 +109,25 @@ function usePrefersReducedMotion() {
   return prefersReducedMotion
 }
 
+// Off-screen (e.g. scrolled 5000+px past the hero), the canvas has nothing to
+// show anyone — gate its frameloop on actual viewport visibility instead of
+// drawing 13 meshes into the void for the whole session.
+function useIsElementVisible(ref: RefObject<HTMLElement | null>) {
+  const [isVisible, setIsVisible] = useState(true)
+
+  useEffect(() => {
+    const node = ref.current
+    if (!node) return
+
+    const observer = new IntersectionObserver((entries) => setIsVisible(entries[entries.length - 1].isIntersecting))
+    observer.observe(node)
+
+    return () => observer.disconnect()
+  }, [ref])
+
+  return isVisible
+}
+
 function BlueprintPath({
   color = STROKE,
   opacity = 1,
@@ -209,14 +230,16 @@ function BlueprintPattern({ reducedMotion }: { reducedMotion: boolean }) {
 
 export default function HeroSceneCanvas({ onReady }: { onReady: () => void }) {
   const prefersReducedMotion = usePrefersReducedMotion()
+  const containerRef = useRef<HTMLDivElement>(null)
+  const isVisible = useIsElementVisible(containerRef)
 
   return (
-    <div className="pointer-events-none absolute inset-0" data-hero-scene-canvas>
+    <div className="pointer-events-none absolute inset-0" data-hero-scene-canvas ref={containerRef}>
       <Canvas
         aria-hidden="true"
         camera={{ position: [0, 0, 10], zoom: 70 }}
         dpr={[1, 1.5]}
-        frameloop={prefersReducedMotion ? 'demand' : 'always'}
+        frameloop={getHeroSceneFrameloop(isVisible, prefersReducedMotion)}
         gl={{ alpha: true, antialias: true, powerPreference: 'high-performance' }}
         onCreated={onReady}
         orthographic

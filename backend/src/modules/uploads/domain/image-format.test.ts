@@ -24,7 +24,7 @@ describe('detectImageFormat', () => {
       'image/png',
     )
 
-    for (const brand of ['heic', 'heix', 'hevc', 'hevx', 'mif1', 'msf1']) {
+    for (const brand of ['heic', 'heix', 'hevc', 'hevx', 'mif1', 'msf1', 'heim', 'heis']) {
       expect(detectImageFormat(isoBaseMedia(brand))).toBe('image/heic')
     }
   })

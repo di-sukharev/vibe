@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 
 import {
+  adminUsersDisplayData,
   adminUsersPagination,
   adminUsersViewState,
   roleMutationFeedback,
@@ -57,6 +58,15 @@ test('admin pagination reports canGoNext at the last reachable page of an unboun
     totalPages: 5,
     wasBounded: false,
   })
+})
+
+test('admin directory display data is dropped once the query errors, even with stale data cached', () => {
+  const staleData = { items: [], page: 3, pageSize: 20, total: 45, hasNext: true }
+
+  expect(adminUsersDisplayData('error', staleData)).toBeUndefined()
+  expect(adminUsersDisplayData('ready', staleData)).toBe(staleData)
+  expect(adminUsersDisplayData('loading', undefined)).toBeUndefined()
+  expect(adminUsersDisplayData('empty', staleData)).toBe(staleData)
 })
 
 test('role mutation exposes explicit error and success feedback', () => {

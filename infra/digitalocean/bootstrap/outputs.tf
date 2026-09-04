@@ -8,7 +8,8 @@ output "state_region" {
 }
 
 output "state_access_key_id" {
-  value = digitalocean_spaces_key.terraform_state.access_key
+  value     = digitalocean_spaces_key.terraform_state.access_key
+  sensitive = true
 }
 
 output "state_secret_access_key" {

@@ -7,13 +7,14 @@ import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Typography } from '@/components/typography'
+import { isDisplayNameTooShort } from './model'
 import { useUpdateProfileMutation } from './queries'
 
 export function ProfilePanel({ user }: { user: UserDto }) {
   const displayNameErrorId = useId()
   const [displayName, setDisplayName] = useState(user.displayName ?? '')
   const mutation = useUpdateProfileMutation()
-  const displayNameInvalid = displayName.trim().length === 1
+  const displayNameInvalid = isDisplayNameTooShort(displayName)
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()

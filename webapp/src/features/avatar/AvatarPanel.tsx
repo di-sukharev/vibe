@@ -1,13 +1,15 @@
 import type { UserDto } from '@web-app-demo/contracts'
 import { useRef, useState, type ChangeEvent } from 'react'
 
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
 import { FieldDescription } from '@/components/ui/field'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Typography } from '@/components/typography'
 import { ApiRequestError } from '@/platform/api'
+import { initials } from './model'
 import {
   useAvatarImage,
   useAvatarQuery,
@@ -54,71 +56,103 @@ export function AvatarPanel({ user }: { user: UserDto }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-5">
-        <div className="flex flex-wrap items-center gap-5">
-          <Avatar data-testid="avatar-preview" size="xl">
-            {imageUrl && <AvatarImage alt="" src={imageUrl} />}
-            <AvatarFallback data-testid="avatar-fallback">{initials(user)}</AvatarFallback>
-          </Avatar>
+        {avatarQuery.isPending && (
+          <div
+            aria-label="Loading photo"
+            className="flex flex-wrap items-center gap-5"
+            role="status"
+          >
+            <Skeleton className="size-16 rounded-full" />
+            <Skeleton className="h-9 w-32" />
+          </div>
+        )}
 
-          <div className="grid gap-2">
-            <div className="flex flex-wrap gap-2">
+        {avatarQuery.isError && (
+          <Alert data-testid="avatar-load-error" variant="destructive">
+            <AlertTitle>Photo is unavailable</AlertTitle>
+            <AlertDescription>{avatarQuery.error.message}</AlertDescription>
+            <AlertAction>
               <Button
-                disabled={busy}
-                onClick={() => fileInput.current?.click()}
+                onClick={() => void avatarQuery.refetch()}
+                size="sm"
                 type="button"
                 variant="outline"
               >
-                {upload.isPending ? 'Uploading…' : hasAvatar ? 'Replace photo' : 'Upload photo'}
+                Try again
               </Button>
-              {hasAvatar && (
-                <Button
-                  disabled={busy}
-                  onClick={() => {
-                    setNotice(null)
-                    remove.mutate(undefined, { onSuccess: () => setNotice('Photo removed.') })
-                  }}
-                  type="button"
-                  variant="ghost"
-                >
-                  {remove.isPending ? 'Removing…' : 'Remove'}
-                </Button>
-              )}
+            </AlertAction>
+          </Alert>
+        )}
+
+        {!avatarQuery.isPending && !avatarQuery.isError && (
+          <>
+            <div className="flex flex-wrap items-center gap-5">
+              <Avatar data-testid="avatar-preview" size="xl">
+                {imageUrl && <AvatarImage alt="" src={imageUrl} />}
+                <AvatarFallback data-testid="avatar-fallback">{initials(user)}</AvatarFallback>
+              </Avatar>
+
+              <div className="grid gap-2">
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    disabled={busy}
+                    onClick={() => fileInput.current?.click()}
+                    type="button"
+                    variant="outline"
+                  >
+                    {upload.isPending ? 'Uploading…' : hasAvatar ? 'Replace photo' : 'Upload photo'}
+                  </Button>
+                  {hasAvatar && (
+                    <Button
+                      disabled={busy}
+                      onClick={() => {
+                        setNotice(null)
+                        remove.mutate(undefined, { onSuccess: () => setNotice('Photo removed.') })
+                      }}
+                      type="button"
+                      variant="ghost"
+                    >
+                      {remove.isPending ? 'Removing…' : 'Remove'}
+                    </Button>
+                  )}
+                </div>
+                <FieldDescription>JPEG, PNG, or HEIC, up to 5 MB.</FieldDescription>
+              </div>
+
+              {/*
+                Kept out of the tab order: the button above is the control a keyboard or screen
+                reader user operates, and leaving both focusable makes one action cost two tab stops.
+              */}
+              <input
+                accept={acceptedFileTypes}
+                aria-hidden="true"
+                className="sr-only"
+                data-testid="avatar-file-input"
+                onChange={pick}
+                ref={fileInput}
+                tabIndex={-1}
+                type="file"
+              />
             </div>
-            <FieldDescription>JPEG, PNG, or HEIC, up to 5 MB.</FieldDescription>
-          </div>
 
-          {/*
-            Kept out of the tab order: the button above is the control a keyboard or screen
-            reader user operates, and leaving both focusable makes one action cost two tab stops.
-          */}
-          <input
-            accept={acceptedFileTypes}
-            aria-hidden="true"
-            className="sr-only"
-            data-testid="avatar-file-input"
-            onChange={pick}
-            ref={fileInput}
-            tabIndex={-1}
-            type="file"
-          />
-        </div>
-
-        {upload.isError && (
-          <Alert data-testid="avatar-error" variant="destructive">
-            <AlertTitle>Photo was not saved</AlertTitle>
-            <AlertDescription>{uploadErrorMessage(upload.error)}</AlertDescription>
-          </Alert>
-        )}
-        {remove.isError && (
-          <Alert data-testid="avatar-remove-error" variant="destructive">
-            <AlertTitle>Photo was not removed</AlertTitle>
-            <AlertDescription>{remove.error.message}</AlertDescription>
-          </Alert>
-        )}
-        {notice && !upload.isError && !remove.isError && (
-          <Alert data-testid="avatar-notice">
-            <AlertTitle>{notice}</AlertTitle>
-          </Alert>
+            {upload.isError && (
+              <Alert data-testid="avatar-error" variant="destructive">
+                <AlertTitle>Photo was not saved</AlertTitle>
+                <AlertDescription>{uploadErrorMessage(upload.error)}</AlertDescription>
+              </Alert>
+            )}
+            {remove.isError && (
+              <Alert data-testid="avatar-remove-error" variant="destructive">
+                <AlertTitle>Photo was not removed</AlertTitle>
+                <AlertDescription>{remove.error.message}</AlertDescription>
+              </Alert>
+            )}
+            {notice && !upload.isError && !remove.isError && (
+              <Alert data-testid="avatar-notice">
+                <AlertTitle>{notice}</AlertTitle>
+              </Alert>
+            )}
+          </>
         )}
       </CardContent>
     </Card>
@@ -145,15 +179,4 @@ function uploadErrorMessage(error: unknown) {
   }
 
   return error instanceof Error ? error.message : 'Something went wrong. Try again.'
-}
-
-function initials(user: UserDto) {
-  const source = user.displayName?.trim() || user.email
-
-  return source
-    .split(/[\s@._-]+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() ?? '')
-    .join('')
 }

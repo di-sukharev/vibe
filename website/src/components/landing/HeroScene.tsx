@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ComponentType } from 'react'
 
-import { watchHeroSceneEnhancement } from './hero-scene-loading'
+import { getHeroSceneFallbackClassName, watchHeroSceneEnhancement } from './hero-scene-loading'
 
 type CanvasSceneComponent = ComponentType<{ onReady: () => void }>
 
@@ -51,7 +51,7 @@ export default function HeroScene() {
       />
 
       <div
-        className={eligible && canvasReady ? 'hidden' : 'absolute inset-0'}
+        className={getHeroSceneFallbackClassName(eligible && canvasReady)}
         data-hero-scene-fallback
         aria-hidden="true"
       >

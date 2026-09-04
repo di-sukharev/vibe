@@ -4,6 +4,7 @@ import {
   userAuthorityTransitionTransactionOptions,
 } from '../../../db'
 import { Prisma } from '../../../generated/prisma/client'
+import { decideDevelopmentUserRotation } from '../domain/development-seed-policy'
 import { bootstrapAdmin } from './admin-bootstrap'
 
 export type DevelopmentSeedAccounts = {
@@ -64,13 +65,17 @@ async function updateExistingDevelopmentUser(
   existing: { id: string; passwordHash: string | null; role: string },
   credentials: DevelopmentSeedAccounts['user'],
 ) {
-  if (existing.role !== 'user') {
-    throw new Error(`Development user email ${credentials.email} belongs to an administrator`)
-  }
-  if (
+  const passwordMatchesBeforeLock =
     existing.passwordHash !== null &&
     await matchesPassword(credentials.password, existing.passwordHash)
-  ) {
+  const outcome = decideDevelopmentUserRotation({
+    role: existing.role,
+    passwordMatches: passwordMatchesBeforeLock,
+  })
+  if (outcome === 'wrong_role') {
+    throw new Error(`Development user email ${credentials.email} belongs to an administrator`)
+  }
+  if (outcome === 'noop') {
     return { email: credentials.email, id: existing.id }
   }
 
@@ -83,13 +88,14 @@ async function updateExistingDevelopmentUser(
       where: { id: existing.id },
       select: { passwordHash: true, role: true },
     })
-    if (current.role !== 'user') {
-      throw new Error(`Development user email ${credentials.email} belongs to an administrator`)
-    }
-    if (
+    const passwordMatches =
       current.passwordHash !== null &&
       await matchesPassword(credentials.password, current.passwordHash)
-    ) {
+    const raceOutcome = decideDevelopmentUserRotation({ role: current.role, passwordMatches })
+    if (raceOutcome === 'wrong_role') {
+      throw new Error(`Development user email ${credentials.email} belongs to an administrator`)
+    }
+    if (raceOutcome === 'noop') {
       return { email: credentials.email, id: existing.id }
     }
 

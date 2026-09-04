@@ -45,6 +45,7 @@ import {
 } from '@/components/ui/table'
 import { Typography } from '@/components/typography'
 import {
+  adminUsersDisplayData,
   adminUsersPagination,
   adminUsersViewState,
   roleMutationFeedback,
@@ -77,8 +78,9 @@ export function UserDirectory({ currentUser }: { currentUser: UserDto }) {
     itemCount: usersQuery.data?.items.length,
   })
   const mutationFeedback = roleMutationFeedback(roleMutation)
-  const pagination = usersQuery.data
-    ? adminUsersPagination(usersQuery.data)
+  const displayData = adminUsersDisplayData(viewState, usersQuery.data)
+  const pagination = displayData
+    ? adminUsersPagination(displayData)
     : null
 
   const submitSearch = (event: FormEvent<HTMLFormElement>) => {
@@ -95,8 +97,8 @@ export function UserDirectory({ currentUser }: { currentUser: UserDto }) {
     )
   }
 
-  const summary = usersQuery.data
-    ? `Page ${usersQuery.data.page} of ${pagination?.totalPages ?? 1} · ${usersQuery.data.total} users${
+  const summary = displayData
+    ? `Page ${displayData.page} of ${pagination?.totalPages ?? 1} · ${displayData.total} users${
         pagination?.wasBounded
           ? ` · First ${pagination.reachableUsers} matches available`
           : ''

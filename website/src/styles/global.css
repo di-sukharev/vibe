@@ -104,6 +104,7 @@
     }
   html {
     @apply scroll-smooth font-sans;
+    scroll-padding-top: 5rem;
     }
   ::selection {
     @apply bg-white text-black;

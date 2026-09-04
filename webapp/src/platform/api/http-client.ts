@@ -1,7 +1,11 @@
 import { apiErrorSchema } from '@web-app-demo/contracts'
 import type { z } from 'zod'
 
-const defaultApiBaseUrl = (import.meta.env?.VITE_API_URL ?? 'http://localhost:3000').replace(/\/$/, '')
+export function normalizeBaseUrl(url: string): string {
+  return url.replace(/\/$/, '')
+}
+
+const defaultApiBaseUrl = normalizeBaseUrl(import.meta.env?.VITE_API_URL ?? 'http://localhost:3000')
 
 export type HttpRequestOptions = {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'

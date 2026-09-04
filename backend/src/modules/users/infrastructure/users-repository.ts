@@ -3,7 +3,6 @@ import type {
   AdminUsersQuery,
   UserRole,
 } from '@web-app-demo/contracts'
-import { ADMIN_USERS_MAX_PAGE } from '@web-app-demo/contracts'
 
 import {
   acquireUserAuthenticationAuthorityLock,
@@ -18,6 +17,8 @@ import type {
   UserRoleUpdater,
 } from '../application/ports'
 import { UsersFailure } from '../domain/errors'
+import { assertActorIsAdmin, decideRoleUpdate } from '../domain/role-update-policy'
+import { buildUsersListPlan, hasNextUsersPage } from '../domain/users-list-query'
 
 const userSummarySelect = {
   id: true,
@@ -52,31 +53,24 @@ export function createPrismaUsersRepository(db: DbClient): UsersRepository {
       return { totalUsers, totalAdmins, newUsersLast7Days }
     },
 
-    async listUsers({ page, pageSize, q }: AdminUsersQuery) {
-      const where = q
-        ? {
-            OR: [
-              { email: { contains: q, mode: 'insensitive' as const } },
-              { displayName: { contains: q, mode: 'insensitive' as const } },
-            ],
-          }
-        : {}
+    async listUsers(query: AdminUsersQuery) {
+      const { where, skip, take } = buildUsersListPlan(query)
       const [total, users] = await db.$transaction([
         db.user.count({ where }),
         db.user.findMany({
           where,
           orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-          skip: (page - 1) * pageSize,
-          take: pageSize,
+          skip,
+          take,
           select: userSummarySelect,
         }),
       ])
       return {
         items: users.map(toAdminUserSummary),
-        page,
-        pageSize,
+        page: query.page,
+        pageSize: query.pageSize,
         total,
-        hasNext: page < ADMIN_USERS_MAX_PAGE && page * pageSize < total,
+        hasNext: hasNextUsersPage(query.page, query.pageSize, total),
       }
     },
 
@@ -89,9 +83,7 @@ export function createPrismaUsersRepository(db: DbClient): UsersRepository {
           where: { id: input.actorUserId },
           select: { id: true, role: true },
         })
-        if (actor?.role !== 'admin') {
-          throw new UsersFailure('forbidden', 'Administrator access is required')
-        }
+        assertActorIsAdmin(actor)
 
         const target = await tx.user.findUnique({
           where: { id: input.targetUserId },
@@ -100,18 +92,15 @@ export function createPrismaUsersRepository(db: DbClient): UsersRepository {
         if (!target) {
           throw new UsersFailure('not_found', 'User not found')
         }
-        if (target.role === input.role) {
-          return toAdminUserSummary(target)
-        }
-        if (target.id === actor.id && input.role !== 'admin') {
-          throw new UsersFailure('role_conflict', 'You cannot remove your own administrator role')
-        }
 
-        if (target.role === 'admin' && input.role === 'user') {
-          const adminCount = await tx.user.count({ where: { role: 'admin' } })
-          if (adminCount <= 1) {
-            throw new UsersFailure('role_conflict', 'At least one administrator must remain')
-          }
+        const outcome = await decideRoleUpdate({
+          actorId: input.actorUserId,
+          target,
+          requestedRole: input.role,
+          countAdmins: () => tx.user.count({ where: { role: 'admin' } }),
+        })
+        if (outcome === 'noop') {
+          return toAdminUserSummary(target)
         }
 
         const updated = await tx.user.update({

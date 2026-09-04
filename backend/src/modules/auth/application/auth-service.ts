@@ -40,6 +40,18 @@ type AuthServiceDependencies = {
   repository: AuthRepository
 }
 
+/**
+ * A syntactically real argon2id hash that belongs to no account.
+ *
+ * `login` verifies against this whenever the email does not resolve to a real, password-holding
+ * user, so that path costs the same argon2id run as a wrong password on a real account instead of
+ * returning immediately. Without it, an all-numbers response time told an attacker whether an
+ * address has an account, the same enumeration `requestPasswordReset` is deliberately built to
+ * refuse.
+ */
+const noSuchAccountPasswordHash =
+  '$argon2id$v=19$m=65536,t=2,p=1$G4l1mEzoTD2wD2Jegpm1ZQsUQ27rx2FJ7Twm12mJVpw$w36RFX0uPQzJUX1PEQz/cNhO9ZZKTrrfQhOw+8eGWN0'
+
 export class AuthService {
   constructor(private readonly dependencies: AuthServiceDependencies) {}
 
@@ -67,10 +79,11 @@ export class AuthService {
 
   async login(input: LoginRequest, metadata: SessionMetadata) {
     const user = await this.dependencies.repository.findUserByEmail(input.email)
-    if (!user?.passwordHash) {
-      throw new AuthFailure('invalid_credentials', 'Invalid email or password')
-    }
-    if (!(await this.dependencies.passwords.verify(input.password, user.passwordHash))) {
+    const passwordValid = await this.dependencies.passwords.verify(
+      input.password,
+      user?.passwordHash ?? noSuchAccountPasswordHash,
+    )
+    if (!user?.passwordHash || !passwordValid) {
       throw new AuthFailure('invalid_credentials', 'Invalid email or password')
     }
 

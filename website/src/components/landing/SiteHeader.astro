@@ -41,7 +41,7 @@ const navigation = [
       </a>
     </div>
 
-    <details class="group relative md:hidden">
+    <details class="group relative md:hidden" id="mobile-nav">
       <summary
         class="grid size-10 cursor-pointer list-none place-items-center rounded-md border border-white/15 bg-white/5 text-white transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden"
         aria-label="Меню"
@@ -65,3 +65,13 @@ const navigation = [
     </details>
   </div>
 </header>
+
+<script>
+  const mobileNav = document.querySelector<HTMLDetailsElement>('#mobile-nav')
+
+  mobileNav?.addEventListener('click', (event) => {
+    if (event.target instanceof Element && event.target.closest('a')) {
+      mobileNav.open = false
+    }
+  })
+</script>

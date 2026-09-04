@@ -1,7 +1,7 @@
 ---
 import { BriefcaseBusiness, Rocket, Workflow } from 'lucide-react'
 
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import SectionIntro from './SectionIntro.astro'
 
 const audiences = [
@@ -53,7 +53,7 @@ const audiences = [
             </span>
           </CardHeader>
           <CardContent className="flex h-full flex-col p-6">
-            <CardTitle className="text-xl font-bold">{title}</CardTitle>
+            <h3 class="font-heading text-xl leading-normal font-bold">{title}</h3>
             <p class="mt-3 flex-1 leading-6 text-muted-foreground">{description}</p>
             <p class="mt-8 border-t pt-4 text-xs font-bold tracking-wide text-white/55 uppercase">
               {note}
