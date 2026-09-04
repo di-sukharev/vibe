@@ -7,7 +7,9 @@ coverage
 .git
 .scratch
 .env
+**/.env
 .env.*
+**/.env.*
 infra
 !infra/yandex/static.Dockerfile
 **/.terraform

@@ -7,6 +7,9 @@ test('keeps user and administrator workspaces separate', async ({ browser, page 
   await page.goto('/admin/users')
   await expect(page).toHaveURL(/\/login\?returnTo=%2Fadmin%2Fusers$/)
   await page.getByRole('link', { name: 'Sign up' }).click()
+  // /login and /signup share the Email and Password labels, so filling before React swaps the
+  // form sends the input to the page being unmounted. Confirm Password only exists on /signup.
+  await expect(page.getByLabel('Confirm Password')).toBeVisible()
   await page.getByLabel('Email').fill(userEmail)
   await page.getByLabel('Password', { exact: true }).fill(e2ePassword)
   await page.getByLabel('Confirm Password').fill(e2ePassword)

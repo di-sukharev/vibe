@@ -21,22 +21,23 @@ export default function globalTeardown() {
 
   const env = composeEnv()
 
-  run(
-    ['compose', '-p', composeProjectName, 'rm', '--stop', '--force', '--volumes', postgresTestService],
-    env,
-  )
-  // The test database keeps its data in a named volume, which `compose rm --volumes` leaves
-  // alone; a stale one would carry rows into the next run.
-  spawnSync('docker', ['volume', 'rm', '--force', `${composeProjectName}_${postgresTestDataVolume}`], {
-    cwd: repositoryRoot,
-    env,
-    stdio: 'ignore',
-  })
+  try {
+    run(
+      ['compose', '-p', composeProjectName, 'rm', '--stop', '--force', '--volumes', postgresTestService],
+      env,
+    )
+  } finally {
+    // The test database keeps its data in a named volume, which `compose rm --volumes` leaves
+    // alone; a stale one would carry rows into the next run. `--force` already exits cleanly when
+    // the volume is gone, so a failure here means it survived and must be reported, not swallowed.
+    run(['volume', 'rm', '--force', `${composeProjectName}_${postgresTestDataVolume}`], env)
+  }
 }
 
 function run(args: string[], env: NodeJS.ProcessEnv) {
   const result = spawnSync('docker', args, { cwd: repositoryRoot, env, stdio: 'inherit' })
 
+  if (result.error) throw result.error
   if (result.status !== 0) {
     throw new Error(`Command failed: docker ${args.join(' ')}`)
   }
