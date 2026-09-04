@@ -215,13 +215,13 @@ function useWorkspaceUser(role: UserRole): UserDto {
 
 function HrefRedirect({ href }: { href: string }) {
   const router = useRouter()
-  // Keyed by the href it last redirected to, so a mounted instance that receives a new href
-  // (e.g. a same-tab auth change flipping the target while this component stays mounted)
-  // still issues a replace() instead of silently treating it as an already-handled redirect.
-  const redirectedHref = useRef<string | null>(null)
+  // Redirects once per mount, deliberately. Re-running on a new href sends this back through the
+  // guard that produced the href in the first place, which appends the current location to
+  // returnTo again and again: /login?returnTo=%2Flogin%3FreturnTo%3D… without end.
+  const hasRedirected = useRef(false)
   useEffect(() => {
-    if (redirectedHref.current === href) return
-    redirectedHref.current = href
+    if (hasRedirected.current) return
+    hasRedirected.current = true
     router.history.replace(href)
   }, [href, router])
   return null
