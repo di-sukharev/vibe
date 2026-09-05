@@ -232,8 +232,9 @@ signal because it depends on the Terraform CLI rather than the normal applicatio
 - `bun run storybook:build` - statically build both local component catalogs; use
   `storybook:build:webapp` or `storybook:build:website` for one surface.
 - `bun run dev:backend:s3` - start the backend against the local S3 container instead of the disk.
-- `bun run check` - broad release/audit regression: template invariants, architecture, typecheck,
-  lint, and all tests; requires Docker for backend integration.
+- `bun run check` - broad release/audit regression: template invariants, architecture, dependency
+  advisories, typecheck, lint, and all tests; requires registry access for the audit and Docker for
+  backend integration.
 - `bun run template:check` - validate checklist state, capability-ledger states, equivalent agent
   instructions, and local Markdown file, directory, and heading links.
 - `bun run typecheck` - run TypeScript checks across workspaces.
@@ -244,11 +245,16 @@ signal because it depends on the Terraform CLI rather than the normal applicatio
   `website/dist`, after those builds. Deliberately not part of `build`: only the own-server proxy
   reads those sidecars. Hosted releases upload/build the original assets and let their edge layer
   negotiate compression when available.
-- `bun audit` - list known vulnerabilities. It reports none today, and the `overrides` block in the
-  root `package.json` is why: every entry there is a minimum version that closes an advisory in a
-  transitive dependency nothing here imports directly. Treat that block as maintenance, not
-  configuration - after a dependency update, drop the floors one at a time and re-run `bun audit`;
-  the ones that stay quiet are no longer needed. `bun update` still moves everything within them.
+- `bun run audit` - fail on unreviewed dependency vulnerabilities; part of `bun run check` and the
+  one step in that chain that needs registry access. It reports none today, and the `overrides`
+  block in the root `package.json` is why: every entry there is a minimum version that closes an
+  advisory in a transitive dependency nothing here imports directly. Treat that block as
+  maintenance, not configuration - after a dependency update, drop the floors one at a time and
+  re-run `bun run audit`; the ones that stay quiet are no longer needed. `bun update` still moves
+  everything within them. An advisory with no fixed release upstream needs a narrow, expiring
+  `temporaryAuditExceptions` entry in `scripts/dependency-audit.mjs`, which pins the advisory, the
+  lockfile resolutions, the direct consumers, and the reachable workspaces, and still refuses any
+  direct application dependency or source import of that package.
 - Prisma is pinned to an exact `7.9.0` in `backend/package.json`, and that is deliberate: 7.9.1
   cannot be installed. `bun add @prisma/client@7.9.1` in an empty directory produces 12 KB and
   three files instead of 78 MB and seventeen, with an empty `runtime/`, so the generated client's
