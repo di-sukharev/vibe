@@ -30,7 +30,7 @@ import { subscribeToBrowserSessionChanges } from './session-coordinator'
 export function AuthProvider({ children }: PropsWithChildren) {
   const queryClient = useQueryClient()
   const [accessToken, setAccessTokenState] = useState<string | null>(null)
-  const [isBootstrapping, setIsBootstrapping] = useState(true)
+  const [isRestoringSession, setIsRestoringSession] = useState(true)
   const [bootstrapError, setBootstrapError] = useState<Error | null>(null)
   const [bootstrapAttempt, setBootstrapAttempt] = useState(0)
   const bootstrapGeneration = useRef(0)
@@ -52,7 +52,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
         const generation = ++bootstrapGeneration.current
         const shouldBootstrap = sessionEvent.state === 'authenticated'
         setBootstrapError(null)
-        setIsBootstrapping(shouldBootstrap)
+        setIsRestoringSession(shouldBootstrap)
         void clearLocalSession()
           .catch(() => undefined)
           .then(() => {
@@ -60,7 +60,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
             if (shouldBootstrap) {
               setBootstrapAttempt((attempt) => attempt + 1)
             } else {
-              setIsBootstrapping(false)
+              setIsRestoringSession(false)
             }
           })
       }),
@@ -99,7 +99,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       })
       .finally(() => {
         if (shouldApply()) {
-          setIsBootstrapping(false)
+          setIsRestoringSession(false)
         }
       })
 
@@ -110,7 +110,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   const meQuery = useCurrentUserQuery({
     api,
-    enabled: !isBootstrapping && Boolean(accessToken),
+    enabled: !isRestoringSession && Boolean(accessToken),
   })
   const { mutateAsync: registerAsync } = useRegisterMutation({ api, setAccessToken })
   const { mutateAsync: loginAsync } = useLoginMutation({ api, setAccessToken })
@@ -159,11 +159,15 @@ export function AuthProvider({ children }: PropsWithChildren) {
       return
     }
 
-    setIsBootstrapping(true)
+    setIsRestoringSession(true)
     setBootstrapError(null)
     setBootstrapAttempt((attempt) => attempt + 1)
   }, [accessToken, meQuery])
 
+  // The session is unknown until the cookie refresh has answered and, when it restored an access
+  // token, until the first `/api/auth/me` load has settled. Reporting "signed out" in between would
+  // send a signed-in user through the login redirect on every reload.
+  const isBootstrapping = isRestoringSession || (Boolean(accessToken) && meQuery.isPending)
   const sessionError = bootstrapError ?? (accessToken ? toOptionalError(meQuery.error) : null)
   const transport = useMemo(
     () => ({
