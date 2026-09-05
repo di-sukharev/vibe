@@ -874,7 +874,7 @@ function terraformPlan({
 }) {
   const scratchParent = resolve(repoRoot, '.scratch', 'infra-plans')
   mkdirSync(scratchParent, { recursive: true })
-  const planDirectory = mkdtempSync(resolve(scratchParent, `${label}-`))
+  const planDirectory = rememberDisposablePlan(mkdtempSync(resolve(scratchParent, `${label}-`)))
   const planPath = resolve(planDirectory, 'terraform.tfplan')
 
   try {
@@ -1707,10 +1707,46 @@ function writeManagedRootInputs(context, rootName, releaseInputs) {
     )
   }
   const root = context.paths.roots[rootName]
-  writeJsonFile(resolve(root, 'foundation.auto.tfvars.json'), foundationInputs)
-  writeJsonFile(resolve(root, 'release.auto.tfvars.json'), releaseInputs)
+  writeDisposableRootInputs(root, foundationInputs, releaseInputs)
   initializeManagedRoot(context, rootName)
   return root
+}
+
+/**
+ * Cross-state inputs carry production secrets: the DigitalOcean runtime root receives
+ * `jwt_secret`, the media bucket key, and every `extra_runtime_secret_env` value, and even a
+ * read-only `infra:plan` writes them. Terraform needs them only while a command runs, so they live
+ * for that window and are removed when it ends - including when it fails. Nothing is lost by
+ * removing them: every terraform invocation on a managed root writes them again from foundation
+ * state first. Yandex needs none of this, because its foundation hands out Lockbox references.
+ */
+const disposableSecretPaths = new Set()
+
+export function writeDisposableRootInputs(root, foundationInputs, releaseInputs) {
+  for (const [name, value] of [
+    ['foundation.auto.tfvars.json', foundationInputs],
+    ['release.auto.tfvars.json', releaseInputs],
+  ]) {
+    const path = resolve(root, name)
+    writeJsonFile(path, value)
+    disposableSecretPaths.add(path)
+  }
+}
+
+/**
+ * A saved plan holds every attribute Terraform is about to write, secrets included, so it belongs
+ * to the same short window as the inputs above.
+ */
+export function rememberDisposablePlan(directory) {
+  disposableSecretPaths.add(directory)
+  return directory
+}
+
+export function discardDisposableSecrets() {
+  for (const path of disposableSecretPaths) {
+    rmSync(path, { force: true, recursive: true })
+  }
+  disposableSecretPaths.clear()
 }
 
 function syncDigitalOceanFirewallInput(context, apiAppId) {
@@ -2879,6 +2915,16 @@ async function executeCommand(options) {
 }
 
 if (import.meta.main) {
+  // `process.exit` skips `finally`, so the removal hangs off the process itself: it has to run
+  // whether the command succeeded, threw, or the operator pressed Ctrl-C mid-plan.
+  process.on('exit', discardDisposableSecrets)
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+    process.on(signal, () => {
+      discardDisposableSecrets()
+      process.exit(130)
+    })
+  }
+
   try {
     await main()
   } catch (error) {

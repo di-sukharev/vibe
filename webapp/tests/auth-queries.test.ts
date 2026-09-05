@@ -9,6 +9,7 @@ import {
   logoutAuthenticatedSession,
   sessionQueryKeys,
 } from '../src/features/auth/queries'
+import { avatarQueryKeys } from '../src/features/avatar/queries'
 
 const user = {
   id: 'user_1',
@@ -175,4 +176,15 @@ test('session cleanup does not wait on the authenticated query it cancels', asyn
   expect(queryClient.getQueryData(authQueryKeys.me())).toBeUndefined()
   releaseQuery()
   await inFlightQuery.catch(() => undefined)
+})
+
+test('every session-scoped feature cache is inside the namespace session cleanup removes', async () => {
+  const queryClient = new QueryClient()
+  queryClient.setQueryData(avatarQueryKeys.current(), {
+    avatar: { downloadUrl: 'https://storage.example/previous-user.jpg' },
+  })
+
+  await clearAuthenticatedSession(queryClient, () => undefined)
+
+  expect(queryClient.getQueryData(avatarQueryKeys.current())).toBeUndefined()
 })

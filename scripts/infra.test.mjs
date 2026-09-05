@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { spawn } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -13,6 +13,7 @@ import {
   digitalOceanSpacesKeyProblems,
   digitalOceanTeamIdentityProblems,
   digestFromRepoDigests,
+  discardDisposableSecrets,
   executePromotionPipeline,
   githubRepositoryFromRemoteUrl,
   immutableReleaseBranch,
@@ -43,6 +44,7 @@ import {
   withProductionMutationLease,
   yandexDatabaseRotationProblems,
   yandexRuntimeStateProblems,
+  writeDisposableRootInputs,
   writeYandexStaticReleaseMarkers,
   yieldToProcessEvents,
 } from './infra.mjs'
@@ -1370,5 +1372,49 @@ describe('Yandex static publishing', () => {
         },
       ),
     ).rejects.toThrow(`expected ${commit}`)
+  })
+})
+
+describe('managed root inputs', () => {
+  test('cross-state secrets leave the working tree when the command ends', () => {
+    const root = mkdtempSync(resolve(tmpdir(), 'infra-managed-root-'))
+    const foundationPath = resolve(root, 'foundation.auto.tfvars.json')
+    const releasePath = resolve(root, 'release.auto.tfvars.json')
+
+    try {
+      writeDisposableRootInputs(
+        root,
+        { jwt_secret: 'test-jwt-secret-value', media_secret_access_key: 'test-media-key' },
+        { runtime_image_digest: 'sha256:0000' },
+      )
+
+      expect(readFileSync(foundationPath, 'utf8')).toContain('test-jwt-secret-value')
+      expect(readFileSync(releasePath, 'utf8')).toContain('sha256:0000')
+
+      discardDisposableSecrets()
+
+      expect(existsSync(foundationPath)).toBe(false)
+      expect(existsSync(releasePath)).toBe(false)
+    } finally {
+      rmSync(root, { force: true, recursive: true })
+    }
+  })
+
+  test('discarding twice is safe and forgets what it already removed', () => {
+    const root = mkdtempSync(resolve(tmpdir(), 'infra-managed-root-'))
+
+    try {
+      writeDisposableRootInputs(root, { jwt_secret: 'test-jwt-secret-value' }, {})
+      discardDisposableSecrets()
+      writeFileSync(resolve(root, 'foundation.auto.tfvars.json'), 'written by an operator')
+
+      discardDisposableSecrets()
+
+      expect(readFileSync(resolve(root, 'foundation.auto.tfvars.json'), 'utf8')).toBe(
+        'written by an operator',
+      )
+    } finally {
+      rmSync(root, { force: true, recursive: true })
+    }
   })
 })

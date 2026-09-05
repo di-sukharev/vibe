@@ -102,6 +102,42 @@ describe('dependency direction', () => {
   })
 })
 
+describe('module root placement', () => {
+  test('keeps product code out of the module root, where no layer rule reaches it', () => {
+    const violation = check([
+      file('backend/src/modules/auth/session-helpers.ts', "import { Prisma } from '../../generated/prisma/client'"),
+    ])[0]
+
+    expect(violation?.rule).toBe('backend-module-layer-placement')
+  })
+
+  test('accepts the public index and the module integration tests at that root', () => {
+    expect(check([
+      file('backend/src/modules/auth/index.ts', "import { PrismaClient } from '@prisma/client'"),
+      file('backend/src/modules/auth/auth.integration.test.ts', "import { createApp } from '../../app'"),
+    ])).toEqual([])
+  })
+
+  test('reports placement even for a file that imports nothing', () => {
+    expect(check([file('backend/src/modules/auth/constants.ts', 'export const retries = 3')])
+      .map((item) => item.rule)).toEqual(['backend-module-layer-placement'])
+  })
+})
+
+describe('website client boundary', () => {
+  test('holds the website to the same feature and layer direction as the webapp', () => {
+    const violations = check([
+      file('website/src/components/ui/button.tsx', "import { useAuth } from '@/features/auth'"),
+      file('website/src/pages/landing.tsx', "import { model } from '@/features/pricing/model'"),
+    ])
+
+    expect(violations.map((item) => item.rule)).toEqual([
+      'client-dependency-direction',
+      'client-feature-public-api',
+    ])
+  })
+})
+
 function check(files) {
   return checkArchitectureSources(files)
 }

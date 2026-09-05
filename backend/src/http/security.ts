@@ -23,6 +23,7 @@ type FixedWindowRateLimitOptions<E extends Env> = {
   errorMessage: string
   key: (c: Context<E>) => string
   max: number
+  maxTrackedKeys?: number
   now?: () => number
   windowSeconds: number
 }
@@ -65,6 +66,7 @@ export function createFixedWindowRateLimit<E extends Env>(
   const buckets = new Map<string, RateLimitBucket>()
   const now = options.now ?? Date.now
   const windowMs = options.windowSeconds * 1000
+  const trackedKeyLimit = options.maxTrackedKeys ?? maxTrackedKeys
 
   return async (c, next) => {
     const currentTime = now()
@@ -72,16 +74,15 @@ export function createFixedWindowRateLimit<E extends Env>(
     let bucket = buckets.get(key)
 
     if (!bucket || bucket.resetAt <= currentTime) {
-      if (buckets.size >= maxTrackedKeys - 1) {
+      if (buckets.size >= trackedKeyLimit) {
         deleteExpiredBuckets(buckets, currentTime)
       }
-      if (buckets.size >= maxTrackedKeys - 1) {
-        key = 'overflow'
-        bucket = buckets.get(key)
+      if (buckets.size >= trackedKeyLimit && !evictOneUnexhaustedBucket(buckets, options.max)) {
+        // Every tracked key already spent its budget, so the table holds nothing but the counters
+        // currently doing the limiting. Refusing the new key is the honest answer: evicting one
+        // would let a flood of fresh keys clear the record of whoever is being limited.
+        return rateLimited(c, options, currentTime + windowMs, currentTime)
       }
-    }
-
-    if (!bucket || bucket.resetAt <= currentTime) {
       bucket = { count: 0, resetAt: currentTime + windowMs }
       buckets.set(key, bucket)
     }
@@ -92,8 +93,7 @@ export function createFixedWindowRateLimit<E extends Env>(
     c.header('RateLimit-Reset', String(Math.ceil(bucket.resetAt / 1000)))
 
     if (bucket.count > options.max) {
-      c.header('Retry-After', String(Math.max(1, Math.ceil((bucket.resetAt - currentTime) / 1000))))
-      return c.json(errorResponse('RATE_LIMITED', options.errorMessage), 429)
+      return rateLimited(c, options, bucket.resetAt, currentTime)
     }
 
     await next()
@@ -124,6 +124,35 @@ export function clientAddress(
   } catch {
     return 'unknown'
   }
+}
+
+function rateLimited<E extends Env>(
+  c: Context<E>,
+  options: FixedWindowRateLimitOptions<E>,
+  resetAt: number,
+  now: number,
+) {
+  c.header('RateLimit-Limit', String(options.max))
+  c.header('RateLimit-Remaining', '0')
+  c.header('RateLimit-Reset', String(Math.ceil(resetAt / 1000)))
+  c.header('Retry-After', String(Math.max(1, Math.ceil((resetAt - now) / 1000))))
+  return c.json(errorResponse('RATE_LIMITED', options.errorMessage), 429)
+}
+
+/**
+ * Frees one slot for a key the store has not seen. Buckets that already reached the budget are
+ * skipped: those are the counters enforcing the limit right now, and evicting one would hand any
+ * client able to mint fresh keys a way to erase its own record. Map iteration is insertion order,
+ * so the oldest still-cheap key goes first.
+ */
+function evictOneUnexhaustedBucket(buckets: Map<string, RateLimitBucket>, max: number) {
+  for (const [key, bucket] of buckets) {
+    if (bucket.count >= max) continue
+    buckets.delete(key)
+    return true
+  }
+
+  return false
 }
 
 function deleteExpiredBuckets(buckets: Map<string, RateLimitBucket>, now: number) {

@@ -29,6 +29,10 @@ export function checkArchitectureSources(files) {
     const normalizedPath = normalizePath(file.path)
     const imports = staticImports(file.source)
 
+    checkBackendModulePlacement(normalizedPath, (rule, message) => {
+      violations.push({ path: normalizedPath, line: 1, rule, message })
+    })
+
     for (const imported of imports) {
       const report = (rule, message) => {
         violations.push({
@@ -128,6 +132,22 @@ function checkBackendLayers(filePath, specifier, report) {
   }
 }
 
+/**
+ * Layer rules key off `modules/<module>/<layer>/`, so a file sitting directly at a module root is
+ * reached by none of them: it could import Prisma into what is really domain code and the check
+ * would still pass. The root belongs to the module's public index and its module-wide tests, and
+ * everything else belongs to a layer that has rules.
+ */
+function checkBackendModulePlacement(filePath, report) {
+  const rootFile = filePath.match(/^backend\/src\/modules\/[^/]+\/([^/]+)$/)?.[1]
+  if (!rootFile || rootFile === 'index.ts' || /\.test\.[cm]?[jt]sx?$/.test(rootFile)) return
+
+  report(
+    'backend-module-layer-placement',
+    `${rootFile} must live in a module layer (domain, application, transport, or infrastructure); only the module's public index and its module-wide tests belong at the module root.`,
+  )
+}
+
 function checkBackendModuleBoundary(filePath, specifier, report) {
   const sourceModule = filePath.match(/^backend\/src\/modules\/([^/]+)\//)?.[1]
   const target = resolveRepositoryImport(filePath, specifier)
@@ -146,7 +166,7 @@ function checkBackendModuleBoundary(filePath, specifier, report) {
 }
 
 function checkClientBoundary(filePath, specifier, report) {
-  const client = filePath.match(/^(webapp|mobile)\/src\//)?.[1]
+  const client = filePath.match(/^(webapp|website|mobile)\/src\//)?.[1]
   if (!client) return
 
   const target = resolveRepositoryImport(filePath, specifier)
