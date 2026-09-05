@@ -121,7 +121,12 @@ Auth in `src/features/auth` is the client golden path: its API adapter owns auth
 The webapp has two non-overlapping authenticated route trees: `/app/*` for
 `user`, and `/admin/*` for `admin`. Route guards wait for auth bootstrap, redirect
 guests through a role-checked internal return path, and send cross-role requests
-to the current role’s home. The shared workspace shell owns the full shadcn
+to the current role’s home. The return-path allow-list is the role’s protected
+route table in `src/features/navigation`: a path matcher over literal and named
+`$param` segments, so parameterised routes survive the login round-trip. A unit
+test pins that table to the routes registered under each workspace layout and
+rejects route shapes the matcher does not understand; the sidebar menu is a
+presentation subset of it. The shared workspace shell owns the full shadcn
 dashboard-01 sidebar/inset visual unit; role navigation is a pure feature-owned
 map. Shared shell building blocks live in `src/components/dashboard`, while
 account and admin panels stay with their owning feature. Dashboard metrics and
