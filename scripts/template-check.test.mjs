@@ -260,7 +260,7 @@ describe('template checklist validation', () => {
   test('requires completed installs to finish the core intake and remove bootstrap instructions', () => {
     const completed = completedChecklist()
     const cleanAgents = withoutBootstrapBlock(currentAgents)
-    const cleanClaude = withoutBootstrapBlock(currentClaude)
+    const cleanClaude = currentClaude
 
     expect(validateChecklist(completed, { agents: cleanAgents, claude: cleanClaude })).toEqual([])
 
@@ -294,26 +294,33 @@ describe('template checklist validation', () => {
     )
 
     expect(validateChecklist(completed, { agents: currentAgents, claude: currentClaude })).toContain(
-      'A completed install must remove Bootstrap-Only Instructions from AGENTS.md and CLAUDE.md.',
+      'A completed install must remove Bootstrap-Only Instructions from AGENTS.md.',
     )
   })
 })
 
-describe('agent instruction equivalence', () => {
-  test('accepts only the intentional title and reciprocal filename differences', () => {
+describe('agent instruction imports', () => {
+  test('requires CLAUDE.md to import AGENTS.md instead of restating it', () => {
     expect(validateAgentInstructions(currentAgents, currentClaude)).toEqual([])
 
-    const drifted = currentClaude.replace('Prefer evidence over ceremony.', 'Prefer guesses over evidence.')
-    expect(validateAgentInstructions(currentAgents, drifted)).toEqual([
-      'AGENTS.md and CLAUDE.md differ beyond their document titles and reciprocal filename references.',
+    const missingImport = currentClaude.replace('@AGENTS.md', 'See AGENTS.md for the rules.')
+    expect(validateAgentInstructions(currentAgents, missingImport)).toEqual([
+      'CLAUDE.md must load the shared instructions with a standalone `@AGENTS.md` import line.',
     ])
 
-    const hiddenFilenameDrift = currentClaude.replace(
-      'from both `AGENTS.md` and `CLAUDE.md`',
-      'from both `CLAUDE.md` and `CLAUDE.md`',
-    )
-    expect(validateAgentInstructions(currentAgents, hiddenFilenameDrift)).toEqual([
-      'AGENTS.md and CLAUDE.md differ beyond their document titles and reciprocal filename references.',
+    const codeSpanImport = currentClaude.replace('@AGENTS.md', '`@AGENTS.md`')
+    expect(validateAgentInstructions(currentAgents, codeSpanImport)).toEqual([
+      'CLAUDE.md must load the shared instructions with a standalone `@AGENTS.md` import line.',
+    ])
+
+    const fencedImport = ['```text', '@AGENTS.md', '```'].join('\n')
+    expect(validateAgentInstructions(currentAgents, fencedImport)).toEqual([
+      'CLAUDE.md must load the shared instructions with a standalone `@AGENTS.md` import line.',
+    ])
+
+    const copiedBack = `${currentClaude}\n\n${currentAgents}`
+    expect(validateAgentInstructions(currentAgents, copiedBack)).toEqual([
+      'CLAUDE.md must not restate AGENTS.md sections; it imports them with `@AGENTS.md`.',
     ])
   })
 })
