@@ -110,23 +110,61 @@ async function createAdminDirectoryTestApp({
   }
 }
 
-test('liveness is process-only while readiness checks the database', async () => {
-  let databaseAvailable = true
+function createHealthTestApp({ databaseAvailable }: { databaseAvailable: boolean }) {
+  let queries = 0
   const prisma = {
     $queryRaw: async () => {
+      queries += 1
+      // Yield once so concurrent probes overlap the way a real round-trip would.
+      await Promise.resolve()
       if (!databaseAvailable) throw new Error('database unavailable')
       return [{ '?column?': 1 }]
     },
   } as unknown as DbClient
-  const app = createApp({ env, prisma })
 
-  expect((await app.request('/health/live')).status).toBe(200)
-  expect((await app.request('/health/ready')).status).toBe(200)
+  return {
+    app: createApp({ env, prisma }),
+    get queries() {
+      return queries
+    },
+  }
+}
 
-  databaseAvailable = false
+test('concurrent readiness probes share one database query while liveness never touches it', async () => {
+  // `/health/ready` sits outside every rate limiter, so a GET flood must not turn into a flood of
+  // pool connections. `http/readiness.test.ts` owns the window arithmetic; this proves the wiring:
+  // N overlapping probes cost one query and all report the same answer.
+  const harness = createHealthTestApp({ databaseAvailable: true })
+  const probes = 25
 
-  expect((await app.request('/health/live')).status).toBe(200)
-  expect((await app.request('/health/ready')).status).toBe(503)
+  const responses = await Promise.all(
+    Array.from({ length: probes }, () => harness.app.request('/health/ready')),
+  )
+
+  expect(responses.map((response) => response.status)).toEqual(Array(probes).fill(200))
+  expect(harness.queries).toBe(1)
+
+  // A cached success answers the next probe inside the window without another query.
+  expect((await harness.app.request('/health/ready')).status).toBe(200)
+  expect(harness.queries).toBe(1)
+
+  expect((await harness.app.request('/health/live')).status).toBe(200)
+  expect((await harness.app.request('/health')).status).toBe(200)
+  expect(harness.queries).toBe(1)
+})
+
+test('readiness reports 503 while the database probe fails, and liveness stays 200', async () => {
+  const harness = createHealthTestApp({ databaseAvailable: false })
+
+  const responses = await Promise.all(
+    Array.from({ length: 5 }, () => harness.app.request('/health/ready')),
+  )
+
+  expect(responses.map((response) => response.status)).toEqual(Array(5).fill(503))
+  expect(await responses[0]!.json()).toEqual({ status: 'unavailable' })
+  expect(harness.queries).toBe(1)
+  expect((await harness.app.request('/health/live')).status).toBe(200)
+  expect((await harness.app.request('/health')).status).toBe(200)
 })
 
 test('CORS preflight allows the standard mutation methods exposed by the client transport', async () => {

@@ -11,6 +11,7 @@ import type { DbClient } from './db'
 import { disabledEmailDelivery, type EmailDelivery } from './email'
 import type { AppEnv } from './env'
 import { errorResponse, handleError, validationErrorHook } from './http/errors'
+import { createReadinessProbe } from './http/readiness'
 import { createAuthSecurity, createFixedWindowRateLimit } from './http/security'
 import { createAuthModule, type AuthHttpEnv } from './modules/auth'
 import { createUploadsModule } from './modules/uploads'
@@ -130,13 +131,17 @@ export function createApp({
     })
   })
 
+  // Readiness is the one database-backed route that no limiter covers, so it answers from one
+  // probe per second rather than one query per request. One second is invisible to the platform
+  // checks that poll every 10 s, and it caps what an unauthenticated GET flood can cost the pool.
+  const databaseReady = createReadinessProbe({
+    check: () => prisma.$queryRaw`SELECT 1`,
+    windowMs: 1_000,
+  })
   app.get('/health/ready', async (c) => {
-    try {
-      await prisma.$queryRaw`SELECT 1`
-      return c.json({ status: 'ok' }, 200)
-    } catch {
-      return c.json({ status: 'unavailable' }, 503)
-    }
+    return (await databaseReady())
+      ? c.json({ status: 'ok' }, 200)
+      : c.json({ status: 'unavailable' }, 503)
   })
 
   app.route('/api/auth', auth.routes)

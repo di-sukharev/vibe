@@ -133,6 +133,8 @@ implicitly.
 - `GET /health/live`
 - `GET /health/ready`
 
+`GET /health/live` only proves the process answers. `GET /health/ready` runs `SELECT 1` against the database and answers `200` or `503`; because it sits outside every rate limiter, it memoises the last probe outcome for one second, so any number of overlapping probes cost the pool one query and a change in database health shows up within a second.
+
 `GET /api/admin/users` has a separate in-memory read budget, keyed by administrator ID and shared across that administrator's sessions and search filters. It defaults to 120 requests per 60 seconds through `ADMIN_USERS_READ_RATE_LIMIT_*` and does not consume the account-mutation budget. The store is process-local; use shared rate-limit state when the API runs in multiple backend processes and global enforcement is required.
 
 Passwords are hashed through `Bun.password` with Argon2id. Access tokens are short-lived JWTs through `jose`. Initial refresh tokens are random; rotated successors are opaque, domain-separated HMAC values derived with the server secret so concurrent uses of the same credential receive the same successor. Only current and immediately previous SHA-256 hashes are stored in the database. Refresh atomically rotates the credential inside the same logical session, so another browser tab's still-valid access token is not revoked. Reuse of the previous credential after the short race-tolerance window revokes that session as potentially compromised.
