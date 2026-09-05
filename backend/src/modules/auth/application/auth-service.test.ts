@@ -501,7 +501,10 @@ test('an unknown address costs the same password work as a registered one', asyn
   }
   const service = new AuthService({
     ...unusedPasswordResetDependencies,
-    accessTokens: { sign: async () => 'access-token', verify: async () => ({}) },
+    accessTokens: {
+      sign: async () => 'access-token',
+      verify: async () => ({ sub: user.id, email: user.email, sessionId: 'session-1' }),
+    },
     clock: { now: () => new Date('2026-01-01T00:00:00.000Z') },
     logoutCleanup: async () => undefined,
     passwords,
