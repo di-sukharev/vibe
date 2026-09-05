@@ -128,6 +128,21 @@ describe('auth routes', () => {
 
     expect(untrustedLogout.status).toBe(403)
     expect(untrustedLogoutBody.error.code).toBe('FORBIDDEN')
+
+    // Registration is a cookie write like the others: without this guard a third-party page could
+    // make the visitor's browser create an account the attacker controls and hold its session.
+    const untrustedRegister = await app.request('/api/auth/register', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: 'https://attacker.example',
+      },
+      body: JSON.stringify({ email: 'victim@example.com', password: 'password123' }),
+    })
+    const untrustedRegisterBody = await untrustedRegister.json()
+
+    expect(untrustedRegister.status).toBe(403)
+    expect(untrustedRegisterBody.error.code).toBe('FORBIDDEN')
   })
 
   test('accepts password reset requests generically while email delivery is disabled', async () => {

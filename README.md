@@ -254,13 +254,16 @@ depends on the Terraform CLI rather than the normal application toolchain.
   negotiate compression when available.
 - `bun run audit` - fail on unreviewed dependency vulnerabilities. The `overrides` block in the root
   `package.json` sets minimum safe versions for fixable transitive advisories. The mobile line also
-  carries two narrow, expiring exceptions for `image-size@1.2.1` because Metro uses it only for
-  local build assets and no patched npm release exists. The gate accepts only
-  `GHSA-w3rx-r6r6-pgpr` and `GHSA-5p2g-fcmc-qvqq`, verifies every lockfile resolution and reverse
-  installed-dependency path (Metro is the only direct consumer; only mobile reaches it), refuses
-  direct application use or graph drift, and expires after 2026-09-24. Track the upstream
-  [advisory-database issue](https://github.com/github/advisory-database/issues/9028), remove the
-  exceptions as soon as a fixed release reaches Expo/Metro, and re-run `bun run audit` after every
+  carries narrow, expiring exceptions for advisories with no usable fix: two for `image-size@1.2.1`,
+  which Metro uses only for local build assets and which has no patched npm release
+  (`GHSA-w3rx-r6r6-pgpr`, `GHSA-5p2g-fcmc-qvqq`, both reviewed by 2026-09-24; track the upstream
+  [advisory-database issue](https://github.com/github/advisory-database/issues/9028)), and one for
+  `decode-uri-component@0.2.2` reached through the `query-string` that `expo-router` uses for deep
+  links (`GHSA-vcc3-ghjq-m6fr`, reviewed by 2026-12-05), whose patched 0.5.0 is ESM-only while
+  `query-string` requires `^0.2.2`, so an override would break the Metro bundle instead of fixing
+  anything. For each one the gate pins the advisory, verifies every lockfile resolution and reverse
+  installed-dependency path, and refuses direct application use, a source import, or graph drift.
+  Remove an exception as soon as a usable release ships, and re-run `bun run audit` after every
   dependency update. `bun update` still moves override ranges within their safe floors.
 - Prisma is pinned to an exact `7.9.0` in `backend/package.json`, and that is deliberate: 7.9.1
   cannot be installed. `bun add @prisma/client@7.9.1` in an empty directory produces 12 KB and

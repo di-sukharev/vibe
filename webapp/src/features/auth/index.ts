@@ -10,6 +10,6 @@ export {
   readPasswordResetToken,
 } from './password-reset-location'
 export { AuthProvider } from './provider'
-export { authQueryKeys } from './queries'
+export { authQueryKeys, sessionQueryKeys } from './queries'
 export { useAuth } from './use-auth'
 export type { AuthContextValue } from './context'

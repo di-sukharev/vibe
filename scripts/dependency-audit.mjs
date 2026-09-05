@@ -27,6 +27,17 @@ const javaScriptMimeTypes = new Set([
 
 export const temporaryAuditExceptions = [
   {
+    advisoryId: 'GHSA-vcc3-ghjq-m6fr',
+    allowedDirectConsumers: ['query-string'],
+    allowedResolutions: ['decode-uri-component@0.2.2'],
+    allowedWorkspaces: ['mobile'],
+    expiresOn: '2026-12-05',
+    packageName: 'decode-uri-component',
+    reason:
+      'Redos-shaped CPU exhaustion on malformed percent-encoding, reached only through the query-string expo-router uses to parse deep links. The patched 0.5.0 is ESM-only and query-string requires ^0.2.2, so forcing it through overrides would break the Metro bundle rather than fix anything.',
+    severity: 'moderate',
+  },
+  {
     advisoryId: 'GHSA-w3rx-r6r6-pgpr',
     allowedDirectConsumers: ['metro'],
     allowedResolutions: ['image-size@1.2.1'],

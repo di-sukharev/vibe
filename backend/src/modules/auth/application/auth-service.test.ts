@@ -579,3 +579,45 @@ test('social auth rejects a provider token that carries no email for a new subje
     service.socialAuth('apple', { idToken: 'token', displayName: undefined }, socialMetadata),
   ).rejects.toMatchObject({ kind: 'provider_email_required' })
 })
+
+test('an unknown address costs the same password work as a registered one', async () => {
+  const verifiedAgainst: string[] = []
+  const passwords = {
+    hash: async () => 'decoy-password-hash',
+    verify: async (_password: string, passwordHash: string) => {
+      verifiedAgainst.push(passwordHash)
+      return false
+    },
+  }
+  const service = new AuthService({
+    ...unusedPasswordResetDependencies,
+    accessTokens: {
+      sign: async () => 'access-token',
+      verify: async () => ({ sub: user.id, email: user.email, sessionId: 'session-1' }),
+    },
+    clock: { now: () => new Date('2026-01-01T00:00:00.000Z') },
+    logoutCleanup: async () => undefined,
+    passwords,
+    refreshReuseGraceSeconds: 10,
+    refreshTokenTtlDays: 30,
+    sessionAbsoluteTtlDays: 90,
+    refreshTokens: {
+      create: () => 'refresh-token',
+      hash: (token) => `hash:${token}`,
+      familyHash: (token) => `family:${token}`,
+      rotate: (token) => `next:${token}`,
+    },
+    repository: {
+      ...unusedPasswordResetRepository,
+      findUserByEmail: async () => null,
+    } as unknown as AuthRepository,
+  })
+
+  await expect(
+    service.login({ email: 'nobody@example.com', password: 'password123' }, {}),
+  ).rejects.toThrow('Invalid email or password')
+
+  // Without this the response time answers the question the 401 body refuses to answer.
+  expect(verifiedAgainst).toHaveLength(1)
+  expect(verifiedAgainst[0]).not.toBe(user.passwordHash)
+})
