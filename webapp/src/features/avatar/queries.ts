@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 
-import { useAuth } from '@/features/auth'
+import { sessionQueryKeys, useAuth } from '@/features/auth'
 import { createAvatarUpload, deleteAvatar, fetchAvatar, finalizeAvatarUpload } from './api'
 import { AvatarUploadError, describeAvatarFile, uploadAvatarObject } from './upload'
 
@@ -11,8 +11,11 @@ function describeRejection(reason: 'type' | 'too-small' | 'too-large') {
   return 'Pick an image smaller than 5 MB.'
 }
 
+// Session-scoped on purpose: an avatar belongs to whoever is signed in, and the cache lives in a
+// QueryClient that outlives a sign-out. Keeping the key under `sessionQueryKeys.all` is what makes
+// the existing session cleanup remove it, instead of showing the next account the last one's photo.
 export const avatarQueryKeys = {
-  current: () => ['avatar', 'current'] as const,
+  current: () => [...sessionQueryKeys.all, 'avatar', 'current'] as const,
 }
 
 export function useAvatarQuery() {

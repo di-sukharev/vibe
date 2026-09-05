@@ -110,7 +110,7 @@ function buildAuthService({
     refreshReuseGraceSeconds: env.REFRESH_REUSE_GRACE_SECONDS,
     sessionAbsoluteTtlDays: env.SESSION_ABSOLUTE_TTL_DAYS,
     refreshTokens: {
-      create: createRefreshToken,
+      create: () => createRefreshToken(env.JWT_SECRET),
       hash: hashRefreshToken,
       familyHash: (token) => hashRefreshTokenFamily(token, env.JWT_SECRET),
       rotate: (token) => deriveRotatedRefreshToken(token, env.JWT_SECRET),

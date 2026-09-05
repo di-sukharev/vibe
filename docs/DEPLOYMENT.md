@@ -23,9 +23,19 @@ Provider runbooks:
 | Terraform state       | Private, versioned Space            | Private, versioned Object Storage bucket       |
 | CDN                   | App Platform's static-site delivery | Off by default; Cloud CDN is opt-in            |
 
-The launch profile intentionally uses one database node and one API instance/revision. This is the
-economical starting point, not a high-availability claim. Increase the provider-specific size and
-replica settings before the availability requirement demands it.
+The launch profile intentionally uses one database node, and on DigitalOcean one API instance
+(`instance_count = 1`). This is the economical starting point, not a high-availability claim.
+Increase the provider-specific size and replica settings before the availability requirement
+demands it.
+
+Yandex is different and the difference matters: Serverless Containers scale out by running more
+instances of the revision, and `concurrency` only sets how many requests one instance takes before
+the next one starts. There is no setting that pins the API to a single process. Anything the
+backend keeps in process memory is therefore per-instance there, and the auth rate limiter in
+`backend/src/http/security.ts` is exactly that - its own comment states the condition. On Yandex,
+treat `AUTH_RATE_LIMIT_MAX` and `ADMIN_USERS_READ_RATE_LIMIT_MAX` as per-instance budgets, not
+global ones, until that counter is moved into shared state. PostgreSQL is the shared state this
+repository already runs; see the rule in `docs/ARCHITECTURE.md` before reaching for anything else.
 
 No Ansible is used on these two paths: there is no host to configure. Terraform owns managed and
 serverless resources; the release script owns image build, migration ordering, static publication,

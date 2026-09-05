@@ -45,6 +45,20 @@ type AuthServiceDependencies = {
 export class AuthService {
   constructor(private readonly dependencies: AuthServiceDependencies) {}
 
+  /**
+   * Password work for an address that has no account. Without it a login for an unknown address
+   * answers after a single indexed SELECT while a registered one pays full argon2, and the
+   * difference is measurable from outside - the response time then answers the question the 401
+   * body refuses to answer. The hash is built once, lazily, and never leaves this object; matching
+   * it changes nothing, because the caller throws either way.
+   */
+  private decoyPasswordHash?: Promise<string>
+
+  private async spendAbsentUserPasswordWork(password: string) {
+    this.decoyPasswordHash ??= this.dependencies.passwords.hash('absent-user')
+    await this.dependencies.passwords.verify(password, await this.decoyPasswordHash)
+  }
+
   async register(input: RegisterPayload, metadata: SessionMetadata) {
     const existingUser = await this.dependencies.repository.findUserByEmail(input.email)
     if (existingUser) {
@@ -70,6 +84,7 @@ export class AuthService {
   async login(input: LoginRequest, metadata: SessionMetadata) {
     const user = await this.dependencies.repository.findUserByEmail(input.email)
     if (!user?.passwordHash) {
+      await this.spendAbsentUserPasswordWork(input.password)
       throw new AuthFailure('invalid_credentials', 'Invalid email or password')
     }
     if (!(await this.dependencies.passwords.verify(input.password, user.passwordHash))) {

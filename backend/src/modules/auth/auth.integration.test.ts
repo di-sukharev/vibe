@@ -560,6 +560,37 @@ maybeDescribe('auth API integration', () => {
     expect(attackerCredential.status).toBe(401)
   })
 
+  test('a token forged around a leaked family locator cannot revoke the session', async () => {
+    const register = await app.request('/api/auth/token/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'forged-family@example.com', password: 'password123' }),
+    })
+    const registered = await register.json()
+    const [familyId] = registered.refreshToken.split('.')
+
+    // The family locator travels in the clear inside the token, so a partial leak hands an
+    // attacker exactly this much. It must not be enough to make the reuse check fire.
+    const forged = await app.request('/api/auth/token/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: `${familyId}.${'f'.repeat(43)}.${'g'.repeat(43)}` }),
+    })
+    expect(forged.status).toBe(401)
+
+    const owner = await app.request('/api/auth/token/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: registered.refreshToken }),
+    })
+    expect(owner.status).toBe(200)
+
+    const session = await prisma.authSession.findFirst({
+      where: { user: { email: 'forged-family@example.com' } },
+    })
+    expect(session?.revokedAt).toBeNull()
+  })
+
   test('web auth never exposes its HttpOnly refresh token when the client platform header is spoofed', async () => {
     const register = await app.request('/api/auth/register', {
       method: 'POST',
