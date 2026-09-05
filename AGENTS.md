@@ -21,7 +21,7 @@
 
 - If instructions conflict, follow higher-priority system, developer, and user instructions first, then the nearest repository instructions.
 - Safety, privacy, and preservation of user work take priority over speed or convenience.
-- When editing this file, keep equivalent agent files such as `CLAUDE.md` aligned.
+- This file is the single source of truth for agent instructions. `CLAUDE.md` only loads it with a standalone `@AGENTS.md` import line, so edit rules here and never copy them back into another agent file.
 
 ## Working With The User
 
@@ -84,14 +84,15 @@ This block exists only for fresh installs from the template. If this repository 
 - Read `README.md`, especially `Agent Repo Download Instructions`, and `CHECKLIST.md` before setup or feature work.
 - When installing this template for a project, run the `CHECKLIST.md` intake in the user's language and complete every conditional section activated by its answers before feature work starts. When working on the template itself, leave its answers unfilled and keep only its capability ledger accurate.
 - Follow that README section for repository remote handling, Docker/PostgreSQL setup, Expo/EAS owner setup, and mobile Maestro dev-client setup when mobile E2E is active; the product intake itself lives in `CHECKLIST.md`.
-- Record durable project choices in `CHECKLIST.md`, README files, and docs, not in `AGENTS.md` or `CLAUDE.md`.
-- After first-run setup is complete, delete this entire `Bootstrap-Only Instructions` block from both `AGENTS.md` and `CLAUDE.md`.
+- Record durable project choices in `CHECKLIST.md`, README files, and docs, not in `AGENTS.md`.
+- After first-run setup is complete, delete this entire `Bootstrap-Only Instructions` block from `AGENTS.md`.
 <!-- BOOTSTRAP_ONLY_END -->
 
 ## Git And Remote Policy
 
 - Inspect `git remote -v` before any branch, commit, push, or PR workflow.
-- Use the repository's `main` or `master`; create, switch to, or suggest another branch only on explicit user request.
+- Stay on the repository's current `main` or `master`. Do not create, switch, or rename a branch unless the user explicitly asked for that branch in this conversation; wanting a clean base, isolating an experiment, or preparing a PR is not a reason to branch on your own. If a branch looks right, propose it and wait for the answer.
+- Never run `git stash` in any form, including `push`, `pop`, `apply`, `drop`, and `clear`. Stashed work disappears from `git status` and from the working tree, so the user's changes get stranded or dropped without anyone seeing it. If uncommitted changes block the task, leave them where they are, stop, and report the blocker.
 - Treat this repository as a template for a new project by default, not as a pull request source for the template.
 - If `origin` points to the template repository and the user has not explicitly said they are contributing to the template, remove it with `git remote remove origin`.
 - Add the user's own GitHub repository as `origin` only when the user provides a URL or asks to create/publish the project.
@@ -196,7 +197,7 @@ This block exists only for fresh installs from the template. If this repository 
 - Background jobs are declared once in `backend/src/jobs.ts`; recurring schedules live in `backend/src/job-schedules.json`. Terraform runs the scheduler as a DigitalOcean worker and the same `cron.ts` executor in HTTP-mode Yandex job containers, where non-2xx failures activate timer-trigger retries. See `docs/BACKGROUND_JOBS.md` before adding another execution model.
 - Work that must survive a process restart goes through `backend/src/outbox`; `background-tasks.ts` stays for work whose loss is acceptable. `docs/BACKGROUND_JOBS.md` compares the three before you pick.
 - Before deployment work, read the relevant docs and use repository scripts/generators rather than provider details from memory.
-- Before deployment or cloud-resource updates, verify the release source with `git remote -v`, `git status --short --branch`, and the configured deployment branch/commit. If the worktree is dirty, the branch is not pushed/synced, or the release source is ambiguous, stop and report the blocker. Do not run `git reset`, `git checkout --`, `git clean`, `git stash`, or equivalent cleanup to make deployment possible unless the user explicitly requested that exact action.
+- Before deployment or cloud-resource updates, verify the release source with `git remote -v`, `git status --short --branch`, and the configured deployment branch/commit. If the worktree is dirty, the branch is not pushed/synced, or the release source is ambiguous, stop and report the blocker. Do not run `git reset`, `git checkout --`, `git clean`, or equivalent cleanup to make deployment possible unless the user explicitly requested that exact action, and never `git stash`.
 - Keep durable storage and media decisions in `docs/STORAGE.md` and provider-specific deployment docs.
 
 ## UI And Design
@@ -224,7 +225,7 @@ This block exists only for fresh installs from the template. If this repository 
 - The one exception is an isolation check that does **not** copy this repository - an empty directory with a single dependency, to observe what a package manager or a tool actually does. Use it only when the working tree cannot answer the question, and delete it inside the same task. This is what proved `@prisma/client@7.9.1` installs as 12 KB instead of 78 MB; without it the conclusion would have been "a Prisma release broke our types", and the fix would have been a version rollback for a reason that was not true.
 - Do not weaken auth, permissions, validation, encryption, rate limits, or auditability to make a task easier.
 - Do not manually edit generated files unless the repository explicitly requires it. Update the source and run the generator instead.
-- Do not stage, commit, amend, rebase, reset, stash, push, or delete files unless explicitly asked.
+- Do not stage, commit, amend, rebase, reset, push, or delete files unless explicitly asked, and never stash or create a branch on your own initiative; see `Git And Remote Policy`.
 - Keep diffs focused. Avoid unrelated formatting churn.
 
 ## Completion Report

@@ -139,10 +139,8 @@ export function validateChecklist(source, { agents = '', claude = '' } = {}) {
       errors.push('A completed install must mark at least one active surface.')
     }
 
-    if (hasBootstrapInstructions(agents) || hasBootstrapInstructions(claude)) {
-      errors.push(
-        'A completed install must remove Bootstrap-Only Instructions from AGENTS.md and CLAUDE.md.',
-      )
+    if (hasBootstrapInstructions(agents)) {
+      errors.push('A completed install must remove Bootstrap-Only Instructions from AGENTS.md.')
     }
   }
 
@@ -152,14 +150,20 @@ export function validateChecklist(source, { agents = '', claude = '' } = {}) {
 }
 
 export function validateAgentInstructions(agents, claude) {
-  if (
-    normalizeAgentInstructions(agents, 'AGENTS.md') ===
-    normalizeAgentInstructions(claude, 'CLAUDE.md')
-  ) return []
+  const errors = []
+  const importable = withoutFencedCode(claude)
 
-  return [
-    'AGENTS.md and CLAUDE.md differ beyond their document titles and reciprocal filename references.',
-  ]
+  if (!importable.split(/\r?\n/).some((line) => line.trim() === '@AGENTS.md')) {
+    errors.push(
+      'CLAUDE.md must load the shared instructions with a standalone `@AGENTS.md` import line.',
+    )
+  }
+
+  if ([...agents.matchAll(/^## .+$/gm)].some((heading) => importable.includes(heading[0]))) {
+    errors.push('CLAUDE.md must not restate AGENTS.md sections; it imports them with `@AGENTS.md`.')
+  }
+
+  return errors
 }
 
 export function validateCapabilityContract(
@@ -622,19 +626,6 @@ function isCapabilityHeader(cells) {
 function hasBootstrapInstructions(source) {
   return source.includes('<!-- BOOTSTRAP_ONLY_START -->') ||
     source.includes('<!-- BOOTSTRAP_ONLY_END -->')
-}
-
-function normalizeAgentInstructions(source, fileName) {
-  const peerName = fileName === 'AGENTS.md' ? 'CLAUDE.md' : 'AGENTS.md'
-  const titlePattern = fileName === 'AGENTS.md' ? /^# AGENTS\.md$/m : /^# CLAUDE\.md$/m
-  const reciprocalInstruction = `- When editing this file, keep equivalent agent files such as \`${peerName}\` aligned.`
-
-  return source
-    .replace(titlePattern, '# AGENT_INSTRUCTIONS.md')
-    .replace(
-      reciprocalInstruction,
-      '- When editing this file, keep the peer agent file aligned.',
-    )
 }
 
 function withoutFencedCode(source) {

@@ -27,7 +27,7 @@ Give the agent this initial prompt:
 ```text
 Install this repository into the project. Before cloning, ask whether I need the mobile app now;
 use the mobile branch only when I do, and run its published-template gate before setup. Read
-README.md, CHECKLIST.md, CLAUDE.md, and the docs for every active surface. Run the CHECKLIST
+README.md, CHECKLIST.md, AGENTS.md, and the docs for every active surface. Run the CHECKLIST
 intake in my language and record every durable answer before feature work.
 
 Treat this as a new project unless I explicitly say I am contributing to the template: inspect
@@ -45,17 +45,17 @@ runbook. Never deploy from a dirty, detached, unpushed, or wrong branch.
 
 Prefer the monolithic backend. Use Managed PostgreSQL and private object storage for production
 media; never use a container filesystem for durable uploads. After setup, remove the marked
-Bootstrap-Only Instructions blocks from AGENTS.md and CLAUDE.md, validate the active surfaces,
+Bootstrap-Only Instructions block from AGENTS.md, validate the active surfaces,
 and report exact remaining account/domain authorizations without printing secrets.
 ```
 
-- First read `README.md`, [CHECKLIST.md](CHECKLIST.md), `CLAUDE.md` if present, and relevant `docs/*.md`, including [docs/WEB_SURFACES.md](docs/WEB_SURFACES.md) before website data, catalog, cart, checkout, order, entitlement, subscription, or payment work; then inspect package scripts and each active surface's app-local `.env.example` before running setup commands.
+- First read `README.md`, [CHECKLIST.md](CHECKLIST.md), [AGENTS.md](AGENTS.md), and relevant `docs/*.md`, including [docs/WEB_SURFACES.md](docs/WEB_SURFACES.md) before website data, catalog, cart, checkout, order, entitlement, subscription, or payment work; then inspect package scripts and each active surface's app-local `.env.example` before running setup commands.
 - Inspect `git remote -v` before any branch, commit, push, or PR workflow. If `origin` points to the template repository and the user has not explicitly said they are contributing to the template, treat this as a new project and detach from the template remote with `git remote remove origin`.
 - If the user provides their own GitHub repository URL or asks to publish the new project, add that URL as the new `origin` after the template remote is removed. If the user has not chosen a destination yet, leave the repository with no `origin` and report that publishing is not configured.
 - Do not open pull requests against the template repository during first-run project setup. Ask only if the user explicitly says this checkout is for improving the template itself.
 - Run the intake from [CHECKLIST.md](CHECKLIST.md) in the user's language before making product or deployment choices, and record the answers in that file rather than only in the conversation.
 - Rename the template deliberately rather than with an unreviewed global replacement. Use `rg -n "web_app_demo|web-app-demo|vibecoding-template"` to inventory package scopes, database names, cookie names, Docker/Compose isolation names, deploy image defaults, and architecture-check aliases; update each owning source, regenerate `bun.lock` with the repository's pinned Bun version, then run install, typecheck, architecture checks, backend integration, and web E2E for the active surfaces.
-- After the user answers, record durable project choices in [CHECKLIST.md](CHECKLIST.md) before feature work: project name/slug, active and deferred surfaces, first-version capabilities, the capability ledger, and what deployment/release work is in or out of scope. Expand the relevant README sections when a choice needs more explanation than the checklist row holds. Once setup is complete, remove the marked `Bootstrap-Only Instructions` blocks from `AGENTS.md` and `CLAUDE.md`.
+- After the user answers, record durable project choices in [CHECKLIST.md](CHECKLIST.md) before feature work: project name/slug, active and deferred surfaces, first-version capabilities, the capability ledger, and what deployment/release work is in or out of scope. Expand the relevant README sections when a choice needs more explanation than the checklist row holds. Once setup is complete, remove the marked `Bootstrap-Only Instructions` block from `AGENTS.md`.
 - If only the webapp is active, keep mobile deferred on the default branch: do not run Expo/EAS/Maestro setup and do not add mobile features. When the user later asks for mobile, switch to the `mobile` branch first.
 - If only the mobile app is active, keep webapp and website intact but deferred: do not add browser-only features or Playwright flows unless they support the active mobile/backend work, and add or update a short deferred-surface note in `webapp/README.md` or `website/README.md` as relevant. When the user later asks for webapp, remove or rewrite that note, then set up and validate webapp normally.
 - On the `mobile` branch, keep template-level Expo/EAS config universal. Do not commit an `expo.owner` or `extra.eas.projectId` to the template. In an installed project, write `expo.owner` and run EAS project init only after the user selects the real Expo personal account or organization that should own the app.
@@ -353,7 +353,7 @@ The backend API flow is `route -> validation -> auth/session guard -> service ->
 
 Keep the default architecture monolithic. For DigitalOcean production, the backend/API default is one `apps-s-1vcpu-1gb` App Platform container so a new project starts inside the expected low-cost budget with Managed PostgreSQL while retaining a clear scale-up path. Add backend worker or scheduled-job components from the same Docker image only when a concrete background job exists; the scheduler ships with the outbox drain and is deployable as-is. For real-time features, a single backend instance can own its local WebSocket connections. If the backend is horizontally scaled and users connected to different instances must receive the same chat, presence, or live events, add a managed Redis-compatible Pub/Sub broker between instances, using DigitalOcean Managed Valkey or Yandex Managed Service for Valkey, whichever hosting the checklist records.
 
-Ongoing engineering guidance lives in [AGENTS.md](AGENTS.md), [CLAUDE.md](CLAUDE.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/TESTING.md](docs/TESTING.md), and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). First-run download and product setup instructions live in this README.
+Ongoing engineering guidance lives in [AGENTS.md](AGENTS.md), which [CLAUDE.md](CLAUDE.md) imports for Claude Code, plus [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/TESTING.md](docs/TESTING.md), and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). First-run download and product setup instructions live in this README.
 
 ## Current Upstream Documentation
 

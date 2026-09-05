@@ -205,7 +205,7 @@ Verified by the agent during setup, not asked.
 - [ ] Validation scope recorded for this project (which suites run before a change is called done): _unanswered_
 - [ ] Project renamed from the template identifiers (`web_app_demo`, `web-app-demo`, `vibecoding-template`), `bun.lock` regenerated
 - [ ] Deferred-surface notes added to the READMEs of surfaces that are not active
-- [ ] `Bootstrap-Only Instructions` blocks deleted from `AGENTS.md` and `CLAUDE.md`
+- [ ] `Bootstrap-Only Instructions` block deleted from `AGENTS.md`
 - [ ] Local URLs, commands run, and anything the user must authorize manually reported back to the user
 
-`README.md`, `AGENTS.md`, `CLAUDE.md`, and some `docs/` runbooks route agents into this file by section name, so renaming a heading breaks those pointers silently. Add rows and sections a project needs, and cross-reference sections by name rather than by number so renumbering stays harmless.
+`README.md`, `AGENTS.md`, and some `docs/` runbooks route agents into this file by section name, so renaming a heading breaks those pointers silently. Add rows and sections a project needs, and cross-reference sections by name rather than by number so renumbering stays harmless.

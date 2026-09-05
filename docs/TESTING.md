@@ -7,9 +7,9 @@ explicit release/audit pass or a genuinely cross-cutting change. Its chain is
 `template:check -> architecture:check -> audit -> typecheck -> lint -> test`. The audit needs
 registry access, and the broad command requires Docker because its test phase includes backend
 integration. `bun run template:check` is the fast, dependency-free guard for `CHECKLIST.md`, the
-capability ledger, equivalent `AGENTS.md` / `CLAUDE.md` instructions, and local Markdown file,
-directory, and heading links. Terraform remains an explicit optional signal through
-`bun run test:terraform` when its CLI is installed.
+capability ledger, the `CLAUDE.md` import of `AGENTS.md`, and local Markdown file, directory, and
+heading links. Terraform remains an explicit optional signal through `bun run test:terraform` when
+its CLI is installed.
 
 ## Pyramid
 
