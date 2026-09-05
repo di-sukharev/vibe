@@ -67,7 +67,10 @@ in `job-schedules.json` together with the lock and provider-execution budgets, a
 creates the triggers. The executor takes the same PostgreSQL advisory lock as the scheduler, so a
 retry or adjacent tick skips while the previous invocation still owns it. CLI mode exits nonzero
 on failure. Yandex runs `cron.ts --http <job>` because command/task mode always returns HTTP 200;
-the adapter instead returns 503 so the trigger's configured retries can observe the failure.
+the adapter instead returns 503 so the trigger's configured retries can observe the failure. The
+adapter runs the job only for the trigger's own invocation, `POST /`: any other method gets 405 and
+any other path 404 without touching the job, so invoker rights alone do not let a probe, a warm-up,
+or a stray `GET /favicon.ico` run it.
 DigitalOcean's baseline uses the scheduler worker because its durable outbox must run more often
 than the scheduled-job cadence permits.
 

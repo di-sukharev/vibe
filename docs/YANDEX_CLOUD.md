@@ -169,7 +169,10 @@ job containers.
 
 The timer containers run `cron.ts --http <job>`. A successful locked run returns HTTP 204; a job or
 cleanup failure returns 503, which is visible to the trigger and activates its three configured
-retries. Command/task mode is used only for the explicitly invoked migration because Yandex always
+retries. Only the trigger's `POST /` runs the job (Yandex invokes a container from a trigger with an
+HTTP POST, and the trigger sets no path): other methods get 405, other paths 404, and nothing runs,
+so a probe or a stray `GET /favicon.ico` from an identity with invoker rights cannot execute the
+cleanup. Command/task mode is used only for the explicitly invoked migration because Yandex always
 returns HTTP 200 for that mode and exposes the process result through `X-Task-Exit-Code`; the release
 script checks that header before promotion.
 

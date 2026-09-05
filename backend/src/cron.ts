@@ -59,6 +59,31 @@ export async function handleProviderJobInvocation(
   }
 }
 
+/**
+ * The container is built for one invocation: the timer trigger's `POST /`. Yandex sends a trigger
+ * event as an HTTP POST to the container address, and `infra/yandex/runtime/containers.tf` sets no
+ * trigger path, so the root is the only request that may run the job. IAM decides who may reach
+ * the container; this decides which request is the job. A probe, a warm-up, or a stray
+ * `GET /favicon.ico` from an identity with invoker rights gets 405/404 and runs nothing.
+ */
+export async function handleProviderJobRequest(
+  request: Request,
+  jobName: string,
+  createRuntime: () => BackendRuntime = createBackendRuntime,
+  entries: ScheduleEntry[] = schedules,
+) {
+  if (new URL(request.url).pathname !== '/') {
+    return new Response('Not Found', { status: 404 })
+  }
+  if (request.method !== 'POST') {
+    return new Response('Method Not Allowed', {
+      headers: { Allow: 'POST' },
+      status: 405,
+    })
+  }
+  return handleProviderJobInvocation(jobName, createRuntime, entries)
+}
+
 export function startProviderJobServer(jobName: string) {
   if (!isBackgroundJobName(jobName)) {
     throw new Error(
@@ -68,7 +93,7 @@ export function startProviderJobServer(jobName: string) {
 
   const server = Bun.serve({
     port: Number(Bun.env.PORT ?? 8080),
-    fetch: () => handleProviderJobInvocation(jobName),
+    fetch: (request) => handleProviderJobRequest(request, jobName),
   })
   console.log(`Provider timer for ${jobName} listening on ${server.url}`)
   return server

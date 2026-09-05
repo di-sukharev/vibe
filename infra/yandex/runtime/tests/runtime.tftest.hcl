@@ -78,6 +78,14 @@ run "immutable_runtime_with_provider_timers" {
   }
 
   assert {
+    condition = alltrue([
+      for trigger in values(yandex_function_trigger.jobs) :
+      coalesce(trigger.container[0].path, "/") == "/"
+    ])
+    error_message = "cron.ts HTTP mode runs the job only for POST /; a trigger path off the root would 404 every tick."
+  }
+
+  assert {
     condition = (
       yandex_serverless_container.jobs["outbox"].execution_timeout == "180s" &&
       yandex_serverless_container.jobs["uploads"].execution_timeout == "840s" &&
