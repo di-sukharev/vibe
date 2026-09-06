@@ -16,7 +16,7 @@ import {
   errorId,
   hasErrors,
   passwordConfirmationErrors,
-  toFieldErrors,
+  toValidationErrors,
 } from './form-validation'
 import { PasswordInput } from './PasswordInput'
 
@@ -42,7 +42,8 @@ export function ResetPasswordForm({ token }: { token: string }) {
         token,
         password: value.password,
       })
-      const nextErrors = result.success ? {} : toFieldErrors(result.error.issues)
+      const validation = toValidationErrors(result.success ? [] : result.error.issues)
+      const nextErrors = validation.fieldErrors
       const confirmationErrors = passwordConfirmationErrors(
         value.password,
         value.confirmPassword,
@@ -50,6 +51,7 @@ export function ResetPasswordForm({ token }: { token: string }) {
       if (confirmationErrors) nextErrors.confirmPassword = confirmationErrors
       if (!result.success || hasErrors(nextErrors.confirmPassword)) {
         setFieldErrors(nextErrors)
+        setFormError(validation.formError)
         return
       }
 

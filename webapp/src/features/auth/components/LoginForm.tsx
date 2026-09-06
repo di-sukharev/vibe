@@ -11,7 +11,7 @@ import { ApiRequestError } from '@/platform/api'
 import { useAuth } from '../use-auth'
 import { FormAlert } from './form-errors'
 import type { FieldErrors } from './form-model'
-import { clearFieldError, errorId, hasErrors, toFieldErrors } from './form-validation'
+import { clearFieldError, errorId, hasErrors, toValidationErrors } from './form-validation'
 import { PasswordInput } from './PasswordInput'
 
 export function LoginForm({ returnTo }: { returnTo?: string }) {
@@ -29,7 +29,9 @@ export function LoginForm({ returnTo }: { returnTo?: string }) {
       setFormError(null)
       const result = loginRequestSchema.safeParse(value)
       if (!result.success) {
-        setFieldErrors(toFieldErrors(result.error.issues))
+        const validation = toValidationErrors(result.error.issues)
+        setFieldErrors(validation.fieldErrors)
+        setFormError(validation.formError)
         return
       }
 
