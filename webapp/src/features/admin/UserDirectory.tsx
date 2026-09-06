@@ -27,6 +27,7 @@ import {
   InputGroupAddon,
   InputGroupInput,
 } from '@/components/ui/input-group'
+import { Item } from '@/components/ui/item'
 import {
   Select,
   SelectContent,
@@ -44,6 +45,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Typography } from '@/components/typography'
+import { useMediaQuery } from '@/hooks/use-media-query'
 import { formatDate } from '@/platform/intl'
 import {
   adminUsersPagination,
@@ -61,11 +63,26 @@ type PendingRoleChange = {
   user: AdminUserSummary
 }
 
+type DirectoryRowsProps = {
+  currentUser: UserDto
+  isRoleChangePending: boolean
+  onRoleChange: (user: AdminUserSummary, role: UserRole) => void
+  users: ReadonlyArray<AdminUserSummary>
+}
+
+// Tailwind's `sm` breakpoint. The frame's toolbar and footer stack below it through `sm:`
+// classes, so the rows switch on the same edge. Below it the three columns do not fit a phone,
+// and a table squeezed into a column with CSS loses its semantics: `display` overrides drop the
+// table from the accessibility tree and a hidden `<thead>` takes the column labels with it. So
+// each viewport gets markup of its own kind: a real table, or a list whose fields carry labels.
+const tableViewportQuery = '(min-width: 40rem)'
+
 export function UserDirectory({ currentUser }: { currentUser: UserDto }) {
   const [draftQuery, setDraftQuery] = useState('')
   const [query, setQuery] = useState('')
   const [page, setPage] = useState(1)
   const [pendingRole, setPendingRole] = useState<PendingRoleChange | null>(null)
+  const fitsTable = useMediaQuery(tableViewportQuery)
   const usersQuery = useAdminUsersQuery({
     q: query || undefined,
     page,
@@ -86,6 +103,11 @@ export function UserDirectory({ currentUser }: { currentUser: UserDto }) {
     event.preventDefault()
     setPage(1)
     setQuery(draftQuery.trim())
+  }
+
+  const requestRoleChange = (user: AdminUserSummary, role: UserRole) => {
+    roleMutation.reset()
+    setPendingRole({ role, user })
   }
 
   const confirmRoleChange = () => {
@@ -153,71 +175,21 @@ export function UserDirectory({ currentUser }: { currentUser: UserDto }) {
           )}
           {viewState === 'empty' && <DirectoryEmpty hasQuery={query.length > 0} />}
           {viewState === 'ready' && usersQuery.data && (
-            <Table className="block sm:table">
-              <TableHeader className="hidden sm:table-header-group">
-                <TableRow>
-                  <TableHead>User</TableHead>
-                  <TableHead>Role</TableHead>
-                  <TableHead>Created</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody className="grid gap-3 sm:table-row-group">
-                {usersQuery.data.items.map((user) => (
-                  <TableRow
-                    className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 rounded-xl border-0 p-4 ring-1 ring-border sm:table-row sm:rounded-none sm:border-b sm:p-0 sm:ring-0"
-                    key={user.id}
-                  >
-                    <TableCell className="min-w-0 p-0 whitespace-normal sm:p-3 sm:whitespace-nowrap">
-                      <div className="grid">
-                        <Typography variant="bodySmMedium">
-                          {user.displayName ?? user.email}
-                        </Typography>
-                        <Typography className="break-all" variant="caption" tone="muted">
-                          {user.email}
-                        </Typography>
-                      </div>
-                    </TableCell>
-                    <TableCell className="p-0 sm:p-3">
-                      <Select
-                        disabled={roleMutation.isPending}
-                        onValueChange={(value) => {
-                          const parsedRole = userRoleSchema.safeParse(value)
-                          if (parsedRole.success && parsedRole.data !== user.role) {
-                            roleMutation.reset()
-                            setPendingRole({ role: parsedRole.data, user })
-                          }
-                        }}
-                        value={user.role}
-                      >
-                        <SelectTrigger
-                          aria-label={`Role for ${user.email}`}
-                          className="w-28 capitalize"
-                        >
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem
-                            disabled={user.id === currentUser.id && user.role === 'admin'}
-                            value="user"
-                          >
-                            User
-                          </SelectItem>
-                          <SelectItem value="admin">Admin</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </TableCell>
-                    <TableCell className="col-span-2 flex items-center justify-between border-t p-0 pt-3 tabular-nums sm:table-cell sm:border-0 sm:p-3">
-                      <Typography className="sm:hidden" variant="caption" tone="muted">
-                        Created
-                      </Typography>
-                      <Typography as="span" variant="bodySm">
-                        {formatDate(user.createdAt)}
-                      </Typography>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            fitsTable ? (
+              <UserTable
+                currentUser={currentUser}
+                isRoleChangePending={roleMutation.isPending}
+                onRoleChange={requestRoleChange}
+                users={usersQuery.data.items}
+              />
+            ) : (
+              <UserList
+                currentUser={currentUser}
+                isRoleChangePending={roleMutation.isPending}
+                onRoleChange={requestRoleChange}
+                users={usersQuery.data.items}
+              />
+            )
           )}
         </DataTableFrame>
       </div>
@@ -233,6 +205,153 @@ export function UserDirectory({ currentUser }: { currentUser: UserDto }) {
         pendingChange={pendingRole}
       />
     </>
+  )
+}
+
+function UserTable({
+  currentUser,
+  isRoleChangePending,
+  onRoleChange,
+  users,
+}: DirectoryRowsProps) {
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>User</TableHead>
+          <TableHead>Role</TableHead>
+          <TableHead>Created</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {users.map((user) => (
+          <TableRow key={user.id}>
+            <TableCell>
+              <div className="grid">
+                <Typography variant="bodySmMedium">
+                  {user.displayName ?? user.email}
+                </Typography>
+                <Typography variant="caption" tone="muted">
+                  {user.email}
+                </Typography>
+              </div>
+            </TableCell>
+            <TableCell>
+              <RoleSelect
+                currentUser={currentUser}
+                disabled={isRoleChangePending}
+                onRoleChange={onRoleChange}
+                user={user}
+              />
+            </TableCell>
+            <TableCell>
+              <Typography as="span" className="tabular-nums" variant="bodySm">
+                {formatDate(user.createdAt)}
+              </Typography>
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  )
+}
+
+/**
+ * The narrow counterpart of `UserTable`: one list item per user, each a definition list whose
+ * terms name the fields the table names with column headers. "User" and "Role" are visible in
+ * the values themselves and stay screen-reader only; "Created" is the one a bare date needs.
+ */
+function UserList({
+  currentUser,
+  isRoleChangePending,
+  onRoleChange,
+  users,
+}: DirectoryRowsProps) {
+  return (
+    // Explicit `role="list"`: WebKit drops list semantics from an unstyled `<ul>`, and phones
+    // are exactly where this markup renders.
+    <ul aria-label="Users" className="grid gap-3" role="list">
+      {users.map((user) => (
+        <Item asChild key={user.id} variant="outline">
+          <li>
+            <dl className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-3">
+              <div className="grid min-w-0">
+                <Typography as="dt" variant="srOnly">
+                  User
+                </Typography>
+                <dd className="grid">
+                  <Typography variant="bodySmMedium">
+                    {user.displayName ?? user.email}
+                  </Typography>
+                  <Typography variant="caption" tone="muted" wrap="break">
+                    {user.email}
+                  </Typography>
+                </dd>
+              </div>
+              <div>
+                <Typography as="dt" variant="srOnly">
+                  Role
+                </Typography>
+                <dd>
+                  <RoleSelect
+                    currentUser={currentUser}
+                    disabled={isRoleChangePending}
+                    onRoleChange={onRoleChange}
+                    user={user}
+                  />
+                </dd>
+              </div>
+              <div className="col-span-2 flex items-center justify-between border-t pt-3">
+                <Typography as="dt" variant="caption" tone="muted">
+                  Created
+                </Typography>
+                <Typography as="dd" variant="bodySm">
+                  {formatDate(user.createdAt)}
+                </Typography>
+              </div>
+            </dl>
+          </li>
+        </Item>
+      ))}
+    </ul>
+  )
+}
+
+function RoleSelect({
+  currentUser,
+  disabled,
+  onRoleChange,
+  user,
+}: {
+  currentUser: UserDto
+  disabled: boolean
+  onRoleChange: (user: AdminUserSummary, role: UserRole) => void
+  user: AdminUserSummary
+}) {
+  return (
+    <Select
+      disabled={disabled}
+      onValueChange={(value) => {
+        const parsedRole = userRoleSchema.safeParse(value)
+        if (parsedRole.success && parsedRole.data !== user.role) {
+          onRoleChange(user, parsedRole.data)
+        }
+      }}
+      value={user.role}
+    >
+      <SelectTrigger aria-label={`Role for ${user.email}`} className="w-28 capitalize">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem
+          disabled={user.id === currentUser.id && user.role === 'admin'}
+          value="user"
+        >
+          User
+        </SelectItem>
+        <SelectItem value="admin">Admin</SelectItem>
+      </SelectContent>
+    </Select>
   )
 }
 
