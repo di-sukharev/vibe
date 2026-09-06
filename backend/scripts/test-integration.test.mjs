@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 
 import { composeProjectName, postgresTestDataVolume } from '../../scripts/repo-env.mjs'
-import { runBackendIntegration } from './test-integration.mjs'
+import { userAuthenticationSessionTransactionOptions } from '../src/db.ts'
+import { integrationTestTimeoutMs, runBackendIntegration } from './test-integration.mjs'
 
 const integrationFile = 'src/example.integration.test.ts'
 const testDatabaseUrl =
@@ -53,7 +54,7 @@ describe('backend integration Docker lifecycle', () => {
         integrationTestFiles: [integrationFile],
         spawn,
       }),
-    ).rejects.toThrow('bun test src/example.integration.test.ts failed with exit code 7')
+    ).rejects.toThrow(`bun test ${integrationFile} --timeout=${integrationTestTimeoutMs} failed with exit code 7`)
 
     const projectName = integrationProjectName(calls)
     expect(commandArgs(calls)).toContainEqual([
@@ -145,7 +146,7 @@ describe('backend integration Docker lifecycle', () => {
         spawn,
         writeError: (message) => messages.push(message),
       }),
-    ).rejects.toThrow('bun test src/example.integration.test.ts failed with exit code 7')
+    ).rejects.toThrow(`bun test ${integrationFile} --timeout=${integrationTestTimeoutMs} failed with exit code 7`)
 
     expect(messages).toHaveLength(1)
     expect(messages[0]).toContain('Docker cleanup also failed')
@@ -242,6 +243,7 @@ describe('backend integration Docker lifecycle', () => {
       integrationFile,
       '-t',
       'focused behavior',
+      `--timeout=${integrationTestTimeoutMs}`,
     ])
     expect(calls.some(({ command }) => command === 'docker')).toBe(false)
 
@@ -255,6 +257,31 @@ describe('backend integration Docker lifecycle', () => {
       }),
     ).rejects.toThrow('Focused backend test file was not discovered')
     expect(rejectedCalls).toHaveLength(0)
+  })
+
+  test('gives every test an integration budget unless the caller sets one', async () => {
+    const calls = []
+
+    await runBackendIntegration({
+      environment: { TEST_DATABASE_URL: testDatabaseUrl, TEST_SKIP_DOCKER: '1' },
+      integrationTestFiles: [integrationFile],
+      spawn: successfulSpawn(calls),
+    })
+
+    // Longer than the longest request-path transaction timeout, so a lock held too long is still
+    // reported through the request that held it rather than by the harness as a bare timeout.
+    expect(integrationTestTimeoutMs).toBeGreaterThan(userAuthenticationSessionTransactionOptions.timeout)
+    expect(bunTestArgs(calls)).toEqual(['test', integrationFile, `--timeout=${integrationTestTimeoutMs}`])
+
+    const overridden = []
+    await runBackendIntegration({
+      environment: { TEST_DATABASE_URL: testDatabaseUrl, TEST_SKIP_DOCKER: '1' },
+      integrationTestFiles: [integrationFile],
+      testArgs: ['--timeout=1000'],
+      spawn: successfulSpawn(overridden),
+    })
+
+    expect(bunTestArgs(overridden)).toEqual(['test', integrationFile, '--timeout=1000'])
   })
 
   test('TEST_SKIP_DOCKER requires an explicit external test database URL', async () => {
@@ -299,6 +326,10 @@ function successfulSpawn(calls, shouldFail = () => false) {
     calls.push({ args, command, options })
     return { status: shouldFail(command, args) ? 7 : 0 }
   }
+}
+
+function bunTestArgs(calls) {
+  return calls.find(({ command, args }) => command === 'bun' && args[0] === 'test')?.args
 }
 
 function commandArgs(calls) {

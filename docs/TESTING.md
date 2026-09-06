@@ -59,7 +59,11 @@ runs in `test:live`.
 Everything else named `*.test.ts` or `*.test.mjs` runs in `test:unit` with nothing installed. Name a
 test accordingly: `backend/scripts/test-files.mjs` owns the split. The unit and integration runners
 accept exact discovered file paths relative to `backend/` plus Bun's `-t`/`--test-name-pattern`
-filter. Omitting both selects the complete runner-owned suite for broad regression.
+filter. Omitting both selects the complete runner-owned suite for broad regression. The integration
+runner also gives every test a 30 s budget instead of Bun's 5 s unit-test default - the
+password-hashing scenarios exceed 5 s on a saturated machine, and a timed-out test's body runs on
+into the next test's cleanup, so the failure lands on an unrelated assertion; pass `--timeout=<ms>`
+to override it for a focused run.
 
 The third category keeps `bun run test:backend:unit` runnable without Docker. The root
 `bun run test` still requires Docker because it deliberately includes backend integration. A live

@@ -17,6 +17,19 @@ import { backendTestFiles, selectBackendTestRun } from './test-files.mjs'
 const backendRoot = resolve(fileURLToPath(new URL('.', import.meta.url)), '..')
 const repositoryRoot = resolve(backendRoot, '..')
 
+/**
+ * The per-test budget every integration test gets unless the caller passes `--timeout=<ms>`.
+ *
+ * bun's default, 5 s, is a unit-test budget. The scenarios here hash passwords with argon2id
+ * several times each and cross a Docker network: 0.3-0.6 s idle, and past 5 s on a saturated
+ * machine. A test that times out does not fail cleanly either - bun lets its body run on into the
+ * next test's cleanup, so the failure is reported against an unrelated later assertion. The budget
+ * is longer than the request-path transaction timeouts in `src/db.ts` (15 s and 20 s), so a lock
+ * held too long is still reported through the request that held it - Prisma expires that
+ * transaction and the request answers 500 - rather than by the harness as a bare timeout.
+ */
+export const integrationTestTimeoutMs = 30_000
+
 class CommandFailure extends Error {
   constructor(command, args, exitCode) {
     super(`${command} ${args.join(' ')} failed with exit code ${exitCode}`)
@@ -150,7 +163,7 @@ export async function runBackendIntegration({
     if (!selectedTestRun) {
       throw new Error('No *.integration.test.* files found under backend/src or backend/scripts')
     }
-    run('bun', ['test', ...selectedTestRun.testFiles, ...selectedTestRun.bunTestArgs], { env })
+    run('bun', ['test', ...selectedTestRun.testFiles, ...withTestBudget(selectedTestRun.bunTestArgs)], { env })
   } catch (error) {
     primaryFailure = error
   } finally {
@@ -168,6 +181,11 @@ export async function runBackendIntegration({
   }
 
   if (primaryFailure) throw primaryFailure
+}
+
+function withTestBudget(bunTestArgs) {
+  if (bunTestArgs.some((argument) => argument.startsWith('--timeout='))) return bunTestArgs
+  return [...bunTestArgs, `--timeout=${integrationTestTimeoutMs}`]
 }
 
 function errorMessage(error) {
