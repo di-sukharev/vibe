@@ -7,18 +7,22 @@ import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Typography } from '@/components/typography'
+import { errorId, hasErrors } from '@/features/auth'
+import { validateProfileForm } from './profile-form'
 import { useUpdateProfileMutation } from './queries'
 
 export function ProfilePanel({ user }: { user: UserDto }) {
   const displayNameErrorId = useId()
   const [displayName, setDisplayName] = useState(user.displayName ?? '')
   const mutation = useUpdateProfileMutation()
-  const displayNameInvalid = displayName.trim().length === 1
+  const validation = validateProfileForm(displayName)
+  const displayNameErrors = validation.errors?.fieldErrors.displayName
+  const displayNameInvalid = hasErrors(displayNameErrors)
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const normalized = displayName.trim()
-    mutation.mutate(normalized === '' ? null : normalized, {
+    if (!validation.request) return
+    mutation.mutate(validation.request.displayName, {
       onSuccess: (response) => setDisplayName(response.user.displayName ?? ''),
     })
   }
@@ -39,12 +43,11 @@ export function ProfilePanel({ user }: { user: UserDto }) {
             <Field data-invalid={displayNameInvalid}>
               <FieldLabel htmlFor="profile-display-name">Display name</FieldLabel>
               <Input
-                aria-describedby={displayNameInvalid ? displayNameErrorId : undefined}
+                aria-describedby={errorId(displayNameErrors, displayNameErrorId)}
                 aria-invalid={displayNameInvalid}
                 autoComplete="name"
                 disabled={mutation.isPending}
                 id="profile-display-name"
-                maxLength={80}
                 onChange={(event) => {
                   setDisplayName(event.target.value)
                   mutation.reset()
@@ -53,11 +56,7 @@ export function ProfilePanel({ user }: { user: UserDto }) {
                 value={displayName}
               />
               <FieldDescription>Leave empty to use your email instead.</FieldDescription>
-              {displayNameInvalid && (
-                <FieldError id={displayNameErrorId}>
-                  Display name must be at least 2 characters.
-                </FieldError>
-              )}
+              <FieldError id={displayNameErrorId} errors={displayNameErrors} />
             </Field>
             <Field>
               <FieldLabel htmlFor="profile-email">Email</FieldLabel>
@@ -71,6 +70,12 @@ export function ProfilePanel({ user }: { user: UserDto }) {
             </Field>
           </FieldGroup>
 
+          {validation.errors?.formError && (
+            <Alert variant="destructive">
+              <AlertTitle>Profile cannot be saved</AlertTitle>
+              <AlertDescription>{validation.errors.formError}</AlertDescription>
+            </Alert>
+          )}
           {mutation.isError && (
             <Alert variant="destructive">
               <AlertTitle>Profile was not saved</AlertTitle>
@@ -86,7 +91,7 @@ export function ProfilePanel({ user }: { user: UserDto }) {
 
           <div>
             <Button
-              disabled={mutation.isPending || displayNameInvalid}
+              disabled={mutation.isPending || validation.errors !== null}
               type="submit"
             >
               {mutation.isPending ? 'Saving…' : 'Save profile'}
