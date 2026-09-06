@@ -205,7 +205,8 @@ test('password reset request stays generic and creates nothing while delivery is
 
 test('a reset request queues exactly one task without looking the account up', async () => {
   // The response must not reveal whether the address exists, so the account lookup belongs to the
-  // handler. What the request does is one insert, identical either way.
+  // handler. What the request does is hand the queue one enqueue, identical either way; whether
+  // a row is written is the queue's own, address-blind decision.
   const now = new Date('2026-01-01T00:00:00.000Z')
   let repositoryCalls = 0
   const queued: unknown[] = []

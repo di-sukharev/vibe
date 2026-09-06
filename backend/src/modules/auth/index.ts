@@ -1,6 +1,7 @@
 import type { DbClient } from '../../db'
 import type { EmailDelivery } from '../../email'
 import type { AppEnv } from '../../env'
+import { drainPassCapacity } from '../../outbox'
 import type { BackendRuntime } from '../../runtime'
 import { AuthService } from './application/auth-service'
 import { passwordResetCooldownSeconds, type Clock, type LogoutCleanup, type ProjectUser } from './application/ports'
@@ -119,7 +120,7 @@ function buildAuthService({
       familyHash: (token) => hashRefreshTokenFamily(token, env.JWT_SECRET),
       rotate: (token) => deriveRotatedRefreshToken(token, env.JWT_SECRET),
     },
-    passwordResetTasks: createPasswordResetTaskQueue(db),
+    passwordResetTasks: createPasswordResetTaskQueue(db, { pendingLimit: drainPassCapacity(env) }),
     repository: createPrismaAuthRepository(db),
   })
 }

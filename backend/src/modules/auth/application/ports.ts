@@ -125,7 +125,8 @@ export type PasswordResetNotifier = {
  * Queues the account-dependent half of a password reset.
  *
  * The request handler must not look the account up: doing so would make the response time reveal
- * whether the address exists. It writes one row for any address, and the handler decides.
+ * whether the address exists. It writes one row for any address - or none for any address, while
+ * a flood keeps its ceiling full - and the handler decides.
  */
 export type PasswordResetTaskQueue = {
   enqueuePasswordReset(input: { email: string; now: Date }): Promise<void>

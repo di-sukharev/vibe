@@ -106,9 +106,12 @@ export class AuthService {
     // neither a token nor a queued task.
     if (!passwordResetNotifier.configured) return { accepted: true as const }
 
-    // Exactly one insert, whether or not the address belongs to an account. That is what keeps
-    // the response time from answering a question the response body refuses to answer - and it
-    // makes the 202 a promise the system can keep, because the row is committed before it.
+    // The same work whether or not the address belongs to an account: the queue reads its own
+    // ceiling, then writes one row - or none, while a flood keeps that ceiling full. Nothing on
+    // this path depends on the address existing, which is what keeps the response time from
+    // answering a question the response body refuses to answer. Within the ceiling the 202 is a
+    // promise the system can keep, because the row is committed before it; past it, the same
+    // answer with nothing behind it, and the next drain pass clears what filled the ceiling.
     await passwordResetTasks.enqueuePasswordReset({
       email: input.email,
       now: this.dependencies.clock.now(),

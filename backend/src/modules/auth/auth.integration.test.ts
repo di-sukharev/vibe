@@ -4,7 +4,7 @@ import { createApp } from '../../app'
 import { createPrisma } from '../../db'
 import type { EmailDelivery, EmailMessage } from '../../email'
 import { loadEnv } from '../../env'
-import { drainTaskOutbox } from '../../outbox'
+import { drainOptionsFromEnv, drainTaskOutbox } from '../../outbox'
 import type { BackendRuntime } from '../../runtime'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
@@ -12,13 +12,14 @@ const databaseUrl = process.env.TEST_DATABASE_URL
 const maybeDescribe = databaseUrl ? describe : describe.skip
 
 maybeDescribe('auth API integration', () => {
-  const env = loadEnv({
+  const envInput = {
     DATABASE_URL: databaseUrl!,
     JWT_SECRET: '12345678901234567890123456789012',
     CORS_ORIGINS: 'http://localhost:5173',
     // Short enough that a test can observe an access token expiring.
     ACCESS_TOKEN_TTL_SECONDS: '60',
-  })
+  }
+  const env = loadEnv(envInput)
   const prisma = createPrisma(databaseUrl!)
   const app = createApp({ env, prisma })
 
@@ -303,6 +304,64 @@ maybeDescribe('auth API integration', () => {
     expect(previousRefresh.status).toBe(401)
     expect(previousPassword.status).toBe(401)
     expect(newPassword.status).toBe(200)
+  })
+
+  test('a flood of unknown addresses cannot starve a real reset', async () => {
+    // One outbox row per request is what keeps the 202 generic, so the inflow is bounded only by
+    // the auth rate limit times the addresses an attacker holds, while a drain moves a fixed
+    // number of rows a minute. The queue therefore never holds more than one drain pass of due
+    // resets: past that a request is answered exactly as before and nothing is written, and the
+    // next pass clears them all instead of working through a backlog for days.
+    const messages: EmailMessage[] = []
+    const emailDelivery: EmailDelivery = {
+      driver: 'console',
+      configured: true,
+      send: async (message) => {
+        messages.push(message)
+      },
+    }
+    // A pass makes five loops, so a batch of two is a ceiling of ten.
+    const floodEnv = loadEnv({ ...envInput, TASK_OUTBOX_BATCH_LIMIT: '2' })
+    const floodApp = createApp({ emailDelivery, env: floodEnv, prisma })
+    const drainRuntime = { emailDelivery, env: floodEnv, prisma } as unknown as BackendRuntime
+    const drain = () =>
+      drainTaskOutbox(drainRuntime, { ...drainOptionsFromEnv(floodEnv), now: new Date() })
+    const requestReset = (email: string) =>
+      floodApp.request('/api/auth/password-reset/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      })
+    const pendingResets = () =>
+      prisma.taskOutbox.count({ where: { status: 'pending', type: 'auth:password-reset' } })
+
+    const register = await floodApp.request('/api/auth/token/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'victim@example.com', password: 'password123' }),
+    })
+    expect(register.status).toBe(201)
+
+    // Sequential on purpose: the ceiling is a read followed by a write, so concurrent requests
+    // can overshoot it by their own number. That is accepted; what is pinned here is the ceiling.
+    const floodBodies: unknown[] = []
+    for (let index = 0; index < 16; index += 1) {
+      const response = await requestReset(`bogus-${index}@example.com`)
+      expect(response.status).toBe(202)
+      floodBodies.push(await response.json())
+    }
+    expect(new Set(floodBodies.map((body) => JSON.stringify(body))).size).toBe(1)
+    expect(await pendingResets()).toBe(10)
+
+    // The flood bought one drain pass, not a backlog.
+    expect(await drain()).toMatchObject({ done: 0, skipped: 10, terminalFailed: 0, transientFailed: 0 })
+    expect(await pendingResets()).toBe(0)
+
+    const realRequest = await requestReset('victim@example.com')
+    expect(realRequest.status).toBe(202)
+    expect(await realRequest.json()).toEqual(floodBodies[0])
+    expect(await drain()).toMatchObject({ done: 1, skipped: 0, terminalFailed: 0, transientFailed: 0 })
+    expect(messages.map(({ to }) => to)).toEqual(['victim@example.com'])
   })
 
   test('returns one durable successor across three concurrent refresh requests', async () => {

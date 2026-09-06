@@ -188,6 +188,70 @@ failing. The key is how you choose the window:
 Derive the key from what the caller submitted, never from what you looked up: a key that depends
 on whether an account exists is an oracle for which addresses are registered.
 
+### What an anonymous caller may queue
+
+The request half of a password reset writes one row for any address - that is what keeps its
+response identical for registered and unknown addresses - so the inflow to `auth:password-reset`
+is bounded only by the auth rate limit times the addresses an attacker holds. Five IPs sending
+sixty fresh addresses a minute is 300 rows in against the 250 a pass moves out: the backlog grows
+for as long as the flood lasts, and every real reset queues behind it, FIFO, for up to
+`TASK_OUTBOX_RETENTION_DAYS`.
+
+The queue is the ceiling. `createPasswordResetTaskQueue` admits a new row only while fewer than
+one drain pass (`TASK_OUTBOX_BATCH_LIMIT` times the five loops a pass makes, 250 by default) of
+`auth:password-reset` rows are pending and due; past that the request gets the same 202 and
+nothing is written. The count is read before the address is looked at and keyed on nothing the
+caller sent, so neither its cost nor its answer says whether an account exists.
+
+One pass, because that is what the drain can move before the next one starts: everything the
+ceiling admits is claimable by the next pass, so this type's backlog can never carry over from
+one pass to the next - which is the whole defect. Two things can leave part of it behind: the
+pass is shared, so other types' due rows take their share of it oldest-first, and
+`TASK_OUTBOX_MAX_RUNTIME_MS` can end a pass of slow real sends before it reaches the capacity.
+What either leaves of this type is still due, still counted, and narrows what the ceiling admits
+next - a bounded remainder, never a compounding backlog - so raising `TASK_OUTBOX_BATCH_LIMIT`
+widens the ceiling only as far as the runtime lets a pass use it. A flood never binds on
+runtime: an address with no account costs one lookup. Anything smaller would refuse requests the
+drain could have delivered on time: a ceiling of one batch, say, would close the door for part of
+every minute at sixty fresh addresses a minute - one IP inside the auth rate limit - where before
+nothing happened at all. The ceiling is derived from the same variable the runner reads its batch
+from, so raising `TASK_OUTBOX_BATCH_LIMIT` for throughput raises it in step; an own-server install
+sets the variable identically in the API's and the scheduler's environment. Only due rows count:
+a reset whose delivery failed is parked as pending with a due time minutes ahead, and counting
+those would let a provider outage fill the ceiling with real resets in backoff and then silently
+drop every new request until the outage ends. Flood rows do not park - an address with no account
+is skipped on its first attempt, terminally; only an attempt that fails on the database before
+the lookup answers goes into backoff - so the bound on a flood is unchanged. The bound is soft under
+concurrency - a read followed by a write, so simultaneous requests can overshoot it by their own
+number - and it is deliberately not a fair share inside the drain: junk and real resets are the
+same task type, the drain cannot tell them apart, and only the door can refuse to let the queue
+become the bottleneck. A pass full of resets delays every other task type by one pass at most:
+the drain claims oldest-first, and a notice queued behind a full ceiling is the oldest due row
+when the next pass begins.
+
+What it costs: nothing below the pass capacity - every request is admitted and delivered by the
+next pass, as before. Above it, a real request that lands while the ceiling is full gets its 202
+and no email, with nothing to tell the user which attempts were dropped. After a one-off burst
+the next pass clears everything and a retry goes through. While a flood is sustained the ceiling
+refills soon after every pass - at the example rate, within fifty seconds of a 250-row ceiling -
+and real requests are admitted only in that gap, so a retry is a matter of luck for as long as
+the flood lasts. The due rows of this type never exceed the pass capacity (a per-type count; the
+logged `backlog` sums every type), and a pass never claims more than its capacity, so `claimed`
+at the pass capacity pass after pass, with `skipped` making up nearly all of it, is the cue to
+raise `TASK_OUTBOX_BATCH_LIMIT` or shorten the
+drain interval, which widens the gap. Rows admitted while a pass is running carry a due time after
+the pass clock and wait for the next one. The per-IP auth limit still applies on top and is not
+the knob for this.
+
+The ceiling also ties the request path to the drain being alive. Only a pass empties the queue,
+so with the runner down - crash-looping, mid-deploy, or never started next to `start:api` - the
+first pass worth of real requests is kept and every later one is answered and discarded until a
+pass runs. Before the ceiling the same outage delayed those resets; now it loses them, and no
+metric shows it, because refusals are unlogged by design and the `skipped` cue comes from the
+drain that is not running. That is the price of a bound that needs no new state or index, and it
+makes "the drain has not reported a pass recently" the alert an install with a provider must
+have - the scheduler section above asks for the same alert for a different reason.
+
 ### Running the drain
 
 `outbox:drain` is an ordinary job, so every runner in the table above can run it. `bun run dev`
@@ -223,11 +287,16 @@ you to record before reaching for a queue service.
 
 ### What to watch
 
-Each pass logs one line. Three numbers matter:
+Each pass logs one line. Four numbers matter:
 
 - `backlog` climbing across consecutive runs - the drain cannot keep up. That is the measurement
   `docs/ARCHITECTURE.md` asks for before reaching for a queue service.
 - `terminalFailed` above zero - work was given up on. `lastError` on the row says why.
+- `claimed` at the pass capacity (`TASK_OUTBOX_BATCH_LIMIT` times five) pass after pass, with
+  `skipped` making up nearly all of it - the reset ceiling is full of addresses that have no
+  account, which is what a flood looks like from here. The request path deliberately logs
+  nothing about refusals: a log line per refused request
+  would be a second flood. See "What an anonymous caller may queue".
 - `unhandled` above zero - rows are queued for a type this deployment has no handler for, which
   means an API is ahead of its runner. Roll the runner forward.
 

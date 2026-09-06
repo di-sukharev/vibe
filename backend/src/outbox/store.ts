@@ -73,12 +73,17 @@ export async function recoverStaleLeases(
   return count
 }
 
+/** The rows a pass may claim at `now`: pending, due, and of a type this deployment runs. */
+function claimableWhere({ now, types }: { now: Date; types: readonly string[] }) {
+  return { status: 'pending' as const, scheduledFor: { lte: now }, type: { in: [...types] } }
+}
+
 export function findClaimableTasks(
   prisma: OutboxPrisma,
   { limit, now, types }: { limit: number; now: Date; types: readonly string[] },
 ) {
   return prisma.taskOutbox.findMany({
-    where: { status: 'pending', scheduledFor: { lte: now }, type: { in: [...types] } },
+    where: claimableWhere({ now, types }),
     // Best-effort FIFO. A task type that needs a stronger ordering guarantee than this is not a
     // job for a shared outbox table.
     orderBy: [{ scheduledFor: 'asc' }, { id: 'asc' }],
@@ -182,16 +187,27 @@ export async function deleteExpiredTasks(
   return count
 }
 
+/**
+ * How many rows a pass could claim right now. Defined here, next to the claim itself, so a caller
+ * that admits work against the drain's pace - the password-reset ceiling - counts exactly what
+ * the drain will take and cannot drift from it.
+ */
+export function countClaimableTasks(
+  prisma: OutboxPrisma,
+  { now, types }: { now: Date; types: readonly string[] },
+) {
+  return prisma.taskOutbox.count({ where: claimableWhere({ now, types }) })
+}
+
 /** What is still waiting once a pass is over: the number to alert on when it climbs. */
 export async function summarizeBacklog(
   prisma: OutboxPrisma,
   { now, types }: { now: Date; types: readonly string[] },
 ) {
-  const due = { status: 'pending' as const, scheduledFor: { lte: now }, type: { in: [...types] } }
   const [backlog, oldest, unhandled] = await Promise.all([
-    prisma.taskOutbox.count({ where: due }),
+    countClaimableTasks(prisma, { now, types }),
     prisma.taskOutbox.findFirst({
-      where: due,
+      where: claimableWhere({ now, types }),
       orderBy: { scheduledFor: 'asc' },
       select: { scheduledFor: true },
     }),

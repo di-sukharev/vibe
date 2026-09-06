@@ -70,7 +70,7 @@ Both are transactional-email services, not marketing platforms, which is what th
 
 ## The Delivery Contract
 
-**Delivery is durable, not immediate.** A password-reset request commits a `task_outbox` row and returns; the message leaves when something runs `outbox:drain`. That is deliberate — a provider outage or a redeploy mid-request would otherwise lose the email silently. It also means **an install that wires a provider must run a drain**, or it will accept every request and send nothing. See [BACKGROUND_JOBS.md](BACKGROUND_JOBS.md), "Running the drain".
+**Delivery is durable, not immediate.** A password-reset request commits a `task_outbox` row and returns; the message leaves when something runs `outbox:drain`. That is deliberate — a provider outage or a redeploy mid-request would otherwise lose the email silently. It also means **an install that wires a provider must run a drain**: without one it accepts every request, keeps only the first drain pass of them (`TASK_OUTBOX_BATCH_LIMIT` times five, 250 by default) - the queue admits at most one pass of resets, so a flood of requests cannot starve it - and discards the rest without a trace. See [BACKGROUND_JOBS.md](BACKGROUND_JOBS.md), "Running the drain" and "What an anonymous caller may queue".
 
 **Delivery is at-least-once.** If a process dies after the provider accepted a message but before the row was marked done, the task runs again and a second message goes out. For a password reset that means a second link, with the first already dead. Design new task types so a repeat is harmless.
 
