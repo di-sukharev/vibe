@@ -1,7 +1,8 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 
 import { sessionQueryKeys, useAuth } from '@/features/auth'
+import type { AuthenticatedTransport } from '@/platform/api'
 import { createAvatarUpload, deleteAvatar, fetchAvatar, finalizeAvatarUpload } from './api'
 import { AvatarUploadError, describeAvatarFile, uploadAvatarObject } from './upload'
 
@@ -18,16 +19,20 @@ export const avatarQueryKeys = {
   current: () => [...sessionQueryKeys.all, 'avatar', 'current'] as const,
 }
 
-export function useAvatarQuery() {
-  const auth = useAuth()
-
-  return useQuery({
+export function avatarQueryOptions(transport: AuthenticatedTransport) {
+  return queryOptions({
     queryKey: avatarQueryKeys.current(),
-    queryFn: () => fetchAvatar(auth.transport),
+    queryFn: ({ signal }) => fetchAvatar(transport, { signal }),
     // The download URL is short-lived, so a cached response outlives its own link. Refetching
     // well inside the window keeps the rendered image from breaking mid-session.
     staleTime: 60_000,
   })
+}
+
+export function useAvatarQuery() {
+  const auth = useAuth()
+
+  return useQuery(avatarQueryOptions(auth.transport))
 }
 
 export function useUploadAvatarMutation() {

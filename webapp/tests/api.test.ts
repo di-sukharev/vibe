@@ -519,6 +519,132 @@ test('bootstrapAuthSession surfaces transient refresh failures without clearing 
   expect(cleared).toBe(false)
 })
 
+test('AuthApi surfaces an aborted request as its AbortError, never as an expired session', async () => {
+  let accessToken: string | null = 'active-access-token'
+  let authExpiredCalls = 0
+  const calls: string[] = []
+  const controller = new AbortController()
+
+  globalThis.fetch = async (input, init) => {
+    const path = new URL(String(input)).pathname
+    calls.push(path)
+    if (path === '/api/auth/me') {
+      // A 401 whose error body is still streaming when the caller aborts: the browser errors the
+      // body with the abort reason, so the JSON payload never fully arrives.
+      return new Response(bodyThatErrorsOnAbort(init?.signal), { status: 401 })
+    }
+    return json({ error: { code: 'NOT_FOUND', message: 'Unexpected request' } }, 404)
+  }
+
+  const client = new AuthApi({
+    getAccessToken: () => accessToken,
+    setAccessToken: (nextAccessToken) => {
+      accessToken = nextAccessToken
+    },
+    onAuthExpired: () => {
+      authExpiredCalls += 1
+    },
+  })
+  const request = client.me({ signal: controller.signal })
+  await waitForEvent(calls, '/api/auth/me')
+  controller.abort()
+
+  const error = await rejectionOf(request)
+  expect(error).toBeInstanceOf(DOMException)
+  expect((error as DOMException).name).toBe('AbortError')
+  expect(calls).toEqual(['/api/auth/me'])
+  expect(accessToken).toBe('active-access-token')
+  expect(authExpiredCalls).toBe(0)
+})
+
+test('one caller aborting its request does not cancel the refresh other callers share', async () => {
+  const expiredAccessToken = accessTokenFor('user_1', 'expired')
+  const freshAccessToken = accessTokenFor('user_1', 'fresh')
+  let accessToken: string | null = expiredAccessToken
+  let authExpiredCalls = 0
+  let releaseRefresh!: () => void
+  const refreshCanFinish = new Promise<void>((resolve) => {
+    releaseRefresh = resolve
+  })
+  const calls: string[] = []
+  const controller = new AbortController()
+
+  globalThis.fetch = async (input, init) => {
+    // Like the browser, refuse to start a request whose signal is already aborted.
+    init?.signal?.throwIfAborted()
+    const path = new URL(String(input)).pathname
+    calls.push(path)
+
+    if (path === '/api/auth/refresh') {
+      // Also like the browser: had the caller's signal leaked into this request, the abort below
+      // would fail the refresh for everyone waiting on it.
+      await Promise.race([refreshCanFinish, untilAborted(init?.signal)])
+      return json({ accessToken: freshAccessToken }, 200)
+    }
+    if (new Headers(init?.headers).get('Authorization') === `Bearer ${freshAccessToken}`) {
+      return json(
+        {
+          user: {
+            id: 'user_1',
+            email: 'user@example.com',
+            displayName: null,
+            role: 'user',
+            createdAt: '2026-05-11T00:00:00.000Z',
+          },
+        },
+        200,
+      )
+    }
+    return json({ error: { code: 'UNAUTHORIZED', message: 'Expired access token' } }, 401)
+  }
+
+  const client = new AuthApi({
+    getAccessToken: () => accessToken,
+    setAccessToken: (nextAccessToken) => {
+      accessToken = nextAccessToken
+    },
+    onAuthExpired: () => {
+      authExpiredCalls += 1
+    },
+  })
+  const abortedRequest = client.me({ signal: controller.signal })
+  const keptRequest = client.me()
+  await waitForEvent(calls, '/api/auth/refresh')
+  controller.abort()
+  releaseRefresh()
+
+  const error = await rejectionOf(abortedRequest)
+  expect(error).toBeInstanceOf(DOMException)
+  expect((error as DOMException).name).toBe('AbortError')
+  await expect(keptRequest).resolves.toMatchObject({ user: { email: 'user@example.com' } })
+  expect(calls.filter((call) => call === '/api/auth/refresh')).toHaveLength(1)
+  expect(accessToken).toBe(freshAccessToken)
+  expect(authExpiredCalls).toBe(0)
+})
+
+async function rejectionOf(promise: Promise<unknown>): Promise<unknown> {
+  try {
+    await promise
+  } catch (error) {
+    return error
+  }
+  throw new Error('Expected the promise to reject')
+}
+
+function untilAborted(signal: AbortSignal | null | undefined) {
+  return new Promise<never>((_resolve, reject) => {
+    signal?.addEventListener('abort', () => reject(signal.reason), { once: true })
+  })
+}
+
+function bodyThatErrorsOnAbort(signal: AbortSignal | null | undefined) {
+  return new ReadableStream({
+    start(controller) {
+      signal?.addEventListener('abort', () => controller.error(signal.reason), { once: true })
+    },
+  })
+}
+
 async function waitForEvent(events: string[], event: string) {
   for (let attempt = 0; attempt < 10; attempt += 1) {
     if (events.includes(event)) return

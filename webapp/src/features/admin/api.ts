@@ -10,13 +10,17 @@ import {
 
 import type { AuthenticatedTransport } from '@/platform/api'
 
-export function getAdminDashboard(transport: AuthenticatedTransport) {
-  return transport.request('/api/admin/dashboard', adminDashboardResponseSchema)
+export function getAdminDashboard(
+  transport: AuthenticatedTransport,
+  options: { signal?: AbortSignal } = {},
+) {
+  return transport.request('/api/admin/dashboard', adminDashboardResponseSchema, options)
 }
 
 export function getAdminUsers(
   transport: AuthenticatedTransport,
   input: AdminUsersQuery,
+  options: { signal?: AbortSignal } = {},
 ) {
   const query = adminUsersQuerySchema.parse(input)
   const search = new URLSearchParams({
@@ -24,7 +28,7 @@ export function getAdminUsers(
     pageSize: String(query.pageSize),
   })
   if (query.q) search.set('q', query.q)
-  return transport.request(`/api/admin/users?${search}`, adminUsersResponseSchema)
+  return transport.request(`/api/admin/users?${search}`, adminUsersResponseSchema, options)
 }
 
 export function updateAdminUserRole(
