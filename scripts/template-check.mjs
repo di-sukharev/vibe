@@ -536,13 +536,6 @@ function validateCapabilityLedger(source) {
   return errors
 }
 
-function markdownTableRows(source) {
-  return markdownTableBlocks(source)
-    .flat()
-    .filter((entry) => entry.closed)
-    .map((entry) => entry.cells)
-}
-
 function markdownTableBlocks(source) {
   const blocks = []
   let current = []
