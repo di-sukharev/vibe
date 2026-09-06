@@ -1,4 +1,8 @@
-import { ADMIN_USERS_MAX_PAGE } from '@web-app-demo/contracts'
+import {
+  ADMIN_USERS_MAX_PAGE,
+  type AdminUserSummary,
+  type UpdateUserRoleResponse,
+} from '@web-app-demo/contracts'
 
 type AdminUsersQueryState = {
   isError: boolean
@@ -37,14 +41,30 @@ export function adminUsersPagination({
   }
 }
 
+export type RoleMutationFeedback =
+  | { kind: 'error'; reason: string }
+  | { kind: 'success'; user: AdminUserSummary }
+  | null
+
+/**
+ * Everything the directory shows about the last role change comes from here. The error branch
+ * carries the mutation error's message as the reason: for the backend's policy answers (last
+ * administrator, self-demotion) that is the sentence the person needs, and the dialog renders it
+ * under its heading instead of reaching into the raw mutation error. Network and response-shape
+ * failures surface their own message the same way, as every other alert in this feature does.
+ */
 export function roleMutationFeedback({
+  data,
+  error,
   isError,
   isSuccess,
 }: {
+  data: UpdateUserRoleResponse | undefined
+  error: Error | null
   isError: boolean
   isSuccess: boolean
-}): 'error' | 'success' | null {
-  if (isError) return 'error'
-  if (isSuccess) return 'success'
+}): RoleMutationFeedback {
+  if (isError && error) return { kind: 'error', reason: error.message }
+  if (isSuccess && data) return { kind: 'success', user: data.user }
   return null
 }

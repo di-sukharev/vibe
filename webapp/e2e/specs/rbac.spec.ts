@@ -78,12 +78,14 @@ test('promoting a user revokes the old session and opens the admin workspace aft
       status: 409,
       contentType: 'application/json',
       body: JSON.stringify({
-        error: { code: 'CONFLICT', message: 'Role update was rejected' },
+        error: { code: 'CONFLICT', message: 'At least one administrator must remain' },
       }),
     })
   })
   await dialog.getByRole('button', { name: 'Change role' }).click()
-  await expect(dialog.getByRole('alert')).toContainText(/\S/)
+  const failureAlert = dialog.getByRole('alert')
+  await expect(failureAlert).toContainText('Role was not changed')
+  await expect(failureAlert).toContainText('At least one administrator must remain')
   await adminPage.unroute(roleEndpoint)
 
   await dialog.getByRole('button', { name: 'Change role' }).click()

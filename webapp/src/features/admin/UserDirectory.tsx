@@ -108,11 +108,11 @@ export function UserDirectory({ currentUser }: { currentUser: UserDto }) {
   return (
     <>
       <div className="grid gap-4">
-        {mutationFeedback === 'success' && roleMutation.isSuccess && (
+        {mutationFeedback?.kind === 'success' && (
           <Alert>
             <AlertTitle>Role changed</AlertTitle>
             <AlertDescription>
-              {roleMutation.data.user.email} is now {roleMutation.data.user.role}.
+              {mutationFeedback.user.email} is now {mutationFeedback.user.role}.
               Their previous sessions have been revoked.
             </AlertDescription>
           </Alert>
@@ -222,7 +222,7 @@ export function UserDirectory({ currentUser }: { currentUser: UserDto }) {
       </div>
 
       <RoleChangeDialog
-        error={roleMutation.isError ? roleMutation.error : null}
+        failureReason={mutationFeedback?.kind === 'error' ? mutationFeedback.reason : null}
         isPending={roleMutation.isPending}
         onCancel={() => {
           roleMutation.reset()
