@@ -203,7 +203,7 @@ Verified by the agent during setup, not asked.
 
 - [ ] Durable answers above filled in, install status set to `completed YYYY-MM-DD`
 - [ ] Validation scope recorded for this project (which suites run before a change is called done): _unanswered_
-- [ ] Project renamed from the template identifiers (`web_app_demo`, `web-app-demo`, `vibecoding-template`), `bun.lock` regenerated
+- [ ] Project renamed from the template identifiers (`web_app_demo`, `web-app-demo`, `vibecoding-template`, the `Vibe Coding Template` page title), `bun.lock` regenerated
 - [ ] Deferred-surface notes added to the READMEs of surfaces that are not active
 - [ ] `Bootstrap-Only Instructions` block deleted from `AGENTS.md`
 - [ ] Local URLs, commands run, and anything the user must authorize manually reported back to the user

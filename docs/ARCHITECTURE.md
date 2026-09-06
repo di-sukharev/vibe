@@ -112,6 +112,7 @@ The webapp follows these client rules:
 - TanStack Form owns form state.
 - Zod schemas come from `@web-app-demo/contracts`.
 - `src/platform/api` owns endpoint-agnostic fetch, base URL handling, response parsing, and the shared API error.
+- `src/platform/intl` owns the locale-pinned formatters shared across features (today: dates).
 - `src/features/<context>` owns endpoint paths, schemas, server-state adapters, providers, and product UI for that context.
 - Routes and `src/main.tsx` are thin composition files and import features through their public `index.ts`.
 - `src/components/ui` and `src/platform` never import product features. Features may use platform code and UI primitives; cross-feature imports must use the target feature's public index.

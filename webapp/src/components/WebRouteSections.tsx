@@ -104,8 +104,8 @@ function RouteStateCard({
         <CardContent>
           <Empty
             aria-live={alert ? 'assertive' : undefined}
-            className="border-0 p-4 sm:p-8"
             role={alert ? 'alert' : undefined}
+            size="sm"
           >
             <EmptyHeader>
               <EmptyMedia variant="icon">

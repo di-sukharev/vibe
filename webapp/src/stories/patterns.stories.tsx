@@ -69,7 +69,7 @@ export const LoadingEmptyError: Story = {
     <PatternSurface>
       <div className="grid gap-5 lg:grid-cols-3">
         <Card><CardHeader><Typography as="h2" variant="h6">Loading</Typography></CardHeader><CardContent className="grid gap-3"><Skeleton className="h-5 w-1/2" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-4/5" /></CardContent></Card>
-        <Card><CardContent><Empty className="p-4"><EmptyHeader><EmptyMedia variant="icon">∅</EmptyMedia><EmptyTitle>No results</EmptyTitle><EmptyDescription>Try another filter.</EmptyDescription></EmptyHeader><EmptyContent><Button size="sm" variant="outline">Clear filter</Button></EmptyContent></Empty></CardContent></Card>
+        <Card><CardContent><Empty size="sm"><EmptyHeader><EmptyMedia variant="icon">∅</EmptyMedia><EmptyTitle>No results</EmptyTitle><EmptyDescription>Try another filter.</EmptyDescription></EmptyHeader><EmptyContent><Button size="sm" variant="outline">Clear filter</Button></EmptyContent></Empty></CardContent></Card>
         <Alert variant="destructive"><AlertTitle>Could not load projects</AlertTitle><AlertDescription>The connection was interrupted. Try again.</AlertDescription></Alert>
       </div>
     </PatternSurface>

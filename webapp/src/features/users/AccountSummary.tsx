@@ -2,10 +2,7 @@ import { Calendar03Icon, UserCircle02Icon } from '@hugeicons/core-free-icons'
 import type { UserDto } from '@web-app-demo/contracts'
 
 import { SectionCards } from '@/components/dashboard'
-
-const dateFormatter = new Intl.DateTimeFormat('en', {
-  dateStyle: 'medium',
-})
+import { formatDate } from '@/platform/intl'
 
 export function AccountSummary({ user }: { user: UserDto }) {
   return (
@@ -21,7 +18,7 @@ export function AccountSummary({ user }: { user: UserDto }) {
           description: `Workspace role: ${formatRole(user.role)}`,
           icon: Calendar03Icon,
           label: 'Member since',
-          value: dateFormatter.format(new Date(user.createdAt)),
+          value: formatDate(user.createdAt),
         },
       ]}
     />

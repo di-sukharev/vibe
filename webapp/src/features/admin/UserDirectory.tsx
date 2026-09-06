@@ -44,6 +44,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Typography } from '@/components/typography'
+import { formatDate } from '@/platform/intl'
 import {
   adminUsersPagination,
   adminUsersViewState,
@@ -210,7 +211,7 @@ export function UserDirectory({ currentUser }: { currentUser: UserDto }) {
                         Created
                       </Typography>
                       <Typography as="span" variant="bodySm">
-                        {new Date(user.createdAt).toLocaleDateString()}
+                        {formatDate(user.createdAt)}
                       </Typography>
                     </TableCell>
                   </TableRow>
