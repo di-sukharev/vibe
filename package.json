@@ -48,7 +48,7 @@
     "build:webapp": "bun run --cwd webapp build",
     "build:website": "bun run --cwd website build",
     "build:backend": "bun run --cwd backend build",
-    "check": "bun run template:check && bun run architecture:check && bun run audit && bun run typecheck && bun run lint && bun run test",
+    "check": "bun run template:check && bun run architecture:check && bun run audit && bun run typecheck && bun run lint && bun run test && bun run test:build-contracts",
     "template:check": "bun scripts/template-check.mjs",
     "architecture:check": "bun scripts/architecture-check.mjs",
     "audit": "bun scripts/dependency-audit.mjs",
@@ -79,6 +79,7 @@
     "test:storage:s3": "bun scripts/storage-local.mjs test",
     "test:webapp": "bun run --cwd webapp test",
     "test:website": "bun run --cwd website test",
+    "test:build-contracts": "bun run build:webapp && bun run build:website && bun run --cwd webapp test:build-contracts && bun run --cwd website test:build-contracts",
     "smoke:backend:docker": "bun run --cwd backend smoke:docker",
     "e2e:webapp": "bun run --cwd webapp e2e",
     "e2e:webapp:s3": "bun scripts/storage-local.mjs e2e"

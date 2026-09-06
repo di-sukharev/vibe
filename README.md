@@ -217,8 +217,9 @@ Test runners use the separate Docker Compose `postgres_test` service and the `TE
 Ordinary tasks use focused validation at the boundary that owns the changed behavior. The broad
 local regression, `bun run check`, belongs to explicit release/audit work or a genuinely
 cross-cutting change: it validates reusable-template invariants, architecture boundaries, typecheck,
-lint, and the full test suite. The full suite includes backend integration tests, so Docker must be
-installed and the daemon running. Terraform validation remains a separate `bun run test:terraform`
+lint, the full test suite, and the build contracts over the production `webapp` and `website`
+output. The full suite includes backend integration tests, so Docker must be installed and the
+daemon running. Terraform validation remains a separate `bun run test:terraform`
 signal because it depends on the Terraform CLI rather than the normal application toolchain.
 
 ## Workspace Commands
@@ -233,8 +234,8 @@ signal because it depends on the Terraform CLI rather than the normal applicatio
   `storybook:build:webapp` or `storybook:build:website` for one surface.
 - `bun run dev:backend:s3` - start the backend against the local S3 container instead of the disk.
 - `bun run check` - broad release/audit regression: template invariants, architecture, dependency
-  advisories, typecheck, lint, and all tests; requires registry access for the audit and Docker for
-  backend integration.
+  advisories, typecheck, lint, all tests, and the build contracts; requires registry access for the
+  audit and Docker for backend integration.
 - `bun run template:check` - validate checklist state, capability-ledger states, equivalent agent
   instructions, and local Markdown file, directory, and heading links.
 - `bun run typecheck` - run TypeScript checks across workspaces.
@@ -272,6 +273,11 @@ signal because it depends on the Terraform CLI rather than the normal applicatio
 - `bun run test:backend:integration` - run DB-backed tests through `postgres_test`; append a file
   path relative to `backend/` and `-t "name"` for a focused task signal.
 - `bun run test:webapp` - run webapp client tests.
+- `bun run test:website` - run website unit tests.
+- `bun run test:build-contracts` - build `webapp` and `website`, then check the invariants that only
+  their production output can show: story-only utilities stay out of the shipped CSS and the website
+  hero scene stays a lazy chunk. The one test script that builds; `test:webapp` and `test:website`
+  stay read-only.
 - `bun run test:storage:s3` - run the storage contract against a real local S3 server (needs Docker).
 - `bun run --cwd backend start:cron -- <job>` - run one background job once, for example `outbox:drain`; see [docs/BACKGROUND_JOBS.md](docs/BACKGROUND_JOBS.md).
 - `bun run --cwd backend start:scheduler` - run the in-repo schedule from `job-schedules.json`: outbox every minute, upload cleanup hourly, and auth cleanup daily (`bun run dev` starts it too).

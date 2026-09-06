@@ -536,7 +536,7 @@ export default defineConfig([
     },
   },
   {
-    files: ['playwright.config.ts', 'e2e/**/*.ts', 'tests/**/*.ts'],
+    files: ['playwright.config.ts', 'e2e/**/*.ts', 'tests/**/*.ts', 'build-contracts/**/*.ts'],
     languageOptions: {
       globals: {
         ...globals.browser,

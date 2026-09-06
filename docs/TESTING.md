@@ -4,9 +4,11 @@ The goal of this template's tests is to help future agents prove each change at 
 
 Focused task validation is the default. `bun run check` is the broad repository regression for an
 explicit release/audit pass or a genuinely cross-cutting change. Its chain is
-`template:check -> architecture:check -> audit -> typecheck -> lint -> test`. The audit needs
-registry access, and the broad command requires Docker because its test phase includes backend
-integration. `bun run template:check` is the fast, dependency-free guard for `CHECKLIST.md`, the
+`template:check -> architecture:check -> audit -> typecheck -> lint -> test -> test:build-contracts`.
+The audit needs registry access, and the broad command requires Docker because its test phase
+includes backend integration. The last step is the only test script that builds an application:
+it produces the `webapp` and `website` production output and checks it; no other `test:*` script
+builds or writes `dist/`. `bun run template:check` is the fast, dependency-free guard for `CHECKLIST.md`, the
 capability ledger, the `CLAUDE.md` import of `AGENTS.md`, and local Markdown file, directory, and
 heading links. Terraform remains an explicit optional signal through `bun run test:terraform` when
 its CLI is installed.
@@ -14,6 +16,7 @@ its CLI is installed.
 ## Pyramid
 
 - Contracts/unit: pure rules, shared Zod wire shapes, env parsing, JWTs, password hashing, client API refresh/retry behavior, and token cleanup.
+- Build contracts: invariants that exist only in the production `dist/` of `webapp` and `website`, such as which utilities reach the shipped CSS and how the hero scene is split into chunks; see [Build Contracts](#build-contracts).
 - Backend integration: route/auth/database behavior such as refresh-token rotation, one-time password reset, role guards, profile persistence, duplicate registration, and concurrency.
 - Webapp Playwright: a curated portfolio of product journeys and failure mechanisms that depend on a real browser and Vite UI.
 - Mobile Maestro: lives on the `mobile` branch with the runnable Expo app.
@@ -99,6 +102,22 @@ local storage container and delete the volume holding a developer's uploads as a
 running tests. Teardown removes the test database service and its named volume explicitly instead.
 
 This template does not ship with GitHub Actions or another hosted validation runner. Run the focused task signals locally; run broad regression deliberately as release/audit work. Production releases and activated SSG rebuilds follow the selected hosting provider's deployment runbook rather than replacing task validation.
+
+## Build Contracts
+
+```bash
+bun run test:build-contracts
+```
+
+The script builds `webapp` and `website`, then runs `webapp/build-contracts/*.test.ts` and
+`website/build-contracts/*.test.ts` against the fresh `dist/` directories: story-only utilities stay
+out of the production CSS, the website's hero fallback stays in the static HTML, and its R3F scene
+stays a separate lazy chunk. The test files only read the output. That keeps `bun run test:webapp`
+and `bun run test:website` read-only: they never build, never write `dist/`, and never inherit the
+developer's build environment, so `bun run check` builds and checks once, after the read-only
+suites. A build-contract file started on its own checks whatever `dist/` is on disk and fails with a
+pointer to the script when there is none. Add a build contract only for an invariant that the built
+output alone can show; everything else belongs in the unit suites.
 
 ## Webapp E2E
 

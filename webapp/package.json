@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b",
     "test": "bun test tests",
+    "test:build-contracts": "bun test build-contracts",
     "lint": "eslint .",
     "preview": "vite preview",
     "storybook": "storybook dev --port 6006 --no-open",

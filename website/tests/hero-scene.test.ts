@@ -1,17 +1,11 @@
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
-import { readFileSync, readdirSync } from 'node:fs'
-import { resolve } from 'node:path'
 import test from 'node:test'
-import { fileURLToPath } from 'node:url'
 
 import {
   watchHeroSceneEnhancement,
   watchHeroSceneEligibility,
   type HeroSceneMediaQuery,
 } from '../src/components/landing/hero-scene-loading'
-
-const websiteRoot = fileURLToPath(new URL('..', import.meta.url))
 
 test('hero scene eligibility follows desktop width and reduced-motion preferences', () => {
   const desktop = fakeMediaQuery(false)
@@ -63,46 +57,6 @@ test('the R3F enhancement loads once and only while desktop motion is eligible',
   assert.deepEqual(eligibility, [false, true, false, true])
 })
 
-test('the static build keeps the fallback eager, the R3F scene lazy, and story styles isolated', { timeout: 30_000 }, () => {
-  const storySource = readFileSync(
-    resolve(websiteRoot, 'src/stories/ui/demos.tsx'),
-    'utf8',
-  )
-  assert.match(storySource, /h-\[34rem\]/)
-
-  execFileSync('bun', ['run', 'build'], {
-    cwd: websiteRoot,
-    env: process.env,
-    stdio: 'pipe',
-  })
-
-  const dist = resolve(websiteRoot, 'dist')
-  const assets = resolve(dist, '_astro')
-  const html = readFileSync(resolve(dist, 'index.html'), 'utf8')
-  const scripts = readdirSync(assets)
-    .filter((name) => name.endsWith('.js'))
-    .map((name) => ({ name, source: readFileSync(resolve(assets, name), 'utf8') }))
-  const css = readdirSync(assets)
-    .filter((name) => name.endsWith('.css'))
-    .map((name) => readFileSync(resolve(assets, name), 'utf8'))
-    .join('\n')
-  const canvasChunk = scripts.find(({ source }) => source.includes('data-hero-scene-canvas'))
-  const shellUrl = html.match(
-    /<astro-island[^>]*component-url="([^"]+\.js)"[^>]*>[\s\S]*?data-hero-scene/,
-  )?.[1]
-
-  assert.match(html, /data-hero-scene-fallback/)
-  assert.match(html, /client="idle"/)
-  assert.ok(!css.includes('.h-\\[34rem\\]{'))
-  assert.ok(canvasChunk, 'expected a separate R3F canvas chunk')
-  assert.ok(shellUrl, 'expected the lightweight HeroScene island chunk')
-  assert.doesNotMatch(html, new RegExp(escapeRegExp(canvasChunk.name)))
-
-  const shell = readFileSync(resolve(dist, shellUrl.slice(1)), 'utf8')
-  assert.match(shell, new RegExp(escapeRegExp(canvasChunk.name)))
-  assert.doesNotMatch(shell, /data-hero-scene-canvas/)
-})
-
 function fakeMediaQuery(initialMatches: boolean): HeroSceneMediaQuery & {
   setMatches(matches: boolean): void
 } {
@@ -124,8 +78,4 @@ function fakeMediaQuery(initialMatches: boolean): HeroSceneMediaQuery & {
       for (const listener of listeners) listener()
     },
   }
-}
-
-function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
