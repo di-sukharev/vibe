@@ -1,10 +1,12 @@
 import { spawnSync } from 'node:child_process'
 import {
+  assertE2eDatabaseUrl,
   composeEnv,
   composeProjectName,
   defaultDatabaseUrl,
   e2eAdminEmail,
   e2eAdminPassword,
+  postgresTestService,
   repositoryRoot,
 } from './env'
 
@@ -46,13 +48,7 @@ async function waitForComposePostgres(service: string, database: string, env: No
 
 export default async function globalSetup() {
   const databaseUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL ?? defaultDatabaseUrl
-  const databaseName = new URL(databaseUrl).pathname.replace(/^\//, '')
-
-  if (!databaseName.endsWith('_test') && process.env.E2E_ALLOW_NON_TEST_DATABASE !== '1') {
-    throw new Error(
-      `Refusing to run Playwright against non-test database "${databaseName}". Use a *_test database or set E2E_ALLOW_NON_TEST_DATABASE=1 intentionally.`,
-    )
-  }
+  assertE2eDatabaseUrl(databaseUrl)
 
   process.env.TEST_DATABASE_URL = databaseUrl
   process.env.DATABASE_URL = databaseUrl
@@ -63,8 +59,8 @@ export default async function globalSetup() {
   })
 
   if (process.env.E2E_SKIP_DOCKER !== '1') {
-    run('docker', [...composeArgs, 'up', '-d', 'postgres_test'], env)
-    await waitForComposePostgres('postgres_test', 'web_app_demo_test', env)
+    run('docker', [...composeArgs, 'up', '-d', postgresTestService], env)
+    await waitForComposePostgres(postgresTestService, 'web_app_demo_test', env)
   }
 
   run('bun', ['run', '--cwd', 'backend', 'prisma:deploy'], env)

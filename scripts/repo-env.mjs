@@ -6,8 +6,14 @@ export const repositoryRoot = resolve(fileURLToPath(new URL('..', import.meta.ur
 export const repositoryHash = createHash('sha256').update(repositoryRoot).digest('hex').slice(0, 12)
 export const composeProjectName =
   process.env.COMPOSE_PROJECT_NAME ?? `vibecoding-template-${repositoryHash}`
+/**
+ * Repository-derived test database port, before any `POSTGRES_TEST_PORT` override. The E2E port
+ * planner starts its free-port search here, so both runners agree on the first choice.
+ */
+export const preferredPostgresTestPort =
+  30000 + (Number.parseInt(repositoryHash.slice(0, 6), 16) % 20000)
 export const defaultPostgresTestPort =
-  process.env.POSTGRES_TEST_PORT ?? String(30000 + (Number.parseInt(repositoryHash.slice(0, 6), 16) % 20000))
+  process.env.POSTGRES_TEST_PORT ?? String(preferredPostgresTestPort)
 /**
  * Local S3 port, in a band no other repository-derived port uses.
  *

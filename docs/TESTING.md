@@ -149,9 +149,10 @@ E2E_BACKEND_PORT=<backend-port>
 E2E_WEB_PORT=<web-port>
 E2E_SKIP_DOCKER=1
 E2E_KEEP_DOCKER=1
+E2E_ALLOW_NON_TEST_DATABASE=1
 ```
 
-By default, Playwright computes `POSTGRES_TEST_PORT` from the absolute repository path and refuses to run against a database that does not use the `_test` suffix. This prevents E2E from accidentally writing to development or production data. Use `DATABASE_URL` only as a low-level override; `TEST_DATABASE_URL` is the documented test entry point.
+By default, Playwright computes `POSTGRES_TEST_PORT` from the absolute repository path and refuses to run against a database that does not use the `_test` suffix. This prevents E2E from accidentally writing to development or production data. Set `E2E_ALLOW_NON_TEST_DATABASE=1` only when you intentionally target such a database; it is the E2E counterpart of the backend runner's `TEST_ALLOW_NON_TEST_DATABASE`, and neither variable unlocks the other. Use `DATABASE_URL` only as a low-level override; `TEST_DATABASE_URL` is the documented test entry point. The Compose project name, the derived test port, and the `postgres_test` service and volume names come from `scripts/repo-env.mjs`, the same module the backend integration runner uses, so the two runners cannot drift apart.
 
 Playwright artifacts live in `webapp/e2e/.artifacts/` and are not committed. For interactive debugging:
 

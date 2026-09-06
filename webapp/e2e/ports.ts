@@ -1,5 +1,6 @@
 import { createServer } from 'node:net'
 import {
+  defaultTestDatabaseUrl,
   preferredBackendPort,
   preferredPostgresTestPort,
   preferredWebPort,
@@ -52,9 +53,7 @@ export async function resolveE2ePorts(): Promise<PortPlan> {
       })
   const backendUrl = process.env.E2E_BACKEND_URL ?? `http://127.0.0.1:${backendPort}`
   const webUrl = process.env.E2E_WEB_URL ?? `http://127.0.0.1:${webPort}`
-  const databaseUrl =
-    explicitDatabaseUrl
-    ?? `postgresql://superuser:superpassword@localhost:${postgresTestPort}/web_app_demo_test?schema=public`
+  const databaseUrl = explicitDatabaseUrl ?? defaultTestDatabaseUrl(String(postgresTestPort))
 
   return {
     backendPort,
