@@ -104,9 +104,25 @@ The first apply starts with local bootstrap state, creates a private versioned s
 bucket-scoped key, then migrates that state to the S3-compatible backend. On Yandex, the script uses
 temporary folder-level `storage.admin` only to create and version the bucket, removes it after
 installing a policy scoped to the dedicated state service account, and only then migrates state.
-That policy permits bucket-configuration refresh plus current state/lock objects, explicitly denies
-bucket deletion, and never permits deleting object versions. It writes these ignored, mode-`0600`
-files:
+That policy permits bucket-configuration refresh plus current state/lock objects, denies the state
+account `s3:DeleteBucket` and `s3:PutBucketVersioning`, and never permits deleting object versions.
+The Deny guards against a Terraform change, not against a key holder: on Yandex, policy management
+is authorized by IAM (Yandex documents `storage.admin` for a service account applying a policy
+through the S3 API, which is how Terraform applies it) and is not a policy action, so whoever may
+edit the policy can also lift the Deny. Versioning is enabled once at creation, before the policy
+exists, so the Deny never blocks a routine apply. A fresh install writes the current policy during
+the first apply, while the temporary role is present. An existing install picks up a change to
+this policy (the `s3:PutBucketVersioning` Deny is one) by rerunning `infra:bootstrap -- yandex`;
+in steady state the state account holds no IAM role, so expect that policy update to be refused
+at apply time (the plan still runs: the provider reads a refused policy as empty and plans an
+in-place update). If it is, add `bootstrap_folder_storage_access = true` to
+`infra/yandex/bootstrap/terraform.tfvars`
+and rerun once: the wrapper applies with the temporary role, removes that binding again in the
+same command exactly as the first apply does, and reminds you to delete the line. If that rerun is
+refused again right after the grant, IAM propagation is the likely cause: rerun once more with the
+line still present. Ordinary and `--dry-run` reruns may destroy only that one binding without a
+flag, so a stray grant cannot survive the next run; the `--recover-state-*` flow refuses to run
+while that line is present. The bootstrap writes these ignored, mode-`0600` files:
 
 - `infra/<provider>/.env.terraform-state` — scoped backend credentials;
 - `infra/<provider>/*/backend.backend.hcl` — endpoint, bucket, and state key, with no credentials.
@@ -150,7 +166,14 @@ buckets and immediately removes the folder grant. Publisher and media identities
 data-plane permissions. Every rerun automatically authorizes deletion of only that one known
 temporary folder binding, so an interruption between create and tighten cannot strand broad
 access. Steady-state plans assert that the broad binding is absent; the resulting IaC key cannot
-read or damage the separate state bucket.
+read or damage the separate state bucket. Each application bucket policy denies that key
+`s3:DeleteBucket` and `s3:PutBucketVersioning`. `s3:PutBucketVersioning` is a documented Yandex
+policy action, so a Terraform change that suspends versioning fails; bucket deletion and policy
+management are authorized by IAM, where the key holds bucket-scoped `storage.admin`, so the Deny is
+not protection against whoever holds the key. The two static buckets allow anonymous object reads
+only; once a release has run, every later `infra:apply` ends by reading the release marker and `/`
+of both static domains and requesting a missing web app path, and fails if any of them or the index
+shell does not come back. `docs/YANDEX_CLOUD.md` states the full boundary and the rollback.
 
 ## Plan and release
 

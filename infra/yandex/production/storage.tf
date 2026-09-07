@@ -28,7 +28,7 @@ resource "yandex_storage_bucket" "webapp" {
 
   anonymous_access_flags {
     read        = true
-    list        = true
+    list        = false
     config_read = false
   }
 
@@ -64,7 +64,7 @@ resource "yandex_storage_bucket" "website" {
 
   anonymous_access_flags {
     read        = true
-    list        = true
+    list        = false
     config_read = false
   }
 
@@ -146,6 +146,17 @@ resource "yandex_iam_service_account_static_access_key" "static_publisher" {
 }
 
 locals {
+  # Every policy below lets the bucket-scoped IaC key refresh and update bucket configuration
+  # (`s3:*` on the bucket ARN, never on objects) and denies it the two bucket-level changes
+  # Terraform never sends after creation. On Yandex, bucket deletion and policy management are not
+  # policy actions: IAM authorizes them, and the IaC account holds bucket-scoped `storage.admin`,
+  # so the next apply always rewrites these policies and whoever holds that key can lift the Deny.
+  # `s3:PutBucketVersioning` is a documented policy action and the provider sends it only when the
+  # `versioning` block changes, so the Deny turns an accidental versioning change into a failed
+  # apply. `s3:DeleteBucket` is defense in depth only: Terraform removes the policy resource before
+  # it would delete a bucket. Keep `s3:*`: an enumerated allow list buys no protection and breaks
+  # refresh the day the provider reads one more bucket attribute.
+  iac_key_denied_bucket_actions = ["s3:DeleteBucket", "s3:PutBucketVersioning"]
   static_publisher_bucket_actions = [
     "s3:GetBucketLocation",
     "s3:ListBucket",
@@ -178,14 +189,7 @@ resource "yandex_storage_bucket_policy" "webapp_publisher" {
         Sid       = "ProtectBucketFromTerraformKey"
         Effect    = "Deny"
         Principal = { CanonicalUser = yandex_iam_service_account.storage_manager.id }
-        Action    = ["s3:DeleteBucket"]
-        Resource  = "arn:aws:s3:::${yandex_storage_bucket.webapp.bucket}"
-      },
-      {
-        Sid       = "PublicBucketList"
-        Effect    = "Allow"
-        Principal = "*"
-        Action    = ["s3:ListBucket"]
+        Action    = local.iac_key_denied_bucket_actions
         Resource  = "arn:aws:s3:::${yandex_storage_bucket.webapp.bucket}"
       },
       {
@@ -233,14 +237,7 @@ resource "yandex_storage_bucket_policy" "website_publisher" {
         Sid       = "ProtectBucketFromTerraformKey"
         Effect    = "Deny"
         Principal = { CanonicalUser = yandex_iam_service_account.storage_manager.id }
-        Action    = ["s3:DeleteBucket"]
-        Resource  = "arn:aws:s3:::${yandex_storage_bucket.website.bucket}"
-      },
-      {
-        Sid       = "PublicBucketList"
-        Effect    = "Allow"
-        Principal = "*"
-        Action    = ["s3:ListBucket"]
+        Action    = local.iac_key_denied_bucket_actions
         Resource  = "arn:aws:s3:::${yandex_storage_bucket.website.bucket}"
       },
       {
@@ -317,7 +314,7 @@ resource "yandex_storage_bucket_policy" "media_data_plane" {
         Sid       = "ProtectBucketFromTerraformKey"
         Effect    = "Deny"
         Principal = { CanonicalUser = yandex_iam_service_account.storage_manager.id }
-        Action    = ["s3:DeleteBucket"]
+        Action    = local.iac_key_denied_bucket_actions
         Resource  = "arn:aws:s3:::${yandex_storage_bucket.media.bucket}"
       },
       {

@@ -36,7 +36,9 @@ because the target bucket does not exist yet and versioning requires that role. 
 installs a bucket policy scoped to that dedicated service account, removes the folder-wide role,
 verifies bucket refresh and state access, and only then migrates local state. Because policy scope is
 the service account rather than one key ID, a replacement key created on that same account can run
-the documented lost-credential recovery; keys from other identities remain denied.
+the documented lost-credential recovery; keys from other identities remain denied. That policy also
+denies the state account `s3:DeleteBucket` and `s3:PutBucketVersioning`; the foundation section
+below explains what such a Deny does and does not guarantee on Yandex.
 
 Create and validate three Certificate Manager certificates for the API, webapp, and website
 domains. Each static bucket name must exactly equal its domain because direct Object Storage HTTPS
@@ -101,12 +103,59 @@ the first bucket creation it gives the storage-management account temporary fold
 `storage.admin`, which the provider requires for versioning and full bucket configuration. It then
 installs that role only on the webapp, website, and media buckets and removes the broad role in the
 same command. Access-key-specific bucket policies give publishers only sync operations without
-bucket/version deletion and give the media runtime only object read/write/delete. Separate
-anonymous rules expose only list/read on the two static buckets; the media policy has no such rule.
-The static rule intentionally admits Yandex Cloud CDN's documented HTTP origin request, while
-user-facing domains redirect to HTTPS. Each policy also lets the bucket-scoped IaC service account refresh and update bucket
-configuration while explicitly denying bucket deletion and omitting object-version deletion. The
-IaC key cannot access the separate Terraform-state bucket in steady state.
+bucket/version deletion and give the media runtime only object read/write/delete. The two static
+buckets allow anonymous object reads only; no anonymous request can list them. Website hosting,
+the optional CDN origin, and the release-marker check fetch objects by path, and the publisher's
+`ListBucket` is granted to its access key: the publisher holds no IAM role, and the key-conditioned
+policy authorizes its listing exactly as it authorizes its uploads. Yandex asks for both: its
+console guide opens object reads and object listing, and its hosting concept page lists a bucket
+with anonymous listing off among the configurations hosting does not support. This template opens
+reads only anyway, because listing is not what hosting uses, so it sits outside that stated
+envelope: a future Yandex change may legitimately break it, the rollback below restores the
+supported configuration, and the release proves the current state on every run: `bun run release
+-- yandex` syncs with the publisher key (a list on
+every run), reads the release marker through the public domains, requests a webapp path that does
+not exist and requires the index shell back with whatever 2xx/4xx status carries it (every deep
+link into the single-page app, including emailed password-reset links, depends on that
+error-document fallback), and finally fetches `/` on both domains. On an existing install the
+flags take effect the moment `infra:apply` finishes, so once a release has run (the runtime root
+exists) the apply itself ends by requiring the release marker and `/` of both static domains to
+still be readable and by running that same probe, and fails with a pointer to this rollback if any
+of them does not come back; before the first release there is nothing to read, and that release
+runs the same checks. If that post-apply check fails, the static sync fails with
+`AccessDenied` on a list request (the sync runs after the runtime deploy, so the runtime serves
+the new commit with the previous static build until a rerun), hosting answers 403, or the release
+probe fails, restore `list = true` in both static
+`anonymous_access_flags` blocks, re-add an anonymous `s3:ListBucket` allow on the bucket ARN in
+both static policies, flip the `infra/yandex/production/tests/production.tftest.hcl` assertions
+that pin anonymous listing off, and rerun `infra:apply`. Nested directory paths without a trailing
+slash (`/docs` redirecting to `/docs/`) are exercised by no current surface or check; probe one by
+hand when the website gains such a route. The media bucket has no anonymous rule. The public read
+rule intentionally admits Yandex Cloud CDN's documented HTTP origin request, while user-facing
+domains redirect to HTTPS.
+
+Each policy also lets the bucket-scoped IaC service account refresh and update bucket configuration
+(`s3:*` on the bucket ARN, never on objects) and denies it `s3:DeleteBucket` and
+`s3:PutBucketVersioning`; object-version deletion is never granted. Read that Deny for exactly what
+it is. Yandex checks a policy's Deny before anything else and lists `s3:PutBucketVersioning` as a
+policy action, so a Terraform change that suspends versioning fails and the 30-day recovery window
+stays intact. Bucket deletion and policy management are not policy actions on Yandex; IAM alone
+authorizes them (`storage.configurer` is the documented minimum to apply or delete a policy from
+the console, `storage.admin` for a service account through the S3 API as Terraform does, and
+`storage.editor` deletes a bucket), and the IaC account holds `storage.admin` on its three
+buckets. So the `s3:DeleteBucket` Deny is defense in depth at most: Terraform removes the policy
+resource before it would delete a bucket, and `force_destroy = false`, the media bucket's
+`prevent_destroy`, and the wrapper's destroy allowlist are the Terraform-side stops. Neither Deny
+protects against whoever holds the IaC key or a folder-level `storage.admin`: either can rewrite
+the policy first. Treat that key as an operator credential. The Deny cannot lock Terraform out:
+versioning is set once at creation, before the policy exists, the provider sends
+`PutBucketVersioning` only when the `versioning` block changes, and policy updates are authorized
+by the IAM binding, so the next `infra:apply` rewrites the policies with the same key it always
+used; `s3:*` stays so that they remain allowed should the policy be consulted as well. Do not
+replace it with an enumerated list: that would protect nothing (the same key rewrites the policy
+through IAM) and would break bucket refresh the day the provider reads one more attribute. If a
+future change must alter versioning, drop the Deny in one apply and change versioning in the next.
+The IaC key cannot access the separate Terraform-state bucket in steady state.
 
 The release refuses foundation drift, builds and pushes one Linux AMD64 image from a `git archive`
 of the captured commit, and applies it to the independent migration root. The script invokes the
@@ -125,7 +174,8 @@ current by design; prune them only with a separately reviewed retention policy i
 cost becomes material. Each surface also publishes a revalidated release marker containing the
 captured commit. Final verification reads that marker through the public domain with a cache-busting
 query and requires an exact match, so a healthy stale CDN object or misdirected DNS target cannot be
-reported as the new release.
+reported as the new release. It then requests a webapp path that does not exist and requires the
+index shell, proving the single-page fallback still works on the public domain.
 
 The static publisher key is a sensitive Terraform output consumed in memory by the release
 process. Its exact-key bucket policies cover only the two public static buckets and cannot delete a

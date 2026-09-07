@@ -135,12 +135,13 @@ When optimized images are required, generate app-owned variants in the backend o
 - Use a limited-access key scoped to the app's bucket.
 - The Yandex Terraform path enforces that scope with exact-access-key bucket policies: static
   publishers can sync only their two website buckets without deleting buckets or object versions,
-  and the runtime key can read/write/delete only ordinary media objects. Separate anonymous
-  rules expose list/read only on the two static-site buckets. They intentionally admit the HTTP
-  request from Yandex Cloud CDN to its website-bucket origin; user-facing domains still redirect
-  to HTTPS. The dedicated IaC service account can
-  manage configuration only on its three application buckets, is denied bucket deletion, cannot
-  delete object versions, and is never injected into the application.
+  and the runtime key can read/write/delete only ordinary media objects. The two static-site
+  buckets allow anonymous object reads only; no anonymous request can list them. That
+  read rule intentionally admits the HTTP request from Yandex Cloud CDN to its website-bucket
+  origin; user-facing domains still redirect to HTTPS. The dedicated IaC service account can
+  manage configuration only on its three application buckets, is denied `s3:DeleteBucket` and
+  `s3:PutBucketVersioning` there, cannot delete object versions, and is never injected into the
+  application; `docs/YANDEX_CLOUD.md` explains what that Deny does and does not guarantee.
 - Validate content type, size, owner, and permissions before issuing any URL, and verify the stored object before publishing it.
 - Generate object keys server-side. Never trust a client-provided path.
 - Keep emails, names, customer ids, and other personal data out of bucket names, object keys, metadata, and tags.

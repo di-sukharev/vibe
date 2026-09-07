@@ -42,6 +42,18 @@ resource "yandex_storage_bucket" "terraform_state" {
   }
 }
 
+# The state service account refreshes and applies this policy with its own key. On Yandex, policy
+# management is not a policy action: IAM authorizes it (`storage.admin` for a service account
+# calling the S3 API, which is how Terraform applies it), so in steady state, when this account
+# holds no role, a change to this policy may be refused. The plan still runs (the provider reads a
+# refused policy as empty and plans an in-place update); the apply is where the refusal surfaces,
+# and docs/DEPLOYMENT.md has the one-command rollout with the temporary folder role. Keep `s3:*`
+# on the bucket ARN: it is what keeps bucket refresh working without an IAM role, it keeps policy
+# updates allowed should the policy be consulted for them too, and an enumerated list would
+# protect nothing, because whoever may edit the policy can lift the Deny. The Deny covers only
+# actions Terraform never sends after creation: `s3:PutBucketVersioning` is a documented policy
+# action and versioning is set once, before this policy exists; `s3:DeleteBucket` is not a policy
+# action on Yandex and stays as defense in depth. Neither can block a routine apply.
 resource "yandex_storage_bucket_policy" "terraform_state" {
   bucket     = yandex_storage_bucket.terraform_state.bucket
   access_key = yandex_iam_service_account_static_access_key.terraform_state.access_key
@@ -60,7 +72,7 @@ resource "yandex_storage_bucket_policy" "terraform_state" {
         Sid       = "ProtectStateBucket"
         Effect    = "Deny"
         Principal = { CanonicalUser = yandex_iam_service_account.terraform_state.id }
-        Action    = ["s3:DeleteBucket"]
+        Action    = ["s3:DeleteBucket", "s3:PutBucketVersioning"]
         Resource  = "arn:aws:s3:::${yandex_storage_bucket.terraform_state.bucket}"
       },
       {

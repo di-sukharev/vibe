@@ -56,13 +56,13 @@ run "private_versioned_state" {
         for statement in jsondecode(yandex_storage_bucket_policy.terraform_state.policy).Statement : statement
         if statement.Sid == "TerraformStateBucketConfiguration"
       ]).Resource == "arn:aws:s3:::${var.state_bucket_name}" &&
-      one([
+      toset(one([
         for statement in jsondecode(yandex_storage_bucket_policy.terraform_state.policy).Statement : statement
         if statement.Sid == "ProtectStateBucket"
-      ]).Action == ["s3:DeleteBucket"] &&
+      ]).Action) == toset(["s3:DeleteBucket", "s3:PutBucketVersioning"]) &&
       !strcontains(yandex_storage_bucket_policy.terraform_state.policy, "s3:DeleteObjectVersion")
     )
-    error_message = "The dedicated state service account must support bucket refresh and credential recovery without bucket or version deletion."
+    error_message = "The dedicated state service account must support bucket refresh and credential recovery without bucket deletion, versioning changes, or version deletion."
   }
 
   assert {

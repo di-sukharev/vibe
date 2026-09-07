@@ -99,13 +99,13 @@ run "steady_state_foundation" {
   assert {
     condition = (
       one(yandex_storage_bucket.webapp.anonymous_access_flags).read &&
-      one(yandex_storage_bucket.webapp.anonymous_access_flags).list &&
+      !one(yandex_storage_bucket.webapp.anonymous_access_flags).list &&
       !one(yandex_storage_bucket.webapp.anonymous_access_flags).config_read &&
       one(yandex_storage_bucket.website.anonymous_access_flags).read &&
-      one(yandex_storage_bucket.website.anonymous_access_flags).list &&
+      !one(yandex_storage_bucket.website.anonymous_access_flags).list &&
       !one(yandex_storage_bucket.website.anonymous_access_flags).config_read
     )
-    error_message = "Static hosting needs public object/list access, never public bucket-configuration access."
+    error_message = "Static hosting needs public object reads only; anonymous listing and bucket-configuration reads stay off."
   }
 
   assert {
@@ -154,18 +154,6 @@ run "steady_state_foundation" {
         ] : (
         one([
           for statement in jsondecode(raw_policy).Statement : statement
-          if statement.Sid == "PublicBucketList"
-        ]).Action == ["s3:ListBucket"] &&
-        one([
-          for statement in jsondecode(raw_policy).Statement : statement
-          if statement.Sid == "PublicBucketList"
-        ]).Principal == "*" &&
-        !contains(keys(one([
-          for statement in jsondecode(raw_policy).Statement : statement
-          if statement.Sid == "PublicBucketList"
-        ])), "Condition") &&
-        one([
-          for statement in jsondecode(raw_policy).Statement : statement
           if statement.Sid == "PublicObjectRead"
         ]).Action == ["s3:GetObject"] &&
         one([
@@ -175,10 +163,25 @@ run "steady_state_foundation" {
         !contains(keys(one([
           for statement in jsondecode(raw_policy).Statement : statement
           if statement.Sid == "PublicObjectRead"
-        ])), "Condition")
+        ])), "Condition") &&
+        length([
+          for statement in jsondecode(raw_policy).Statement : statement
+          if statement.Effect == "Allow" &&
+          try(statement.Principal == "*", false) &&
+          !can(statement.Condition.StringEquals["yc:access-key-id"]) &&
+          length(setintersection(toset(flatten([statement.Action])), toset(["s3:ListBucket", "s3:ListBucketVersions", "s3:ListBucketMultipartUploads", "s3:*", "*"]))) > 0
+        ]) == 0 &&
+        contains(one([
+          for statement in jsondecode(raw_policy).Statement : statement
+          if statement.Sid == "PublisherBucketDataPlane"
+        ]).Action, "s3:ListBucket") &&
+        one([
+          for statement in jsondecode(raw_policy).Statement : statement
+          if statement.Sid == "PublisherBucketDataPlane"
+        ]).Condition.StringEquals["yc:access-key-id"] == "publisher-access-key"
       )
     ])
-    error_message = "Each public static policy must allow anonymous list/read for direct hosting and the documented HTTP CDN origin."
+    error_message = "Each public static policy must allow anonymous object reads only; bucket listing stays keyed to the publisher."
   }
 
   assert {
@@ -201,10 +204,10 @@ run "steady_state_foundation" {
             for statement in jsondecode(raw_policy).Statement : statement
             if statement.Sid == "TerraformBucketConfiguration"
           ]).Resource, "/*") &&
-          one([
+          toset(one([
             for statement in jsondecode(raw_policy).Statement : statement
             if statement.Sid == "ProtectBucketFromTerraformKey"
-          ]).Action == ["s3:DeleteBucket"] &&
+          ]).Action) == toset(["s3:DeleteBucket", "s3:PutBucketVersioning"]) &&
           !strcontains(raw_policy, "s3:DeleteObjectVersion")
         )
       ]) &&
@@ -212,7 +215,7 @@ run "steady_state_foundation" {
       yandex_storage_bucket_policy.website_publisher.access_key == "storage-manager-access-key" &&
       yandex_storage_bucket_policy.media_data_plane.access_key == "storage-manager-access-key"
     )
-    error_message = "Every bucket policy must let only the bucket-scoped IaC identity refresh configuration while denying bucket/version deletion."
+    error_message = "Every bucket policy must let only the bucket-scoped IaC identity refresh configuration while denying bucket deletion, versioning changes, and object-version deletion."
   }
 
   assert {
