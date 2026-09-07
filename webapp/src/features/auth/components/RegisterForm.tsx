@@ -16,7 +16,7 @@ import {
   errorId,
   hasErrors,
   passwordConfirmationErrors,
-  toFieldErrors,
+  toValidationErrors,
 } from './form-validation'
 import { PasswordInput } from './PasswordInput'
 
@@ -43,7 +43,8 @@ export function RegisterForm({ returnTo }: { returnTo?: string }) {
         email: value.email,
         password: value.password,
       })
-      const nextErrors = result.success ? {} : toFieldErrors(result.error.issues)
+      const validation = toValidationErrors(result.success ? [] : result.error.issues)
+      const nextErrors = validation.fieldErrors
       const confirmationErrors = passwordConfirmationErrors(
         value.password,
         value.confirmPassword,
@@ -51,6 +52,7 @@ export function RegisterForm({ returnTo }: { returnTo?: string }) {
       if (confirmationErrors) nextErrors.confirmPassword = confirmationErrors
       if (!result.success || hasErrors(nextErrors.confirmPassword)) {
         setFieldErrors(nextErrors)
+        setFormError(validation.formError)
         return
       }
 

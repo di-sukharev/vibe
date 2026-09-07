@@ -13,13 +13,13 @@ import {
 import { Button } from '@/components/ui/button'
 
 export function RoleChangeDialog({
-  error,
+  failureReason,
   isPending,
   onCancel,
   onConfirm,
   pendingChange,
 }: {
-  error: Error | null
+  failureReason: string | null
   isPending: boolean
   onCancel: () => void
   onConfirm: () => void
@@ -44,10 +44,10 @@ export function RoleChangeDialog({
               : ''}
           </AlertDialogDescription>
         </AlertDialogHeader>
-        {error && (
+        {failureReason !== null && (
           <Alert variant="destructive">
             <AlertTitle>Role was not changed</AlertTitle>
-            <AlertDescription>{error.message}</AlertDescription>
+            <AlertDescription>{failureReason}</AlertDescription>
           </Alert>
         )}
         <AlertDialogFooter>

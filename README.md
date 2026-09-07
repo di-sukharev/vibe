@@ -54,7 +54,7 @@ and report exact remaining account/domain authorizations without printing secret
 - If the user provides their own GitHub repository URL or asks to publish the new project, add that URL as the new `origin` after the template remote is removed. If the user has not chosen a destination yet, leave the repository with no `origin` and report that publishing is not configured.
 - Do not open pull requests against the template repository during first-run project setup. Ask only if the user explicitly says this checkout is for improving the template itself.
 - Run the intake from [CHECKLIST.md](CHECKLIST.md) in the user's language before making product or deployment choices, and record the answers in that file rather than only in the conversation.
-- Rename the template deliberately rather than with an unreviewed global replacement. Use `rg -n "web_app_demo|web-app-demo|vibecoding-template"` to inventory package scopes, database names, cookie names, Docker/Compose isolation names, deploy image defaults, and architecture-check aliases; update each owning source, regenerate `bun.lock` with the repository's pinned Bun version, then run install, typecheck, architecture checks, backend integration, and web E2E for the active surfaces.
+- Rename the template deliberately rather than with an unreviewed global replacement. Use `rg -n "web_app_demo|web-app-demo|vibecoding-template|Vibe Coding Template"` to inventory package scopes, database names, cookie names, Docker/Compose isolation names, deploy image defaults, architecture-check aliases, and the webapp page title in `webapp/index.html`; update each owning source, regenerate `bun.lock` with the repository's pinned Bun version, then run install, typecheck, architecture checks, backend integration, and web E2E for the active surfaces.
 - After the user answers, record durable project choices in [CHECKLIST.md](CHECKLIST.md) before feature work: project name/slug, active and deferred surfaces, first-version capabilities, the capability ledger, and what deployment/release work is in or out of scope. Expand the relevant README sections when a choice needs more explanation than the checklist row holds. Once setup is complete, remove the marked `Bootstrap-Only Instructions` block from `AGENTS.md`.
 - If only the webapp is active, keep mobile deferred on the default branch: do not run Expo/EAS/Maestro setup and do not add mobile features. When the user later asks for mobile, switch to the `mobile` branch first.
 - If only the mobile app is active, keep webapp and website intact but deferred: do not add browser-only features or Playwright flows unless they support the active mobile/backend work, and add or update a short deferred-surface note in `webapp/README.md` or `website/README.md` as relevant. When the user later asks for webapp, remove or rewrite that note, then set up and validate webapp normally.
@@ -223,10 +223,11 @@ Test runners use the separate Docker Compose `postgres_test` service and the `TE
 Ordinary tasks use focused validation at the boundary that owns the changed behavior. The broad
 local regression, `bun run check`, belongs to explicit release/audit work or a genuinely
 cross-cutting change: it validates reusable-template invariants, architecture boundaries,
-dependency advisories, typecheck, lint, and the full test suite. The dependency audit needs registry
-access, and the full suite includes backend integration tests, so Docker must be installed and the
-daemon running. Terraform validation remains a separate `bun run test:terraform` signal because it
-depends on the Terraform CLI rather than the normal application toolchain.
+dependency advisories, typecheck, lint, the full test suite, and the build contracts over the
+production `webapp` and `website` output. The dependency audit needs registry access, and the full
+suite includes backend integration tests, so Docker must be installed and the daemon running.
+Terraform validation remains a separate `bun run test:terraform` signal because it depends on the
+Terraform CLI rather than the normal application toolchain.
 
 ## Workspace Commands
 
@@ -241,7 +242,8 @@ depends on the Terraform CLI rather than the normal application toolchain.
   `storybook:build:webapp` or `storybook:build:website` for one surface.
 - `bun run dev:backend:s3` - start the backend against the local S3 container instead of the disk.
 - `bun run check` - broad release/audit regression: template invariants, architecture, dependency
-  audit, typecheck, lint, and all tests; requires registry access and Docker for backend integration.
+  advisories, typecheck, lint, all tests, and the build contracts; requires registry access for the
+  audit and Docker for backend integration.
 - `bun run template:check` - validate checklist state, capability-ledger states, equivalent agent
   instructions, and local Markdown file, directory, and heading links.
 - `bun run typecheck` - run TypeScript checks across workspaces.
@@ -282,6 +284,11 @@ depends on the Terraform CLI rather than the normal application toolchain.
 - `bun run test:backend:integration` - run DB-backed tests through `postgres_test`; append a file
   path relative to `backend/` and `-t "name"` for a focused task signal.
 - `bun run test:webapp` - run webapp client tests.
+- `bun run test:website` - run website unit tests.
+- `bun run test:build-contracts` - build `webapp` and `website`, then check the invariants that only
+  their production output can show: story-only utilities stay out of the shipped CSS and the website
+  hero scene stays a lazy chunk. The one test script that builds; `test:webapp` and `test:website`
+  stay read-only.
 - `bun run test:mobile` - run mobile client tests.
 - `bun run test:storage:s3` - run the storage contract against a real local S3 server (needs Docker).
 - `bun run --cwd backend start:cron -- <job>` - run one background job once, for example `outbox:drain`; see [docs/BACKGROUND_JOBS.md](docs/BACKGROUND_JOBS.md).

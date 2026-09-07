@@ -12,7 +12,7 @@ import { ApiRequestError } from '@/platform/api'
 import { useAuth } from '../use-auth'
 import { FormAlert } from './form-errors'
 import type { FieldErrors } from './form-model'
-import { clearFieldError, errorId, hasErrors, toFieldErrors } from './form-validation'
+import { clearFieldError, errorId, hasErrors, toValidationErrors } from './form-validation'
 
 export function ForgotPasswordForm() {
   const auth = useAuth()
@@ -27,7 +27,9 @@ export function ForgotPasswordForm() {
       setFormError(null)
       const result = passwordResetRequestSchema.safeParse(value)
       if (!result.success) {
-        setFieldErrors(toFieldErrors(result.error.issues))
+        const validation = toValidationErrors(result.error.issues)
+        setFieldErrors(validation.fieldErrors)
+        setFormError(validation.formError)
         return
       }
 

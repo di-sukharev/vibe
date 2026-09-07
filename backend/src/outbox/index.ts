@@ -1,6 +1,6 @@
 import type { DbClient } from '../db'
 import type { AppEnv } from '../env'
-import type { DrainOptions } from './drain'
+import { maxLoops, type DrainOptions } from './drain'
 import { requireTaskHandler, taskHandlers, type TaskHandlerRegistry } from './handlers'
 import { insertTask } from './store'
 import type { EnqueueTaskInput, EnqueueTaskResult } from './types'
@@ -8,6 +8,7 @@ import type { EnqueueTaskInput, EnqueueTaskResult } from './types'
 export { TerminalTaskError } from './errors'
 export { drainTaskOutbox, type DrainOptions } from './drain'
 export { isTaskType, taskHandlers, taskTypeNames } from './handlers'
+export { countClaimableTasks } from './store'
 export type {
   DrainMetrics,
   EnqueueTaskInput,
@@ -49,4 +50,16 @@ export function drainOptionsFromEnv(env: AppEnv): DrainOptions {
     maxRuntimeMs: env.TASK_OUTBOX_MAX_RUNTIME_MS,
     retentionDays: env.TASK_OUTBOX_RETENTION_DAYS,
   }
+}
+
+/**
+ * The most rows one pass can claim, from the same environment the pass reads its batch from.
+ *
+ * The right ceiling for a caller that admits work against the drain's pace: the password-reset
+ * queue holds at most this many due rows, so nothing the drain could have delivered on time is
+ * refused, and what a shared or runtime-bounded pass leaves of them is a bounded remainder that
+ * shrinks the next admission rather than a backlog that compounds.
+ */
+export function drainPassCapacity(env: AppEnv) {
+  return env.TASK_OUTBOX_BATCH_LIMIT * maxLoops
 }

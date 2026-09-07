@@ -84,8 +84,8 @@ export function createPrismaUsersRepository(db: DbClient): UsersRepository {
     updateRole(input) {
       return db.$transaction(async (tx) => {
         await acquirePushTokenUserLock(tx, input.targetUserId)
-        await acquireUserAuthenticationAuthorityLock(tx, input.targetUserId)
         await acquireUserRoleMutationLock(tx)
+        await acquireUserAuthenticationAuthorityLock(tx, input.targetUserId)
 
         const actor = await tx.user.findUnique({
           where: { id: input.actorUserId },

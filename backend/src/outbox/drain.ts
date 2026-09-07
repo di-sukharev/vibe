@@ -48,7 +48,7 @@ export type DrainOptions = {
  * drains do not raise it - they read the same ordered window and mostly lose claims to each
  * other - so a backlog is cleared by a bigger batch or a shorter interval, not by more workers.
  */
-const maxLoops = 5
+export const maxLoops = 5
 const sweepLimit = 100
 
 const defaults = {

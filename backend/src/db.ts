@@ -10,9 +10,9 @@ export function createPrisma(connectionString: string) {
 export type DbClient = ReturnType<typeof createPrisma>
 
 // Push admission intentionally holds its per-user fence through the provider
-// call. Authority transitions acquire that target fence before their short
-// global role-policy section, so this budget always covers the complete send
-// fence plus the final revocation work.
+// call. Authority transitions take the target fence before the short global
+// role-policy section, but acquire the user's auth lock only after that section
+// so a queued role change does not block the user's login.
 export const maximumPushSendFenceTransactionMs = 120_000
 export const userAuthorityTransitionTransactionOptions = {
   timeout: maximumPushSendFenceTransactionMs + 15_000,

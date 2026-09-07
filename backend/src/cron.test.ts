@@ -1,6 +1,10 @@
 import { expect, spyOn, test } from 'bun:test'
 
-import { handleProviderJobInvocation, runOneShotJob } from './cron'
+import {
+  handleProviderJobInvocation,
+  handleProviderJobRequest,
+  runOneShotJob,
+} from './cron'
 import type { BackendRuntime } from './runtime'
 
 function runtimeWithLock(acquired: boolean) {
@@ -122,4 +126,80 @@ test('the provider HTTP path returns non-2xx when a job fails', async () => {
   } finally {
     error.mockRestore()
   }
+})
+
+function providerRequest(method: string, path: string) {
+  return new Request(`http://jobs.internal${path}`, { method })
+}
+
+test('the provider HTTP server runs the job once for the trigger POST to /', async () => {
+  const { calls, runtime } = runtimeWithLock(true)
+  let runtimesCreated = 0
+  const log = spyOn(console, 'log').mockImplementation(() => {})
+
+  try {
+    const response = await handleProviderJobRequest(
+      providerRequest('POST', '/'),
+      'db:ping',
+      () => {
+        runtimesCreated += 1
+        return runtime
+      },
+      [{ expression: '* * * * *', job: 'db:ping', timeoutMs: 42_000 }],
+    )
+
+    expect(response.status).toBe(204)
+    expect(runtimesCreated).toBe(1)
+    expect(calls).toEqual({
+      closes: 1,
+      jobs: 1,
+      transactionTimeouts: [42_000],
+    })
+  } finally {
+    log.mockRestore()
+  }
+})
+
+test('the provider HTTP server answers 405 to a non-POST without running the job', async () => {
+  const { calls, runtime } = runtimeWithLock(true)
+  let runtimesCreated = 0
+
+  const response = await handleProviderJobRequest(
+    providerRequest('GET', '/'),
+    'db:ping',
+    () => {
+      runtimesCreated += 1
+      return runtime
+    },
+  )
+
+  expect(response.status).toBe(405)
+  expect(response.headers.get('allow')).toBe('POST')
+  expect(runtimesCreated).toBe(0)
+  expect(calls.jobs).toBe(0)
+})
+
+test('the provider HTTP server answers 404 off the root path without running the job', async () => {
+  const { calls, runtime } = runtimeWithLock(true)
+  let runtimesCreated = 0
+  const createRuntime = () => {
+    runtimesCreated += 1
+    return runtime
+  }
+
+  const unknownPath = await handleProviderJobRequest(
+    providerRequest('POST', '/unknown'),
+    'db:ping',
+    createRuntime,
+  )
+  const strayProbe = await handleProviderJobRequest(
+    providerRequest('GET', '/favicon.ico'),
+    'db:ping',
+    createRuntime,
+  )
+
+  expect(unknownPath.status).toBe(404)
+  expect(strayProbe.status).toBe(404)
+  expect(runtimesCreated).toBe(0)
+  expect(calls.jobs).toBe(0)
 })

@@ -1,4 +1,5 @@
 import {
+  queryOptions,
   useMutation,
   useQuery,
   useQueryClient,
@@ -33,12 +34,15 @@ type AuthMutationOptions = {
   setAccessToken: (accessToken: string | null) => void
 }
 
-export function useCurrentUserQuery({ api, enabled }: CurrentUserQueryOptions) {
-  return useQuery({
+export function currentUserQueryOptions(api: Pick<AuthApi, 'me'>) {
+  return queryOptions({
     queryKey: authQueryKeys.me(),
-    enabled,
-    queryFn: () => api.me(),
+    queryFn: ({ signal }) => api.me({ signal }),
   })
+}
+
+export function useCurrentUserQuery({ api, enabled }: CurrentUserQueryOptions) {
+  return useQuery({ ...currentUserQueryOptions(api), enabled })
 }
 
 export function useRegisterMutation({ api, setAccessToken }: AuthMutationOptions) {

@@ -4,9 +4,11 @@ The goal of this template's tests is to help future agents prove each change at 
 
 Focused task validation is the default. `bun run check` is the broad repository regression for an
 explicit release/audit pass or a genuinely cross-cutting change. Its chain is
-`template:check -> architecture:check -> audit -> typecheck -> lint -> test`. The audit needs
-registry access, and the broad command requires Docker because its test phase includes backend
-integration. `bun run template:check` is the fast, dependency-free guard for `CHECKLIST.md`, the
+`template:check -> architecture:check -> audit -> typecheck -> lint -> test -> test:build-contracts`.
+The audit needs registry access, and the broad command requires Docker because its test phase
+includes backend integration. The last step is the only test script that builds an application:
+it produces the `webapp` and `website` production output and checks it; no other `test:*` script
+builds or writes `dist/`. `bun run template:check` is the fast, dependency-free guard for `CHECKLIST.md`, the
 capability ledger, the `CLAUDE.md` import of `AGENTS.md`, and local Markdown file, directory, and
 heading links. Terraform remains an explicit optional signal through `bun run test:terraform` when
 its CLI is installed.
@@ -14,6 +16,7 @@ its CLI is installed.
 ## Pyramid
 
 - Contracts/unit: pure rules, shared Zod wire shapes, env parsing, JWTs, password hashing, client API refresh/retry behavior, and token cleanup.
+- Build contracts: invariants that exist only in the production `dist/` of `webapp` and `website`, such as which utilities reach the shipped CSS and how the hero scene is split into chunks; see [Build Contracts](#build-contracts).
 - Backend integration: route/auth/database behavior such as refresh-token rotation, one-time password reset, role guards, profile persistence, duplicate registration, and concurrency.
 - Webapp Playwright: a curated portfolio of product journeys and failure mechanisms that depend on a real browser and Vite UI.
 - Mobile Maestro: a curated portfolio of product-critical native journeys and device-owned risks against an installed Expo development build.
@@ -65,7 +68,11 @@ today. The mobile package has no marker mechanism, so it does the same thing wit
 `mobile/tests/parked/` is excluded by `--path-ignore-patterns`, and moving a file out of it is the
 whole re-activation. The unit and integration runners
 accept exact discovered file paths relative to `backend/` plus Bun's `-t`/`--test-name-pattern`
-filter. Omitting both selects the complete runner-owned suite for broad regression.
+filter. Omitting both selects the complete runner-owned suite for broad regression. The integration
+runner also gives every test a 3 min budget instead of Bun's 5 s unit-test default - the
+password-hashing scenarios exceed 5 s on a saturated machine, and a timed-out test's body runs on
+into the next test's cleanup, so the failure lands on an unrelated assertion; pass `--timeout=<ms>`
+to override it for a focused run.
 
 The third category keeps `bun run test:backend:unit` runnable without Docker. The root
 `bun run test` still requires Docker because it deliberately includes backend integration. A live
@@ -83,7 +90,16 @@ when one is half configured, and refuses outright when none is, because a live c
 quietly passes without contacting anything proves nothing. See [STORAGE.md](STORAGE.md) and
 [EMAIL.md](EMAIL.md).
 
-Contract tests live in `packages/contracts/src/*.test.ts` and protect shared request/response/error schemas used by backend, webapp, and mobile. Webapp and mobile unit tests live in each client `tests/` directory and cover API refresh/retry behavior that would be too expensive and brittle to fully exercise in E2E.
+Contract tests live in `packages/contracts/src/*.test.ts` and protect shared request/response/error
+schemas used by backend, webapp, and mobile. Webapp and mobile unit tests live in each client's
+`tests/` directory and cover API refresh/retry behavior that would be too expensive and brittle to
+fully exercise in E2E. Webapp tests also cover the `AuthProvider` session-state contract. The
+provider test renders the real provider with `react-dom/client` under React `act` against a small
+in-test root-container and `window` shim; the repository deliberately has no jsdom or happy-dom,
+so extend that shim rather than adding a DOM library. A component that renders host elements, such
+as the profile form's contract-driven validation, is checked as static markup through
+`react-dom/server`'s `renderToStaticMarkup`, which needs no DOM at all. The `mobile` branch extends
+this same contract/testing model for Expo.
 
 Backend tests live next to their owning product modules. Integration tests exercise auth,
 users/admin RBAC, and notifications through application/transport boundaries and real PostgreSQL
@@ -120,6 +136,22 @@ local storage container and delete the volume holding a developer's uploads as a
 running tests. Teardown removes the test database service and its named volume explicitly instead.
 
 This template does not ship with GitHub Actions or another hosted validation runner. Run the focused task signals locally; run broad regression deliberately as release/audit work. Production releases and activated SSG rebuilds follow the selected hosting provider's deployment runbook rather than replacing task validation.
+
+## Build Contracts
+
+```bash
+bun run test:build-contracts
+```
+
+The script builds `webapp` and `website`, then runs `webapp/build-contracts/*.test.ts` and
+`website/build-contracts/*.test.ts` against the fresh `dist/` directories: story-only utilities stay
+out of the production CSS, the website's hero fallback stays in the static HTML, and its R3F scene
+stays a separate lazy chunk. The test files only read the output. That keeps `bun run test:webapp`
+and `bun run test:website` read-only: they never build, never write `dist/`, and never inherit the
+developer's build environment, so `bun run check` builds and checks once, after the read-only
+suites. A build-contract file started on its own checks whatever `dist/` is on disk and fails with a
+pointer to the script when there is none. Add a build contract only for an invariant that the built
+output alone can show; everything else belongs in the unit suites.
 
 ## Webapp E2E
 
@@ -174,9 +206,10 @@ E2E_BACKEND_PORT=<backend-port>
 E2E_WEB_PORT=<web-port>
 E2E_SKIP_DOCKER=1
 E2E_KEEP_DOCKER=1
+E2E_ALLOW_NON_TEST_DATABASE=1
 ```
 
-By default, Playwright computes `POSTGRES_TEST_PORT` from the absolute repository path and refuses to run against a database that does not use the `_test` suffix. This prevents E2E from accidentally writing to development or production data. Use `DATABASE_URL` only as a low-level override; `TEST_DATABASE_URL` is the documented test entry point.
+By default, Playwright computes `POSTGRES_TEST_PORT` from the absolute repository path and refuses to run against a database that does not use the `_test` suffix. This prevents E2E from accidentally writing to development or production data. Set `E2E_ALLOW_NON_TEST_DATABASE=1` only when you intentionally target such a database; it is the E2E counterpart of the backend runner's `TEST_ALLOW_NON_TEST_DATABASE`, and neither variable unlocks the other. Use `DATABASE_URL` only as a low-level override; `TEST_DATABASE_URL` is the documented test entry point. The Compose project name, the derived test port, and the `postgres_test` service and volume names come from `scripts/repo-env.mjs`, the same module the backend integration runner uses, so the two runners cannot drift apart.
 
 Playwright artifacts live in `webapp/e2e/.artifacts/` and are not committed. For interactive debugging:
 

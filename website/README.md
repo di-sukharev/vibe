@@ -76,6 +76,13 @@ compositions. The current Astro landing sections and pages stay outside the cata
 the official React/Vite renderer only, adds no Astro adapter or hydration to the site, and its
 static output is not part of `website/dist`.
 
+## Env
+
+The variables below are public, build-time configuration: Astro inlines `PUBLIC_*` values into the static output, so nothing secret may carry that prefix (the server-island `ASTRO_KEY` above stays a secret and never does). [.env.example](.env.example) lists them; copy it to `website/.env` when a local build should carry these values, and leave it out otherwise.
+
+- `PUBLIC_WEBSITE_URL` is the canonical origin of this website, such as `https://www.example.com`. Set, pages emit canonical and `og:url` metadata; unset, they omit it.
+- `PUBLIC_WEBAPP_URL` is the origin of the authenticated `webapp`, such as `https://app.example.com`. Unset, the landing page keeps its local next-step link and the site builds without a web app. Set to anything other than an absolute `http(s)` URL, the build fails with an error that names the variable (`src/lib/landing-actions.ts`), so a release cannot ship a dead call to action. In production the unified release fills both values from Terraform outputs, see Deployment below.
+
 ## Deployment
 
 When the website has only fully prerendered output and no server islands or runtime-rendered routes, `website/dist` is fully static. Terraform creates a DigitalOcean App Platform Static Site or a Yandex Object Storage website bucket according to `CHECKLIST.md`. The unified release supplies `PUBLIC_WEBSITE_URL` and `PUBLIC_WEBAPP_URL`, rebuilds after either changes, and publishes/deploys the exact release. Without a canonical URL, pages omit canonical and `og:url` metadata. Follow [../docs/DEPLOYMENT.md](../docs/DEPLOYMENT.md) and run `bun run release -- <digitalocean|yandex>`.

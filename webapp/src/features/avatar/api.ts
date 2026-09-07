@@ -25,8 +25,11 @@ export function finalizeAvatarUpload(transport: AuthenticatedTransport, uploadId
   )
 }
 
-export function fetchAvatar(transport: AuthenticatedTransport) {
-  return transport.request('/api/uploads/avatar', avatarResponseSchema)
+export function fetchAvatar(
+  transport: AuthenticatedTransport,
+  options: { signal?: AbortSignal } = {},
+) {
+  return transport.request('/api/uploads/avatar', avatarResponseSchema, options)
 }
 
 export function deleteAvatar(transport: AuthenticatedTransport) {

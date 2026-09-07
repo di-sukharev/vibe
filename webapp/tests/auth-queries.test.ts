@@ -1,15 +1,18 @@
 import { QueryClient } from '@tanstack/react-query'
 import { expect, test } from 'bun:test'
 
+import { adminDashboardQueryOptions, adminUsersQueryOptions } from '../src/features/admin/queries'
 import {
   applyAuthenticatedSession,
   authQueryKeys,
   clearAuthenticatedSession,
   confirmPasswordResetAndClearSession,
+  currentUserQueryOptions,
   logoutAuthenticatedSession,
   sessionQueryKeys,
 } from '../src/features/auth/queries'
-import { avatarQueryKeys } from '../src/features/avatar/queries'
+import { avatarQueryKeys, avatarQueryOptions } from '../src/features/avatar/queries'
+import type { HttpRequestOptions } from '../src/platform/api'
 
 const user = {
   id: 'user_1',
@@ -176,6 +179,36 @@ test('session cleanup does not wait on the authenticated query it cancels', asyn
   expect(queryClient.getQueryData(authQueryKeys.me())).toBeUndefined()
   releaseQuery()
   await inFlightQuery.catch(() => undefined)
+})
+
+test('every session-scoped query hands the abort signal TanStack gives it to the transport', async () => {
+  const queryClient = new QueryClient()
+  const received: Array<{ path: string; signal: unknown }> = []
+  const transport = {
+    request: async (path: string, _schema: unknown, options?: HttpRequestOptions) => {
+      received.push({ path, signal: options?.signal })
+      return {} as never
+    },
+  }
+  const api = {
+    me: async (options?: { signal?: AbortSignal }) => {
+      received.push({ path: '/api/auth/me', signal: options?.signal })
+      return { user: { ...user, role: 'user' as const } }
+    },
+  }
+
+  await queryClient.fetchQuery(currentUserQueryOptions(api))
+  await queryClient.fetchQuery(adminDashboardQueryOptions(transport))
+  await queryClient.fetchQuery(adminUsersQueryOptions(transport, { page: 1, pageSize: 20 }))
+  await queryClient.fetchQuery(avatarQueryOptions(transport))
+
+  expect(received.map((request) => request.path)).toEqual([
+    '/api/auth/me',
+    '/api/admin/dashboard',
+    '/api/admin/users?page=1&pageSize=20',
+    '/api/uploads/avatar',
+  ])
+  expect(received.every((request) => request.signal instanceof AbortSignal)).toBe(true)
 })
 
 test('every session-scoped feature cache is inside the namespace session cleanup removes', async () => {

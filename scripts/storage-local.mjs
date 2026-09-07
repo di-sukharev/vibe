@@ -28,6 +28,11 @@ import {
  * container belonging to another project. And `stop` is `stop`, never `down`: the named volume
  * and the Postgres services have to survive, because losing an uploaded file to a routine
  * "turn it off" is exactly the surprise a template must not ship.
+ *
+ * The lifecycle commands take their process and S3 access as parameters - `spawn` for `start`,
+ * `status`, and `stop`, `createS3Client` for the two that talk to the bucket - so the tests can
+ * hand in stand-ins and check the docker arguments without a daemon or a container. The
+ * `dev-backend`, `test`, and `e2e` wrappers still spawn their child directly.
  */
 
 const commands = new Set(['start', 'status', 'stop', 'env', 'dev-backend', 'test', 'e2e'])
@@ -53,15 +58,15 @@ const port = defaultPrivateStorageS3Port
 const endpoint = localPrivateStorageEndpoint(port)
 const composeArgs = ['compose', '-p', composeProjectName]
 
-function run(command, args, env = composeEnv()) {
-  const result = spawnSync(command, args, { cwd: repositoryRoot, env, stdio: 'inherit' })
+function run(command, args, { spawn = spawnSync, env = composeEnv() } = {}) {
+  const result = spawn(command, args, { cwd: repositoryRoot, env, stdio: 'inherit' })
 
   if (result.status !== 0) {
     throw new Error(`${command} ${args.join(' ')} failed with exit code ${result.status}`)
   }
 }
 
-function createS3Client() {
+function createLiveS3Client() {
   return import('@aws-sdk/client-s3').then(({ S3Client }) => ({
     client: new S3Client({
       endpoint,
@@ -76,7 +81,7 @@ function createS3Client() {
   }))
 }
 
-async function bucketIsReachable() {
+async function bucketIsReachable(createS3Client) {
   const { HeadBucketCommand } = await import('@aws-sdk/client-s3')
   const { client } = await createS3Client()
 
@@ -94,9 +99,9 @@ async function bucketIsReachable() {
  * Readiness is asserted with a real signed request rather than a container health flag: what
  * matters is that the S3 API answers, the credentials work, and the bucket exists.
  */
-async function waitForBucket({ attempts = 90, delayMs = 1000 } = {}) {
+async function waitForBucket({ createS3Client, attempts = 90, delayMs = 1000 }) {
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    if (await bucketIsReachable()) return
+    if (await bucketIsReachable(createS3Client)) return
     if (attempt === 1) {
       process.stdout.write('Waiting for the local S3 container to become ready...\n')
     }
@@ -126,7 +131,7 @@ function corsOrigins({ anyOrigin = false } = {}) {
   return ['*']
 }
 
-async function applyBucketCors({ anyOrigin = false } = {}) {
+async function applyBucketCors({ createS3Client, anyOrigin = false }) {
   const { CreateBucketCommand, PutBucketCorsCommand } = await import('@aws-sdk/client-s3')
   const { client } = await createS3Client()
 
@@ -162,22 +167,27 @@ function envBlock() {
     .join('\n')
 }
 
-async function start({ quiet = false, anyOrigin = false } = {}) {
+export async function start({
+  quiet = false,
+  anyOrigin = false,
+  spawn = spawnSync,
+  createS3Client = createLiveS3Client,
+} = {}) {
   assertLocalPrivateStorageEndpoint(endpoint)
 
-  run('docker', [...composeArgs, 'up', '-d', localPrivateStorageService])
-  await waitForBucket()
-  await applyBucketCors({ anyOrigin })
+  run('docker', [...composeArgs, 'up', '-d', localPrivateStorageService], { spawn })
+  await waitForBucket({ createS3Client })
+  await applyBucketCors({ createS3Client, anyOrigin })
 
   if (!quiet) {
     process.stdout.write(`Local S3 storage is ready at ${endpoint}\n\n${envBlock()}\n`)
   }
 }
 
-async function status() {
-  run('docker', [...composeArgs, 'ps', localPrivateStorageService])
+export async function status({ spawn = spawnSync, createS3Client = createLiveS3Client } = {}) {
+  run('docker', [...composeArgs, 'ps', localPrivateStorageService], { spawn })
 
-  if (await bucketIsReachable()) {
+  if (await bucketIsReachable(createS3Client)) {
     process.stdout.write(`Bucket "${localPrivateStorageBucket}" is reachable at ${endpoint}\n`)
     return
   }
@@ -188,10 +198,10 @@ async function status() {
   process.exitCode = 1
 }
 
-function stop() {
+export function stop({ spawn = spawnSync } = {}) {
   // `stop`, not `down`: `down` would also take the database with it and, with --volumes, the
   // uploaded objects. Stopping keeps everything and simply frees the port.
-  run('docker', [...composeArgs, 'stop', localPrivateStorageService])
+  run('docker', [...composeArgs, 'stop', localPrivateStorageService], { spawn })
   process.stdout.write('Local S3 storage stopped. Its volume is kept.\n')
 }
 
