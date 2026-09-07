@@ -8,6 +8,12 @@ export type HttpRequestOptions = {
   body?: unknown
   headers?: HeadersInit
   credentials?: RequestCredentials
+  /**
+   * An abort the transport observes rejects the request with the signal's reason (an
+   * `AbortError`) rather than an `ApiRequestError`, so callers cannot mistake a cancelled request
+   * for one the backend answered. TanStack Query hands every fetch its own signal; forwarding it
+   * lets a superseded query cancel its request instead of leaving it in flight.
+   */
   signal?: AbortSignal
 }
 
@@ -53,20 +59,24 @@ export class HttpClient {
     })
 
     if (!response.ok) {
-      throw await toApiError(response)
+      throw await toApiError(response, options.signal)
     }
 
     return response
   }
 }
 
-async function toApiError(response: Response) {
+async function toApiError(response: Response, signal?: AbortSignal) {
   const fallbackMessage = `Request failed with status ${response.status}`
 
   try {
     const parsed = apiErrorSchema.parse(await response.json())
     return new ApiRequestError(response.status, parsed.error.code, parsed.error.message)
   } catch {
+    // An abort that lands while the error body is still streaming rejects `json()` with the abort
+    // reason. Surface that reason instead of a status-coded error a caller could act on, such as
+    // treating a cancelled 401 as an expired session.
+    signal?.throwIfAborted()
     return new ApiRequestError(response.status, 'INTERNAL_ERROR', fallbackMessage)
   }
 }

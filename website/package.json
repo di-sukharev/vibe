@@ -10,6 +10,7 @@
     "dev": "astro dev",
     "build": "astro build",
     "test": "bun test tests",
+    "test:build-contracts": "bun test build-contracts",
     "typecheck": "astro check",
     "preview": "astro preview",
     "storybook": "storybook dev --port 6007 --no-open",

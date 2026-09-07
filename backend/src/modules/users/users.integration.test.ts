@@ -2,7 +2,13 @@ import { createHash } from 'node:crypto'
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 
 import { createApp } from '../../app'
-import { acquirePushTokenUserLock, createPrisma, type DbClient } from '../../db'
+import {
+  acquirePushTokenUserLock,
+  createPrisma,
+  type DbClient,
+  userAuthenticationSessionTransactionOptions,
+  userAuthorityTransitionTransactionOptions,
+} from '../../db'
 import { loadEnv } from '../../env'
 import {
   assertLoginCapableAdmin,
@@ -13,6 +19,17 @@ import { bootstrapDevelopmentData } from '../../../scripts/development-seed'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 const maybeDescribe = databaseUrl ? describe : describe.skip
+
+/**
+ * The keys `db.ts` hands to `pg_advisory_xact_lock`, repeated here rather than exported: they are
+ * an implementation detail of the locks, and a test that has to know them should be the only
+ * other place that does. A rename there means no lock request is ever recognised: the observed
+ * operation still queues on the real lock, so the test fails only once the gated holder's
+ * transaction has expired, 15-20 s in, on whatever that expiry surfaces as - a 500, a rejected
+ * bootstrap, or the ordering flag - rather than promptly on the ordering it meant to check.
+ */
+const userRoleMutationLockKey = 'user-role-mutations'
+const userAuthenticationAuthorityLockKey = (userId: string) => `auth-authority:${userId}`
 
 maybeDescribe('users and admin API integration', () => {
   const env = loadEnv({
@@ -232,7 +249,71 @@ maybeDescribe('users and admin API integration', () => {
     expect(await prisma.user.count({ where: { role: 'admin' } })).toBe(1)
   })
 
-  test('makes old-password login wait when bootstrap password reset owns authentication authority', async () => {
+  test('keeps queued role transitions from blocking unrelated target logins', async () => {
+    const actor = await register('queue-actor@example.com')
+    await prisma.user.update({
+      where: { id: actor.user.id },
+      data: { role: 'admin' },
+    })
+    const firstTarget = await register('queue-first@example.com')
+    const secondTarget = await register('queue-second@example.com')
+    const thirdTarget = await register('queue-third@example.com')
+
+    const firstUpdateGate = gateNextUserUpdate(firstTarget.user.id)
+    const firstRoleApp = createApp({ env, prisma: firstUpdateGate.db })
+    // Resolves once both later role changes have asked for the global role lock the first one is
+    // holding: from then on they are queued behind it, whatever the machine's pace.
+    const roleLockQueue = observeAdvisoryLockRequests(userRoleMutationLockKey, 2)
+    const queuedRoleApp = createApp({ env, prisma: roleLockQueue.db })
+    const promote = (targetId: string, requestApp: typeof app) =>
+      requestApp.request(`/api/admin/users/${targetId}/role`, {
+        method: 'PATCH',
+        headers: authenticatedJsonHeaders(actor.accessToken),
+        body: JSON.stringify({ role: 'admin' }),
+      })
+
+    const firstRoleChange = promote(firstTarget.user.id, firstRoleApp)
+    await firstUpdateGate.reached
+
+    let secondRoleSettled = false
+    let thirdRoleSettled = false
+    const secondRoleChange = Promise.resolve(promote(secondTarget.user.id, queuedRoleApp)).finally(() => {
+      secondRoleSettled = true
+    })
+    const thirdRoleChange = Promise.resolve(promote(thirdTarget.user.id, queuedRoleApp)).finally(() => {
+      thirdRoleSettled = true
+    })
+    // Raced against the role changes themselves so that a role change which no longer takes the
+    // lock fails the queued assertion below instead of leaving this wait to the test timeout.
+    await Promise.race([roleLockQueue.requested, secondRoleChange, thirdRoleChange])
+
+    const loginRequest = (email: string) =>
+      app.request('/api/auth/token/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password: 'password123' }),
+      })
+    // Awaited while the first role change still holds the queue: a login that had to wait for its
+    // target's queued role change could not answer before the gate below is released.
+    const loginResponses = await Promise.all([
+      loginRequest(secondTarget.user.email),
+      loginRequest(thirdTarget.user.email),
+    ])
+
+    const roleChangesWereQueued = !secondRoleSettled && !thirdRoleSettled
+    firstUpdateGate.release()
+    const roleResponses = await Promise.all([
+      firstRoleChange,
+      secondRoleChange,
+      thirdRoleChange,
+    ])
+
+    expect(roleChangesWereQueued).toBe(true)
+    expect(loginResponses.map(({ status }) => status)).toEqual([200, 200])
+    expect(roleResponses.map(({ status }) => status)).toEqual([200, 200, 200])
+  })
+
+  test('makes an old-password login wait out a bootstrap that owns authentication authority', async () => {
     const existing = await register('bootstrap-reset-wins@example.com')
     const userUpdateGate = gateNextUserUpdate(existing.user.id)
     const reset = bootstrapAdmin(userUpdateGate.db, {
@@ -241,8 +322,16 @@ maybeDescribe('users and admin API integration', () => {
     })
     await userUpdateGate.reached
 
+    // The login has to queue on the lock the bootstrap holds, and its transaction has to be
+    // allowed to wait longer than an authority transition may run - otherwise it would die on
+    // Prisma's timeout instead of answering against the credential the bootstrap installs.
+    const authorityLock = observeAdvisoryLockRequests(
+      userAuthenticationAuthorityLockKey(existing.user.id),
+    )
+    const loginTransactions = recordTransactionOptions(authorityLock.db)
+    const loginApp = createApp({ env, prisma: loginTransactions.db })
     let loginSettled = false
-    const oldPasswordLogin = Promise.resolve(app.request('/api/auth/token/login', {
+    const oldPasswordLogin = Promise.resolve(loginApp.request('/api/auth/token/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -252,12 +341,18 @@ maybeDescribe('users and admin API integration', () => {
     })).finally(() => {
       loginSettled = true
     })
-    await new Promise<void>((resolve) => setTimeout(resolve, 50))
+    // Raced against the login so that a login which no longer takes the lock is caught by the
+    // settled flag below instead of leaving this wait to the test timeout.
+    await Promise.race([authorityLock.requested, oldPasswordLogin])
     const loginSettledBeforeReset = loginSettled
     userUpdateGate.release()
 
     const [, loginResponse] = await Promise.all([reset, oldPasswordLogin])
     expect(loginSettledBeforeReset).toBe(false)
+    expect(loginTransactions.options).toEqual([userAuthenticationSessionTransactionOptions])
+    expect(userAuthenticationSessionTransactionOptions.timeout).toBeGreaterThan(
+      userAuthorityTransitionTransactionOptions.timeout,
+    )
     expect(loginResponse.status).toBe(401)
   })
 
@@ -275,14 +370,20 @@ maybeDescribe('users and admin API integration', () => {
     })
     await sessionCreateGate.reached
 
+    const authorityLock = observeAdvisoryLockRequests(
+      userAuthenticationAuthorityLockKey(existing.user.id),
+    )
     let resetSettled = false
-    const reset = bootstrapAdmin(prisma, {
+    const reset = bootstrapAdmin(authorityLock.db, {
       email: existing.user.email,
       password: 'newer-bootstrap-password',
     }).finally(() => {
       resetSettled = true
     })
-    await new Promise<void>((resolve) => setTimeout(resolve, 50))
+    // The bootstrap has asked for the lock the login's transaction holds, so it is queued. Raced
+    // against the bootstrap so that one which no longer takes the lock is caught by the settled
+    // flag below instead of leaving this wait to the test timeout.
+    await Promise.race([authorityLock.requested, reset])
     const resetSettledBeforeLogin = resetSettled
     sessionCreateGate.release()
 
@@ -311,8 +412,12 @@ maybeDescribe('users and admin API integration', () => {
     })
     await userUpdateGate.reached
 
+    const authorityLock = observeAdvisoryLockRequests(
+      userAuthenticationAuthorityLockKey(target.user.id),
+    )
+    const loginApp = createApp({ env, prisma: authorityLock.db })
     let loginSettled = false
-    const targetLogin = Promise.resolve(app.request('/api/auth/token/login', {
+    const targetLogin = Promise.resolve(loginApp.request('/api/auth/token/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -322,7 +427,10 @@ maybeDescribe('users and admin API integration', () => {
     })).finally(() => {
       loginSettled = true
     })
-    await new Promise<void>((resolve) => setTimeout(resolve, 50))
+    // The login has asked for the lock the role change holds, so it is queued behind it. Raced
+    // against the login so that one which no longer takes the lock is caught by the settled flag
+    // below instead of leaving this wait to the test timeout.
+    await Promise.race([authorityLock.requested, targetLogin])
     const loginSettledBeforeRoleChange = loginSettled
     userUpdateGate.release()
 
@@ -811,6 +919,50 @@ maybeDescribe('users and admin API integration', () => {
     return { db, reached, release: releaseGate }
   }
 
+  /**
+   * Resolves once `count` transactions on the returned client have asked PostgreSQL for the
+   * named advisory lock. The statement itself is left alone, so a lock someone else holds still
+   * blocks the caller: what the test learns is that the caller has reached the wait, without
+   * guessing how long it took to get there.
+   */
+  function observeAdvisoryLockRequests(lockKey: string, count = 1) {
+    let markRequested: () => void = () => undefined
+    const requested = new Promise<void>((resolve) => {
+      markRequested = resolve
+    })
+    let seen = 0
+    const db = prisma.$extends({
+      query: {
+        $executeRaw({ args, query }) {
+          if (isAdvisoryLockRequest(args, lockKey)) {
+            seen += 1
+            if (seen === count) markRequested()
+          }
+          return query(args)
+        },
+      },
+    }) as unknown as DbClient
+    return { db, requested }
+  }
+
+  /** The options of every `$transaction` opened through the returned client, in call order. */
+  function recordTransactionOptions(db: DbClient) {
+    const options: unknown[] = []
+    const recording = new Proxy(db, {
+      get(target, property) {
+        if (property === '$transaction') {
+          return (...args: unknown[]) => {
+            options.push(args[1])
+            return Reflect.apply(target.$transaction, target, args)
+          }
+        }
+        const value = Reflect.get(target, property, target)
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    })
+    return { db: recording, options }
+  }
+
   async function register(email: string, displayName?: string) {
     const response = await app.request('/api/auth/token/register', {
       method: 'POST',
@@ -850,4 +1002,20 @@ function authenticatedJsonHeaders(accessToken: string) {
     ...authenticatedHeaders(accessToken),
     'Content-Type': 'application/json',
   }
+}
+
+/**
+ * A `$executeRaw` statement taking the advisory lock keyed `lockKey`. `db.ts` writes one key
+ * inline and binds the other as a parameter, so both places are checked.
+ */
+function isAdvisoryLockRequest(statement: unknown, lockKey: string) {
+  const { sql, text, strings, values } = statement as {
+    sql?: string
+    text?: string
+    strings?: readonly string[]
+    values?: readonly unknown[]
+  }
+  const statementSql = sql ?? text ?? strings?.join('')
+  if (statementSql?.includes('pg_advisory_xact_lock') !== true) return false
+  return statementSql.includes(`'${lockKey}'`) || values?.includes(lockKey) === true
 }

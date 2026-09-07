@@ -1,8 +1,17 @@
 import { afterEach, expect, test } from 'bun:test'
 
-import { assertLocalPrivateStorageEndpoint, assertTestDatabaseUrl } from './repo-env.mjs'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
-const envKeys = ['TEST_ALLOW_NON_TEST_DATABASE']
+import {
+  assertLocalPrivateStorageEndpoint,
+  assertTestDatabaseUrl,
+  postgresTestDataVolume,
+  postgresTestService,
+  repositoryRoot,
+} from './repo-env.mjs'
+
+const envKeys = ['TEST_ALLOW_NON_TEST_DATABASE', 'CUSTOM_ALLOW_NON_TEST_DATABASE']
 const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]))
 
 afterEach(() => {
@@ -38,6 +47,29 @@ test('assertTestDatabaseUrl accepts non-test databases with an intentional overr
       'postgresql://superuser:superpassword@localhost:54329/web_app_demo?schema=public',
     ),
   ).not.toThrow()
+})
+
+test('assertTestDatabaseUrl lets a runner name its own override, and only that name unlocks it', () => {
+  const developmentUrl =
+    'postgresql://superuser:superpassword@localhost:54329/web_app_demo?schema=public'
+  const options = { allowEnvName: 'CUSTOM_ALLOW_NON_TEST_DATABASE' }
+
+  process.env.TEST_ALLOW_NON_TEST_DATABASE = '1'
+  expect(() => assertTestDatabaseUrl(developmentUrl, options)).toThrow(
+    /set CUSTOM_ALLOW_NON_TEST_DATABASE=1 intentionally/,
+  )
+
+  process.env.CUSTOM_ALLOW_NON_TEST_DATABASE = '1'
+  expect(() => assertTestDatabaseUrl(developmentUrl, options)).not.toThrow()
+})
+
+test('the test service and volume names are the ones docker-compose.yml declares, so teardown removes a volume that exists', () => {
+  const compose = Bun.YAML.parse(readFileSync(resolve(repositoryRoot, 'docker-compose.yml'), 'utf8'))
+  const service = compose.services[postgresTestService]
+
+  expect(service).toBeDefined()
+  expect(service.volumes.map((mount) => String(mount).split(':')[0])).toContain(postgresTestDataVolume)
+  expect(Object.keys(compose.volumes)).toContain(postgresTestDataVolume)
 })
 
 test('assertLocalPrivateStorageEndpoint accepts loopback endpoints', () => {

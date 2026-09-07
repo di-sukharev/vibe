@@ -9,6 +9,7 @@ import {
   activeDeploymentCommitProblems,
   backendEnvironment,
   bootstrapStateMode,
+  bootstrapTemporaryAccess,
   digitalOceanCliEnvironment,
   digitalOceanSpacesKeyProblems,
   digitalOceanTeamIdentityProblems,
@@ -41,6 +42,8 @@ import {
   stateRecoveryOutputs,
   staticUploadSteps,
   verifyYandexStaticCommit,
+  verifyYandexStaticReadsAfterApply,
+  verifyYandexWebappFallback,
   withProductionMutationLease,
   yandexDatabaseRotationProblems,
   yandexRuntimeStateProblems,
@@ -376,6 +379,62 @@ describe('Terraform configuration helpers', () => {
         recoverExisting: true,
       }),
     ).toBe('recover')
+  })
+
+  test('honors the temporary state role only from tfvars and never during recovery', () => {
+    const env = {}
+    for (const value of [true, 'true']) {
+      expect(
+        bootstrapTemporaryAccess({
+          provider: 'yandex',
+          tfvars: { bootstrap_folder_storage_access: value },
+          stateMode: 'remote',
+          env,
+        }),
+      ).toEqual({ requested: true, problem: null })
+    }
+    expect(
+      bootstrapTemporaryAccess({
+        provider: 'yandex',
+        tfvars: { bootstrap_folder_storage_access: false },
+        stateMode: 'remote',
+        env,
+      }),
+    ).toEqual({ requested: false, problem: null })
+    expect(
+      bootstrapTemporaryAccess({
+        provider: 'yandex',
+        tfvars: {},
+        stateMode: 'local',
+        env,
+      }),
+    ).toEqual({ requested: false, problem: null })
+    expect(
+      bootstrapTemporaryAccess({
+        provider: 'digitalocean',
+        tfvars: { bootstrap_folder_storage_access: true },
+        stateMode: 'remote',
+        env: { TF_VAR_bootstrap_folder_storage_access: 'true' },
+      }),
+    ).toEqual({ requested: false, problem: null })
+
+    const recovery = bootstrapTemporaryAccess({
+      provider: 'yandex',
+      tfvars: { bootstrap_folder_storage_access: true },
+      stateMode: 'recover',
+      env,
+    })
+    expect(recovery.requested).toBe(true)
+    expect(recovery.problem).toContain('before state recovery')
+
+    const exported = bootstrapTemporaryAccess({
+      provider: 'yandex',
+      tfvars: {},
+      stateMode: 'remote',
+      env: { TF_VAR_bootstrap_folder_storage_access: 'false' },
+    })
+    expect(exported.requested).toBe(false)
+    expect(exported.problem).toContain('Unset TF_VAR_bootstrap_folder_storage_access')
   })
 
   test('builds reattach configuration only from paired recovery signals', () => {
@@ -1372,6 +1431,189 @@ describe('Yandex static publishing', () => {
         },
       ),
     ).rejects.toThrow(`expected ${commit}`)
+  })
+
+  test('the webapp fallback probe accepts the index shell for a missing path and rejects an access error', async () => {
+    const commit = 'b'.repeat(40)
+    const shell = '<!doctype html><html><body><div id="root"></div></body></html>'
+    const requestedUrls = []
+
+    for (const status of [200, 404, 403]) {
+      await verifyYandexWebappFallback(
+        { webapp_url: 'https://app.example.com' },
+        commit,
+        {
+          fetchImpl: async (url) => {
+            requestedUrls.push(String(url))
+            return new Response(shell, { status })
+          },
+          sleepImpl: async () => {},
+        },
+      )
+    }
+    expect(requestedUrls).toEqual(
+      Array(3).fill(
+        `https://app.example.com/app/release-fallback-probe?revision=${commit}`,
+      ),
+    )
+
+    let attempts = 0
+    await expect(
+      verifyYandexWebappFallback(
+        { webapp_url: 'https://app.example.com' },
+        commit,
+        {
+          fetchImpl: async () => {
+            attempts += 1
+            return new Response(
+              '<?xml version="1.0"?><Error><Code>AccessDenied</Code></Error>',
+              { status: 403 },
+            )
+          },
+          sleepImpl: async () => {},
+        },
+      ),
+    ).rejects.toThrow('HTTP 403 without the web app index shell')
+    expect(attempts).toBe(12)
+
+    await expect(
+      verifyYandexWebappFallback(
+        { webapp_url: 'https://app.example.com' },
+        commit,
+        {
+          fetchImpl: async () => new Response('<html>not found</html>', { status: 404 }),
+          sleepImpl: async () => {},
+        },
+      ),
+    ).rejects.toThrow('HTTP 404 without the web app index shell')
+
+    await expect(
+      verifyYandexWebappFallback(
+        { webapp_url: 'https://app.example.com' },
+        commit,
+        {
+          fetchImpl: async () => new Response(shell, { status: 503 }),
+          sleepImpl: async () => {},
+        },
+      ),
+    ).rejects.toThrow('HTTP 503 with the web app index shell')
+  })
+
+  test('the post-apply static check runs once a release exists and requires both domains and the shell', async () => {
+    const commit = 'c'.repeat(40)
+    const shell = '<!doctype html><html><body><div id="root"></div></body></html>'
+    const outputs = {
+      webapp_url: 'https://app.example.com',
+      website_url: 'https://www.example.com',
+    }
+    const ok = (body = '') => () => new Response(body, { status: 200 })
+    const server = (handlers) => async (url) => {
+      const { host, pathname } = new URL(url)
+      const handler = handlers[`${host}${pathname}`]
+      if (!handler) throw new Error(`unexpected request ${url}`)
+      return handler(url)
+    }
+    const healthy = (probe) => ({
+      'app.example.com/.well-known/release-revision': ok(`${commit}\n`),
+      'app.example.com/': ok(shell),
+      'www.example.com/.well-known/release-revision': ok(commit),
+      'www.example.com/': ok('<html>website</html>'),
+      'app.example.com/app/release-fallback-probe': probe,
+    })
+
+    const skipped = []
+    for (const partial of [{}, { webapp_url: outputs.webapp_url }]) {
+      await verifyYandexStaticReadsAfterApply(partial, {
+        fetchImpl: async (url) => {
+          throw new Error(`unexpected request ${url}`)
+        },
+        sleepImpl: async () => {},
+        log: (line) => skipped.push(line),
+      })
+    }
+    expect(skipped).toEqual(
+      Array(2).fill(
+        '[infra] yandex: no release has run yet; the first release verifies the static reads and the missing-path fallback.',
+      ),
+    )
+
+    const requested = []
+    await verifyYandexStaticReadsAfterApply(outputs, {
+      fetchImpl: async (url) => {
+        requested.push(new URL(url))
+        return server(healthy(() => new Response(shell, { status: 404 })))(url)
+      },
+      sleepImpl: async () => {},
+      log: () => {
+        throw new Error('a released install must not be skipped')
+      },
+    })
+    expect(requested.map((url) => `${url.host}${url.pathname}`)).toEqual([
+      'app.example.com/.well-known/release-revision',
+      'app.example.com/',
+      'www.example.com/.well-known/release-revision',
+      'www.example.com/',
+      'app.example.com/app/release-fallback-probe',
+    ])
+    for (const url of requested.slice(0, 4)) {
+      expect(url.searchParams.get('revision')).toStartWith('apply-')
+    }
+    expect(requested[4].searchParams.get('revision')).toBe(commit)
+
+    const probeUrls = []
+    await verifyYandexStaticReadsAfterApply(outputs, {
+      fetchImpl: server({
+        ...healthy((url) => {
+          probeUrls.push(String(url))
+          return new Response(shell, { status: 200 })
+        }),
+        'app.example.com/.well-known/release-revision': ok(''),
+      }),
+      sleepImpl: async () => {},
+    })
+    expect(probeUrls).toEqual([
+      'https://app.example.com/app/release-fallback-probe?revision=apply',
+    ])
+
+    let websiteAttempts = 0
+    let probed = 0
+    await expect(
+      verifyYandexStaticReadsAfterApply(outputs, {
+        fetchImpl: server({
+          ...healthy(() => {
+            probed += 1
+            return new Response(shell, { status: 200 })
+          }),
+          'www.example.com/': () => {
+            websiteAttempts += 1
+            return new Response(
+              '<?xml version="1.0"?><Error><Code>AccessDenied</Code></Error>',
+              { status: 403 },
+            )
+          },
+        }),
+        sleepImpl: async () => {},
+      }),
+    ).rejects.toThrow(
+      /^website index at https:\/\/www\.example\.com\/\?revision=apply-\d+ is not readable after the apply: HTTP 403\./,
+    )
+    expect(websiteAttempts).toBe(12)
+    expect(probed).toBe(0)
+
+    await expect(
+      verifyYandexStaticReadsAfterApply(outputs, {
+        fetchImpl: server(
+          healthy(
+            () =>
+              new Response(
+                '<?xml version="1.0"?><Error><Code>AccessDenied</Code></Error>',
+                { status: 403 },
+              ),
+          ),
+        ),
+        sleepImpl: async () => {},
+      }),
+    ).rejects.toThrow('HTTP 403 without the web app index shell')
   })
 })
 

@@ -25,7 +25,7 @@ transport -> application -> domain/ports -> infrastructure -> DTO
 - `src/scheduler.ts` is the long-running timer process; `src/worker.ts` is the long-running loop process. On the mobile line, `job-schedules.json` includes task-outbox and push processing, upload cleanup, and combined auth/notification maintenance; Terraform deploys them through a DigitalOcean scheduler worker or Yandex timer tasks. The loop worker ships empty. See [BACKGROUND_JOBS.md](BACKGROUND_JOBS.md).
 - `src/runtime.ts` owns shared env loading, Prisma creation, and runtime cleanup for all backend entrypoints.
 - `src/background-tasks.ts` defers response-independent best-effort work and lets the API drain accepted tasks before graceful shutdown. Tasks receive an `AbortSignal`; a task deadline aborts work but keeps its cleanup tracked until settlement, while server draining and task cleanup consume one shared absolute shutdown deadline. It holds work whose loss on a restart is acceptable - deleting an object whose upload row was rejected, for instance.
-- `src/outbox` holds work whose loss is not acceptable: a row in `task_outbox`, claimed and retried by the `outbox:drain` job until it succeeds or gives up. Three mechanisms, one distinction: `background-tasks.ts` for best-effort work inside a request, `outbox` for durable one-off work, `jobs.ts` for work on a timer. Password reset uses the outbox, which is also what keeps the public response path account-independent: the request writes one row for any address and the handler does the lookup. See [BACKGROUND_JOBS.md](BACKGROUND_JOBS.md).
+- `src/outbox` holds work whose loss is not acceptable: a row in `task_outbox`, claimed and retried by the `outbox:drain` job until it succeeds or gives up. Three mechanisms, one distinction: `background-tasks.ts` for best-effort work inside a request, `outbox` for durable one-off work, `jobs.ts` for work on a timer. Password reset uses the outbox, which is also what keeps the public response path account-independent: the request writes one row for any address - or none for any address, while a flood keeps the queue's ceiling full - and the handler does the lookup. See [BACKGROUND_JOBS.md](BACKGROUND_JOBS.md).
 - `src/app.ts` is the composition root. It owns the Hono app, CORS, secure headers, error handling, module construction, route mounting, and OpenAPI output.
 - `src/env.ts` validates environment variables with Zod.
 - `src/db.ts` creates the Prisma client.
@@ -128,6 +128,7 @@ The webapp and mobile app follow the same client rules:
 - TanStack Form owns form state.
 - Zod schemas come from `@web-app-demo/contracts`.
 - `src/platform/api` owns endpoint-agnostic fetch, base URL handling, response parsing, and the shared API error.
+- `src/platform/intl` owns the locale-pinned formatters shared across features (today: dates).
 - `src/features/<context>` owns endpoint paths, schemas, server-state adapters, providers, and product UI for that context.
 - Routes and `src/main.tsx` are thin composition files and import features through their public `index.ts`.
 - `src/components/ui` and `src/platform` never import product features. Features may use platform code and UI primitives; cross-feature imports must use the target feature's public index and the resulting feature graph must stay acyclic. Put collaboration that would create a cycle into composition behind a narrow owning port.
@@ -137,7 +138,12 @@ Auth in `src/features/auth` is the client golden path: its API adapter owns auth
 The webapp has two non-overlapping authenticated route trees: `/app/*` for
 `user`, and `/admin/*` for `admin`. Route guards wait for auth bootstrap, redirect
 guests through a role-checked internal return path, and send cross-role requests
-to the current role’s home. The shared workspace shell owns the full shadcn
+to the current role’s home. The return-path allow-list is the role’s protected
+route table in `src/features/navigation`: a path matcher over literal and named
+`$param` segments, so parameterised routes survive the login round-trip. A unit
+test pins that table to the routes registered under each workspace layout and
+rejects route shapes the matcher does not understand; the sidebar menu is a
+presentation subset of it. The shared workspace shell owns the full shadcn
 dashboard-01 sidebar/inset visual unit; role navigation is a pure feature-owned
 map. Shared shell building blocks live in `src/components/dashboard`, while
 account and admin panels stay with their owning feature. Dashboard metrics and

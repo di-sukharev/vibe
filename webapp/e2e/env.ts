@@ -1,30 +1,46 @@
-import { createHash } from 'node:crypto'
-import { resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import {
+  assertTestDatabaseUrl,
+  composeProjectName,
+  defaultPostgresTestPort,
+  defaultTestDatabaseUrl,
+  postgresTestDataVolume,
+  postgresTestService,
+  preferredPostgresTestPort,
+  repositoryHash,
+  repositoryRoot,
+} from '../../scripts/repo-env.mjs'
 import { portFromUrl } from './url'
 
-export const repositoryRoot = resolve(fileURLToPath(new URL('../..', import.meta.url)))
-export const repositoryHash = createHash('sha256').update(repositoryRoot).digest('hex').slice(0, 12)
-export const preferredPostgresTestPort =
-  30000 + (Number.parseInt(repositoryHash.slice(0, 6), 16) % 20000)
+/**
+ * Docker and PostgreSQL constants come from the same module the backend integration runner and
+ * the Docker smoke use, so a renamed volume or service cannot leave this run cleaning up the
+ * wrong one.
+ */
+export {
+  composeProjectName,
+  defaultTestDatabaseUrl,
+  postgresTestDataVolume,
+  postgresTestService,
+  preferredPostgresTestPort,
+  repositoryRoot,
+}
+
 export const preferredBackendPort =
   50000 + (Number.parseInt(repositoryHash.slice(6, 12), 16) % 5000)
 export const preferredWebPort =
   55000 + (Number.parseInt(repositoryHash.slice(0, 6), 16) % 5000)
-export const composeProjectName =
-  process.env.COMPOSE_PROJECT_NAME ?? `vibecoding-template-${repositoryHash}`
-export const defaultPostgresTestPort =
-  process.env.POSTGRES_TEST_PORT ?? String(preferredPostgresTestPort)
-export const defaultBackendPort =
-  process.env.E2E_BACKEND_PORT ?? String(preferredBackendPort)
-export const defaultWebPort =
-  process.env.E2E_WEB_PORT ?? String(preferredWebPort)
-export const defaultDatabaseUrl = `postgresql://superuser:superpassword@localhost:${defaultPostgresTestPort}/web_app_demo_test?schema=public`
-export const postgresTestService = 'postgres_test'
-/** Mirrors `postgresTestDataVolume` in scripts/repo-env.mjs. */
-export const postgresTestDataVolume = 'postgres_18_test_data'
+export const defaultDatabaseUrl = defaultTestDatabaseUrl(defaultPostgresTestPort)
 export const e2eAdminEmail = 'admin@example.com'
 export const e2eAdminPassword = 'admin-e2e-password'
+
+/**
+ * The E2E counterpart of the backend runner's `TEST_ALLOW_NON_TEST_DATABASE`: the same rule,
+ * unlocked by its own variable, so allowing one runner onto a development database never
+ * silently allows the other.
+ */
+export function assertE2eDatabaseUrl(databaseUrl: string) {
+  assertTestDatabaseUrl(databaseUrl, { allowEnvName: 'E2E_ALLOW_NON_TEST_DATABASE' })
+}
 
 export function composeEnv(extra: NodeJS.ProcessEnv = {}) {
   const explicitDatabaseUrl =

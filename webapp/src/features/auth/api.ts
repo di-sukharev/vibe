@@ -121,6 +121,8 @@ export class AuthApi {
 
       const payload = cookieRefreshRequestSchema.parse({})
       try {
+        // Every caller that hit a 401 waits on this one refresh, so it deliberately runs without
+        // any caller's abort signal: one cancelled query must not fail the others' retry.
         return await this.http.request('/api/auth/refresh', cookieRefreshResponseSchema, {
           method: 'POST',
           body: payload,
@@ -140,8 +142,8 @@ export class AuthApi {
     return trackedPromise
   }
 
-  me(): Promise<MeResponse> {
-    return this.requestAuthenticated('/api/auth/me', meResponseSchema)
+  me(options: { signal?: AbortSignal } = {}): Promise<MeResponse> {
+    return this.requestAuthenticated('/api/auth/me', meResponseSchema, options)
   }
 
   logout(): Promise<BrowserSessionTransition<undefined> | null> {
@@ -193,6 +195,8 @@ export class AuthApi {
       }
       return response
     } catch (error) {
+      // Only a 401 the backend actually answered can mean an expired access token. An aborted
+      // request rejects with its AbortError and is rethrown untouched: no refresh, no sign-out.
       if (!(error instanceof ApiRequestError) || error.status !== 401 || accessTokenOverride) {
         throw error
       }

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import { loadEnv } from '../env'
-import { drainOptionsFromEnv, enqueueTask } from './index'
+import { drainOptionsFromEnv, drainPassCapacity, enqueueTask } from './index'
 
 const prisma = {
   taskOutbox: {
@@ -49,5 +49,19 @@ describe('drainOptionsFromEnv', () => {
       maxRuntimeMs: 11_000,
       retentionDays: 3,
     })
+  })
+})
+
+describe('drainPassCapacity', () => {
+  test('is the batch times the five loops a pass makes', () => {
+    // The password-reset ceiling is sized to this. Smaller and it refuses requests the drain
+    // could have delivered on time; larger and a flood carries over from one pass to the next.
+    const env = loadEnv({
+      DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
+      JWT_SECRET: '12345678901234567890123456789012',
+      TASK_OUTBOX_BATCH_LIMIT: '7',
+    })
+
+    expect(drainPassCapacity(env)).toBe(35)
   })
 })

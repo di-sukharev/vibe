@@ -318,6 +318,38 @@ export async function yieldToProcessEvents() {
   await new Promise((resolveTurn) => setTimeout(resolveTurn, 0))
 }
 
+/**
+ * Whether a Yandex bootstrap rerun asked for the temporary folder-wide state role through
+ * terraform.tfvars, and whether the current mode may honor it. Only the tfvars line is accepted:
+ * a TF_VAR_ export would create the grant outside the same-command tighten step, so it is refused.
+ */
+export function bootstrapTemporaryAccess({
+  provider,
+  tfvars,
+  stateMode,
+  env = process.env,
+}) {
+  if (provider !== 'yandex') return { requested: false, problem: null }
+  if (env.TF_VAR_bootstrap_folder_storage_access !== undefined) {
+    return {
+      requested: false,
+      problem:
+        'Unset TF_VAR_bootstrap_folder_storage_access; request the temporary state role only with `bootstrap_folder_storage_access = true` in infra/yandex/bootstrap/terraform.tfvars so the same run removes it again.',
+    }
+  }
+  const requested = [true, 'true'].includes(
+    tfvars?.bootstrap_folder_storage_access,
+  )
+  if (requested && stateMode === 'recover') {
+    return {
+      requested,
+      problem:
+        'Remove `bootstrap_folder_storage_access = true` from infra/yandex/bootstrap/terraform.tfvars before state recovery; the recovery apply never removes that temporary folder-wide role.',
+    }
+  }
+  return { requested, problem: null }
+}
+
 export function bootstrapStateMode({
   hasStateEnvironment,
   hasLocalState,
@@ -471,6 +503,12 @@ export function protectedYandexSecretVersionDestroyAddresses(liveSlot) {
 
 const yandexFoundationCleanupAddresses = [
   'yandex_resourcemanager_folder_iam_member.storage_manager[0]',
+]
+
+// The bootstrap root's only temporary grant. Every bootstrap rerun may drop it without a flag, so a
+// one-off `bootstrap_folder_storage_access = true` apply cannot strand folder-wide storage.admin.
+const yandexBootstrapCleanupAddresses = [
+  'yandex_resourcemanager_folder_iam_member.terraform_state_storage[0]',
 ]
 
 const yandexMigrationSeedCleanupAddresses = [
@@ -1389,6 +1427,12 @@ async function bootstrap(provider, options) {
     paths.bootstrapRoot,
     'bootstrap-access.auto.tfvars.json',
   )
+  const temporaryAccess = bootstrapTemporaryAccess({
+    provider,
+    tfvars,
+    stateMode,
+  })
+  if (temporaryAccess.problem) throw new Error(temporaryAccess.problem)
   if (stateMode === 'ambiguous') {
     throw new Error(
       'No local or configured remote state was found. Pass --new for a verified first bootstrap, or use the documented --recover-state-* reattach flow for existing infrastructure.',
@@ -1480,7 +1524,7 @@ async function bootstrap(provider, options) {
         apply: true,
         allowedDestroyAddresses: [
           ...options.allowedDestroyAddresses,
-          'yandex_resourcemanager_folder_iam_member.terraform_state_storage[0]',
+          ...yandexBootstrapCleanupAddresses,
         ],
         label: 'yandex-bootstrap-tighten-state-access',
       })
@@ -1535,9 +1579,37 @@ async function bootstrap(provider, options) {
     root: paths.bootstrapRoot,
     env: remoteEnvironment,
     apply: !options.dryRun,
-    allowedDestroyAddresses: options.allowedDestroyAddresses,
+    allowedDestroyAddresses: [
+      ...options.allowedDestroyAddresses,
+      ...(provider === 'yandex' ? yandexBootstrapCleanupAddresses : []),
+    ],
     label: `${provider}-bootstrap`,
   })
+  // A steady-state Yandex rerun that needed `bootstrap_folder_storage_access = true` (the state
+  // account holds no IAM role, so Yandex may refuse its own policy update) tightens in the same
+  // command, exactly like the first apply, so the temporary folder-wide role does not outlive it.
+  if (temporaryAccess.requested && !options.dryRun) {
+    writeJsonFile(bootstrapAccessPath, {
+      bootstrap_folder_storage_access: false,
+    })
+    try {
+      terraformPlan({
+        root: paths.bootstrapRoot,
+        env: remoteEnvironment,
+        apply: true,
+        allowedDestroyAddresses: [
+          ...options.allowedDestroyAddresses,
+          ...yandexBootstrapCleanupAddresses,
+        ],
+        label: 'yandex-bootstrap-tighten-state-access',
+      })
+    } finally {
+      rmSync(bootstrapAccessPath)
+    }
+    console.log(
+      '[infra] yandex: the temporary folder-wide state role was removed again. Delete `bootstrap_folder_storage_access = true` from infra/yandex/bootstrap/terraform.tfvars so later reruns do not recreate it.',
+    )
+  }
   if (!options.dryRun) {
     writeBackendArtifacts(
       provider,
@@ -1939,6 +2011,11 @@ async function applyFoundation(provider, options) {
       label: `${provider}-foundation`,
     })
     await assertProductionMutationLease(options)
+    if (provider === 'yandex' && !options.dryRun && !firstYandexBucketApply) {
+      await verifyYandexStaticReadsAfterApply(
+        readManagedRootOutputs(context, 'runtime'),
+      )
+    }
     if (options.dryRun || !firstYandexBucketApply) return
 
     rmSync(bootstrapAccessPath)
@@ -2479,6 +2556,113 @@ export async function verifyYandexStaticCommit(
   }
 }
 
+// The webapp is a single-page app: every deep link (a reload of /app/*, an emailed
+// /reset-password link) asks the bucket for a key that does not exist and relies on the website
+// error document answering with the index shell. The static buckets allow anonymous object reads
+// only, so this probe is the proof, after every release and after every later `infra:apply`, that
+// a missing key still serves the shell instead of an Object Storage access error. Browsers render
+// the shell whatever 2xx/4xx status carries it, so the status is reported but only the body
+// decides.
+export async function verifyYandexWebappFallback(
+  outputs,
+  commit,
+  { fetchImpl = fetch, sleepImpl = Bun.sleep } = {},
+) {
+  const url = outputs.webapp_url
+  if (!url) throw new Error('Terraform did not return web app URL')
+  const probeUrl = new URL('/app/release-fallback-probe', url)
+  probeUrl.searchParams.set('revision', commit)
+  let lastResult = 'no response'
+
+  for (let attempt = 1; attempt <= 12; attempt += 1) {
+    try {
+      const response = await fetchImpl(probeUrl, {
+        cache: 'no-store',
+        headers: { 'cache-control': 'no-cache' },
+        signal: AbortSignal.timeout(10_000),
+      })
+      const body = await response.text()
+      const hasShell = body.includes('<div id="root">')
+      if (response.status < 500 && hasShell) {
+        lastResult = null
+        break
+      }
+      lastResult = `HTTP ${response.status} ${hasShell ? 'with' : 'without'} the web app index shell`
+    } catch (error) {
+      lastResult = error instanceof Error ? error.message : String(error)
+    }
+    if (attempt < 12) await sleepImpl(5_000)
+  }
+
+  if (lastResult) {
+    throw new Error(
+      `web app fallback verification failed at ${probeUrl}: ${lastResult}. A missing path must serve index.html; see the anonymous-access rollback in docs/YANDEX_CLOUD.md.`,
+    )
+  }
+}
+
+// `infra:apply` changes the static buckets' anonymous access with no HTTP check of its own. The
+// runtime root exists only after a release has run, and every release ends by publishing both
+// static builds with their markers, so once that root exists the markers and `/` of both static
+// domains must still be readable anonymously and a missing web app path must still answer with
+// the index shell right after the apply; an existing install then learns about broken hosting
+// from the apply that caused it, not from the next release. Before the first release there is
+// nothing to read, and that release runs the same checks itself.
+export async function verifyYandexStaticReadsAfterApply(
+  runtimeOutputs,
+  { fetchImpl = fetch, sleepImpl = Bun.sleep, log = console.log } = {},
+) {
+  const { webapp_url: webappUrl, website_url: websiteUrl } = runtimeOutputs
+  if (!webappUrl || !websiteUrl) {
+    log(
+      '[infra] yandex: no release has run yet; the first release verifies the static reads and the missing-path fallback.',
+    )
+    return
+  }
+  const cacheBuster = `apply-${Date.now()}`
+  const readAnonymously = async (name, base, path) => {
+    const url = new URL(path, base)
+    url.searchParams.set('revision', cacheBuster)
+    let lastResult = 'no response'
+    for (let attempt = 1; attempt <= 12; attempt += 1) {
+      try {
+        const response = await fetchImpl(url, {
+          cache: 'no-store',
+          headers: { 'cache-control': 'no-cache' },
+          signal: AbortSignal.timeout(10_000),
+        })
+        if (response.ok) return (await response.text()).trim()
+        lastResult = `HTTP ${response.status}`
+        await response.body?.cancel()
+      } catch (error) {
+        lastResult = error instanceof Error ? error.message : String(error)
+      }
+      if (attempt < 12) await sleepImpl(5_000)
+    }
+    throw new Error(
+      `${name} at ${url} is not readable after the apply: ${lastResult}. If a release has published the static builds, anonymous object reads are broken; see the anonymous-access rollback in docs/YANDEX_CLOUD.md. If no release has published them yet, run bun run release -- yandex, which verifies them itself.`,
+    )
+  }
+
+  const revision =
+    (await readAnonymously(
+      'web app release marker',
+      webappUrl,
+      '/.well-known/release-revision',
+    )) || 'apply'
+  await readAnonymously('web app index', webappUrl, '/')
+  await readAnonymously(
+    'website release marker',
+    websiteUrl,
+    '/.well-known/release-revision',
+  )
+  await readAnonymously('website index', websiteUrl, '/')
+  await verifyYandexWebappFallback(runtimeOutputs, revision, {
+    fetchImpl,
+    sleepImpl,
+  })
+}
+
 export function activeDeploymentCommitProblems(
   response,
   expectedCommit,
@@ -2768,6 +2952,7 @@ async function release(provider, options) {
     async verify({ staticDeployment }) {
       assertCleanReleaseSource(context.outputs.release_source, provider, commit)
       await verifyYandexStaticCommit(staticDeployment, commit)
+      await verifyYandexWebappFallback(staticDeployment, commit)
       await verifyDeployment(staticDeployment)
       console.log(
         `[infra] ${provider}: release ${commit} completed and verified.`,

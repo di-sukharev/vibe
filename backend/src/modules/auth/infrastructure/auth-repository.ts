@@ -112,7 +112,7 @@ export function createPrismaAuthRepository(db: DbClient): AuthRepository {
           select: { id: true },
         })
         return { user, session }
-      })
+      }, userAuthenticationSessionTransactionOptions)
     },
 
     async findActiveRefreshSession(input) {
