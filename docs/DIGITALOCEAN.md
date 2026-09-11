@@ -129,8 +129,11 @@ idempotent and verifies the created administrator.
   service, but restore testing and an HA upgrade remain operator work.
 - PostgreSQL initially trusts only the dedicated VPC CIDR while no app ID exists. After the
   migration-gated API deployment succeeds, the wrapper feeds its App ID back into the independent
-  foundation root and replaces the bootstrap rule with that exact trusted source. Adding an
-  external admin client requires a deliberate Terraform firewall rule, not a console-wide allow.
+  foundation root and replaces the bootstrap rule with that exact trusted source. If the runtime
+  state stops reporting that App ID while the API app still exists, `infra:plan` and
+  `infra:apply` fail closed instead of widening the rule back to the VPC range; recover or import
+  the runtime state first. Adding an external admin client requires a deliberate Terraform
+  firewall rule, not a console-wide allow.
 - App Platform Static Sites use DigitalOcean's edge delivery; no separate Spaces CDN or Terraform
   CDN resource is created.
 - DigitalOcean documents Spaces lifecycle rules only for object expiration and incomplete multipart

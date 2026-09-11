@@ -11,6 +11,7 @@ import {
   bootstrapStateMode,
   bootstrapTemporaryAccess,
   digitalOceanCliEnvironment,
+  digitalOceanRuntimeStateProblems,
   digitalOceanSpacesKeyProblems,
   digitalOceanTeamIdentityProblems,
   digestFromRepoDigests,
@@ -712,6 +713,91 @@ describe('release safety', () => {
     ).toEqual([
       'DigitalOcean token belongs to team UUID other-team, expected team-uuid',
     ])
+  })
+
+  test('fails closed when the DigitalOcean API app exists without runtime state', () => {
+    const projectSlug = 'example-product'
+    const deployedApps = JSON.stringify([
+      { id: 'webapp-app-id', spec: { name: 'example-product-prod-webapp' } },
+      { id: 'api-app-id', spec: { name: 'example-product-prod-api' } },
+      { id: 'other-app-id', spec: { name: 'other-product-prod-api' } },
+    ])
+    const problem =
+      'DigitalOcean runtime state has no API App ID, but the deployed API app still exists: example-product-prod-api (api-app-id). Recover or import the runtime state before the database firewall falls back to the VPC range.'
+
+    // Runtime state present: the provider is never asked.
+    expect(
+      digitalOceanRuntimeStateProblems(
+        { apiAppId: 'api-app-id', projectSlug },
+        {
+          listApps: () => {
+            throw new Error('doctl must not run while the runtime state is present')
+          },
+        },
+      ),
+    ).toEqual([])
+
+    // Runtime state missing, no API app yet: the first release.
+    for (const raw of [
+      '[]',
+      'null',
+      JSON.stringify({ apps: [] }),
+      JSON.stringify([
+        { id: 'webapp-app-id', spec: { name: 'example-product-prod-webapp' } },
+        { id: 'other-app-id', spec: { name: 'other-product-prod-api' } },
+      ]),
+    ]) {
+      expect(
+        digitalOceanRuntimeStateProblems(
+          { apiAppId: undefined, projectSlug },
+          { listApps: () => raw },
+        ),
+      ).toEqual([])
+    }
+
+    // Runtime state missing, API app still deployed: the firewall would silently widen.
+    const calls = []
+    expect(
+      digitalOceanRuntimeStateProblems(
+        { apiAppId: null, projectSlug },
+        {
+          listApps: (...args) => {
+            calls.push(args)
+            return deployedApps
+          },
+        },
+      ),
+    ).toEqual([problem])
+    expect(calls).toEqual([[]])
+    expect(
+      digitalOceanRuntimeStateProblems(
+        { apiAppId: '', projectSlug },
+        {
+          listApps: () =>
+            JSON.stringify({
+              apps: [{ id: 'api-app-id', spec: { name: 'example-product-prod-api' } }],
+            }),
+        },
+      ),
+    ).toEqual([problem])
+
+    // An unreadable provider answer never counts as "no app".
+    expect(() =>
+      digitalOceanRuntimeStateProblems(
+        { apiAppId: null, projectSlug },
+        { listApps: () => 'not json' },
+      ),
+    ).toThrow(
+      'Could not verify DigitalOcean runtime state because doctl returned invalid app JSON',
+    )
+    expect(() =>
+      digitalOceanRuntimeStateProblems(
+        { apiAppId: null, projectSlug },
+        { listApps: () => JSON.stringify({ apps: 'nope' }) },
+      ),
+    ).toThrow(
+      'Could not verify DigitalOcean runtime state because doctl returned no app list',
+    )
   })
 
   test('holds one production lease until the complete mutation settles', async () => {
