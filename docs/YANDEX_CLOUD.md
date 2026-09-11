@@ -18,7 +18,8 @@ data-residency requirement. Common safety and release rules live in
 - separate migration, runtime, gateway, trigger, publisher, and storage-management service
   accounts with narrow roles;
 - an optional Postbox sender and optional Cloud CDN resources;
-- a private versioned Object Storage bucket and scoped key for Terraform state.
+- a private versioned Object Storage bucket and scoped key for Terraform state; its lifecycle rule
+  expires noncurrent versions after 30 days and aborts incomplete multipart uploads after 7.
 
 `enable_cdn = false` and `route_static_through_cdn = false` by default. Static files then come
 directly from Object Storage HTTPS website hosting. The first flag provisions two CDN origin

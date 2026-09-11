@@ -243,9 +243,12 @@ signal because it depends on the Terraform CLI rather than the normal applicatio
 - `bun run architecture:check` - enforce the module/feature dependency boundaries.
 - `bun run build` - run production build/typecheck/export scripts for workspaces that define them.
 - `bun run static:precompress` - write `.br` and `.gz` next to the text assets in `webapp/dist` and
-  `website/dist`, after those builds. Deliberately not part of `build`: only the own-server proxy
-  reads those sidecars. Hosted releases upload/build the original assets and let their edge layer
-  negotiate compression when available.
+  `website/dist`, after those builds. Own-server only: the Caddy/nginx proxy in
+  [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#own-server) is the one thing that reads those sidecars,
+  which is why it is not part of `build`. It is not a step before a cloud release either: Yandex
+  builds the static surfaces inside Docker from a Git archive and DigitalOcean builds them on App
+  Platform, so neither ever sees a local `dist`, and their edge layers negotiate compression when
+  available.
 - `bun run audit` - fail on unreviewed dependency vulnerabilities; part of `bun run check` and the
   one step in that chain that needs registry access. It reports none today, and the `overrides`
   block in the root `package.json` is why: every entry there is a minimum version that closes an

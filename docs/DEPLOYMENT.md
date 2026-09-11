@@ -101,9 +101,15 @@ bun run infra:apply -- <digitalocean|yandex>
 ```
 
 The first apply starts with local bootstrap state, creates a private versioned state bucket and a
-bucket-scoped key, then migrates that state to the S3-compatible backend. On Yandex, the script uses
-temporary folder-level `storage.admin` only to create and version the bucket, removes it after
-installing a policy scoped to the dedicated state service account, and only then migrates state.
+bucket-scoped key, then migrates that state to the S3-compatible backend. The bucket expires
+noncurrent versions after 30 days and aborts incomplete multipart uploads after 7: every init, plan,
+and apply creates and deletes the lock object, every apply rewrites state, versioning keeps each of
+those as a noncurrent version, and on Yandex that is what would fill the bucket's `max_size` until
+Terraform can no longer take the lock. Current versions are never expired. An existing install picks
+the rule up by rerunning `infra:bootstrap -- <provider>`, on Yandex with the temporary-role caveat
+below. On Yandex, the script uses temporary folder-level `storage.admin` only to create and
+configure the bucket, removes it after installing a policy scoped to the dedicated state service
+account, and only then migrates state.
 That policy permits bucket-configuration refresh plus current state/lock objects, denies the state
 account `s3:DeleteBucket` and `s3:PutBucketVersioning`, and never permits deleting object versions.
 The Deny guards against a Terraform change, not against a key holder: on Yandex, policy management
@@ -346,7 +352,13 @@ The own-server option remains deliberately separate from the two Terraform stack
 `backend/Dockerfile`, run PostgreSQL 18+, apply `bun run --cwd backend db:deploy` before promotion,
 serve `webapp/dist` and `website/dist` behind Caddy/nginx, run
 `bun run --cwd backend start:scheduler` as a supervised service, and provide an S3-compatible
-private media bucket. Use Ansible only when it reduces repeatable host configuration (packages,
+private media bucket. Run `bun run static:precompress` after both static builds so the proxy can
+serve the `.br`/`.gz` siblings it writes (Caddy `precompressed`; nginx `gzip_static` for `.gz`,
+plus `brotli_static` from the `ngx_brotli` module for `.br`, which stock nginx never serves). That
+step belongs to this path only: neither cloud release reads those files (Yandex builds the static
+surfaces inside `infra/yandex/static.Dockerfile` from a Git archive, DigitalOcean builds them on
+App Platform), so do not run it as part of a cloud release or add it to those build commands. Use
+Ansible only when it reduces repeatable host configuration (packages,
 users, firewall, systemd, proxy); keep database data, credentials, and releases out of playbook
 templates. The operator owns TLS, backups, restore tests, patching, monitoring, and rollback.
 

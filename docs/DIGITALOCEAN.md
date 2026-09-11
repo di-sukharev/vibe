@@ -14,7 +14,8 @@ the Terraform source lives under [`infra/digitalocean`](../infra/digitalocean).
 - one App Platform API app containing the API service, long-running scheduler worker, and
   `PRE_DEPLOY` migration job;
 - separate App Platform Static Site apps for `webapp` and `website`;
-- a private versioned Space and scoped key for Terraform state.
+- a private versioned Space and scoped key for Terraform state; its lifecycle rule expires
+  noncurrent versions after 30 days and aborts incomplete multipart uploads after 7.
 
 The scheduler runs `outbox:drain` every minute, abandoned-upload cleanup hourly at minute 15, and
 session/reset-token cleanup daily at 03:00 UTC. The migration job uses the same immutable backend
@@ -130,6 +131,22 @@ idempotent and verifies the created administrator.
   external admin client requires a deliberate Terraform firewall rule, not a console-wide allow.
 - App Platform Static Sites use DigitalOcean's edge delivery; no separate Spaces CDN or Terraform
   CDN resource is created.
+- DigitalOcean documents Spaces lifecycle rules only for object expiration and incomplete multipart
+  uploads. The state Space's noncurrent-version rule is the standard S3 lifecycle element the
+  provider sends, but nothing in this repository can prove Spaces honors it. After the apply that
+  installs it (the first `infra:bootstrap -- digitalocean --new`, or the rerun on an existing
+  install), read it back once with any S3 client and the account Spaces key exported as
+  `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, for example
+  `aws s3api get-bucket-lifecycle-configuration --endpoint-url https://<spaces_region>.digitaloceanspaces.com --bucket <state Space>`,
+  and expect `NoncurrentVersionExpiration` of 30 days. If the read-back omits that element, Spaces
+  accepted the rule without keeping it and every later rerun will plan the same in-place update:
+  treat it exactly like a refusal. If Spaces refuses the rule instead, the apply fails at the
+  lifecycle step. In both cases drop `noncurrent_version_expiration` from that rule and from the
+  matching assertion in `infra/digitalocean/bootstrap/tests/bootstrap.tftest.hcl`, record the gap
+  in `CHECKLIST.md`, and rerun without `--new`. On a first run a refusal also leaves the created
+  Space tainted in the local bootstrap state, which `prevent_destroy` refuses to replace; clear it
+  with `terraform untaint digitalocean_spaces_bucket.terraform_state` against that local state
+  before the rerun, and never delete the Space or the state to get past it.
 - Private media is never served through a public CDN. The backend issues short-lived signed URLs.
 - Do not enable `deploy_on_push`: the guarded release command is the one promotion authority.
 - Keep wrapper-owned `infra-release/*` branches immutable. Old branches are release evidence and
