@@ -284,6 +284,11 @@ run "steady_state_foundation" {
     condition     = output.release_source.git_branch == var.git_branch
     error_message = "The guarded release wrapper must read the effective branch from foundation state."
   }
+
+  assert {
+    condition     = output.runtime_inputs.runtime_environment["RATE_LIMIT_STORE"] == "database"
+    error_message = "Serverless Containers scale out per request, so the auth limiter must count in PostgreSQL rather than in one instance's memory."
+  }
 }
 
 run "cdn_keeps_direct_https_rollback" {

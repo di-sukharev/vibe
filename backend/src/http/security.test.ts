@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 import { Hono } from 'hono'
 
+import type { RateLimitStore } from '../rate-limit/port'
 import { createFixedWindowRateLimit } from './security'
 
 test('fixed-window rate limits reset without sharing state between keys', async () => {
@@ -81,4 +82,43 @@ test('a table full of exhausted keys refuses new ones instead of forgetting a li
   expect(refused.status).toBe(429)
   expect(refused.headers.get('retry-after')).toBe('60')
   expect((await request('first')).status).toBe(429)
+})
+
+test('counts through the injected store and answers from what it reports', async () => {
+  // The store is the seam that lets several backend processes share one budget. The middleware
+  // must hand it everything its peers need to agree on the same bucket - key, window and clock -
+  // and then trust the count it gets back instead of keeping one of its own.
+  const calls: { key: string; windowSeconds: number; now: number }[] = []
+  let count = 0
+  const store: RateLimitStore = {
+    consume: async (key, windowSeconds, now) => {
+      calls.push({ key, windowSeconds, now })
+      count += 1
+      return { count, resetAt: 61_000 }
+    },
+  }
+  const app = new Hono()
+  app.use('*', createFixedWindowRateLimit({
+    errorMessage: 'Too many test requests',
+    key: (c) => c.req.header('x-test-key') ?? 'missing',
+    max: 1,
+    now: () => 1_000,
+    store: () => store,
+    windowSeconds: 60,
+  }))
+  app.get('/', (c) => c.text('ok'))
+  const request = () => app.request('/', { headers: { 'X-Test-Key': 'shared' } })
+
+  const allowed = await request()
+  expect(allowed.status).toBe(200)
+  expect(allowed.headers.get('ratelimit-remaining')).toBe('0')
+
+  const limited = await request()
+  expect(limited.status).toBe(429)
+  expect(limited.headers.get('ratelimit-reset')).toBe('61')
+  expect(limited.headers.get('retry-after')).toBe('60')
+  expect(calls).toEqual([
+    { key: 'shared', windowSeconds: 60, now: 1_000 },
+    { key: 'shared', windowSeconds: 60, now: 1_000 },
+  ])
 })

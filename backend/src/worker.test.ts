@@ -72,6 +72,7 @@ test('loops run side by side and survive a failing neighbour', async () => {
         },
       },
       passwordResetToken: { deleteMany: async () => ({ count: 0 }) },
+      rateLimitBucket: { deleteMany: async () => ({ count: 0 }) },
     },
     env: { SESSION_RETENTION_DAYS: 7, SESSION_ABSOLUTE_TTL_DAYS: 90 },
   } as unknown as BackendRuntime

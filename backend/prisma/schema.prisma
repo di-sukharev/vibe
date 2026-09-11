@@ -150,3 +150,24 @@ model AuthSession {
   @@index([expiresAt], map: "auth_sessions_expires_at_idx")
   @@map("auth_sessions")
 }
+
+/// One counter per policy, client key and clock-aligned window, bumped by a single upsert per
+/// limited request when RATE_LIMIT_STORE=database (backend/src/rate-limit/database-store.ts).
+/// A row is only ever reached through its own key and referenced by nothing, so the natural key
+/// is the primary key: a surrogate UUID would add a second index to every auth request and point
+/// at nothing. `auth:sessions:cleanup` deletes rows past `expires_at`.
+model RateLimitBucket {
+  /// Which budget the row belongs to. Validated in code (backend/src/rate-limit/port.ts), not by
+  /// a database enum, so adding a policy stays a code change.
+  policy      String
+  /// The client's identity under that policy: an address for auth, a user id for admin reads.
+  key         String
+  windowStart DateTime @map("window_start")
+  count       Int
+  /// When the window ends. Stored next to the count so the sweeper needs no idea of window sizes.
+  expiresAt   DateTime @map("expires_at")
+
+  @@id([policy, key, windowStart], map: "rate_limit_buckets_pkey")
+  @@index([expiresAt], map: "rate_limit_buckets_expires_at_idx")
+  @@map("rate_limit_buckets")
+}

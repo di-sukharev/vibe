@@ -59,6 +59,12 @@ const envSchema = z.object({
   AUTH_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
   ADMIN_USERS_READ_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(120),
   ADMIN_USERS_READ_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
+  // Where the auth and admin limiters count. `memory` is one process's own table and the whole
+  // truth while one API instance serves every request: DigitalOcean's launch profile, an own
+  // server, local development. `database` counts in PostgreSQL through one upsert per limited
+  // request, so any number of instances share one budget; Terraform sets it for Yandex Serverless
+  // Containers, which scale out per concurrent request. See docs/DEPLOYMENT.md.
+  RATE_LIMIT_STORE: z.enum(['memory', 'database']).default('memory'),
   SHUTDOWN_GRACE_SECONDS: z.coerce.number().int().positive().max(60).default(20),
   // Which email adapter createEmailDelivery builds. 'console' prints the message instead of
   // sending it, so password reset can be followed locally; production refuses it below.

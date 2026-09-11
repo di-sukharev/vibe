@@ -16,6 +16,7 @@ import { createAuthSecurity, createFixedWindowRateLimit } from './http/security'
 import { createAuthModule, type AuthHttpEnv } from './modules/auth'
 import { createUploadsModule } from './modules/uploads'
 import { createUsersModule } from './modules/users'
+import { createRateLimitStores } from './rate-limit'
 import {
   apiCorsAllowedHeaders,
   browserUploadExposedHeaders,
@@ -44,10 +45,14 @@ export function createApp({
 }: CreateAppOptions) {
   const storage = privateStorage ?? createPrivateStorage(env)
   const auth = createAuthModule({ db: prisma, emailDelivery, env })
+  // One store per policy, in memory or in PostgreSQL as RATE_LIMIT_STORE says; the middleware
+  // never learns which.
+  const rateLimitStore = createRateLimitStores(env, prisma)
   const adminUsersReadRateLimit = createFixedWindowRateLimit<AuthHttpEnv>({
     errorMessage: 'Too many admin user directory requests',
     key: (c) => c.var.user.id,
     max: env.ADMIN_USERS_READ_RATE_LIMIT_MAX,
+    store: rateLimitStore('admin-users-read'),
     windowSeconds: env.ADMIN_USERS_READ_RATE_LIMIT_WINDOW_SECONDS,
   })
   const users = createUsersModule({
@@ -90,24 +95,21 @@ export function createApp({
       maxAge: 600,
     }),
   )
-  for (const middleware of createAuthSecurity({
-    bodyLimitBytes: env.AUTH_BODY_LIMIT_BYTES,
-    rateLimitMax: env.AUTH_RATE_LIMIT_MAX,
-    rateLimitWindowSeconds: env.AUTH_RATE_LIMIT_WINDOW_SECONDS,
-    trustProxy: env.TRUST_PROXY,
-    trustedProxyClientIpHeader: env.TRUSTED_PROXY_CLIENT_IP_HEADER,
-    trustedProxyClientIpPosition: env.TRUSTED_PROXY_CLIENT_IP_POSITION,
-  })) {
+  // Signing in and managing an account are two budgets of the same size, keyed by client address.
+  const authSecurity = (policy: 'auth' | 'account') =>
+    createAuthSecurity({
+      bodyLimitBytes: env.AUTH_BODY_LIMIT_BYTES,
+      rateLimitMax: env.AUTH_RATE_LIMIT_MAX,
+      rateLimitWindowSeconds: env.AUTH_RATE_LIMIT_WINDOW_SECONDS,
+      store: rateLimitStore(policy),
+      trustProxy: env.TRUST_PROXY,
+      trustedProxyClientIpHeader: env.TRUSTED_PROXY_CLIENT_IP_HEADER,
+      trustedProxyClientIpPosition: env.TRUSTED_PROXY_CLIENT_IP_POSITION,
+    })
+  for (const middleware of authSecurity('auth')) {
     app.use('/api/auth/*', middleware)
   }
-  for (const middleware of createAuthSecurity({
-    bodyLimitBytes: env.AUTH_BODY_LIMIT_BYTES,
-    rateLimitMax: env.AUTH_RATE_LIMIT_MAX,
-    rateLimitWindowSeconds: env.AUTH_RATE_LIMIT_WINDOW_SECONDS,
-    trustProxy: env.TRUST_PROXY,
-    trustedProxyClientIpHeader: env.TRUSTED_PROXY_CLIENT_IP_HEADER,
-    trustedProxyClientIpPosition: env.TRUSTED_PROXY_CLIENT_IP_POSITION,
-  })) {
+  for (const middleware of authSecurity('account')) {
     app.use('/api/users/*', middleware)
     app.use('/api/admin/*', middleware)
     app.use('/api/uploads/*', middleware)

@@ -88,6 +88,19 @@ describe('loadEnv', () => {
     expect(() => loadEnv({ ...base, EMAIL_DELIVERY: 'smtp' })).toThrow('EMAIL_DELIVERY')
   })
 
+  test('counts rate limits in process memory unless the deployment selects the database', () => {
+    const base = {
+      DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
+      JWT_SECRET: '12345678901234567890123456789012',
+    }
+
+    // The default is a contract, not tuning: a single-process install must not pay a query per
+    // auth request for a budget it can count by itself.
+    expect(loadEnv(base).RATE_LIMIT_STORE).toBe('memory')
+    expect(loadEnv({ ...base, RATE_LIMIT_STORE: 'database' }).RATE_LIMIT_STORE).toBe('database')
+    expect(() => loadEnv({ ...base, RATE_LIMIT_STORE: 'redis' })).toThrow('RATE_LIMIT_STORE')
+  })
+
   test('rejects unsafe production CORS origins', () => {
     const baseEnv = {
       DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',

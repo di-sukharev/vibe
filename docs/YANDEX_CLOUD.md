@@ -239,11 +239,11 @@ any object still owned by the legacy role instead of failing halfway through a m
 
 The provider timers use UTC:
 
-| Job                       | Timer expression | Lock / invocation timeout | Purpose                                  |
-| ------------------------- | ---------------- | ------------------------- | ---------------------------------------- |
-| `outbox:drain`            | `* * ? * * *`    | 240s / 180s               | Durable email/task delivery every minute |
-| `uploads:pending:cleanup` | `15 * ? * * *`   | 900s / 840s               | Abandoned uploads hourly                 |
-| `auth:sessions:cleanup`   | `0 3 ? * * *`    | 240s / 180s               | Expired sessions/reset tokens daily      |
+| Job                       | Timer expression | Lock / invocation timeout | Purpose                                             |
+| ------------------------- | ---------------- | ------------------------- | --------------------------------------------------- |
+| `outbox:drain`            | `* * ? * * *`    | 240s / 180s               | Durable email/task delivery every minute            |
+| `uploads:pending:cleanup` | `15 * ? * * *`   | 900s / 840s               | Abandoned uploads hourly                            |
+| `auth:sessions:cleanup`   | `0 3 ? * * *`    | 240s / 180s               | Expired sessions, reset tokens, rate windows daily  |
 
 The API and job containers join the VPC; Managed PostgreSQL has no public IP. Yandex assigns
 connected Serverless Containers addresses from its documented `198.19.0.0/16` service range, so

@@ -31,12 +31,17 @@ demands it.
 
 Yandex is different and the difference matters: Serverless Containers scale out by running more
 instances of the revision, and `concurrency` only sets how many requests one instance takes before
-the next one starts. There is no setting that pins the API to a single process. Anything the
-backend keeps in process memory is therefore per-instance there, and the auth rate limiter in
-`backend/src/http/security.ts` is exactly that - its own comment states the condition. On Yandex,
-treat `AUTH_RATE_LIMIT_MAX` and `ADMIN_USERS_READ_RATE_LIMIT_MAX` as per-instance budgets, not
-global ones, until that counter is moved into shared state. PostgreSQL is the shared state this
-repository already runs; see the rule in `docs/ARCHITECTURE.md` before reaching for anything else.
+the next one starts. There is no setting that pins the API to a single process, so anything the
+backend keeps in process memory is per-instance there. The auth and admin rate limiters are the
+one such thing that must not be, which is why the Yandex runtime inputs set
+`RATE_LIMIT_STORE=database`: the limiters in `backend/src/http/security.ts` then count in the
+`rate_limit_buckets` table of the PostgreSQL the deployment already runs (`backend/src/rate-limit`),
+one upsert per limited request keyed by policy, client and clock-aligned window, so
+`AUTH_RATE_LIMIT_MAX` and `ADMIN_USERS_READ_RATE_LIMIT_MAX` are global budgets on both hostings.
+DigitalOcean keeps the default `memory` store: with one instance it is already the whole truth and
+costs no query. An own server that runs more than one backend process sets `database` the same
+way. `auth:sessions:cleanup` sweeps spent windows. The rule in `docs/ARCHITECTURE.md` is why this
+is a table and not a Redis.
 
 No Ansible is used on these two paths: there is no host to configure. Terraform owns managed and
 serverless resources; the release script owns image build, migration ordering, static publication,

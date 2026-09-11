@@ -42,7 +42,7 @@ export const backgroundJobs = {
     const absoluteRetentionCutoff = new Date(
       now.getTime() - (env.SESSION_ABSOLUTE_TTL_DAYS + env.SESSION_RETENTION_DAYS) * dayMs,
     )
-    const [sessions, resetTokens] = await Promise.all([
+    const [sessions, resetTokens, rateLimitWindows] = await Promise.all([
       prisma.authSession.deleteMany({
         where: {
           OR: [
@@ -55,9 +55,15 @@ export const backgroundJobs = {
       prisma.passwordResetToken.deleteMany({
         where: { expiresAt: { lt: now } },
       }),
+      // A rate-limit window past its end is never read again - every request looks up the window
+      // containing its own clock - so the rows are pure weight. Only RATE_LIMIT_STORE=database
+      // writes them; elsewhere this sweeps an empty table.
+      prisma.rateLimitBucket.deleteMany({
+        where: { expiresAt: { lt: now } },
+      }),
     ])
     console.log(
-      `Job auth:sessions:cleanup removed ${sessions.count} stale sessions and ${resetTokens.count} expired password reset tokens.`,
+      `Job auth:sessions:cleanup removed ${sessions.count} stale sessions, ${resetTokens.count} expired password reset tokens and ${rateLimitWindows.count} spent rate-limit windows.`,
     )
   },
   'uploads:pending:cleanup': async ({ prisma, privateStorage }, now) => {

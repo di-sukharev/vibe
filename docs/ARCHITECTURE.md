@@ -26,6 +26,7 @@ transport -> application -> domain/ports -> infrastructure -> DTO
 - `src/runtime.ts` owns shared env loading, Prisma creation, and runtime cleanup for all backend entrypoints.
 - `src/background-tasks.ts` defers response-independent best-effort work and lets the API drain accepted tasks before graceful shutdown. Tasks receive an `AbortSignal`; a task deadline aborts work but keeps its cleanup tracked until settlement, while server draining and task cleanup consume one shared absolute shutdown deadline. It holds work whose loss on a restart is acceptable - deleting an object whose upload row was rejected, for instance.
 - `src/outbox` holds work whose loss is not acceptable: a row in `task_outbox`, claimed and retried by the `outbox:drain` job until it succeeds or gives up. Three mechanisms, one distinction: `background-tasks.ts` for best-effort work inside a request, `outbox` for durable one-off work, `jobs.ts` for work on a timer. Password reset uses the outbox, which is also what keeps the public response path account-independent: the request writes one row for any address - or none for any address, while a flood keeps the queue's ceiling full - and the handler does the lookup. See [BACKGROUND_JOBS.md](BACKGROUND_JOBS.md).
+- `src/rate-limit` owns where the fixed-window limiters in `src/http/security.ts` keep their counters: a bounded process-local table by default, or one PostgreSQL row per policy, client and clock-aligned window when `RATE_LIMIT_STORE=database` - the setting Terraform applies wherever the API runs as more than one process. `createApp` picks one store per policy; the middleware never learns which.
 - `src/app.ts` is the composition root. It owns the Hono app, CORS, secure headers, error handling, module construction, route mounting, and OpenAPI output.
 - `src/env.ts` validates environment variables with Zod.
 - `src/db.ts` creates the Prisma client.
@@ -58,7 +59,8 @@ Each of those has a smaller first answer inside what is already here:
 - durable background work belongs in the `task_outbox` table drained by the `outbox:drain` job, not in a queue service with its own consumer process;
 - a slow read belongs behind an index or a narrower query before it belongs behind a cache;
 - a text search belongs in PostgreSQL full-text search before it belongs in a search engine;
-- a cross-process notification belongs in a row plus a poll before it belongs in a broker.
+- a cross-process notification belongs in a row plus a poll before it belongs in a broker;
+- a counter every backend instance must agree on - the rate limiter's - belongs in a PostgreSQL row bumped by one upsert (`RATE_LIMIT_STORE=database`, `backend/src/rate-limit`) before it belongs in Redis.
 
 This is not absolute. Add the component when a **measured** limit of the current approach has been reached and the new component removes that limit: the drain cannot keep up at the shortest interval the hosting allows and the backlog grows across runs; delivery is needed to processes that do not share this database; the work needs ordering or exactly-once semantics PostgreSQL cannot express; retention or throughput would put queue rows on a different storage path from product data; or real-time fanout must cross backend instances, which is the case the next paragraphs describe. Record the measurement in `CHECKLIST.md` next to the capability row before adding the component, so a later session can tell a real limit from a preference.
 

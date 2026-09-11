@@ -3,32 +3,32 @@ import { getConnInfo } from 'hono/bun'
 import { bodyLimit } from 'hono/body-limit'
 import { isIP } from 'node:net'
 
+import { createMemoryRateLimitStore } from '../rate-limit/memory-store'
+import type { RateLimitStoreFactory } from '../rate-limit/port'
 import { errorResponse } from './errors'
 
 type AuthSecurityOptions = {
   bodyLimitBytes: number
   rateLimitMax: number
   rateLimitWindowSeconds: number
+  /** Builds the counter store for the budget. Defaults to a process-local one; see rate-limit/port.ts. */
+  store?: RateLimitStoreFactory
   trustProxy: boolean
   trustedProxyClientIpHeader?: string
   trustedProxyClientIpPosition?: 'first' | 'last'
-}
-
-type RateLimitBucket = {
-  count: number
-  resetAt: number
 }
 
 type FixedWindowRateLimitOptions<E extends Env> = {
   errorMessage: string
   key: (c: Context<E>) => string
   max: number
+  /** Bound on the default memory store's table. Ignored when `store` is given. */
   maxTrackedKeys?: number
   now?: () => number
+  /** Builds the counter store for the budget. Defaults to a process-local one; see rate-limit/port.ts. */
+  store?: RateLimitStoreFactory
   windowSeconds: number
 }
-
-const maxTrackedKeys = 10_000
 
 export function createAuthSecurity(options: AuthSecurityOptions): MiddlewareHandler[] {
   return [
@@ -45,6 +45,7 @@ function createAuthRateLimit(options: AuthSecurityOptions): MiddlewareHandler {
     errorMessage: 'Too many authentication requests',
     key: (c) => clientAddress(c, options),
     max: options.rateLimitMax,
+    store: options.store,
     windowSeconds: options.rateLimitWindowSeconds,
   })
 
@@ -58,42 +59,34 @@ function createAuthRateLimit(options: AuthSecurityOptions): MiddlewareHandler {
   }
 }
 
+/**
+ * Fixed-window limiting over whichever store the caller hands in. The store owns the counting
+ * and the window; this owns the budget, the headers and the refusal. The default store is
+ * process-local, which is the whole truth only while one process serves every request - see
+ * rate-limit/port.ts for the shared one.
+ */
 export function createFixedWindowRateLimit<E extends Env>(
   options: FixedWindowRateLimitOptions<E>,
 ): MiddlewareHandler<E> {
-  // This bounded store is intentionally process-local. Replace it with shared state when
-  // requests for one rate-limit policy can be served by multiple backend processes.
-  const buckets = new Map<string, RateLimitBucket>()
+  const store = options.store
+    ? options.store({ max: options.max })
+    : createMemoryRateLimitStore({ max: options.max, maxTrackedKeys: options.maxTrackedKeys })
   const now = options.now ?? Date.now
-  const windowMs = options.windowSeconds * 1000
-  const trackedKeyLimit = options.maxTrackedKeys ?? maxTrackedKeys
 
   return async (c, next) => {
     const currentTime = now()
-    let key = options.key(c)
-    let bucket = buckets.get(key)
+    const { count, resetAt } = await store.consume(
+      options.key(c),
+      options.windowSeconds,
+      currentTime,
+    )
 
-    if (!bucket || bucket.resetAt <= currentTime) {
-      if (buckets.size >= trackedKeyLimit) {
-        deleteExpiredBuckets(buckets, currentTime)
-      }
-      if (buckets.size >= trackedKeyLimit && !evictOneUnexhaustedBucket(buckets, options.max)) {
-        // Every tracked key already spent its budget, so the table holds nothing but the counters
-        // currently doing the limiting. Refusing the new key is the honest answer: evicting one
-        // would let a flood of fresh keys clear the record of whoever is being limited.
-        return rateLimited(c, options, currentTime + windowMs, currentTime)
-      }
-      bucket = { count: 0, resetAt: currentTime + windowMs }
-      buckets.set(key, bucket)
-    }
-
-    bucket.count += 1
     c.header('RateLimit-Limit', String(options.max))
-    c.header('RateLimit-Remaining', String(Math.max(0, options.max - bucket.count)))
-    c.header('RateLimit-Reset', String(Math.ceil(bucket.resetAt / 1000)))
+    c.header('RateLimit-Remaining', String(Math.max(0, options.max - count)))
+    c.header('RateLimit-Reset', String(Math.ceil(resetAt / 1000)))
 
-    if (bucket.count > options.max) {
-      return rateLimited(c, options, bucket.resetAt, currentTime)
+    if (count > options.max) {
+      return rateLimited(c, options, resetAt, currentTime)
     }
 
     await next()
@@ -137,26 +130,4 @@ function rateLimited<E extends Env>(
   c.header('RateLimit-Reset', String(Math.ceil(resetAt / 1000)))
   c.header('Retry-After', String(Math.max(1, Math.ceil((resetAt - now) / 1000))))
   return c.json(errorResponse('RATE_LIMITED', options.errorMessage), 429)
-}
-
-/**
- * Frees one slot for a key the store has not seen. Buckets that already reached the budget are
- * skipped: those are the counters enforcing the limit right now, and evicting one would hand any
- * client able to mint fresh keys a way to erase its own record. Map iteration is insertion order,
- * so the oldest still-cheap key goes first.
- */
-function evictOneUnexhaustedBucket(buckets: Map<string, RateLimitBucket>, max: number) {
-  for (const [key, bucket] of buckets) {
-    if (bucket.count >= max) continue
-    buckets.delete(key)
-    return true
-  }
-
-  return false
-}
-
-function deleteExpiredBuckets(buckets: Map<string, RateLimitBucket>, now: number) {
-  for (const [key, bucket] of buckets) {
-    if (bucket.resetAt <= now) buckets.delete(key)
-  }
 }
