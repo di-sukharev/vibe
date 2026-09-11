@@ -14,7 +14,9 @@ data-residency requirement. Common safety and release rules live in
 - an HTTP Serverless Container behind API Gateway;
 - one migration task container plus three HTTP job containers invoked by timer triggers;
 - public Object Storage website buckets for `webapp` and `website`;
-- a separate private media bucket and bucket-scoped runtime credentials stored in Lockbox;
+- a separate private versioned media bucket and bucket-scoped runtime credentials stored in
+  Lockbox; its lifecycle rule expires noncurrent versions after 30 days and aborts incomplete
+  multipart uploads after 7;
 - separate migration, runtime, gateway, trigger, publisher, and storage-management service
   accounts with narrow roles;
 - an optional Postbox sender and optional Cloud CDN resources;
@@ -156,6 +158,14 @@ used; `s3:*` stays so that they remain allowed should the policy be consulted as
 replace it with an enumerated list: that would protect nothing (the same key rewrites the policy
 through IAM) and would break bucket refresh the day the provider reads one more attribute. If a
 future change must alter versioning, drop the Deny in one apply and change versioning in the next.
+A media bucket created before this template versioned it is that case with a shorter path: enable
+versioning once with your own identity,
+`yc storage bucket update --name <media bucket> --versioning versioning-enabled`
+(`yc` goes through the Cloud API, where IAM authorizes the call; an S3 `put-bucket-versioning`
+from any other key would match no Allow statement and be rejected, and if Yandex rejects the `yc`
+update too, the two-apply path above is the fallback), then rerun `infra:apply`; the refreshed
+bucket already matches the configuration, so the provider sends no `PutBucketVersioning` and the
+apply installs the lifecycle rule.
 The IaC key cannot access the separate Terraform-state bucket in steady state.
 
 The release refuses foundation drift, builds and pushes one Linux AMD64 image from a `git archive`
@@ -181,7 +191,29 @@ index shell, proving the single-page fallback still works on the public domain.
 The static publisher key is a sensitive Terraform output consumed in memory by the release
 process. Its exact-key bucket policies cover only the two public static buckets and cannot delete a
 bucket or a noncurrent object version. The API runtime uses a different exact-key policy scoped to
-ordinary objects in the private media bucket, and its credentials are delivered through Lockbox.
+ordinary objects in the private media bucket, so a delete through it leaves a version it cannot
+remove for the 30 days [STORAGE.md](STORAGE.md) describes, and its credentials are delivered
+through Lockbox. Restoring one of those versions needs an operator identity first. Yandex checks
+IAM before the bucket policy, rejects an S3 request that no policy statement allows, and disables
+console access to a bucket that has a policy; the media policy names only the IaC account (bucket
+actions) and the runtime key (ordinary objects), so nothing it names can read a noncurrent version
+or remove a delete marker, and the IaC key is not an output. Use a service account of your own
+with a static access key (user accounts hold none, and `yc` has no version-listing command): bind
+it bucket-scoped `storage.editor`, the role Yandex documents for restoring object versions, in the
+console or through the Cloud API, so the request passes IAM; then add a temporary policy statement
+for it (`CanonicalUser` = its id) allowing `s3:ListBucketVersions` on the bucket ARN and
+`s3:GetObjectVersion`, `s3:PutObject`, and `s3:DeleteObjectVersion` on `<bucket>/*`: start from
+the current policy, the `policy` field of `yc storage bucket get <media bucket> --full --format json`
+(`| jq .policy` isolates it), append the statement to its `Statement` list, and write that policy
+document back with `yc storage bucket update --policy-from-file`,
+which replaces the policy rather than merging into it; a file holding only the new statement
+would cut the runtime key off from media until the next apply (policy edits are IAM-authorized;
+`storage.configurer` on the bucket is enough for the account running `yc`). Restore through an S3
+client signed with that key, for example
+`aws s3api list-object-versions --endpoint-url https://storage.yandexcloud.net --bucket <media bucket>`,
+then a copy of the version back over its key or a delete of the marker. Afterwards remove the
+binding and rerun `infra:apply`, which rewrites the policy without that statement; the release
+refuses foundation drift until it does.
 Runtime access to Lockbox is also granted per referenced secret, including every
 `extra_secret_bindings` entry; the runtime identity is not a folder-wide payload viewer and cannot
 read the database-owner migration secret.

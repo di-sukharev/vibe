@@ -97,6 +97,37 @@ run "steady_state_foundation" {
   }
 
   assert {
+    condition     = try(one(yandex_storage_bucket.media.versioning).enabled, false)
+    error_message = "User media must be versioned: the runtime key can delete objects and the backend does on every avatar replace or remove, so a delete needs a recoverable version behind it."
+  }
+
+  assert {
+    condition = (
+      try(yandex_storage_bucket.media.lifecycle_rule[0].enabled, false) &&
+      try(yandex_storage_bucket.media.lifecycle_rule[0].noncurrent_version_expiration[0].days, 0) == 30
+    )
+    error_message = "Versioning keeps every replaced or deleted media object as a noncurrent version; the bucket needs one enabled rule expiring them after 30 days, the recovery window docs/STORAGE.md promises, or the bucket grows without bound."
+  }
+
+  assert {
+    condition     = try(yandex_storage_bucket.media.lifecycle_rule[0].abort_incomplete_multipart_upload_days, 0) == 7
+    error_message = "An interrupted multipart upload must be aborted instead of holding storage forever."
+  }
+
+  assert {
+    condition     = try(yandex_storage_bucket.media.lifecycle_rule[1].enabled, null) == null
+    error_message = "The media bucket keeps exactly one lifecycle rule; a second one is where an expiration of current objects would hide."
+  }
+
+  assert {
+    condition = (
+      try(one(yandex_storage_bucket.media.lifecycle_rule[0].expiration).days, null) == null &&
+      try(one(yandex_storage_bucket.media.lifecycle_rule[0].expiration).date, null) == null
+    )
+    error_message = "The lifecycle rule must leave current media objects alone: no expiration by age or date. Removing expired delete markers is the one expiration a versioned media bucket may add."
+  }
+
+  assert {
     condition = (
       one(yandex_storage_bucket.webapp.anonymous_access_flags).read &&
       !one(yandex_storage_bucket.webapp.anonymous_access_flags).list &&

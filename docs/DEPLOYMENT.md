@@ -18,7 +18,7 @@ Provider runbooks:
 | Scheduled work        | App Platform scheduler worker       | Three HTTP job containers with timer triggers  |
 | Database              | Managed PostgreSQL 18               | Managed Service for PostgreSQL 18              |
 | Static webapp/website | App Platform Static Sites           | Two public Object Storage website buckets      |
-| User media            | Private Spaces bucket               | Separate private Object Storage bucket         |
+| User media            | Private, versioned Spaces bucket    | Private, versioned Object Storage bucket       |
 | Image registry        | DigitalOcean Container Registry     | Yandex Container Registry                      |
 | Terraform state       | Private, versioned Space            | Private, versioned Object Storage bucket       |
 | CDN                   | App Platform's static-site delivery | Off by default; Cloud CDN is opt-in            |
