@@ -10,11 +10,16 @@ the Terraform source lives under [`infra/digitalocean`](../infra/digitalocean).
 - one account-wide Container Registry (protected from destroy);
 - one PostgreSQL 18 cluster, application database, separate runtime user, and a
   Terraform-managed trusted-source firewall;
-- one private Spaces bucket for user media plus a bucket-scoped runtime key;
+- one private versioned Spaces bucket for user media plus a bucket-scoped runtime key; its
+  lifecycle rule expires noncurrent versions after 30 days and aborts incomplete multipart uploads
+  after 7;
 - one App Platform API app containing the API service, long-running scheduler worker, and
   `PRE_DEPLOY` migration job;
 - separate App Platform Static Site apps for `webapp` and `website`;
-- a private versioned Space and scoped key for Terraform state.
+- alert rules on the API app: failed deployment and failed domain at app level, and restart,
+  memory, and CPU rules on the scheduler worker, delivered to the team's default email;
+- a private versioned Space and scoped key for Terraform state; its lifecycle rule expires
+  noncurrent versions after 30 days and aborts incomplete multipart uploads after 7.
 
 The scheduler runs `outbox:drain` and `notifications:process` every minute, abandoned-upload
 cleanup hourly at minute 15, and combined auth/notification maintenance every 15 minutes. The
@@ -75,6 +80,16 @@ export TF_VAR_extra_runtime_secret_env='{"EMAIL_RESEND_API_KEY":"<secret>"}'
 
 Then set `email_delivery = "resend"` and `email_from` in the production tfvars.
 
+Alerts need no configuration: App Platform sends them to the team's default email. Routing them
+to specific team members is a console step (the API app, Settings tab, Alert Policies, Edit, then
+expand the rule and set its notification method), deliberately not a Terraform input. Provider
+2.99.1 never reads alert destinations back into state, so a list in Terraform would plan an
+update on every run, and removing it would not restore the default because the provider only ever
+replaces destinations with a declared list and never clears them. On the provider side an apply
+leaves console-set destinations alone: the app spec carries none, and the provider syncs them only
+when Terraform declares some. Whether App Platform itself keeps them when the spec is re-applied
+is not verified; check once after the first release that follows a console change.
+
 ## Commands
 
 ```bash
@@ -121,16 +136,72 @@ If `ADMIN_SEED_*` is supplied, the first deployment runs the migration with it. 
 script removes the bootstrap variables and applies once more; the second migration is deliberately
 idempotent and verifies the created administrator.
 
+## Alerts
+
+Terraform creates these on the API app (`infra/digitalocean/runtime/main.tf`); nothing is clicked
+in the console. Each one is an e-mail to the team's default address; "Configuration" above says how
+to route them to specific people.
+
+| Alert                                          | Fires when                                          | What it means                                                                                                         |
+| ---------------------------------------------- | --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `DEPLOYMENT_FAILED` (app)                      | a deployment fails                                  | the migration gate or a component failed; the previous deployment stays live                                          |
+| `DOMAIN_FAILED` (app)                          | `api_domain` fails to configure                     | a DNS or certificate problem on the API domain                                                                        |
+| `RESTART_COUNT` > 1 in 5 min (scheduler)       | the worker restarted more than once in five minutes | a crash loop: the outbox drain and cleanups are not running. One restart after a deploy stays quiet                   |
+| `MEM_UTILIZATION` > 85% for 10 min (scheduler) | memory stays above 85% of `worker_instance_size`    | the worker is about to be killed for running out of memory                                                            |
+| `CPU_UTILIZATION` > 90% for 30 min (scheduler) | CPU stays above 90% for half an hour                | a healthy scheduler idles between ticks; this is a stuck job. A pass is bounded whatever the backlog, so backlog never shows here |
+
+What these do not cover: the numbers in the `Job outbox:drain completed.` entry - `backlog`,
+`terminalFailed`, `claimed`/`skipped`, `unhandled`. App Platform cannot alert on a value inside a
+log entry without forwarding logs to an external service, which this repository does not run. Read
+them from the worker's runtime log; the app is `<project_slug>-prod-api`. The metrics object is
+printed over a dozen lines after the message, so ask for the lines that follow each match:
+
+```bash
+doctl apps list --format ID,Spec.Name
+doctl apps logs <app id> scheduler --type run --tail 500 | grep -A 11 'outbox:drain completed'
+```
+
+`docs/BACKGROUND_JOBS.md`, "What to watch", says what each number means and when to act. A pass
+that fails without crashing the worker appears there as `Scheduler job outbox:drain failed.`, not
+as an alert.
+
 ## Operations
 
 - The starting PostgreSQL size and single node prioritize launch cost. Backups are managed by the
   service, but restore testing and an HA upgrade remain operator work.
 - PostgreSQL initially trusts only the dedicated VPC CIDR while no app ID exists. After the
   migration-gated API deployment succeeds, the wrapper feeds its App ID back into the independent
-  foundation root and replaces the bootstrap rule with that exact trusted source. Adding an
-  external admin client requires a deliberate Terraform firewall rule, not a console-wide allow.
+  foundation root and replaces the bootstrap rule with that exact trusted source. If the runtime
+  state stops reporting that App ID while the API app still exists, `infra:plan` and
+  `infra:apply` fail closed instead of widening the rule back to the VPC range; recover or import
+  the runtime state first. Adding an external admin client requires a deliberate Terraform
+  firewall rule, not a console-wide allow.
 - App Platform Static Sites use DigitalOcean's edge delivery; no separate Spaces CDN or Terraform
   CDN resource is created.
+- DigitalOcean documents Spaces lifecycle rules only for object expiration and incomplete multipart
+  uploads. The noncurrent-version rule on the state Space and on the media Space is the standard
+  S3 lifecycle element the provider sends, but nothing in this repository can prove Spaces honors
+  it. After the apply that installs each (`infra:bootstrap -- digitalocean --new` for the state
+  Space, `infra:apply -- digitalocean` for the media Space, or the rerun of either on an existing
+  install), read it back once with any S3 client and the account Spaces key exported as
+  `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, for example
+  `aws s3api get-bucket-lifecycle-configuration --endpoint-url https://<spaces_region>.digitaloceanspaces.com --bucket <Space>`,
+  and expect `NoncurrentVersionExpiration` of 30 days. If the read-back omits that element, Spaces
+  accepted the rule without keeping it and every later rerun will plan the same in-place update:
+  treat it exactly like a refusal. If Spaces refuses the rule instead, the apply fails at the
+  lifecycle step. In both cases drop `noncurrent_version_expiration` from both rules and both
+  assertions (`infra/digitalocean/bootstrap/tests/bootstrap.tftest.hcl` and
+  `infra/digitalocean/production/tests/production.tftest.hcl`) the first time Spaces refuses it:
+  the state Space fails first, and the media Space would fail the same way at `infra:apply`. Record
+  the gap in `CHECKLIST.md` and rerun (`infra:bootstrap` without `--new`, then `infra:apply`). For
+  the media Space that gap also means the 30-day recovery window in [STORAGE.md](STORAGE.md) never
+  closes, so deleted versions accumulate until someone prunes them by hand. On a first run a
+  refusal also leaves the created Space tainted, which `prevent_destroy` refuses to replace; clear
+  it with `terraform untaint digitalocean_spaces_bucket.terraform_state` against the local
+  bootstrap state, or `terraform untaint digitalocean_spaces_bucket.media` in the initialized
+  foundation root with `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` exported from the `TF_STATE_*`
+  values in `infra/digitalocean/.env.terraform-state` (the wrapper's own backend credentials),
+  before the rerun, and never delete a Space or the state to get past it.
 - Private media is never served through a public CDN. The backend issues short-lived signed URLs.
 - Do not enable `deploy_on_push`: the guarded release command is the one promotion authority.
 - Keep wrapper-owned `infra-release/*` branches immutable. Old branches are release evidence and
@@ -142,6 +213,7 @@ idempotent and verifies the created administrator.
 
 - [DigitalOcean Terraform provider](https://docs.digitalocean.com/reference/terraform/)
 - [App Platform](https://docs.digitalocean.com/products/app-platform/)
+- [App Platform alerts](https://docs.digitalocean.com/products/app-platform/how-to/create-alerts/)
 - [Managed PostgreSQL](https://docs.digitalocean.com/products/databases/postgresql/)
 - [Container Registry](https://docs.digitalocean.com/products/container-registry/)
 - [Spaces](https://docs.digitalocean.com/products/spaces/)

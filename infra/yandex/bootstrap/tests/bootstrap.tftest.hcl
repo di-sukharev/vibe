@@ -38,6 +38,29 @@ run "private_versioned_state" {
   }
 
   assert {
+    condition = (
+      try(yandex_storage_bucket.terraform_state.lifecycle_rule[0].enabled, false) &&
+      try(yandex_storage_bucket.terraform_state.lifecycle_rule[0].noncurrent_version_expiration[0].days, 0) == 30
+    )
+    error_message = "Every init, plan, and apply writes and deletes the lock object and every apply rewrites state; versioning keeps each as a noncurrent version, so the bucket needs one enabled rule expiring them after 30 days, the window the static buckets keep, or max_size eventually refuses the next lock."
+  }
+
+  assert {
+    condition     = try(yandex_storage_bucket.terraform_state.lifecycle_rule[0].abort_incomplete_multipart_upload_days, 0) == 7
+    error_message = "An interrupted multipart state write must be aborted instead of holding quota."
+  }
+
+  assert {
+    condition     = try(yandex_storage_bucket.terraform_state.lifecycle_rule[1].enabled, null) == null
+    error_message = "The state bucket keeps exactly one lifecycle rule; a second one is where an expiration of current versions would hide."
+  }
+
+  assert {
+    condition     = try(length(yandex_storage_bucket.terraform_state.lifecycle_rule[0].expiration), 0) == 0
+    error_message = "The lifecycle rule must leave current state versions alone."
+  }
+
+  assert {
     condition     = length(yandex_resourcemanager_folder_iam_member.terraform_state_storage) == 0
     error_message = "The temporary folder-wide bootstrap role must be absent from steady state."
   }

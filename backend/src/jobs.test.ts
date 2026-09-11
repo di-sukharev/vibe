@@ -177,6 +177,7 @@ describe('runBackgroundJob', () => {
     const sessionCalls: unknown[] = []
     const resetTokenCalls: unknown[] = []
     let pushTokenMaintenanceQueries = 0
+    const rateLimitCalls: unknown[] = []
     const cleanupRuntime = {
       env: { SESSION_ABSOLUTE_TTL_DAYS: 90, SESSION_RETENTION_DAYS: 7 },
       prisma: {
@@ -194,6 +195,12 @@ describe('runBackgroundJob', () => {
           deleteMany: async (input: unknown) => {
             resetTokenCalls.push(input)
             return { count: 3 }
+          },
+        },
+        rateLimitBucket: {
+          deleteMany: async (input: unknown) => {
+            rateLimitCalls.push(input)
+            return { count: 4 }
           },
         },
       },
@@ -216,6 +223,11 @@ describe('runBackgroundJob', () => {
     expect(resetTokenCalls).toEqual([{
       where: { expiresAt: { lt: now } },
     }])
+    // A rate-limit window nobody can land in any more is dead weight; the job that already sweeps
+    // auth's other expiring rows sweeps these too, so shared counters need no runner of their own.
+    expect(rateLimitCalls).toEqual([{
+      where: { expiresAt: { lt: now } },
+    }])
   })
 
   // The billing reconcile task lived here commented out; docs/IAP.md says what to switch on.
@@ -225,6 +237,7 @@ describe('runBackgroundJob', () => {
       cleanup: 0,
       passwordResetCleanup: 0,
       pushTokenMaintenanceQueries: 0,
+      rateLimitCleanup: 0,
       terminalRedactionSelection: 0,
     }
     const log = spyOn(console, 'log').mockImplementation(() => {})
@@ -251,6 +264,12 @@ describe('runBackgroundJob', () => {
         passwordResetToken: {
           deleteMany: async () => {
             calls.passwordResetCleanup += 1
+            return { count: 0 }
+          },
+        },
+        rateLimitBucket: {
+          deleteMany: async () => {
+            calls.rateLimitCleanup += 1
             return { count: 0 }
           },
         },
@@ -282,6 +301,7 @@ describe('runBackgroundJob', () => {
         cleanup: 1,
         passwordResetCleanup: 1,
         pushTokenMaintenanceQueries: 2,
+        rateLimitCleanup: 1,
         terminalRedactionSelection: 1,
       })
       expect(log).toHaveBeenCalledWith(

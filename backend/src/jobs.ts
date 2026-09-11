@@ -54,9 +54,10 @@ export const backgroundJobs = {
   //   assertGooglePlayReconcileSucceeded(result)
   // },
   'auth:sessions:cleanup': async (runtime, now) => {
-    const { passwordResetTokensDeleted, sessionsDeleted } = await cleanupAuthState(runtime, now)
+    const { passwordResetTokensDeleted, rateLimitWindowsDeleted, sessionsDeleted } =
+      await cleanupAuthState(runtime, now)
     console.log(
-      `Job auth:sessions:cleanup removed ${sessionsDeleted} stale sessions and ${passwordResetTokensDeleted} expired password reset tokens.`,
+      `Job auth:sessions:cleanup removed ${sessionsDeleted} stale sessions, ${passwordResetTokensDeleted} expired password reset tokens and ${rateLimitWindowsDeleted} spent rate-limit windows.`,
     )
   },
   'uploads:pending:cleanup': async ({ prisma, privateStorage }, now) => {
@@ -93,7 +94,8 @@ export const backgroundJobs = {
     )
   },
   'maintenance:process': async (runtime, now) => {
-    const { passwordResetTokensDeleted, sessionsDeleted } = await cleanupAuthState(runtime, now)
+    const { passwordResetTokensDeleted, rateLimitWindowsDeleted, sessionsDeleted } =
+      await cleanupAuthState(runtime, now)
     const terminalNotificationOutboxesRedacted = await (
       await loadNotificationsModule(runtime)
     ).redactTerminalData()
@@ -105,6 +107,7 @@ export const backgroundJobs = {
       authSessionsDeleted: sessionsDeleted,
       // googlePlay,
       passwordResetTokensDeleted,
+      rateLimitWindowsDeleted,
       terminalNotificationOutboxesRedacted,
     })
     // if (googlePlay) assertGooglePlayReconcileSucceeded(googlePlay)
@@ -198,7 +201,7 @@ async function cleanupAuthState({ env, prisma }: BackendRuntime, now: Date) {
           AND session."created_at" > ${absoluteSessionNotBefore}
       )
   `
-  const [sessions, passwordResetTokens] = await Promise.all([
+  const [sessions, passwordResetTokens, rateLimitWindows] = await Promise.all([
     prisma.authSession.deleteMany({
       where: {
         OR: [
@@ -211,9 +214,16 @@ async function cleanupAuthState({ env, prisma }: BackendRuntime, now: Date) {
     prisma.passwordResetToken.deleteMany({
       where: { expiresAt: { lt: now } },
     }),
+    // A rate-limit window past its end is never read again - every request looks up the window
+    // containing its own clock - so the rows are pure weight. Only RATE_LIMIT_STORE=database
+    // writes them; elsewhere this sweeps an empty table.
+    prisma.rateLimitBucket.deleteMany({
+      where: { expiresAt: { lt: now } },
+    }),
   ])
   return {
     passwordResetTokensDeleted: passwordResetTokens.count,
+    rateLimitWindowsDeleted: rateLimitWindows.count,
     sessionsDeleted: sessions.count,
   }
 }

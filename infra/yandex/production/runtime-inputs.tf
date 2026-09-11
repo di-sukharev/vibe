@@ -13,6 +13,7 @@ locals {
     AUTH_RATE_LIMIT_WINDOW_SECONDS             = "60"
     ADMIN_USERS_READ_RATE_LIMIT_MAX            = "120"
     ADMIN_USERS_READ_RATE_LIMIT_WINDOW_SECONDS = "60"
+    RATE_LIMIT_STORE                           = "database"
     SHUTDOWN_GRACE_SECONDS                     = "20"
     TRUST_PROXY                                = "true"
     TRUSTED_PROXY_CLIENT_IP_HEADER             = "x-forwarded-for"

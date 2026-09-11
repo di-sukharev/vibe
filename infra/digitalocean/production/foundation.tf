@@ -94,11 +94,22 @@ resource "digitalocean_spaces_bucket" "media" {
   acl           = "private"
   force_destroy = false
 
-  lifecycle_rule {
-    id      = "abort-incomplete-uploads"
+  versioning {
     enabled = true
+  }
 
+  # The runtime key deletes objects on every avatar replace or remove and on abandoned-upload
+  # cleanup. On a versioned Space each delete leaves a marker over a recoverable version, so a code
+  # bug or a misused key has 30 days of undo; docs/STORAGE.md calls that window the only undo media
+  # has. Current objects are never touched.
+  lifecycle_rule {
+    id                                     = "media-history"
+    enabled                                = true
     abort_incomplete_multipart_upload_days = 7
+
+    noncurrent_version_expiration {
+      days = 30
+    }
   }
 
   lifecycle {

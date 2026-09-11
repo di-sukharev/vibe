@@ -480,6 +480,62 @@ export function yandexRuntimeStateProblems({
   ]
 }
 
+/**
+ * The DigitalOcean foundation trusts the API app by ID and falls back to the VPC range while no
+ * ID is known, so a lost runtime state reads exactly like a first release: Terraform would widen
+ * the database firewall as an in-place attribute change that neither `prevent_destroy` nor
+ * `planSafetyProblems` can see. Ask the provider before believing an empty runtime state.
+ */
+export function digitalOceanRuntimeStateProblems(
+  { apiAppId, projectSlug },
+  { listApps = digitalOceanAppList } = {},
+) {
+  if (apiAppId) return []
+
+  const apiAppName = `${projectSlug}-prod-api`
+  const deployedApiApps = digitalOceanDeployedApps(listApps()).filter(
+    (app) => app.name === apiAppName,
+  )
+  if (deployedApiApps.length === 0) return []
+
+  const described = deployedApiApps
+    .map((app) => `${app.name} (${app.id})`)
+    .join(', ')
+  return [
+    `DigitalOcean runtime state has no API App ID, but the deployed API app still exists: ${described}. Recover or import the runtime state before the database firewall falls back to the VPC range.`,
+  ]
+}
+
+function digitalOceanAppList() {
+  return runDigitalOceanCli(['apps', 'list', '--output', 'json'], {
+    capture: true,
+    sensitiveOutput: true,
+    log: false,
+  })
+}
+
+function digitalOceanDeployedApps(raw) {
+  let parsed
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    throw new Error(
+      'Could not verify DigitalOcean runtime state because doctl returned invalid app JSON',
+    )
+  }
+  // doctl prints a bare array; an account without apps serializes as null.
+  const apps =
+    parsed === null ? [] : Array.isArray(parsed) ? parsed : parsed?.apps
+  if (!Array.isArray(apps)) {
+    throw new Error(
+      'Could not verify DigitalOcean runtime state because doctl returned no app list',
+    )
+  }
+  return apps
+    .filter((app) => typeof app?.spec?.name === 'string')
+    .map((app) => ({ id: app.id ?? 'unknown id', name: app.spec.name }))
+}
+
 export function safeYandexSecretVersionDestroyAddresses(liveSlot) {
   const slots = ['blue', 'green']
   const inactiveSlots = liveSlot
@@ -1771,6 +1827,20 @@ function assertSafeYandexDatabaseRotation(context) {
   return liveSlot
 }
 
+function assertDigitalOceanRuntimeState(context) {
+  if (context.provider !== 'digitalocean') return
+  const runtimeOutputs = readManagedRootOutputs(context, 'runtime')
+  const problems = digitalOceanRuntimeStateProblems({
+    apiAppId: runtimeOutputs.api_app_id,
+    projectSlug: context.tfvars.project_slug,
+  })
+  if (problems.length > 0) {
+    throw new Error(
+      `Unsafe DigitalOcean foundation change:\n- ${problems.join('\n- ')}`,
+    )
+  }
+}
+
 function writeManagedRootInputs(context, rootName, releaseInputs) {
   const foundationInputs = context.outputs[`${rootName}_inputs`]
   if (!foundationInputs || typeof foundationInputs !== 'object') {
@@ -1928,6 +1998,7 @@ function planExistingReleaseRoots(context, options) {
 async function planProduction(provider, options) {
   const context = contextWithProvider(provider)
   const liveSlot = assertSafeYandexDatabaseRotation(context)
+  assertDigitalOceanRuntimeState(context)
   const safeSecretVersionDestroyAddresses =
     provider === 'yandex'
       ? safeYandexSecretVersionDestroyAddresses(liveSlot)
@@ -1973,6 +2044,7 @@ async function planProduction(provider, options) {
 async function applyFoundation(provider, options) {
   const context = contextWithProvider(provider)
   const liveSlot = assertSafeYandexDatabaseRotation(context)
+  assertDigitalOceanRuntimeState(context)
   const safeSecretVersionDestroyAddresses =
     provider === 'yandex'
       ? safeYandexSecretVersionDestroyAddresses(liveSlot)
