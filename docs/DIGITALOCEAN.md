@@ -16,6 +16,8 @@ the Terraform source lives under [`infra/digitalocean`](../infra/digitalocean).
 - one App Platform API app containing the API service, long-running scheduler worker, and
   `PRE_DEPLOY` migration job;
 - separate App Platform Static Site apps for `webapp` and `website`;
+- alert rules on the API app: failed deployment and failed domain at app level, and restart,
+  memory, and CPU rules on the scheduler worker, delivered to the team's default email;
 - a private versioned Space and scoped key for Terraform state; its lifecycle rule expires
   noncurrent versions after 30 days and aborts incomplete multipart uploads after 7.
 
@@ -77,6 +79,16 @@ export TF_VAR_extra_runtime_secret_env='{"EMAIL_RESEND_API_KEY":"<secret>"}'
 
 Then set `email_delivery = "resend"` and `email_from` in the production tfvars.
 
+Alerts need no configuration: App Platform sends them to the team's default email. Routing them
+to specific team members is a console step (the API app, Settings tab, Alert Policies, Edit, then
+expand the rule and set its notification method), deliberately not a Terraform input. Provider
+2.99.1 never reads alert destinations back into state, so a list in Terraform would plan an
+update on every run, and removing it would not restore the default because the provider only ever
+replaces destinations with a declared list and never clears them. On the provider side an apply
+leaves console-set destinations alone: the app spec carries none, and the provider syncs them only
+when Terraform declares some. Whether App Platform itself keeps them when the spec is re-applied
+is not verified; check once after the first release that follows a console change.
+
 ## Commands
 
 ```bash
@@ -122,6 +134,35 @@ static apps at it with `deploy_on_push = false`, and checks each active deployme
 If `ADMIN_SEED_*` is supplied, the first deployment runs the migration with it. After success the
 script removes the bootstrap variables and applies once more; the second migration is deliberately
 idempotent and verifies the created administrator.
+
+## Alerts
+
+Terraform creates these on the API app (`infra/digitalocean/runtime/main.tf`); nothing is clicked
+in the console. Each one is an e-mail to the team's default address; "Configuration" above says how
+to route them to specific people.
+
+| Alert                                          | Fires when                                          | What it means                                                                                                         |
+| ---------------------------------------------- | --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `DEPLOYMENT_FAILED` (app)                      | a deployment fails                                  | the migration gate or a component failed; the previous deployment stays live                                          |
+| `DOMAIN_FAILED` (app)                          | `api_domain` fails to configure                     | a DNS or certificate problem on the API domain                                                                        |
+| `RESTART_COUNT` > 1 in 5 min (scheduler)       | the worker restarted more than once in five minutes | a crash loop: the outbox drain and cleanups are not running. One restart after a deploy stays quiet                   |
+| `MEM_UTILIZATION` > 85% for 10 min (scheduler) | memory stays above 85% of `worker_instance_size`    | the worker is about to be killed for running out of memory                                                            |
+| `CPU_UTILIZATION` > 90% for 30 min (scheduler) | CPU stays above 90% for half an hour                | a healthy scheduler idles between ticks; this is a stuck job. A pass is bounded whatever the backlog, so backlog never shows here |
+
+What these do not cover: the numbers in the `Job outbox:drain completed.` entry - `backlog`,
+`terminalFailed`, `claimed`/`skipped`, `unhandled`. App Platform cannot alert on a value inside a
+log entry without forwarding logs to an external service, which this repository does not run. Read
+them from the worker's runtime log; the app is `<project_slug>-prod-api`. The metrics object is
+printed over a dozen lines after the message, so ask for the lines that follow each match:
+
+```bash
+doctl apps list --format ID,Spec.Name
+doctl apps logs <app id> scheduler --type run --tail 500 | grep -A 11 'outbox:drain completed'
+```
+
+`docs/BACKGROUND_JOBS.md`, "What to watch", says what each number means and when to act. A pass
+that fails without crashing the worker appears there as `Scheduler job outbox:drain failed.`, not
+as an alert.
 
 ## Operations
 
@@ -171,6 +212,7 @@ idempotent and verifies the created administrator.
 
 - [DigitalOcean Terraform provider](https://docs.digitalocean.com/reference/terraform/)
 - [App Platform](https://docs.digitalocean.com/products/app-platform/)
+- [App Platform alerts](https://docs.digitalocean.com/products/app-platform/how-to/create-alerts/)
 - [Managed PostgreSQL](https://docs.digitalocean.com/products/databases/postgresql/)
 - [Container Registry](https://docs.digitalocean.com/products/container-registry/)
 - [Spaces](https://docs.digitalocean.com/products/spaces/)

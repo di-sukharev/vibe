@@ -21,7 +21,9 @@ data-residency requirement. Common safety and release rules live in
   accounts with narrow roles;
 - an optional Postbox sender and optional Cloud CDN resources;
 - a private versioned Object Storage bucket and scoped key for Terraform state; its lifecycle rule
-  expires noncurrent versions after 30 days and aborts incomplete multipart uploads after 7.
+  expires noncurrent versions after 30 days and aborts incomplete multipart uploads after 7;
+- no alerts: the pinned provider has no Monitoring alert or notification-channel resource, so the
+  two alerts in "Alerts" below are created by hand once per folder.
 
 `enable_cdn = false` and `route_static_through_cdn = false` by default. Static files then come
 directly from Object Storage HTTPS website hosting. The first flag provisions two CDN origin
@@ -259,6 +261,82 @@ cleanup. Command/task mode is used only for the explicitly invoked migration bec
 returns HTTP 200 for that mode and exposes the process result through `X-Task-Exit-Code`; the release
 script checks that header before promotion.
 
+## Alerts
+
+Terraform cannot create these: the Yandex provider pinned in `infra/yandex/*/versions.tf` exposes
+only `yandex_monitoring_dashboard`, and the official Terraform reference for Monitoring lists no
+alert or notification-channel resource. Create them once per folder in the console after the first
+release. They survive later releases because the job containers keep their IDs; recreate them if
+the folder or the containers are recreated.
+
+The job containers are `<project_slug>-prod-outbox`, `-uploads`, and `-auth`; their IDs are the
+`container` label values below:
+
+```bash
+yc serverless container list --folder-id <folder_id>
+```
+
+1. **Notification channel.** Monitoring, Notification channels, Create channel. Method `Email`.
+   Recipients are Yandex Cloud accounts, not arbitrary addresses: each one needs the
+   `monitoring.viewer` role on the folder and an e-mail address saved under the console's profile
+   settings, Monitoring section, or the channel delivers nowhere. Name it `prod-alerts`.
+2. **Alert `outbox drain stopped`.** Monitoring, Alerts, Create alert. Query:
+   `series_sum(drop_empty_series("serverless.containers.started_per_second"{folderId="<folder_id>", service="serverless-containers", container="<outbox container id>"}))`.
+   The two functions matter: the metric carries a `revision` label, every release creates a new
+   revision, and an alert is evaluated per line with the worst status winning, so the bare
+   selector would let the previous revision's empty line count as no data and hold the alert in
+   Alarm forever after the second release. Dropping empty lines first and summing the rest leaves
+   one line while the timer runs and no line at all once it has stopped. Trigger condition:
+   aggregation `Maximum`, evaluation window `10m`, Alarm when less than `0.001`. A healthy outbox
+   container is invoked every minute, so any ten-minute window holds a point above zero. No data
+   policies: set both `No selector metrics` and `No points in evaluation window` to `Alarm`, so a
+   timer that stopped, was disabled, or was deleted alarms instead of showing nothing. Channel
+   `prod-alerts`. Not verified against a live folder: after the first release the alert must sit
+   in OK, and it must still sit in OK after the second release, when the first stale revision
+   exists. Then prove it can fire: `yc serverless trigger pause <timer id>` (the timer is
+   `<project_slug>-prod-outbox-timer` in `yc serverless trigger list`), wait longer than the
+   evaluation window, confirm the status is Alarm and the e-mail arrived, then
+   `yc serverless trigger resume <timer id>`. If the paused timer leaves the alert in OK, the
+   empty result matched neither no-data policy: switch the query to the timer's own metric,
+   `"serverless.triggers.read_events_per_second"{folderId="<folder_id>", service="serverless-functions", trigger="<timer id>"}`,
+   which carries no `revision` label, so the bare selector works with both policies at `Alarm`,
+   and repeat the pause test.
+3. **Alert `job failed`.** Same page. Query:
+   `"serverless.containers.errors_per_second"{folderId="<folder_id>", service="serverless-containers", container="<outbox id>|<uploads id>|<auth id>"}`.
+   Aggregation `Maximum`, evaluation window `5m`, Alarm when greater than `0`. `cron.ts --http`
+   answers 503 for a failed pass, which counts as an invocation error and is what activates the
+   timer's retries. The `|` list names the three job containers so the API container,
+   `<project_slug>-prod-api` in the same folder, is not paged as a job. No data policies: set both `No selector metrics` and `No points in evaluation window`
+   to `OK`, because a quiet container reports no errors. Channel `prod-alerts`. Not verified
+   against a live folder either: the metrics reference says only "errors when processing
+   container invocations". If a failed pass - a 503 in the log group - does not move this alert,
+   switch its query to `"serverless.triggers.error_per_second"{folderId="<folder_id>", service="serverless-functions", trigger="<timer id>"}`
+   (`yc serverless trigger list`), which counts the invocations the timer had to retry.
+
+Neither alert reads the numbers in the `Job outbox:drain completed.` entry. Cloud Logging does
+export per-group metrics to Monitoring (`group.saved_records_per_second` by `level`), but the
+drain writes plain-text lines, which land at `LEVEL_UNSPECIFIED`, so nothing separates a pass
+with `terminalFailed: 3` from any other line. A structured JSON line with `level` and `message`
+fields is what would unlock a `terminalFailed` alert here without a new service. Until then,
+`backlog`, `terminalFailed`, `claimed`/`skipped`, and `unhandled` are read from the seven-day log
+group. Not verified against a live folder either, and there is one thing to check first: every
+container is deployed with `log_options { min_level = "INFO" }` (`infra/yandex/runtime/containers.tf`),
+and the official docs say only that custom stdout/stderr lines carry level `UNSPECIFIED`, not
+whether a minimum level keeps or drops them. If the command below returns nothing while the
+containers run, that is the reason: drop `min_level` from the `log_options` blocks in
+`infra/yandex/runtime/containers.tf`, `infra/yandex/runtime/ingress.tf`, and
+`infra/yandex/migration/main.tf`, release, and record the finding in `CHECKLIST.md`. The metrics
+object is printed over a dozen lines after the message and plain-text stdout is ingested line by
+line, so filter by the container rather than by message text and read the records that follow
+each `Job outbox:drain completed.`:
+
+```bash
+yc logging read --folder-id <folder_id> --group-name <project_slug>-prod-containers \
+  --resource-ids <outbox container id> --since 10m
+```
+
+`docs/BACKGROUND_JOBS.md`, "What to watch", says what each number means and when to act.
+
 ## Operator database access
 
 Use IAM authentication through the Yandex Cloud CLI for an interactive `psql` session. The
@@ -420,3 +498,5 @@ runtime state instead of treating it as a first release. Do not bypass the wrapp
 - [Object Storage static hosting](https://yandex.cloud/en/docs/storage/operations/hosting/setup)
 - [Cloud CDN](https://yandex.cloud/en/docs/cdn/)
 - [Lockbox](https://yandex.cloud/en/docs/lockbox/)
+- [Monitoring alerts](https://yandex.cloud/en/docs/monitoring/concepts/alerting/alert)
+- [Serverless Containers metrics](https://yandex.cloud/en/docs/monitoring/metrics-ref/serverless-containers-ref)

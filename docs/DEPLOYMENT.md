@@ -22,6 +22,7 @@ Provider runbooks:
 | Image registry        | DigitalOcean Container Registry     | Yandex Container Registry                      |
 | Terraform state       | Private, versioned Space            | Private, versioned Object Storage bucket       |
 | CDN                   | App Platform's static-site delivery | Off by default; Cloud CDN is opt-in            |
+| Alerts                | App Platform rules (Terraform)      | Monitoring alerts created by hand (runbook)    |
 
 The launch profile intentionally uses one database node, and on DigitalOcean one API instance
 (`instance_count = 1`). This is the economical starting point, not a high-availability claim.
@@ -40,6 +41,12 @@ repository already runs; see the rule in `docs/ARCHITECTURE.md` before reaching 
 No Ansible is used on these two paths: there is no host to configure. Terraform owns managed and
 serverless resources; the release script owns image build, migration ordering, static publication,
 and verification. Ansible becomes useful only on the own-server path.
+
+Alerting is the smallest thing each provider offers without another service: on DigitalOcean,
+Terraform puts App Platform alert rules on the API app and its scheduler worker; on Yandex, the
+provider has no alert resource, so the runbook creates two Monitoring alerts by hand. Neither reads
+the outbox numbers in the log; `docs/BACKGROUND_JOBS.md`, "What to watch", says who is told about
+what, and what still needs a person reading the log.
 
 ## Release sequence
 

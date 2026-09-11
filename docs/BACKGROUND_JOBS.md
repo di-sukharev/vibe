@@ -73,11 +73,18 @@ any other path 404 without touching the job, so invoker rights alone do not let 
 or a stray `GET /favicon.ico` run it.
 DigitalOcean's baseline uses the scheduler worker because its durable outbox must run more often
 than the scheduled-job cadence permits.
+A timer that stops is as silent as a stopped scheduler: on Yandex the runbook creates a Monitoring
+alert on the outbox container's invocation rate by hand, because the provider has no alert
+resource. "Who is told" under "What to watch" says what it covers.
 
 **`scheduler.ts` on your own server or a cloud worker.** Schedules are versioned and reviewed with
 the code, local runs behave exactly like production, and moving between providers touches nothing.
 The cost is that the process is now yours to keep alive: put it under systemd or a Docker restart
 policy, and alert on "the job has not reported success recently" — a stopped scheduler is silent.
+On DigitalOcean the closest thing App Platform offers is the restart, memory, and CPU rules
+Terraform puts on the worker: they catch a scheduler that keeps dying or is stuck, not one that
+stays up and fails every pass, which remains a log check. "Who is told" under "What to watch"
+says exactly what it covers.
 Two copies of the process are handled: each job takes a Postgres advisory lock before running, so a
 rolling deploy cannot run the same job twice, and the copy that loses the race logs that it skipped.
 
@@ -250,7 +257,8 @@ pass runs. Before the ceiling the same outage delayed those resets; now it loses
 metric shows it, because refusals are unlogged by design and the `skipped` cue comes from the
 drain that is not running. That is the price of a bound that needs no new state or index, and it
 makes "the drain has not reported a pass recently" the alert an install with a provider must
-have - the scheduler section above asks for the same alert for a different reason.
+have - the scheduler section above asks for the same alert for a different reason. "Who is told"
+under "What to watch" says where it lives on each hosting.
 
 ### Running the drain
 
@@ -287,7 +295,8 @@ you to record before reaching for a queue service.
 
 ### What to watch
 
-Each pass logs one line. Four numbers matter:
+Each pass logs one entry - `Job outbox:drain completed.` followed by the metrics object, which a
+plain-text log spreads over a dozen lines. Four numbers matter:
 
 - `backlog` climbing across consecutive runs - the drain cannot keep up. That is the measurement
   `docs/ARCHITECTURE.md` asks for before reaching for a queue service.
@@ -299,6 +308,20 @@ Each pass logs one line. Four numbers matter:
   would be a second flood. See "What an anonymous caller may queue".
 - `unhandled` above zero - rows are queued for a type this deployment has no handler for, which
   means an API is ahead of its runner. Roll the runner forward.
+
+**Who is told, and about what.** None of the four numbers reaches an alert by itself: neither
+hosting can alert on a value inside a plain-text log line. DigitalOcean would need log forwarding
+to an external service, Yandex would need the drain to write structured JSON lines, and this
+repository does neither; `docs/ARCHITECTURE.md` says what would have to be measured before adding
+one. What each hosting tells someone on its own, and what still needs a person reading the
+log:
+
+| Signal | DigitalOcean | Yandex Cloud | Own server |
+| --- | --- | --- | --- |
+| The scheduler stopped or keeps dying | Terraform: scheduler worker `RESTART_COUNT` > 1 in five minutes, plus the app's `DEPLOYMENT_FAILED`; e-mail to the team's default address. This catches a worker that keeps dying, not one that stays up and fails every pass - see "A pass fails" below. See [DIGITALOCEAN.md](DIGITALOCEAN.md#alerts). | By hand: Monitoring alert `outbox drain stopped` on `serverless.containers.started_per_second` of the outbox container, no data counted as Alarm. See [YANDEX_CLOUD.md](YANDEX_CLOUD.md#alerts). | Whatever your supervisor alerts on; `systemctl status` shows the last exit. |
+| The worker is about to die or never idles | Terraform: `MEM_UTILIZATION` > 85% for ten minutes, `CPU_UTILIZATION` > 90% for thirty. | Not applicable: each tick is its own invocation with its own memory. | Host monitoring. |
+| A pass fails | Only when the failure crashes or pins the worker; otherwise `Scheduler job outbox:drain failed.` in the runtime log. | By hand: Monitoring alert `job failed` on `serverless.containers.errors_per_second`; `cron.ts --http` answers 503 for a failed pass. | The journal. |
+| `backlog`, `terminalFailed`, `claimed`/`skipped`, `unhandled` | Read the entry in the worker's runtime log; the runbook has the `doctl` command. | Read the entry in the log group; the runbook has the `yc logging read` command and the `min_level` caveat. | The journal. |
 
 Tuning lives in `TASK_OUTBOX_*` (see `backend/.env.example`). One invariant holds them together:
 a task's `deadlineMs` must stay well inside `TASK_OUTBOX_LEASE_STALE_MS`, or a second drain could
@@ -356,9 +379,10 @@ rather than building a rebuild pipeline. Neither hosting offers per-page ISR.
 ## Provider specifics
 
 - DigitalOcean: [DIGITALOCEAN.md](DIGITALOCEAN.md) — Terraform deploys the scheduler worker with
-  the API image and database environment.
+  the API image and database environment, and puts restart, memory, and CPU alert rules on it.
 - Yandex Cloud: [YANDEX_CLOUD.md](YANDEX_CLOUD.md) — Terraform reads `job-schedules.json` and
-  creates one HTTP job container and timer trigger per entry.
+  creates one HTTP job container and timer trigger per entry; the two Monitoring alerts are a
+  documented manual step, because the provider has no alert resource.
 
 ## Upstream documentation
 

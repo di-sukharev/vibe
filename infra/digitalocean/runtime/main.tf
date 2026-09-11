@@ -149,6 +149,37 @@ resource "digitalocean_app" "api" {
         digest        = var.runtime_image_digest
       }
 
+      # A stopped scheduler is silent, so the worker carries the component alerts App Platform
+      # offers. More than one restart in five minutes is a crash loop, not a deploy. Memory above
+      # 85% is the warning before the platform kills the worker for running out of it. A healthy
+      # scheduler idles between ticks, so CPU pinned for thirty minutes is a stuck job; a pass is
+      # bounded whatever the backlog, so a backlog never shows up here. None of these reads the
+      # outbox numbers; docs/BACKGROUND_JOBS.md
+      # says which of those still need a person looking at the log. Destinations are deliberately
+      # absent: with none, App Platform emails the team's default address. Provider 2.99.1 never
+      # reads destinations back into state, so a list here would plan a change on every run and
+      # removing it would not restore the default; route alerts in the console instead.
+      alert {
+        rule     = "RESTART_COUNT"
+        operator = "GREATER_THAN"
+        value    = 1
+        window   = "FIVE_MINUTES"
+      }
+
+      alert {
+        rule     = "MEM_UTILIZATION"
+        operator = "GREATER_THAN"
+        value    = 85
+        window   = "TEN_MINUTES"
+      }
+
+      alert {
+        rule     = "CPU_UTILIZATION"
+        operator = "GREATER_THAN"
+        value    = 90
+        window   = "THIRTY_MINUTES"
+      }
+
       env {
         key   = "DATABASE_URL"
         value = "$${runtime-database.DATABASE_PRIVATE_URL}"
