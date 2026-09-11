@@ -71,3 +71,62 @@ run "migration_gates_runtime" {
     error_message = "The runtime root must include the shared scheduler worker."
   }
 }
+
+run "scheduler_alerts_reach_someone" {
+  command = plan
+
+  assert {
+    condition     = length(digitalocean_app.api.spec[0].worker[0].alert) == 3
+    error_message = "A stopped scheduler is silent: the worker needs its three App Platform component alerts (RESTART_COUNT, MEM_UTILIZATION, CPU_UTILIZATION) so someone is told when it keeps dying, is about to be killed, or never idles."
+  }
+
+  assert {
+    condition = (
+      digitalocean_app.api.spec[0].worker[0].alert[0].rule == "RESTART_COUNT" &&
+      digitalocean_app.api.spec[0].worker[0].alert[0].operator == "GREATER_THAN" &&
+      digitalocean_app.api.spec[0].worker[0].alert[0].value == 1 &&
+      digitalocean_app.api.spec[0].worker[0].alert[0].window == "FIVE_MINUTES"
+    )
+    error_message = "The first scheduler alert must fire on more than one restart in five minutes, which is what a crash-looping scheduler looks like; a single restart after a deploy must stay quiet."
+  }
+
+  assert {
+    condition = (
+      digitalocean_app.api.spec[0].worker[0].alert[1].rule == "MEM_UTILIZATION" &&
+      digitalocean_app.api.spec[0].worker[0].alert[1].operator == "GREATER_THAN" &&
+      digitalocean_app.api.spec[0].worker[0].alert[1].value == 85 &&
+      digitalocean_app.api.spec[0].worker[0].alert[1].window == "TEN_MINUTES"
+    )
+    error_message = "The second scheduler alert must fire on memory above 85% for ten minutes, before App Platform kills the worker for running out of it."
+  }
+
+  assert {
+    condition = (
+      digitalocean_app.api.spec[0].worker[0].alert[2].rule == "CPU_UTILIZATION" &&
+      digitalocean_app.api.spec[0].worker[0].alert[2].operator == "GREATER_THAN" &&
+      digitalocean_app.api.spec[0].worker[0].alert[2].value == 90 &&
+      digitalocean_app.api.spec[0].worker[0].alert[2].window == "THIRTY_MINUTES"
+    )
+    error_message = "The third scheduler alert must fire on CPU above 90% for thirty minutes: a healthy scheduler idles between ticks, so a worker that never idles has a stuck job; a pass is bounded whatever the backlog, so this is not a backlog signal."
+  }
+
+  assert {
+    condition = (
+      !coalesce(digitalocean_app.api.spec[0].worker[0].alert[0].disabled, false) &&
+      !coalesce(digitalocean_app.api.spec[0].worker[0].alert[1].disabled, false) &&
+      !coalesce(digitalocean_app.api.spec[0].worker[0].alert[2].disabled, false)
+    )
+    error_message = "Scheduler alerts must not ship disabled."
+  }
+
+  assert {
+    condition = (
+      length(digitalocean_app.api.spec[0].alert[0].destinations) == 0 &&
+      length(digitalocean_app.api.spec[0].alert[1].destinations) == 0 &&
+      length(digitalocean_app.api.spec[0].worker[0].alert[0].destinations) == 0 &&
+      length(digitalocean_app.api.spec[0].worker[0].alert[1].destinations) == 0 &&
+      length(digitalocean_app.api.spec[0].worker[0].alert[2].destinations) == 0
+    )
+    error_message = "No alert may carry a destinations block: App Platform delivers to the team's default email without one, and provider 2.99.1 never reads destinations back into state, so a configured list would plan a change on every run and a removed one would never restore the default. Route alerts in the console instead."
+  }
+}

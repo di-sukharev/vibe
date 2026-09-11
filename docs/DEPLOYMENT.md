@@ -18,10 +18,11 @@ Provider runbooks:
 | Scheduled work        | App Platform scheduler worker       | Four HTTP job containers with timer triggers   |
 | Database              | Managed PostgreSQL 18               | Managed Service for PostgreSQL 18              |
 | Static webapp/website | App Platform Static Sites           | Two public Object Storage website buckets      |
-| User media            | Private Spaces bucket               | Separate private Object Storage bucket         |
+| User media            | Private, versioned Spaces bucket    | Private, versioned Object Storage bucket       |
 | Image registry        | DigitalOcean Container Registry     | Yandex Container Registry                      |
 | Terraform state       | Private, versioned Space            | Private, versioned Object Storage bucket       |
 | CDN                   | App Platform's static-site delivery | Off by default; Cloud CDN is opt-in            |
+| Alerts                | App Platform rules (Terraform)      | Monitoring alerts created by hand (runbook)    |
 
 The launch profile intentionally uses one database node, and on DigitalOcean one API instance
 (`instance_count = 1`). This is the economical starting point, not a high-availability claim.
@@ -30,16 +31,27 @@ demands it.
 
 Yandex is different and the difference matters: Serverless Containers scale out by running more
 instances of the revision, and `concurrency` only sets how many requests one instance takes before
-the next one starts. There is no setting that pins the API to a single process. Anything the
-backend keeps in process memory is therefore per-instance there, and the auth rate limiter in
-`backend/src/http/security.ts` is exactly that - its own comment states the condition. On Yandex,
-treat `AUTH_RATE_LIMIT_MAX` and `ADMIN_USERS_READ_RATE_LIMIT_MAX` as per-instance budgets, not
-global ones, until that counter is moved into shared state. PostgreSQL is the shared state this
-repository already runs; see the rule in `docs/ARCHITECTURE.md` before reaching for anything else.
+the next one starts. There is no setting that pins the API to a single process, so anything the
+backend keeps in process memory is per-instance there. The auth and admin rate limiters are the
+one such thing that must not be, which is why the Yandex runtime inputs set
+`RATE_LIMIT_STORE=database`: the limiters in `backend/src/http/security.ts` then count in the
+`rate_limit_buckets` table of the PostgreSQL the deployment already runs (`backend/src/rate-limit`),
+one upsert per limited request keyed by policy, client and clock-aligned window, so
+`AUTH_RATE_LIMIT_MAX` and `ADMIN_USERS_READ_RATE_LIMIT_MAX` are global budgets on both hostings.
+DigitalOcean keeps the default `memory` store: with one instance it is already the whole truth and
+costs no query. An own server that runs more than one backend process sets `database` the same
+way. The auth cleanup inside `maintenance:process` sweeps spent windows. The rule in
+`docs/ARCHITECTURE.md` is why this is a table and not a Redis.
 
 No Ansible is used on these two paths: there is no host to configure. Terraform owns managed and
 serverless resources; the release script owns image build, migration ordering, static publication,
 and verification. Ansible becomes useful only on the own-server path.
+
+Alerting is the smallest thing each provider offers without another service: on DigitalOcean,
+Terraform puts App Platform alert rules on the API app and its scheduler worker; on Yandex, the
+provider has no alert resource, so the runbook creates two Monitoring alerts by hand. Neither reads
+the outbox numbers in the log; `docs/BACKGROUND_JOBS.md`, "What to watch", says who is told about
+what, and what still needs a person reading the log.
 
 ## Release sequence
 
@@ -101,9 +113,15 @@ bun run infra:apply -- <digitalocean|yandex>
 ```
 
 The first apply starts with local bootstrap state, creates a private versioned state bucket and a
-bucket-scoped key, then migrates that state to the S3-compatible backend. On Yandex, the script uses
-temporary folder-level `storage.admin` only to create and version the bucket, removes it after
-installing a policy scoped to the dedicated state service account, and only then migrates state.
+bucket-scoped key, then migrates that state to the S3-compatible backend. The bucket expires
+noncurrent versions after 30 days and aborts incomplete multipart uploads after 7: every init, plan,
+and apply creates and deletes the lock object, every apply rewrites state, versioning keeps each of
+those as a noncurrent version, and on Yandex that is what would fill the bucket's `max_size` until
+Terraform can no longer take the lock. Current versions are never expired. An existing install picks
+the rule up by rerunning `infra:bootstrap -- <provider>`, on Yandex with the temporary-role caveat
+below. On Yandex, the script uses temporary folder-level `storage.admin` only to create and
+configure the bucket, removes it after installing a policy scoped to the dedicated state service
+account, and only then migrates state.
 That policy permits bucket-configuration refresh plus current state/lock objects, denies the state
 account `s3:DeleteBucket` and `s3:PutBucketVersioning`, and never permits deleting object versions.
 The Deny guards against a Terraform change, not against a key holder: on Yandex, policy management
@@ -346,7 +364,13 @@ The own-server option remains deliberately separate from the two Terraform stack
 `backend/Dockerfile`, run PostgreSQL 18+, apply `bun run --cwd backend db:deploy` before promotion,
 serve `webapp/dist` and `website/dist` behind Caddy/nginx, run
 `bun run --cwd backend start:scheduler` as a supervised service, and provide an S3-compatible
-private media bucket. Use Ansible only when it reduces repeatable host configuration (packages,
+private media bucket. Run `bun run static:precompress` after both static builds so the proxy can
+serve the `.br`/`.gz` siblings it writes (Caddy `precompressed`; nginx `gzip_static` for `.gz`,
+plus `brotli_static` from the `ngx_brotli` module for `.br`, which stock nginx never serves). That
+step belongs to this path only: neither cloud release reads those files (Yandex builds the static
+surfaces inside `infra/yandex/static.Dockerfile` from a Git archive, DigitalOcean builds them on
+App Platform), so do not run it as part of a cloud release or add it to those build commands. Use
+Ansible only when it reduces repeatable host configuration (packages,
 users, firewall, systemd, proxy); keep database data, credentials, and releases out of playbook
 templates. The operator owns TLS, backups, restore tests, patching, monitoring, and rollback.
 

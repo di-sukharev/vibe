@@ -251,22 +251,29 @@ Terraform CLI rather than the normal application toolchain.
 - `bun run architecture:check` - enforce the module/feature dependency boundaries.
 - `bun run build` - run production build/typecheck/export scripts for workspaces that define them.
 - `bun run static:precompress` - write `.br` and `.gz` next to the text assets in `webapp/dist` and
-  `website/dist`, after those builds. Deliberately not part of `build`: only the own-server proxy
-  reads those sidecars. Hosted releases upload/build the original assets and let their edge layer
-  negotiate compression when available.
-- `bun run audit` - fail on unreviewed dependency vulnerabilities. The `overrides` block in the root
-  `package.json` sets minimum safe versions for fixable transitive advisories. The mobile line also
-  carries narrow, expiring exceptions for advisories with no usable fix: two for `image-size@1.2.1`,
-  which Metro uses only for local build assets and which has no patched npm release
-  (`GHSA-w3rx-r6r6-pgpr`, `GHSA-5p2g-fcmc-qvqq`, both reviewed by 2026-09-24; track the upstream
-  [advisory-database issue](https://github.com/github/advisory-database/issues/9028)), and one for
-  `decode-uri-component@0.2.2` reached through the `query-string` that `expo-router` uses for deep
-  links (`GHSA-vcc3-ghjq-m6fr`, reviewed by 2026-12-05), whose patched 0.5.0 is ESM-only while
-  `query-string` requires `^0.2.2`, so an override would break the Metro bundle instead of fixing
-  anything. For each one the gate pins the advisory, verifies every lockfile resolution and reverse
-  installed-dependency path, and refuses direct application use, a source import, or graph drift.
-  Remove an exception as soon as a usable release ships, and re-run `bun run audit` after every
-  dependency update. `bun update` still moves override ranges within their safe floors.
+  `website/dist`, after those builds. Own-server only: the Caddy/nginx proxy in
+  [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#own-server) is the one thing that reads those sidecars,
+  which is why it is not part of `build`. It is not a step before a cloud release either: Yandex
+  builds the static surfaces inside Docker from a Git archive and DigitalOcean builds them on App
+  Platform, so neither ever sees a local `dist`, and their edge layers negotiate compression when
+  available.
+- `bun run audit` - fail on unreviewed dependency vulnerabilities; part of `bun run check` and the
+  one step in that chain that needs registry access. The `overrides` block in the root
+  `package.json` sets minimum versions that close advisories in transitive dependencies nothing
+  here imports directly. Treat that block as maintenance, not configuration - after a dependency
+  update, drop the floors one at a time and re-run `bun run audit`; the ones that stay quiet are
+  no longer needed. `bun update` still moves everything within them. An advisory with no fixed
+  release upstream needs a narrow, expiring `temporaryAuditExceptions` entry in
+  `scripts/dependency-audit.mjs`, which pins the advisory, the lockfile resolutions, the direct
+  consumers, and the reachable workspaces, and still refuses any direct application dependency
+  or source import of that package. The mobile line carries three such exceptions today: two for
+  `image-size@1.2.1`, which Metro uses only for local build assets and which has no patched npm
+  release (`GHSA-w3rx-r6r6-pgpr`, `GHSA-5p2g-fcmc-qvqq`, both reviewed by 2026-09-24; track the
+  upstream [advisory-database issue](https://github.com/github/advisory-database/issues/9028)),
+  and one for `decode-uri-component@0.2.2` reached through the `query-string` that `expo-router`
+  uses for deep links (`GHSA-vcc3-ghjq-m6fr`, reviewed by 2026-12-05), whose patched 0.5.0 is
+  ESM-only while `query-string` requires `^0.2.2`, so an override would break the Metro bundle
+  instead of fixing anything. Remove an exception as soon as a usable release ships.
 - Prisma is pinned to an exact `7.9.0` in `backend/package.json`, and that is deliberate: 7.9.1
   cannot be installed. `bun add @prisma/client@7.9.1` in an empty directory produces 12 KB and
   three files instead of 78 MB and seventeen, with an empty `runtime/`, so the generated client's

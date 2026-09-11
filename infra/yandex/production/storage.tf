@@ -111,10 +111,24 @@ resource "yandex_storage_bucket" "media" {
     max_age_seconds = 600
   }
 
+  # Set at creation, before the policy below denies the IaC key `s3:PutBucketVersioning`. A bucket
+  # created without it is enabled once by hand; docs/YANDEX_CLOUD.md has the command.
+  versioning {
+    enabled = true
+  }
+
+  # The runtime key deletes objects on every avatar replace or remove and on abandoned-upload
+  # cleanup, and its policy never grants `s3:DeleteObjectVersion`. On a versioned bucket each delete
+  # leaves a marker over a recoverable version, so a code bug or a misused key has 30 days of undo;
+  # docs/STORAGE.md calls that window the only undo media has. Current objects are never touched.
   lifecycle_rule {
-    id                                     = "abort-incomplete-uploads"
+    id                                     = "media-history"
     enabled                                = true
     abort_incomplete_multipart_upload_days = 7
+
+    noncurrent_version_expiration {
+      days = 30
+    }
   }
 
   lifecycle {

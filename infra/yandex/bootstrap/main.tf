@@ -37,6 +37,20 @@ resource "yandex_storage_bucket" "terraform_state" {
     enabled = true
   }
 
+  # Every init, plan, and apply creates and deletes the lock object, every apply rewrites the state
+  # key, and versioning keeps each of those as a noncurrent version. Without a rule they accumulate
+  # until `max_size` refuses the next lock, worst case in the middle of a release. 30 days is the
+  # same recovery window the static buckets keep; current versions are never touched.
+  lifecycle_rule {
+    id                                     = "state-history"
+    enabled                                = true
+    abort_incomplete_multipart_upload_days = 7
+
+    noncurrent_version_expiration {
+      days = 30
+    }
+  }
+
   lifecycle {
     prevent_destroy = true
   }
