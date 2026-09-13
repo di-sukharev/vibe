@@ -1,6 +1,6 @@
 # Testing
 
-The goal of this template's tests is to help future agents prove each change at the narrowest stable boundary while keeping a small, valuable browser regression portfolio.
+This runbook covers local test setup and commands. Test selection, E2E limits, and validation policy live in [AGENTS.md](../AGENTS.md#testing-and-validation).
 
 Focused task validation is the default. `bun run check` is the broad repository regression for an
 explicit release/audit pass or a genuinely cross-cutting change. Its chain is
@@ -17,21 +17,15 @@ its CLI is installed.
 
 - Contracts/unit: pure rules, shared Zod wire shapes, env parsing, JWTs, password hashing, client API refresh/retry behavior, and token cleanup.
 - Build contracts: invariants that exist only in the production `dist/` of `webapp` and `website`, such as which utilities reach the shipped CSS and how the hero scene is split into chunks; see [Build Contracts](#build-contracts).
-- Backend integration: route/auth/database behavior such as refresh-token rotation, one-time password reset, role guards, profile persistence, duplicate registration, and concurrency.
-- Webapp Playwright: a curated portfolio of product journeys and failure mechanisms that depend on a real browser and Vite UI.
-- Mobile Maestro: lives on the `mobile` branch with the runnable Expo app.
-- Focused manual browser passes: primary evidence for visual and local interaction work when permanent automation has no recurring regression value.
+- Backend integration: shared business behavior through real application/HTTP boundaries and isolated test PostgreSQL, including auth, permissions, profile persistence, errors, and concurrency.
+- Webapp Playwright: essential happy paths through the real UI and backend.
+- Mobile Maestro: native happy paths on the `mobile` branch with the runnable Expo app.
 
 ## Task Validation
 
-- Scope acceptance and validation to the changed behavior or invariant and its directly coupled risks, with one decisive observable primary signal.
-- Use the narrowest stable boundary that directly detects the failure; add targeted secondary checks for coupled risks.
-- Run a pre-change baseline when the same focused signal clarifies the current behavior, then reuse it after the edit.
-- Place pure rules and isolated client logic in unit tests, shared wire shapes in contract tests, and route/auth/database behavior in backend integration tests.
-- Keep Playwright as a small portfolio of product-critical client-to-API journeys plus failure mechanisms that depend on a real browser: cookies and session restore, reloads and redirects, multiple tabs, navigation, or browser file transfer and CORS.
-- Before adding browser E2E, name the neighboring lower-level coverage and the unique failure mechanism, or extend an existing journey. Mock-heavy validation, copy, success/error, loading, and empty-state matrices stay below E2E unless they uniquely exercise cookies, reloads, redirects, multiple tabs, navigation, file transfer or CORS, or browser accessibility or focus.
-- A focused manual browser pass records the route, starting state, action, and expected outcome; it can be the primary signal for visual or local interaction work.
-- Finish with the task-specific signals and widen from the concrete blast radius. Broad repository regression is a separate release/audit activity unless the change itself is genuinely cross-cutting.
+Follow [Testing And Validation](../AGENTS.md#testing-and-validation) and select the focused command below. For example, protect a profile update primarily through backend integration; an essential client journey can prove that the saved value survives reload, without asserting a "Profile saved" message. The saved value is product data; the notification's wording is incidental.
+
+When the user requests a browser pass, record the route, starting state, action, and observed outcome.
 
 ## Backend
 
