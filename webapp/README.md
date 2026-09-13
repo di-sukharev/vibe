@@ -118,12 +118,8 @@ Use the local `shadcn` devDependency pinned in `webapp/package.json` and `bun.lo
 
 ## E2E
 
-The Playwright specs form a curated browser portfolio: the auth/profile session
-round trip, browser session coordination, role-safe navigation and promotion,
-and the avatar storage round trip. Pure validation, state matrices, API rules,
-and persistence edge cases stay at their owning contract, unit, or backend
-integration boundary. One browser journey may protect several related
-capabilities.
+Playwright covers essential happy paths through the real UI and backend under
+the testing policy in [AGENTS.md](../AGENTS.md#testing-and-validation).
 
 The run starts Docker Compose `postgres_test`, applies migrations to
 `web_app_demo_test`, idempotently seeds the E2E administrator, starts the backend
