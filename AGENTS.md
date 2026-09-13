@@ -170,7 +170,7 @@ This block exists only for fresh installs from the template. If this repository 
 - Run a pre-change baseline when the same focused signal helps distinguish existing behavior from the task result; reuse it after the edit.
 - Place pure rules and isolated client logic in unit tests, shared wire shapes in contract tests, and route/auth/database behavior in backend integration tests.
 - Keep Playwright as a curated portfolio of a few product-critical client-to-API journeys plus targeted scenarios for risks that depend on a real browser, such as cookies, reloads, redirects, multiple tabs, navigation, or browser file transfer.
-- A focused, recorded manual browser pass can be the primary signal for visual or local interaction work; use code review or screenshots when they communicate the result better.
+- For cosmetic or visual-only changes, validate through code review and relevant local checks that do not launch a browser. Do not open or control a browser, run browser-based checks (including headless Playwright), or capture screenshots for these changes unless the user explicitly requests it. The user reviews the result in their own browser and may ask the agent for a screenshot or browser check; do not make that review a prerequisite for completing the code changes. Report code validation accurately without claiming visual verification.
 - Finish by rerunning the signals that prove the changed behavior, widening from the concrete blast radius. Validate producer and consumer sides when a shared contract changes, and run `bun run architecture:check` when dependency boundaries change.
 - Treat broad repository regression as explicit release/audit work or as a secondary signal for a genuinely cross-cutting change, separate from ordinary task validation.
 - A primary signal passes only when the observable behavior is correct and its command exits cleanly. If it cannot run, report partial validation and the best available substitute; report every failed check plainly.
@@ -204,6 +204,7 @@ This block exists only for fresh installs from the template. If this repository 
 
 - Follow the existing design system, component primitives, and styling conventions.
 - Preserve the existing visual language unless explicitly asked for a redesign.
+- For cosmetic changes, implement the user's intent as precisely as possible from the code, existing components, styles, and supplied references. Leave browser-based visual review to the user unless they explicitly request agent assistance, as described in Testing And Validation.
 - Prefer parent padding plus container gap over ad hoc margins. Keep spacing on the shared scale.
 - Treat shared visual components as closed units: surface, padding, radius, internal spacing, typography, and control sizing belong to the component.
 - Compose shared components from the outside through wrappers, not visual overrides.
