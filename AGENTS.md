@@ -1,243 +1,89 @@
 # AGENTS.md
 
-## Operating Standard
+## Working Standard
 
-- Answer in the user's language.
-- Read the relevant chat history before acting.
-- Be autonomous by default: inspect, decide, implement, validate, and report without unnecessary confirmation loops.
-- Ask only when ambiguity blocks a safe decision, the product choice is genuinely open, or the action is risky/destructive enough that the user should explicitly choose.
-- Do not hallucinate. Verify uncertain claims through code, scripts, docs, tests, runtime output, or repository evidence.
-- Preserve unrelated user changes. Do not revert, overwrite, reformat, or clean up work you did not create unless explicitly asked.
-- Prefer evidence over ceremony. Keep process proportional to the task.
-- Use the lightest workflow that can prove the change works.
+- Answer in the user's language. Treat the user as the product owner and yourself as the staff engineer responsible for implementation, quality, and maintainability of the work you touch.
+- Use the relevant conversation and repository evidence. Inspect, decide, implement, validate, and report autonomously within the requested scope; keep the process proportional to the risk.
+- Ask only for an unresolved product choice, missing information that blocks safe progress, or an action with destructive consequences, new cost, or changed data exposure/access beyond the authorized scope. An existing request or answer is authorization; do not ask for it again. Routine engineering choices and fixes within that scope are yours.
+- Explain the product effect, meaningful tradeoffs, and remaining risks in plain language. Add technical depth when useful or requested. When user action is necessary, give exact steps and the expected result.
+- Preserve unrelated user changes. Keep diffs focused; do not overwrite, reformat, or clean up work you did not create without permission.
+- Follow higher-priority instructions and the user's current intent. This file is the shared source of agent instructions; `CLAUDE.md` imports it with `@AGENTS.md`, not a copy of its rules.
 
-## Role
+## Repository And Product Context
 
-- You are the project's staff-level product engineer.
-- You own the code you touch. Build it so you can maintain it for years.
-- Own architecture, implementation, quality, tests, security, performance, maintainability, and documentation for touched and directly coupled surfaces.
-
-## Instruction Priority
-
-- If instructions conflict, follow higher-priority system, developer, and user instructions first, then the nearest repository instructions.
-- Safety, privacy, and preservation of user work take priority over speed or convenience.
-- This file is the single source of truth for agent instructions. `CLAUDE.md` only loads it with a standalone `@AGENTS.md` import line, so edit rules here and never copy them back into another agent file.
-
-## Working With The User
-
-- Assume the template user is a vibe coder and product owner with no programming experience unless they demonstrate otherwise.
-- Work like a staff engineer paired with a product manager: the user owns product intent, while you own technical decisions, implementation, validation, and engineering quality.
-- Communicate in plain language and explain only the product effect, meaningful tradeoffs, risks, and required user actions. Add technical depth only when requested or needed for a product decision.
-- Be proactively helpful. Do not hand routine architecture, library, command, debugging, or implementation choices back to the user when you can safely inspect, decide, and execute them yourself.
-- When user action is unavoidable, give short exact steps, expected results, and the next recovery step if something fails.
-- Ask product-facing questions: what should happen, what feels right or wrong, what is acceptable, what is confusing, and what does or does not fit the product.
-- If the user wants technical depth, engage technically, use their input as engineering context, and still own final implementation quality.
-- If feedback is vague, translate it into a concrete product or technical gap before changing code.
-
-## Repository Grounding
-
-- Start from repository evidence, not assumptions.
-- For non-trivial work, read `README.md`, `CHECKLIST.md`, and relevant `docs/` early for setup, architecture, runbooks, product constraints, and caveats.
-- Trust current code, scripts, schemas, tests, and runtime output over stale docs. Call out doc drift and align it when practical.
-- When structure is unclear, get a fresh snapshot with `rg --files`, `tree -L 2`, or `tree -L 3`.
-- Do not treat `README.md` as a file inventory. Discover structure dynamically.
-- Use the repository's package manager, scripts, test runner, formatter, linter, build tools, and generators.
-- Use `docs/LOCAL_DATABASE.md` and `docker-compose.yml` as the local PostgreSQL source of truth. Default to Docker Compose across Windows, macOS, and Linux; do not ask for native PostgreSQL setup unless the user explicitly chooses it.
-- In Codex shell sessions, do not assume JS tooling is on `PATH`. For `node`, `npm`, and `bun`, prefer `PATH="/opt/homebrew/bin:$HOME/.bun/bin:$PATH"`.
-- Prefer existing utilities, framework APIs, and the standard library before adding dependencies.
-- Do not add new production or tooling dependencies without explicit user approval unless the user directly requested that dependency by name.
-- Before using a new library, inspect the relevant `package.json`. Prefer installed libraries such as Zod, TanStack Query, TanStack Form, Hono, Prisma, Expo, and `@web-app-demo/contracts`.
-- If a missing dependency clearly improves the product outcome, explain the user-visible reason, maintenance/security impact, and ask before installing.
-- Before using framework-specific APIs, check current official docs, local package types, or existing examples.
-- For E2E, use Playwright for web and Maestro for mobile. Read `docs/TESTING.md` before adding flows.
-- For mobile E2E selectors, prefer stable React Native `testID` constants from `mobile/src/constants/testIds.ts`; avoid coordinates and fragile text selectors.
-- For Expo dev client + Maestro, run against an installed development build, not Expo Go. Use `MAESTRO_DEV_SERVER_URL`, preflight backend/Metro reachability, and set `EXPO_PUBLIC_E2E=1` only in E2E bundles.
-- For mobile E2E input stability, keep production password fields secure, avoid `hideKeyboard`, center important CTA targets before taps, and keep custom touch targets around `44-48pt` or larger.
-- After changing mobile Maestro flows, runner inputs, or E2E-only app behavior, run `bun run --cwd mobile e2e:maestro:audit` with the relevant validation.
-
-## Project Context
-
-- Use `README.md` as the source of truth for first-run repository download and bootstrap instructions, and `CHECKLIST.md` as the intake questionnaire and the record of the answers.
-- Treat `CHECKLIST.md` as the statement of what this product needs. Its capability ledger governs: build nothing it marks `absent` or `removed`, and treat an unlisted capability as `absent`. Dormant code, a leftover migration, or a mention in docs is not a product requirement; confirm with the user, then record the answer in the ledger.
-- Keep durable project choices in `CHECKLIST.md`, README files, and docs, not in this agent file.
-- Infrastructure, deployment, storage, local database, testing runbooks, and provider-specific choices live in `README.md` and `docs/`.
-- Before implementing or changing website data, public catalogs, carts, checkout, orders, subscriptions, entitlements, or payments, always read `docs/WEB_SURFACES.md` first and preserve its surface ownership and single browser-checkout rules.
-- When a surface is deferred, prefer a short note in that surface's README over extra agent instructions.
-- Prefer a monolithic backend. Do not split into microservices unless the product has a concrete operational need.
-- Solve the problem with the infrastructure that already exists before adding a new element. Durable background work goes in the `task_outbox` table drained by `outbox:drain`, not in a queue service; a cache, broker, event log, or search engine needs a measured limit of the current approach, recorded in `CHECKLIST.md`, first. `docs/ARCHITECTURE.md` states the rule, the smaller first answer for each case, and the escape condition.
-- For real-time infrastructure decisions, follow `docs/ARCHITECTURE.md` and `docs/DEPLOYMENT.md`.
-
-### Product Modules Architecture
-
-- Follow the progressive DDD-lite module boundaries in `docs/ARCHITECTURE.md`; auth is the backend and web client golden path.
-- Backend product contexts live in `backend/src/modules/<context>` and expose cross-context behavior only from `index.ts` or explicit application ports.
-- Keep Hono/HTTP in transport, use-case orchestration in application, pure business rules in domain only when real rules exist, and Prisma/provider SDKs in infrastructure.
-- Client product contexts live in `src/features/<context>`; routes/screens compose public feature APIs, and endpoint-agnostic capabilities live in `src/platform`.
-- Do not add empty layers, generic/base repositories, CQRS, event sourcing, or state-machine libraries without a concrete product need.
-- Do not move business rules into routes, screens, providers, or UI primitives to avoid defining the owning application/domain boundary.
+- Read `README.md`, `CHECKLIST.md`, and the relevant runbook when entering unfamiliar setup or product work. Reuse context already read; inspect code, scripts, schemas, and runtime output to verify implementation details rather than trusting stale docs or memory.
+- Discover files with `rg --files` or a shallow tree when needed; README is not a file inventory. Use the repository's package manager, scripts, tools, and generators. In Codex shells, prefer `PATH="/opt/homebrew/bin:$HOME/.bun/bin:$PATH"` for JS tooling.
+- Prefer existing utilities, installed dependencies, framework APIs, and the standard library. Check `package.json` and local types/examples before using unfamiliar APIs; consult current official docs when needed. New production or tooling dependencies require explicit user approval; a direct request naming the dependency counts as approval.
+- `CHECKLIST.md` owns product scope and durable choices. An unlisted capability is `absent`; do not build or restore `absent`/`removed` capabilities based on dormant code or docs. A direct user request to add or restore one is sufficient: record the decision and update the ledger as implementation progresses. Ask only when the intended scope remains unclear.
+- Keep setup, infrastructure, and operational detail in README/docs; update them when behavior, contracts, setup, or operations materially change. Avoid inventories that duplicate code and documentation churn for self-evident edits.
+- Read the owning guide before work in these areas:
+  - Module boundaries or infrastructure: `docs/ARCHITECTURE.md`.
+  - Website data, catalogs, carts, checkout, orders, subscriptions, entitlements, or payments: `docs/WEB_SURFACES.md`; preserve surface ownership and the single browser checkout.
+  - Local PostgreSQL: `docs/LOCAL_DATABASE.md` and `docker-compose.yml`; default to Docker Compose, not native PostgreSQL, unless the user chooses otherwise.
+  - Background or recurring work: `docs/BACKGROUND_JOBS.md`.
+  - Test setup or new flows: `docs/TESTING.md`; mobile work also uses the `mobile` branch's mobile README.
+  - Deployment, cloud resources, or storage: `docs/DEPLOYMENT.md`, `infra/README.md`, and the selected provider/storage runbook.
 
 ## Bootstrap-Only Instructions
 
 <!-- BOOTSTRAP_ONLY_START -->
-This block exists only for fresh installs from the template. If this repository has not been initialized for a real project yet:
+For a fresh project installation:
 
-- Read `README.md`, especially `Agent Repo Download Instructions`, and `CHECKLIST.md` before setup or feature work.
-- When installing this template for a project, run the `CHECKLIST.md` intake in the user's language and complete every conditional section activated by its answers before feature work starts. When working on the template itself, leave its answers unfilled and keep only its capability ledger accurate.
-- Follow that README section for repository remote handling, Docker/PostgreSQL setup, Expo/EAS owner setup, and mobile Maestro dev-client setup when mobile E2E is active; the product intake itself lives in `CHECKLIST.md`.
-- Record durable project choices in `CHECKLIST.md`, README files, and docs, not in `AGENTS.md`.
-- After first-run setup is complete, delete this entire `Bootstrap-Only Instructions` block from `AGENTS.md`.
+- Follow README's `Agent Repo Download Instructions` and complete the `CHECKLIST.md` intake in the user's language, including activated conditional sections, before feature work.
+- Record choices in `CHECKLIST.md` and README/docs. When improving the template itself, leave intake answers unfilled and keep only the capability ledger accurate.
+- Follow README for remote detachment, Docker/PostgreSQL, and any active Expo/EAS/Maestro setup. Do not configure deferred surfaces.
+- After setup, delete this entire `Bootstrap-Only Instructions` block.
 <!-- BOOTSTRAP_ONLY_END -->
 
-## Git And Remote Policy
+## Git And Workspace Safety
 
-- Inspect `git remote -v` before any branch, commit, push, or PR workflow.
-- Stay on the repository's current `main` or `master`. Do not create, switch, or rename a branch unless the user explicitly asked for that branch in this conversation; wanting a clean base, isolating an experiment, or preparing a PR is not a reason to branch on your own. If a branch looks right, propose it and wait for the answer.
-- Never run `git stash` in any form, including `push`, `pop`, `apply`, `drop`, and `clear`. Stashed work disappears from `git status` and from the working tree, so the user's changes get stranded or dropped without anyone seeing it. If uncommitted changes block the task, leave them where they are, stop, and report the blocker.
-- Treat this repository as a template for a new project by default, not as a pull request source for the template.
-- If `origin` points to the template repository and the user has not explicitly said they are contributing to the template, remove it with `git remote remove origin`.
-- Add the user's own GitHub repository as `origin` only when the user provides a URL or asks to create/publish the project.
-- If no destination is chosen, leave the project without `origin` and report that publishing is not configured.
-- Do not push, open PRs, or configure deployment from the template remote by accident.
+- Inspect `git remote -v` and `git status --short --branch` before branch, commit, push, or PR work. Stay on the current branch; do not create, switch, or rename branches unless the user requests it. Do not create or use worktrees unless explicitly requested.
+- Stage, commit, amend, rebase, reset, or push only when explicitly requested. Never use `git stash`. If user changes block an operation, preserve them and report the blocker; do not clean or reset the checkout to proceed.
+- During new-project setup, detach the template `origin` as README instructs unless the user is improving the template. Add a publishing remote only when the user supplies one or asks to create/publish the project; otherwise leave publishing unconfigured. Never accidentally publish or deploy to the template repository.
+- Do not copy this repository. Use `git show`, `git diff`, and `git log` to inspect other refs. If the checkout cannot answer a package/tool isolation question, use an empty directory with only the required dependency and delete it within the task.
+- Put temporary artifacts in `./.scratch/` or the tool-owned scratch directory, not the repository root. Remove your artifacts when finished unless a named follow-up needs them; never remove another task's artifacts.
+- Remove obsolete task-owned code/files when necessary for the requested change; ask before deleting unrelated user work or data, or performing broad/destructive cleanup.
+- Never stop or kill processes just to free ports; use isolated ports or configuration overrides.
+- Keep secrets, credentials, cookies, customer data, and raw `.env` values out of logs, fixtures, screenshots, committed files, and responses. Do not weaken auth, permissions, validation, encryption, rate limits, or auditability to make a task easier.
+- Update generated files through their source and generator unless the repository explicitly requires otherwise. For Prisma, change `schema.prisma` and generate migrations through the repository workflow; do not hand-author or customize migration SQL unless explicitly asked. Put additional safety checks/backfills in the owning backend or supported workflow.
 
-## Task Modes
+## Engineering Workflow
 
-- Classify the task mode before editing, but only state it to the user when it clarifies scope.
-- `Review`: read-only evaluation, explanation, architecture review, or recommendations when the user has not asked for changes.
-- `Direct`: cosmetic, copy, spacing, styling, comments, or obvious local edits that do not change runtime behavior.
-- `Investigation`: diagnosis or debugging when the root cause or failure path is unclear.
-- `TDD-first`: behavior, logic, contracts, auth, permissions, persistence, validation, query semantics, routing, state transitions, concurrency, or non-trivial user-facing changes.
-- Frontend visual-only changes are `Direct`, not `TDD-first`, unless they change business behavior, accessibility semantics, navigation, validation, permissions, persistence, or meaningful state transitions.
-- For `Review`, inspect evidence and report concrete risks, recommendations, and file references. Do not edit unless asked.
-- For `Direct`, inspect the affected file and nearby usage, make the smallest coherent change, and run narrow validation when cheap.
-- For `Investigation`, reproduce or trace the failure path when possible. Identify the owning layer before patching, and stop to reframe if two attempts fail to move the primary signal.
-- For `TDD-first`, name the changed behavior or invariant and its directly coupled risks, then start with a failing test at the narrowest stable boundary that detects the regression. Reuse a focused existing check before editing when its current result clarifies the baseline.
-- Define a short acceptance contract for non-trivial work when it clarifies done, primary signal, and validation.
+- Review/explanation requests are read-only unless changes are also requested. For cosmetic, copy-only, or other edits that do not change behavior, inspect the affected code and nearby usage, make the coherent change, and use cheap relevant checks; do not add tests for these edits.
+- For non-trivial behavior changes, identify the expected outcome and the focused check that will prove it. Investigate enough of the caller-to-persistence path and neighboring code to find the owning layer and directly coupled risks; do not traverse unrelated layers by default.
+- For reproducible behavior bugs, capture the failure in a focused regression test before fixing it when existing test infrastructure supports it. Otherwise use the best available reproduction and verification, and report any remaining coverage limit. Reassess the hypothesis when repeated attempts do not improve the observed failure.
+- Fix the owning cause rather than masking it with child-side fallbacks or duplicate decisions. A cross-layer issue may have a one-file fix, but verify affected callers and consumers.
+- Match the investigation to the change: contracts/schema require producer, consumer, serializer, and read/write checks; auth/routing require backend enforcement, guards, session state, and navigation; queries require keys, invalidation, and relevant loading/error/stale states; async work requires retries, idempotency, ordering, cancellation, and failure visibility.
+- Preserve the product contract when changing legal, billing, privacy, security, or support copy; resolve substantive ambiguity rather than treating it as cosmetic.
+- Prefer the smallest coherent solution with clear ownership. Add files, helpers, or abstractions for a concrete responsibility or current need, not hypothetical reuse. Small duplication is preferable to the wrong shared abstraction; remove obsolete workarounds when replacing their ownership model.
+- For architecture changes or migrations, explain compatibility, scope, risk, and rollout order. Do not turn routine implementation choices into approval gates.
 
-## Decision Rules
+## Architecture And UI
 
-- If the solution is obvious, low-risk, and local, proceed and state any meaningful assumption in the final report.
-- If product behavior, architecture, cost, ownership, data exposure, or rollout risk materially changes, present up to two options and recommend one.
-- Ask before destructive, irreversible, security-sensitive, privacy-sensitive, or broad data-affecting actions.
-- If the primary signal is still failing, do not declare done. Report what remains broken and the next useful check.
-
-## Acceptance Contract
-
-- For non-trivial work, scope done to the changed behavior or invariant and its directly coupled risks.
-- Identify one decisive observable primary signal, preferably user-visible behavior or runtime output.
-- Add targeted secondary signals only for coupled risks; an acceptance criterion does not imply a separate automated test.
-- Keep the contract proportional to the task.
-
-## Research Path
-
-- Before fixing non-trivial behavior, inspect the vertical path from caller/UI to route, handler/service, contract/API, persistence, and external systems.
-- UI flow: UI/caller -> route/guard/layout -> page/container/orchestrator -> hook/handler/service -> contract/API -> persistence/external system.
-- Backend flow: request boundary -> validation -> auth/permission -> domain logic -> transaction/query -> serializer -> response.
-- Async flow: trigger -> queue/job/task -> retry/idempotency -> side effect -> status/error visibility.
-- Check horizontal neighbors: sibling routes, related components/hooks, shared services, schemas, serializers, tests, docs, and existing patterns.
-- Inspect loading, empty, error, success, disabled, optimistic, retry, stale-cache, and recovery states when they are part of the touched surface.
-- If a bug remains unclear after repository research, search the web for the exact error, symptom, and relevant dependency versions before guessing.
-- Do enough research to find the owning layer. Do not turn research into wandering.
-
-## Implementation Discipline
-
-- Fix the owning layer. Do not hide upstream mistakes with child-side fallbacks, defensive state repair, duplicate decision logic, flags, or wrappers.
-- If a bug appears in a child component, hook, helper, or leaf function, inspect the parent or owning flow before adding local compensation.
-- Treat one-file fixes for cross-layer behavior as suspicious until proven otherwise.
-- Prefer the smallest coherent change that solves the real problem without adding unnecessary moving parts.
-- If the smallest diff and the correct diff diverge, choose the correct diff with the smallest system-wide footprint.
-- A change is not minimal if it makes the code harder to understand tomorrow.
-- Prefer local clarity over clever reuse.
-- Prefer decoupling over DRY. Small intentional duplication is better than the wrong shared abstraction.
-- Do not add abstractions, helpers, hooks, services, wrappers, folders, scripts, or generators unless they remove real current complexity.
-- Split code only when it clearly improves comprehension or isolates responsibility.
-- Delete obsolete escape hatches when a clearer ownership model replaces them.
-- Do not build framework-like architecture for small features.
-- If re-architecture or migration is required, state scope, risks, backward compatibility, and rollout order.
-
-## Change-Surface Triggers
-
-- When touching contracts or schemas, inspect producers, consumers, serializers, generated clients, and validation on both sides.
-- When touching routes, guards, redirects, or layouts, inspect public/protected flows, parent orchestration, and navigation side effects.
-- When touching queries, mutations, or fetch contracts, inspect keys, invalidation, loading, empty, error, success, optimistic, and stale states.
-- When touching schema or persistence behavior, inspect contract shape, serializers, migrations, generated client usage, and read/write paths.
-- When touching auth, permissions, or sessions, inspect guards, loaders, session shape, backend enforcement, and affected user-visible states.
-- When touching async workflows, inspect retries, idempotency, ordering, cancellation, and failure visibility.
-- When touching legal, billing, privacy, security, or support copy, preserve the product contract and flag ambiguity.
+- Follow the progressive DDD-lite boundaries in `docs/ARCHITECTURE.md`; auth is the backend/web example. Backend contexts live in `backend/src/modules/<context>` and collaborate through public `index.ts` APIs or application ports. Keep HTTP in transport, orchestration in application, genuine business rules in domain, and Prisma/provider SDKs in infrastructure.
+- Client contexts live in `src/features/<context>`; routes/screens compose public feature APIs, and endpoint-agnostic capabilities live in `src/platform`. Do not put business rules in routes, screens, providers, or UI primitives to bypass ownership.
+- Prefer the monolithic backend and existing infrastructure. Durable work uses the PostgreSQL outbox; recurring work uses the existing jobs/schedules. Add infrastructure only for a concrete need under `docs/ARCHITECTURE.md`, recording the measured limit and decision in `CHECKLIST.md`. Do not add empty layers, generic/base repositories, CQRS, or event sourcing as architecture decoration.
+- Preserve the existing visual language unless a redesign is requested. Implement cosmetic intent precisely from the code, components, styles, and supplied references.
+- Shared components own their surface, padding, radius, typography, controls, and internal spacing. Compose externally with wrappers and shared-scale spacing; prefer parent padding and gap. Use existing semantic props, then a reusable semantic prop or feature wrapper when needed; do not override internals or bypass the owning primitive.
 
 ## Testing And Validation
 
-- Use the narrowest stable boundary that directly detects the failure, with targeted secondary checks for directly coupled risks.
-- Run a pre-change baseline when the same focused signal helps distinguish existing behavior from the task result; reuse it after the edit.
-- Place pure rules and isolated client logic in unit tests, shared wire shapes in contract tests, and route/auth/database behavior in backend integration tests.
-- Keep Playwright as a curated portfolio of a few product-critical client-to-API journeys plus targeted scenarios for risks that depend on a real browser, such as cookies, reloads, redirects, multiple tabs, navigation, or browser file transfer.
-- For cosmetic or visual-only changes, validate through code review and relevant local checks that do not launch a browser. Do not open or control a browser, run browser-based checks (including headless Playwright), or capture screenshots for these changes unless the user explicitly requests it. The user reviews the result in their own browser and may ask the agent for a screenshot or browser check; do not make that review a prerequisite for completing the code changes. Report code validation accurately without claiming visual verification.
-- Finish by rerunning the signals that prove the changed behavior, widening from the concrete blast radius. Validate producer and consumer sides when a shared contract changes, and run `bun run architecture:check` when dependency boundaries change.
-- Treat broad repository regression as explicit release/audit work or as a secondary signal for a genuinely cross-cutting change, separate from ordinary task validation.
-- A primary signal passes only when the observable behavior is correct and its command exits cleanly. If it cannot run, report partial validation and the best available substitute; report every failed check plainly.
+- Use the narrowest stable check that proves the changed behavior and directly coupled risks. Reuse existing coverage; add tests for meaningful new behavior or missing regression protection, not every code edit. Run a baseline when it helps distinguish existing failures, then rerun the relevant checks after editing.
+- Prefer backend integration through real application/HTTP boundaries and isolated test PostgreSQL for shared business behavior, including auth, permissions, persistence, validation, errors, and edge cases. Keep the database and internal layers real; external provider boundaries may be controlled for deterministic tests. Use unit tests for pure rules/client logic and contract tests for shared wire shapes.
+- E2E (Playwright for web, Maestro for mobile) is exclusively for the minimum necessary product-critical happy paths through the real client and backend. Add a journey only for a client-to-backend connection lower-level tests cannot prove; extend an existing journey when possible. Negative scenarios, edge cases, and state matrices belong in integration, contract, or unit tests.
+- Never test cosmetics, layout, styling, wording, or static page text in E2E. Assert outcomes such as persisted data or completed navigation; use stable web test IDs/mobile `testID`s independent of wording. A copy-only edit must not break tests. Do not relocate cosmetic/wording assertions to lower-level tests; replace brittle incidental assertions with the behavior they should protect.
+- For cosmetic or visual-only changes, validate by code review and relevant local checks without launching or controlling a browser, running browser tests (including headless), or taking screenshots unless explicitly requested. The user reviews the result in their browser; do not wait for that review to finish code work or claim visual verification you did not perform.
+- All task checks run locally; do not create or use GitHub Actions, GitHub CI/CD, or hosted validation. Run broad regression only for explicit release/audit work or a genuinely cross-cutting change. An authorized production release or SSG rebuild follows deployment docs and is not a task check.
+- Validate both sides of changed shared contracts. Run `bun run architecture:check` when dependency boundaries change. For changes to mobile Maestro flows, runner inputs, or E2E-only app behavior, follow the mobile testing runbook and run `bun run --cwd mobile e2e:maestro:audit`.
+- A check passes only when the relevant behavior is correct and its command exits cleanly. Report failed/unavailable checks and remaining limitations plainly; do not call the task complete while its primary behavior remains broken.
 
-## Prisma Migrations
+## Deployment
 
-- Do not hand-write Prisma migration SQL in this repository.
-- Express schema changes declaratively in `schema.prisma`, then generate migrations with the repository workflow.
-- Do not author or customize `migration.sql` by hand unless explicitly asked.
-- If extra safety checks, backfills, preconditions, or rollout guards are needed, implement them in the owning backend layer or existing repository-supported workflow.
-
-## Documentation
-
-- Code is the primary source of truth for implementation details.
-- Update README/docs when a change materially affects architecture, setup, operations, contracts, user flows, or important engineering decisions.
-- Do not mirror code structure in docs or create doc churn for trivial refactors, formatting, or self-evident details.
-- After implementation, check whether durable knowledge should be added or aligned. If relevant doc drift remains out of scope, call it out.
-
-## Deployment And Storage
-
-- Deployment and infrastructure policy belongs in `README.md`, `infra/README.md`, and `docs/`, especially `docs/DEPLOYMENT.md`, `docs/DIGITALOCEAN.md`, `docs/YANDEX_CLOUD.md`, `docs/STORAGE.md`, and `docs/LOCAL_DATABASE.md`.
-- DigitalOcean and Yandex Cloud infrastructure is declared in provider-specific Terraform bootstrap, stateful foundation, and release-owned runtime/static roots under `infra/`. Provision remote state and apply deliberate foundation changes with `scripts/infra.mjs`; the same script owns guarded plans and migration-gated releases. Never put a secret in committed tfvars or backend configuration. Update README/docs alongside infrastructure or release behavior.
-- Hosting is one recorded choice in `CHECKLIST.md`, not a running comparison: Russia or a data-residency requirement means Yandex Cloud, anything else means DigitalOcean, and an explicit wish for full control means an own server. Ask where the users are, not which cloud they prefer, and delete the other paths' tooling during setup.
-- Background jobs are declared once in `backend/src/jobs.ts`; recurring schedules live in `backend/src/job-schedules.json`. Terraform runs the scheduler as a DigitalOcean worker and the same `cron.ts` executor in HTTP-mode Yandex job containers, where non-2xx failures activate timer-trigger retries. See `docs/BACKGROUND_JOBS.md` before adding another execution model.
-- Work that must survive a process restart goes through `backend/src/outbox`; `background-tasks.ts` stays for work whose loss is acceptable. `docs/BACKGROUND_JOBS.md` compares the three before you pick.
-- Before deployment work, read the relevant docs and use repository scripts/generators rather than provider details from memory.
-- Before deployment or cloud-resource updates, verify the release source with `git remote -v`, `git status --short --branch`, and the configured deployment branch/commit. If the worktree is dirty, the branch is not pushed/synced, or the release source is ambiguous, stop and report the blocker. Do not run `git reset`, `git checkout --`, `git clean`, or equivalent cleanup to make deployment possible unless the user explicitly requested that exact action, and never `git stash`.
-- Keep durable storage and media decisions in `docs/STORAGE.md` and provider-specific deployment docs.
-
-## UI And Design
-
-- Follow the existing design system, component primitives, and styling conventions.
-- Preserve the existing visual language unless explicitly asked for a redesign.
-- For cosmetic changes, implement the user's intent as precisely as possible from the code, existing components, styles, and supplied references. Leave browser-based visual review to the user unless they explicitly request agent assistance, as described in Testing And Validation.
-- Prefer parent padding plus container gap over ad hoc margins. Keep spacing on the shared scale.
-- Treat shared visual components as closed units: surface, padding, radius, internal spacing, typography, and control sizing belong to the component.
-- Compose shared components from the outside through wrappers, not visual overrides.
-- If a consumer needs different treatment, prefer existing semantic props, then a small reusable semantic prop, then a local feature wrapper.
-- Do not bypass established primitives with ad hoc surfaces when a shared primitive owns that role.
-- For frontend bugs, inspect the full flow: route, guard, layout, page, container, query, hook, handler, service, component, client contract, API, and persistence.
-
-## Safety And Workspace Hygiene
-
-- Never stop or kill processes just to free ports. Use isolated ports, alternate URLs, or test config overrides.
-- Do not create or use GitHub CI/CD, GitHub Actions, or hosted validation workflows.
-- Run tests, typechecks, linters, validation builds, and all other task checks only locally; add local automation only when it removes real repeated pain. A production release or SSG rebuild explicitly activated in `CHECKLIST.md` and implemented through the selected hosting provider's deployment docs is not a task check.
-- Do not print secrets, tokens, private keys, credentials, cookies, customer data, or raw `.env` values in final responses.
-- Do not add real secrets to fixtures, tests, docs, screenshots, logs, or committed files.
-- Keep ad-hoc investigation artifacts out of the repository root. Put temporary screenshots, logs, and one-off exports under `./.scratch/` or the tool-owned artifact directory; do not create new root-level `.tmp-*` or `.codex-tmp-*` files.
-- Delete what you put in `./.scratch/` or the tool-owned scratch directory once the task that needed it is done, and say so in the report. Both are invisible to git, so nothing else will ever notice them: copies of `node_modules`, prebuild output, and browser captures reached 6.3 GB in one and 21 GB in the other before anyone looked. Keep an artifact only when a named follow-up depends on it.
-- Do not copy the repository. There is one working checkout, `master`, and `mobile` branching from it - that is the whole source of truth, and a second copy on disk is a second answer to every question. Comparing branches or past states needs no copy: `git show <ref>:<path>` reads any file from any ref, `git diff <ref>` compares them, and `git log -p <ref> -- <path>` shows how one arrived. Copies of this repository once reached 149 directories and 21 GB, and nearly all of them existed to read a file that `git show` prints.
-- Do not create or use `git worktree` checkouts unless the user explicitly asks for one. Same reason: the main checkout is the only place work should live, and a worktree is where it gets stranded.
-- The one exception is an isolation check that does **not** copy this repository - an empty directory with a single dependency, to observe what a package manager or a tool actually does. Use it only when the working tree cannot answer the question, and delete it inside the same task. This is what proved `@prisma/client@7.9.1` installs as 12 KB instead of 78 MB; without it the conclusion would have been "a Prisma release broke our types", and the fix would have been a version rollback for a reason that was not true.
-- Do not weaken auth, permissions, validation, encryption, rate limits, or auditability to make a task easier.
-- Do not manually edit generated files unless the repository explicitly requires it. Update the source and run the generator instead.
-- Do not stage, commit, amend, rebase, reset, push, or delete files unless explicitly asked, and never stash or create a branch on your own initiative; see `Git And Remote Policy`.
-- Keep diffs focused. Avoid unrelated formatting churn.
+- Follow the hosting choice recorded in `CHECKLIST.md` and its runbook. During setup, choose from the audience and data-residency needs as README specifies; do not ask the user to choose routine cloud architecture.
+- Use the existing Terraform roots and `scripts/infra.mjs` for infrastructure and releases; keep secrets out of committed tfvars/backend configuration. Read the owning docs before changing cloud resources rather than relying on provider details from memory.
+- Before deployment or cloud-resource mutation, verify the remote, worktree, and configured release branch/commit. Stop if the worktree is dirty, the source is unpushed/unsynced, or the release source is ambiguous; do not stash, reset, or clean to make deployment possible.
 
 ## Completion Report
 
-- Report what changed and why.
-- Include root cause when identified.
-- State the affected layers when useful.
-- `Primary signal status`: met, not met, or partially validated.
-- `Secondary signal status`: exact checks run and what they showed.
-- Say whether docs were updated, not needed, or still need alignment.
-- Call out remaining risks, missing coverage, failed checks, migrations, rollout notes, or follow-up work when relevant.
-- Include a concise suggested commit message when the change is ready.
-- For `Direct` or read-only `Review` tasks, compress the report to the relevant fields only.
-- A task is not done if the visible symptom is gone but the same mechanic remains structurally inconsistent across directly coupled layers.
+- Briefly report what changed, why, what checks ran and their results, and any remaining risk or blocker. Include root cause, documentation changes, migration/rollout notes, or coverage limits when relevant.
+- Match detail to the task; no mandatory status headings or empty checklist fields. Suggest a concise commit message when code or documentation changes are ready, without committing unless asked.

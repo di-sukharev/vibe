@@ -157,7 +157,7 @@ The user is a product owner, not an engineer. These are engineering decisions th
 - Which hosting the recorded audience implies: Russia means Yandex Cloud, elsewhere means DigitalOcean, and an explicit wish for full control means an own server. Explain the pick in product terms; never ask the owner to compare providers.
 - Managed Redis-compatible Pub/Sub only when real-time needs to scale across instances.
 - Alerting uses only what the recorded hosting already offers: App Platform alert rules on DigitalOcean, Yandex Monitoring alerts created by hand from the runbook. No log forwarding, monitoring service, or paging integration until a recorded incident shows the log check was not enough.
-- Test boundaries follow the failure mechanism: unit for pure/client rules, contracts for shared wire shapes, backend integration for route/auth/database behavior, and a curated browser portfolio for product-critical client-to-API journeys and real-browser risks.
+- Test boundaries and validation scope follow [AGENTS.md](AGENTS.md#testing-and-validation); local commands live in [docs/TESTING.md](docs/TESTING.md).
 - Libraries, file layout, naming, refactors, and validation scope.
 
 ## 10. Capability ledger
@@ -167,9 +167,9 @@ What this project actually contains. The agent updates it whenever a capability 
 - `included` - present and expected to work.
 - `available` - partly there but not usable yet; the note says exactly what is still missing, which may be configuration, routes, or UI.
 - `absent` - not part of this project. Build it only after the product owner asks.
-- `removed` - deliberately deleted during setup. **Do not re-add it.** A leftover reference, migration, or doc mention is not a product requirement; ask the product owner first.
+- `removed` - deliberately deleted during setup. Restore it only when the product owner asks; a leftover reference, migration, or doc mention is not a product requirement.
 
-A capability with no row is `absent` by default. Add the row instead of assuming. The State column always holds one of the four states above - never `_unanswered_` or `n/a`.
+A capability with no row is `absent` by default. A direct request to add or restore one is sufficient authorization: record the decision and update the row as implementation progresses without asking for the same approval again. The State column always holds one of the four states above - never `_unanswered_` or `n/a`.
 
 | Capability                      | State    | Note                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | ------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
