@@ -98,7 +98,7 @@ class AbortableAppStoreServerAPIClient extends AppStoreServerAPIClient {
     method: string,
     requestBody: string | Buffer | undefined,
     headers: Record<string, string>,
-  ): Promise<import('node-fetch').Response> {
+  ): ReturnType<AppStoreServerAPIClient['makeFetchRequest']> {
     const controller = new AbortController()
     this.controllers.add(controller)
     const query = parsedQueryParameters.toString()
@@ -113,7 +113,7 @@ class AbortableAppStoreServerAPIClient extends AppStoreServerAPIClient {
     ).finally(() => {
       this.controllers.delete(controller)
     })
-    return request as unknown as Promise<import('node-fetch').Response>
+    return request as unknown as ReturnType<AppStoreServerAPIClient['makeFetchRequest']>
   }
 }
 
