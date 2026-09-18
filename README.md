@@ -132,6 +132,8 @@ Astro — стандартный выбор для сайта: мало клие
 bun install
 ```
 
+Ветка `mobile` использует `linker = "isolated"` в `bunfig.toml`. Это разделяет версии React для webapp и Expo. После перехода с `hoisted` удали только каталоги `node_modules` в корне и рабочих пакетах, затем выполни `bun install --frozen-lockfile`. Не удаляй `bun.lock`.
+
 Для backend/API, full-stack и других задач с БД проверь Docker:
 
 ```bash
