@@ -1,109 +1,73 @@
-# Deployment
+# Деплой
 
-Production infrastructure is declared in [infra/README.md](../infra/README.md). Pick the hosting
-from the audience recorded in [CHECKLIST.md](../CHECKLIST.md): Yandex Cloud for users/data in
-Russia, DigitalOcean otherwise, or an own server only when the owner explicitly wants full control.
-Local development never needs cloud credentials.
+Production-инфраструктура описана в [infra/README.md](../infra/README.md). Выбери хостинг по [CHECKLIST.md](../CHECKLIST.md): Yandex Cloud для пользователей/данных в России, иначе DigitalOcean. Свой сервер — только по явному запросу полного контроля. Локальной разработке облачные ключи не нужны.
 
-Provider runbooks:
+Инструкции провайдеров: [DigitalOcean](DIGITALOCEAN.md), [Yandex Cloud](YANDEX_CLOUD.md).
 
-- [DigitalOcean](DIGITALOCEAN.md)
-- [Yandex Cloud](YANDEX_CLOUD.md)
+## Состав production
 
-## Supported production shape
+| Область | DigitalOcean | Yandex Cloud |
+| --- | --- | --- |
+| API | Сервис App Platform | Serverless Container за API Gateway |
+| Задания | Scheduler worker App Platform | Четыре HTTP-контейнера с таймерами |
+| БД | Managed PostgreSQL 18 | Managed Service for PostgreSQL 18 |
+| Статика | App Platform Static Sites | Два публичных website-бакета Object Storage |
+| Файлы пользователей | Приватный Space с версиями | Приватный Object Storage с версиями |
+| Образы | DigitalOcean Container Registry | Yandex Container Registry |
+| Terraform state | Приватный Space с версиями | Приватный Object Storage с версиями |
+| CDN | Встроенная доставка Static Sites | Отключён; Cloud CDN по необходимости |
+| Уведомления | App Platform через Terraform | Monitoring вручную по инструкции |
 
-| Concern               | DigitalOcean                        | Yandex Cloud                                   |
-| --------------------- | ----------------------------------- | ---------------------------------------------- |
-| API                   | App Platform service                | Serverless Container behind API Gateway        |
-| Scheduled work        | App Platform scheduler worker       | Four HTTP job containers with timer triggers   |
-| Database              | Managed PostgreSQL 18               | Managed Service for PostgreSQL 18              |
-| Static webapp/website | App Platform Static Sites           | Two public Object Storage website buckets      |
-| User media            | Private, versioned Spaces bucket    | Private, versioned Object Storage bucket       |
-| Image registry        | DigitalOcean Container Registry     | Yandex Container Registry                      |
-| Terraform state       | Private, versioned Space            | Private, versioned Object Storage bucket       |
-| CDN                   | App Platform's static-site delivery | Off by default; Cloud CDN is opt-in            |
-| Alerts                | App Platform rules (Terraform)      | Monitoring alerts created by hand (runbook)    |
+Начальный профиль содержит один узел БД и один API-экземпляр DigitalOcean (`instance_count = 1`). Это экономный старт, не высокая доступность. До роста требований увеличь размер и число реплик.
 
-The launch profile intentionally uses one database node, and on DigitalOcean one API instance
-(`instance_count = 1`). This is the economical starting point, not a high-availability claim.
-Increase the provider-specific size and replica settings before the availability requirement
-demands it.
+Serverless Containers Yandex масштабируются на несколько процессов. `concurrency` задаёт запросы на экземпляр, а не предел экземпляров. Поэтому Yandex использует `RATE_LIMIT_STORE=database`. Auth/admin-лимиты из `backend/src/http/security.ts` считают в `rate_limit_buckets` через `backend/src/rate-limit`: один upsert на политику, клиента и фиксированное окно.
 
-Yandex is different and the difference matters: Serverless Containers scale out by running more
-instances of the revision, and `concurrency` only sets how many requests one instance takes before
-the next one starts. There is no setting that pins the API to a single process, so anything the
-backend keeps in process memory is per-instance there. The auth and admin rate limiters are the
-one such thing that must not be, which is why the Yandex runtime inputs set
-`RATE_LIMIT_STORE=database`: the limiters in `backend/src/http/security.ts` then count in the
-`rate_limit_buckets` table of the PostgreSQL the deployment already runs (`backend/src/rate-limit`),
-one upsert per limited request keyed by policy, client and clock-aligned window, so
-`AUTH_RATE_LIMIT_MAX` and `ADMIN_USERS_READ_RATE_LIMIT_MAX` are global budgets on both hostings.
-DigitalOcean keeps the default `memory` store: with one instance it is already the whole truth and
-costs no query. An own server that runs more than one backend process sets `database` the same
-way. The auth cleanup inside `maintenance:process` sweeps spent windows. The rule in
-`docs/ARCHITECTURE.md` is why this is a table and not a Redis.
+Так `AUTH_RATE_LIMIT_MAX` и `ADMIN_USERS_READ_RATE_LIMIT_MAX` остаются общими. DigitalOcean с одним процессом использует `memory` без запросов к БД. На своём сервере с несколькими API-процессами также включи `database`. Отработанные окна удаляет auth-очистка в `maintenance:process`. Причина выбора PostgreSQL вместо Redis — в `docs/ARCHITECTURE.md`.
 
-No Ansible is used on these two paths: there is no host to configure. Terraform owns managed and
-serverless resources; the release script owns image build, migration ordering, static publication,
-and verification. Ansible becomes useful only on the own-server path.
+Облачным путям Ansible не нужен: отдельных хостов для настройки нет. Terraform управляет ресурсами; скрипт релиза — образом, порядком миграции, статикой и проверкой. Ansible может пригодиться на своём сервере.
 
-Alerting is the smallest thing each provider offers without another service: on DigitalOcean,
-Terraform puts App Platform alert rules on the API app and its scheduler worker; on Yandex, the
-provider has no alert resource, so the runbook creates two Monitoring alerts by hand. Neither reads
-the outbox numbers in the log; `docs/BACKGROUND_JOBS.md`, "What to watch", says who is told about
-what, and what still needs a person reading the log.
+Используются минимальные уведомления провайдера без нового сервиса. Они не читают числа outbox из обычного лога. Покрытие и ручные проверки описаны в разделе наблюдения `docs/BACKGROUND_JOBS.md`.
 
-## Release sequence
+## Порядок релиза
 
 ```mermaid
 flowchart LR
-  A["Bootstrap remote state once"] --> B["Plan foundation"]
-  B --> C["Apply foundation explicitly"]
-  C --> D["Build and push immutable backend image"]
-  D --> E["Run database migration gate"]
-  E --> F["Promote API and jobs"]
-  F --> G["Publish or rebuild static surfaces"]
-  G --> H["Verify API, webapp, and website"]
+  A["Один раз создать удалённый state"] --> B["Проверить план основы"]
+  B --> C["Явно применить основу"]
+  C --> D["Собрать и отправить неизменяемый образ"]
+  D --> E["Выполнить миграцию БД"]
+  E --> F["Переключить API и задания"]
+  F --> G["Опубликовать статику"]
+  G --> H["Проверить API, webapp и website"]
 ```
 
-Foundation and release states are separate. `infra:apply` is the only routine path that changes
-stateful foundation resources; `release` requires its saved plan to contain no changes. The
-release-owned roots are then idempotent and safe to resume. A migration failure stops before
-runtime or static promotion.
+State основы и релиза разделены. Постоянные ресурсы меняет `infra:apply`. `release` требует план основы без изменений. Корни релиза допускают безопасный повтор. Ошибка миграции останавливает работу до переключения runtime и статики.
 
-Every non-dry foundation apply, release, and non-bootstrap import first holds a provider-wide
-distributed lease in the separate `operations` Terraform state. The holder remains alive for the
-whole multi-root sequence and exits if the wrapper dies; a second wrapper therefore fails at the
-state lock instead of interleaving foundation, migration, runtime, or static mutations. The wrapper
-rechecks ownership before and after every mutating phase and aborts the remaining sequence if the
-holder is lost. Plans, outputs, dry runs, and bootstrap keep their existing root-scoped locking
-behavior.
+Перед реальными apply, release и импортом вне bootstrap берётся общая аренда в Terraform state `operations`. Её процесс живёт всю последовательность и завершается вместе со скриптом. Второй запуск останавливается на блокировке, не перемешивая изменения корней.
 
-## Prerequisites
+Скрипт проверяет владение до и после каждой фазы изменений. Потеря аренды останавливает остаток последовательности. Plan, output, dry-run и bootstrap сохраняют блокировки своих корней.
 
-Both providers require:
+## Требования
 
-- Terraform `>= 1.15, < 2`, Bun, Docker, Git, and a real production branch pushed to its upstream;
-- three real HTTPS domains: API, webapp, and website;
-- a 64-character hexadecimal JWT secret (`openssl rand -hex 32`);
-- provider credentials with enough rights for the resources in the selected Terraform stack.
+Для обоих облаков:
 
-Yandex also needs `yc`, AWS CLI, and three Certificate Manager certificate IDs. DigitalOcean needs
-`doctl`, an authorized App Platform GitHub connection for the configured repository, and Spaces
-management credentials. Exact setup is in the provider runbook.
+- Terraform `>= 1.15, < 2`, Bun, Docker, Git и production-ветка, отправленная в upstream.
+- Три HTTPS-домена: API, webapp и website.
+- Случайный JWT-секрет из 64 шестнадцатеричных символов: `openssl rand -hex 32`.
+- Ключи провайдера с правами выбранного Terraform-стека.
 
-## Configure and bootstrap
+Yandex также требует `yc`, AWS CLI и три ID сертификатов Certificate Manager. DigitalOcean — `doctl`, доступ App Platform к нужному GitHub-репозиторию и ключи управления Spaces. Подробности — в инструкции провайдера.
 
-Copy only the selected provider's examples. These destination files are ignored because they hold
-project identifiers and may hold secrets:
+## Настройка и bootstrap
+
+Скопируй примеры только выбранного провайдера. Эти локальные файлы игнорируются Git:
 
 ```bash
 cp infra/<provider>/bootstrap/terraform.tfvars.example infra/<provider>/bootstrap/terraform.tfvars
 cp infra/<provider>/production/terraform.tfvars.example infra/<provider>/production/terraform.tfvars
 ```
 
-Fill both files, export secret `TF_VAR_*` values described by the provider runbook, then create the
-remote state bucket and scoped backend key:
+Заполни их и передай секретные `TF_VAR_*` по инструкции. Создай удалённый state и ограниченный ключ:
 
 ```bash
 bun run infra:bootstrap -- <digitalocean|yandex> --new --dry-run
@@ -112,52 +76,32 @@ bun run infra:apply -- <digitalocean|yandex> --dry-run
 bun run infra:apply -- <digitalocean|yandex>
 ```
 
-The first apply starts with local bootstrap state, creates a private versioned state bucket and a
-bucket-scoped key, then migrates that state to the S3-compatible backend. The bucket expires
-noncurrent versions after 30 days and aborts incomplete multipart uploads after 7: every init, plan,
-and apply creates and deletes the lock object, every apply rewrites state, versioning keeps each of
-those as a noncurrent version, and on Yandex that is what would fill the bucket's `max_size` until
-Terraform can no longer take the lock. Current versions are never expired. An existing install picks
-the rule up by rerunning `infra:bootstrap -- <provider>`, on Yandex with the temporary-role caveat
-below. On Yandex, the script uses temporary folder-level `storage.admin` only to create and
-configure the bucket, removes it after installing a policy scoped to the dedicated state service
-account, and only then migrates state.
-That policy permits bucket-configuration refresh plus current state/lock objects, denies the state
-account `s3:DeleteBucket` and `s3:PutBucketVersioning`, and never permits deleting object versions.
-The Deny guards against a Terraform change, not against a key holder: on Yandex, policy management
-is authorized by IAM (Yandex documents `storage.admin` for a service account applying a policy
-through the S3 API, which is how Terraform applies it) and is not a policy action, so whoever may
-edit the policy can also lift the Deny. Versioning is enabled once at creation, before the policy
-exists, so the Deny never blocks a routine apply. A fresh install writes the current policy during
-the first apply, while the temporary role is present. An existing install picks up a change to
-this policy (the `s3:PutBucketVersioning` Deny is one) by rerunning `infra:bootstrap -- yandex`;
-in steady state the state account holds no IAM role, so expect that policy update to be refused
-at apply time (the plan still runs: the provider reads a refused policy as empty and plans an
-in-place update). If it is, add `bootstrap_folder_storage_access = true` to
-`infra/yandex/bootstrap/terraform.tfvars`
-and rerun once: the wrapper applies with the temporary role, removes that binding again in the
-same command exactly as the first apply does, and reminds you to delete the line. If that rerun is
-refused again right after the grant, IAM propagation is the likely cause: rerun once more with the
-line still present. Ordinary and `--dry-run` reruns may destroy only that one binding without a
-flag, so a stray grant cannot survive the next run; the `--recover-state-*` flow refuses to run
-while that line is present. The bootstrap writes these ignored, mode-`0600` files:
+Первый bootstrap начинает с локального state, создаёт приватный версионируемый бакет и ключ, затем переносит state в S3-backend. Старые версии удаляются через 30 дней, незавершённые multipart-загрузки — через 7. Текущие версии не истекают.
 
-- `infra/<provider>/.env.terraform-state` — scoped backend credentials;
-- `infra/<provider>/*/backend.backend.hcl` — endpoint, bucket, and state key, with no credentials.
+Это ограничивает накопление старых state/lock-объектов. На Yandex без очистки можно заполнить `max_size` и потерять возможность взять блокировку. Существующая установка получает правило после повторного `infra:bootstrap -- <provider>`.
 
-Bootstrap is restart-safe. If a process stops after creating the credential file but before state
-migration finishes, rerun the same command: a remaining local `terraform.tfstate` is authoritative,
-so the script resumes `-migrate-state`, verifies the required remote outputs, and only then removes
-the local state. Omit `--new` when resuming. It never treats the credential file alone as proof that
-remote state is ready.
+В Yandex для создания и настройки state-бакета временно выдаётся folder-level `storage.admin`. Команда устанавливает политику выделенного state-аккаунта, снимает широкую роль, затем переносит state.
 
-Back up the state environment file in the project's secret manager. Losing it does not expose the
-cloud. If both it and local bootstrap state are absent, the wrapper refuses to create a second
-backend. For DigitalOcean, reattach with a temporary account key that can access the exact existing
-state Space. For Yandex, create the temporary key on the existing dedicated
-`<project_slug>-tf-state` service account; a key from any other identity is rejected by the bucket
-policy even if that identity has a broad folder role. Record both the returned access-key resource
-ID (for revocation) and the one-time key ID/secret, then run:
+Политика разрешает чтение конфигурации бакета и работу с текущими state/lock-объектами. Она запрещает `s3:DeleteBucket`, `s3:PutBucketVersioning` и не разрешает удалять версии. Версионирование включается до политики, поэтому обычный apply не блокируется.
+
+Deny защищает от изменения Terraform, не от владельца ключа с правом менять политику. Yandex проверяет управление политикой через IAM; S3 API требует `storage.admin`. Такой владелец может снять Deny.
+
+У state-аккаунта в обычном режиме нет IAM-роли. Поэтому обновление политики существующей установки может быть отклонено, хотя plan покажет изменение: отказ чтения провайдер воспринимает как пустую политику.
+
+При таком отказе добавь `bootstrap_folder_storage_access = true` в `infra/yandex/bootstrap/terraform.tfvars` и повтори bootstrap. Скрипт временно выдаст роль и снимет её в той же команде, затем попросит удалить строку. Если отказ повторился сразу после выдачи, дождись распространения IAM и повтори с той же строкой.
+
+Обычный повтор и `--dry-run` разрешают удаление только этой известной временной привязки без отдельного флага. Широкая роль не должна пережить следующий запуск. Восстановление `--recover-state-*` запрещено, пока строка присутствует.
+
+Bootstrap создаёт игнорируемые файлы с правами `0600`:
+
+- `infra/<provider>/.env.terraform-state`: ограниченные ключи backend.
+- `infra/<provider>/*/backend.backend.hcl`: endpoint, бакет и ключ state без секретов.
+
+Если процесс остановился до переноса, повтори команду без `--new`. Оставшийся `terraform.tfstate` — источник истины. Скрипт продолжает `-migrate-state`, проверяет удалённые выходы и только затем удаляет локальный state. Один файл ключей не доказывает готовность backend.
+
+Сохрани env-файл state в менеджере секретов. Если пропали он и локальный bootstrap-state, скрипт не создаёт второй backend.
+
+Для DigitalOcean восстановление требует временный ключ к существующему Space. Для Yandex создай ключ именно на `<project_slug>-tf-state`. Другая личность не пройдёт bucket policy, даже с широкой folder-ролью. Сохрани ID ресурса ключа для отзыва и выданные один раз ID/секрет:
 
 ```bash
 export TF_STATE_RECOVERY_ACCESS_KEY_ID='<temporary key id>'
@@ -168,40 +112,27 @@ bun run infra:bootstrap -- <provider> \
 unset TF_STATE_RECOVERY_ACCESS_KEY_ID TF_STATE_RECOVERY_SECRET_ACCESS_KEY
 ```
 
-The command reads and verifies the existing bootstrap state, reconciles its managed backend key,
-verifies that key against the same bucket, reinitializes every root with it, and only then writes
-the ignored credential marker. Revoke the temporary recovery key immediately after the success message
-(`yc iam access-key delete <recovery-access-key-resource-id>` on Yandex). If the process is
-interrupted, rerun the same command with the same temporary key: recovery writes backend
-configuration first but keeps temporary credentials only in process memory, so no ready marker can
-block the retry. Recovery intentionally has no dry-run mode and requires the provider credentials
-normally used to apply the bootstrap root.
+Команда проверяет существующий bootstrap-state, согласует управляемый ключ и проверяет его на том же бакете. Затем переинициализирует корни и записывает файл готовности. После успеха сразу отзови временный ключ; в Yandex: `yc iam access-key delete <recovery-access-key-resource-id>`.
 
-The Yandex foundation's first apply temporarily grants its storage-management identity
-folder-level `storage.admin` while creating the three application buckets and enabling provider-
-managed versioning/configuration. The same command installs `storage.admin` only on those three
-buckets and immediately removes the folder grant. Publisher and media identities keep narrower
-data-plane permissions. Every rerun automatically authorizes deletion of only that one known
-temporary folder binding, so an interruption between create and tighten cannot strand broad
-access. Steady-state plans assert that the broad binding is absent; the resulting IaC key cannot
-read or damage the separate state bucket. Each application bucket policy denies that key
-`s3:DeleteBucket` and `s3:PutBucketVersioning`. `s3:PutBucketVersioning` is a documented Yandex
-policy action, so a Terraform change that suspends versioning fails; bucket deletion and policy
-management are authorized by IAM, where the key holds bucket-scoped `storage.admin`, so the Deny is
-not protection against whoever holds the key. The two static buckets allow anonymous object reads
-only; once a release has run, every later `infra:apply` ends by reading the release marker and `/`
-of both static domains and requesting a missing web app path, and fails if any of them or the index
-shell does not come back. `docs/YANDEX_CLOUD.md` states the full boundary and the rollback.
+При прерывании повтори команду с тем же ключом. Backend-конфигурация записывается первой, временные секреты остаются только в памяти, поэтому файл готовности не помешает повтору. У восстановления нет dry-run; нужны обычные права apply bootstrap.
 
-## Plan and release
+Первый Yandex foundation apply также временно выдаёт storage-аккаунту folder-level `storage.admin`. После создания трёх бакетов команда оставляет роль только на этих бакетах и снимает общую. Ключи публикатора и media имеют более узкие права.
 
-Inspect foundation and every already-created release root at any time:
+Повтор автоматически допускает удаление только этой временной привязки. Обычный план требует её отсутствия. Итоговый IaC-ключ не читает и не повреждает отдельный state-бакет.
+
+Политики бакетов запрещают IaC-ключу `s3:DeleteBucket` и `s3:PutBucketVersioning`. Второй запрет останавливает приостановку версионирования через Terraform. Удаление бакета и правка политики проверяются через IAM, где остаётся bucket-level `storage.admin`. Поэтому Deny не защищает от самого владельца ключа.
+
+Два статических бакета разрешают только анонимное чтение объектов. После первого релиза каждый `infra:apply` проверяет маркер, `/` обоих доменов и отсутствующий путь webapp. Отсутствие страницы или SPA-оболочки завершает команду ошибкой. Полная граница и откат описаны в `docs/YANDEX_CLOUD.md`.
+
+## План и релиз
+
+Проверить основу и уже созданные корни релиза:
 
 ```bash
 bun run infra:plan -- <digitalocean|yandex>
 ```
 
-For the first release, provide the initial administrator only in the process environment:
+Для первого релиза передай администратора только через окружение процесса:
 
 ```bash
 export ADMIN_SEED_EMAIL='owner@example.com'
@@ -211,62 +142,38 @@ bun run release -- <digitalocean|yandex>
 unset ADMIN_SEED_EMAIL ADMIN_SEED_PASSWORD
 ```
 
-The script writes the seed to an ignored mode-`0600` migration-root input only for the migration,
-then removes it. Yandex creates and deletes a migration-only Lockbox secret; DigitalOcean removes
-the PRE_DEPLOY job variables in a second idempotent API deployment. On later releases omit both
-values; `db:deploy` verifies that a login-capable administrator still exists. If a Yandex release
-was interrupted after migration but before cleanup, the next release removes exactly the three
-known seed resources before invoking migration, without requiring the old seed value again.
+Скрипт временно пишет seed во входной файл миграции с правами `0600`, затем удаляет его. Yandex создаёт и удаляет отдельный Lockbox-секрет миграции. DigitalOcean убирает переменные PRE_DEPLOY вторым идемпотентным деплоем API.
 
-Log in once and change that administrator password immediately. Removing it from the active runtime
-does not guarantee that provider deployment history, Lockbox version history, or versioned
-Terraform state has forgotten the bootstrap value.
+Для следующих релизов не передавай seed. `db:deploy` проверит наличие администратора с паролем. После прерванного Yandex-релиза следующий запуск удалит три известных seed-ресурса до миграции без старого пароля.
 
-Before a non-dry release, the script reads the effective release branch (and DigitalOcean GitHub
-repository) from the applied foundation state, fetches the checkout's upstream, and refuses:
+После первого входа сразу смени пароль. Удаление из активного runtime не стирает его из истории деплоев, Lockbox или версий Terraform state.
 
-- a detached, dirty, unpushed, behind, or wrong Git branch or upstream ref;
-- on DigitalOcean, an upstream GitHub repository different from `github_repo`;
-- a DigitalOcean token for a team other than the immutable `DO_EXPECTED_TEAM_UUID`;
-- a Yandex CLI cloud/folder different from `terraform.tfvars`;
-- deletion or replacement of PostgreSQL, the media bucket, registry, Lockbox secrets, or state;
-- any other deletion unless its exact Terraform address is acknowledged with
-  `--allow-destroy=<address>`.
+Перед реальным релизом скрипт читает ветку и GitHub-репозиторий DigitalOcean из применённого state основы, получает upstream и запрещает:
 
-The captured 40-character commit is also the build input: Docker and Yandex static builds consume
-a tracked `git archive`, not the live working directory. DigitalOcean static apps build a
-never-overwritten `infra-release/<sha>` branch, and the release checks App Platform's active
-`source_commit_hash` for both apps before success. A later push advancing the mutable upstream does
-not invalidate the already captured commit or stop a migration-gated promotion halfway through.
+- Detached HEAD, грязную, неопубликованную, отстающую или неверную ветку/upstream.
+- DigitalOcean-репозиторий upstream, отличный от `github_repo`.
+- DigitalOcean-команду, отличную от неизменяемого `DO_EXPECTED_TEAM_UUID`.
+- Cloud/folder Yandex CLI, отличные от `terraform.tfvars`.
+- Удаление или замену PostgreSQL, media-бакета, registry, Lockbox и state.
+- Другие удаления без точного `--allow-destroy=<address>`.
 
-`--allow-destroy` is intentionally exact and never overrides stateful-resource protection. Import
-or move an existing resource instead of authorizing its replacement.
+Docker и статика Yandex собираются из `git archive` зафиксированного 40-символьного коммита. Статика DigitalOcean — из неизменяемой `infra-release/<sha>`. Перед успехом проверяется `source_commit_hash` обоих приложений.
 
-## Secrets and state
+Поздний push в исходную ветку не меняет захваченный коммит и не прерывает переключение после миграции. `--allow-destroy` не отменяет защиту постоянных ресурсов. Вместо замены импортируй или перемести существующий ресурс.
 
-Never commit `.tfvars`, backend credentials, generated auto-variable files, provider tokens, static
-keys, or a Terraform plan. Terraform state necessarily contains sensitive resource values. The
-state bucket and its key are therefore production credentials, not build artifacts.
+## Секреты и state
 
-Prefer `TF_VAR_*` environment variables or add real values to the local ignored
-`terraform.tfvars`. Required secret assignments are deliberately absent from the copyable examples:
-an assignment in `terraform.tfvars`, even an empty map or placeholder, has higher precedence than
-`TF_VAR_*` and would silently replace the exported value. The runtime receives database, JWT,
-media, and email credentials through provider secret fields or Yandex Lockbox; none are baked into
-the image.
+Не коммить `.tfvars`, ключи backend/провайдера, auto-variable-файлы или Terraform-планы. State содержит секреты. Бакет и его ключ — production-доступ, не артефакты сборки.
 
-Yandex uses a login-capable, migration-only database owner plus two DML-only application users
-(`blue` and `green`). Each runtime slot has its own persistent exact Lockbox version. The live
-runtime reports its credential slot from the independent runtime state; before a foundation plan,
-the wrapper compares that slot's version and password fingerprint with the previous foundation
-state and refuses to replace it. Rotate and select only the inactive slot, apply foundation, then
-release; if promotion fails, the old runtime still has both its login and secret version. The exact
-operator sequence is in [YANDEX_CLOUD.md](YANDEX_CLOUD.md).
+Передавай секреты через `TF_VAR_*` или локальный игнорируемый `terraform.tfvars`. Примеры намеренно не задают секретные поля: даже пустое значение в tfvars имеет приоритет над окружением. Runtime получает БД, JWT, media и почту через secret-поля провайдера или Lockbox. В образ они не входят.
 
-## Existing manually created infrastructure
+Yandex использует владельца БД только для миграций и две DML-роли `blue`/`green`. У каждого слота постоянная точная версия Lockbox. Runtime сообщает активный слот из своего отдельного state.
 
-Do not run the first foundation apply over resources that were created by the old CLI runbooks.
-Resolve each real resource ID and import it into the matching root and address first:
+До плана основы скрипт сравнивает версию и отпечаток пароля активного слота с прежним state. Заменять его запрещено. Обнови и выбери неактивный слот, примени основу, затем выполни релиз. При неудаче старый runtime сохранит логин и секрет. Команды — в [YANDEX_CLOUD.md](YANDEX_CLOUD.md).
+
+## Импорт ручной инфраструктуры
+
+Не применяй первую основу поверх ресурсов старых CLI-инструкций. Сначала найди реальные ID и импортируй каждый в нужный корень/адрес:
 
 ```bash
 bun run infra:import -- <provider> bootstrap <terraform-address> <provider-resource-id>
@@ -274,9 +181,7 @@ bun run infra:import -- <provider> foundation <terraform-address> <provider-reso
 bun run infra:plan -- <provider>
 ```
 
-`bootstrap` imports work with local state before backend credentials exist and migrate normally on
-the next bootstrap. Release-owned imports need the current immutable inputs so their configured
-instances exist:
+Bootstrap можно импортировать в локальный state до ключей backend; следующий bootstrap перенесёт его. Для корней релиза нужны точные неизменяемые параметры:
 
 ```bash
 bun run infra:import -- digitalocean runtime digitalocean_app.api <app-id> \
@@ -289,29 +194,17 @@ bun run infra:import -- yandex runtime yandex_serverless_container.api <containe
   --runtime-image-digest=sha256:<64-hex>
 ```
 
-The wrapper writes temporary release inputs, imports, and immediately checks a guarded saved plan.
-Use the provider's current import ID syntax. Import every related instance (including timers or
-static apps) before treating the plan as clean. A naming match alone does not prove ownership.
+Скрипт создаёт временные параметры, импортирует ресурс и проверяет сохранённый план. Используй текущий формат import ID провайдера. Импортируй связанные таймеры и статические приложения до признания плана чистым. Совпадение имени не доказывает владение.
 
-Static access-key resources are the exception: pinned providers do not support importing
-`digitalocean_spaces_key` or `yandex_iam_service_account_static_access_key`, and their secret is
-returned only at creation. The wrapper rejects those addresses instead of starting an impossible
-import. Import the surrounding bucket, service account, Lockbox secret, and policy; let Terraform
-create a new key; apply/release so every backend, runtime, and publisher consumer uses it; verify
-state, media, and static publishing; only then revoke the legacy key. Never revoke the old state key
-before the new backend credential has completed a second init/plan.
+`digitalocean_spaces_key` и `yandex_iam_service_account_static_access_key` импортировать нельзя: закреплённые провайдеры этого не поддерживают, а секрет выдаётся только при создании. Скрипт запрещает такие адреса.
 
-The wrapper also refuses replacement or deletion of either provider's active media key, Yandex
-Postbox key, or the active Yandex database/JWT secret version even with `--allow-destroy`. Those
-credentials cross the foundation/runtime state boundary, so replacing a single declared credential
-would revoke it before the separately deployed API and jobs switch. A real rotation must first add
-a second key/secret slot, apply only that addition, release and verify the new slot, and remove the
-old credential in a later reviewed foundation change. Do not temporarily weaken the protected
-resource list to turn that transition into one apply.
+Импортируй бакет, аккаунт, Lockbox и политику. Создай новый ключ через Terraform. Примени основу/релиз, проверь state, media и статику, затем отзови старый. Старый ключ state отзывай только после второго успешного init/plan с новым.
 
-Existing PostgreSQL objects also keep their original owner when a database resource is imported.
-Before the first Terraform-managed migration, inventory the `public` schema using a privileged
-legacy connection (the URL stays in the environment and is never printed):
+Скрипт также защищает активные media-ключи, ключ Postbox и версию БД/JWT Yandex даже при `--allow-destroy`. Они соединяют разные state: прямая замена отозвала бы доступ до переключения API/заданий.
+
+Для ротации сначала добавь второй ключ/слот, примени только добавление, выполни и проверь релиз. Старый ключ убери отдельным проверенным изменением основы. Не ослабляй список защиты ради одного apply.
+
+Импорт БД не меняет владельцев существующих объектов. Перед первой миграцией проверь public-схему через привилегированное старое подключение. URL хранится только в окружении:
 
 ```bash
 export DATABASE_URL='<legacy owner or privileged connection URL>'
@@ -320,9 +213,7 @@ export DATABASE_MIGRATION_USER='<new migration owner from Terraform>'
 bun run --cwd backend db:adopt-owner
 ```
 
-The read-only command lists app-owned tables, sequences, views, routines, enums/domains, and the
-schema whose owner differs; extension-managed members are deliberately excluded. It refuses mixed
-legacy owners. Review the list, then perform the exact public-schema transfer once:
+Команда только читает таблицы, sequences, views, routines, enums/domains и схему с другим владельцем. Объекты расширений исключены. Смешанные старые владельцы запрещены. Проверь список, затем один раз передай владение:
 
 ```bash
 export CONFIRM_DATABASE_OWNER_ADOPTION="${DATABASE_LEGACY_OWNER}->${DATABASE_MIGRATION_USER}"
@@ -330,63 +221,47 @@ bun run --cwd backend db:adopt-owner -- --apply
 unset DATABASE_URL DATABASE_LEGACY_OWNER DATABASE_MIGRATION_USER CONFIRM_DATABASE_OWNER_ADOPTION
 ```
 
-`db:deploy` runs the same ownership preflight before Prisma and fails closed if adoption was
-skipped. After every migration on both providers it removes public-schema creation, temporary-table,
-object, routine, and matching default privileges inherited through PostgreSQL `PUBLIC`. It also
-rejects DigitalOcean runtime users with elevated attributes, inherited roles, or owned objects;
-there it revokes direct database/schema/table/sequence/default privileges and reapplies only
-CONNECT, schema USAGE, table DML, and sequence use. The preflight and the whole ACL reconciliation
-run in one transaction, so a failed grant cannot leave the active runtime with its previous
-privileges already revoked.
+`db:deploy` выполняет ту же проверку до Prisma и останавливается, если перенос пропущен. После каждой миграции он снимает у `PUBLIC` создание в public-схеме, временные таблицы, права на объекты/routines и соответствующие default privileges.
 
-## Rollback and recovery
+Runtime-пользователь DigitalOcean не может иметь повышенные атрибуты, наследуемые роли или собственные объекты. Его прямые права пересоздаются как CONNECT, schema USAGE, table DML и использование sequences.
 
-Application rollback is a new commit (usually a revert) followed by the same release command. Do
-not point a running service at a mutable tag. Database migrations are forward-only: write backward-
-compatible expand/contract migrations so the previous application version can run during rollback.
+Проверка и согласование ACL идут в одной транзакции. Ошибка выдачи прав не оставит runtime с уже отозванными прежними правами.
 
-If external DNS is not Terraform-managed, the first apply may create the target and then fail only
-at URL verification. Run `bun run infra:output -- yandex`, read `required_dns_records`, update DNS,
-wait for propagation, and rerun the release. The wrapper exposes only an allowlist of operational
-outputs, never publisher credentials. Do not recreate resources.
+## Откат и восстановление
 
-If a Terraform apply fails, read the provider error, fix the owning configuration, and rerun plan.
-Never edit state by hand, delete the state lock, or use `-target` as a routine deployment mechanism.
-If an operating-system or machine failure leaves the `operations` lock stale, first confirm that no
-`scripts/infra.mjs`, Terraform, or lease-holder process for that provider remains. Then initialize
-`infra/<provider>/operations` with its generated backend configuration and state-key environment,
-and run `terraform force-unlock <LOCK_ID>` using only the lock ID printed by Terraform for that
-operations state. Never force-unlock an active holder or a different root.
+Откат приложения — новый коммит, обычно revert, и обычный релиз. Не направляй сервис на изменяемый tag. Миграции идут вперёд; используй совместимые expand/contract, чтобы прежняя версия приложения могла работать при откате.
 
-## Own server
+При внешнем DNS первый apply может создать ресурс и упасть только на проверке URL. Выполни `bun run infra:output -- yandex`, прочитай `required_dns_records`, измени DNS и дождись распространения. Повтори релиз, не пересоздавай ресурсы. Output выдаёт только разрешённые параметры, без ключей публикатора.
 
-The own-server option remains deliberately separate from the two Terraform stacks. Build
-`backend/Dockerfile`, run PostgreSQL 18+, apply `bun run --cwd backend db:deploy` before promotion,
-serve `webapp/dist` and `website/dist` behind Caddy/nginx, run
-`bun run --cwd backend start:scheduler` as a supervised service, and provide an S3-compatible
-private media bucket. Run `bun run static:precompress` after both static builds so the proxy can
-serve the `.br`/`.gz` siblings it writes (Caddy `precompressed`; nginx `gzip_static` for `.gz`,
-plus `brotli_static` from the `ngx_brotli` module for `.br`, which stock nginx never serves). That
-step belongs to this path only: neither cloud release reads those files (Yandex builds the static
-surfaces inside `infra/yandex/static.Dockerfile` from a Git archive, DigitalOcean builds them on
-App Platform), so do not run it as part of a cloud release or add it to those build commands. Use
-Ansible only when it reduces repeatable host configuration (packages,
-users, firewall, systemd, proxy); keep database data, credentials, and releases out of playbook
-templates. The operator owns TLS, backups, restore tests, patching, monitoring, and rollback.
+При ошибке apply исправь конфигурацию владельца и повтори plan. Не правь state вручную, не удаляй блокировку и не используй `-target` как обычный деплой.
 
-## Local validation
+Если сбой машины оставил `operations` заблокированным, сначала убедись, что процессы `scripts/infra.mjs`, Terraform и держатель аренды завершены. Инициализируй `infra/<provider>/operations` с созданными backend-настройками и state-ключом. Затем выполни `terraform force-unlock <LOCK_ID>` только с ID этой operations-блокировки из вывода Terraform. Не снимай блокировку живого процесса или другого корня.
 
-Cloud mutation is never part of the local test suite. A release is the explicit broad-regression
-trigger; validate the application and Terraform contracts before `infra:plan`:
+## Свой сервер
+
+Этот путь отделён от двух облачных стеков:
+
+- Собери `backend/Dockerfile`, запусти PostgreSQL 18+.
+- До переключения выполни `bun run --cwd backend db:deploy`.
+- Раздавай `webapp/dist` и `website/dist` через Caddy/nginx.
+- Запусти `bun run --cwd backend start:scheduler` под supervisor.
+- Подключи приватный S3-совместимый media-бакет.
+
+После обеих статических сборок выполни `bun run static:precompress`. Caddy использует `precompressed`; nginx — `gzip_static` для `.gz` и `brotli_static` из `ngx_brotli` для `.br`. Обычный nginx сам `.br` не отдаёт.
+
+Облачные релизы не читают эти файлы: Yandex собирает Git-архив через `infra/yandex/static.Dockerfile`, DigitalOcean — через App Platform. Не включай precompress в облачные команды.
+
+Ansible используй для повторяемой настройки пакетов, пользователей, firewall, systemd и proxy. Не помещай данные БД, секреты и релизы в шаблоны playbook. Оператор отвечает за TLS, резервные копии, проверку восстановления, обновления, мониторинг и откат.
+
+## Локальные проверки
+
+Тесты не меняют облако. Перед явным релизом проверь приложение и Terraform, затем выполни настоящий plan:
 
 ```bash
 bun run check
 bun run test:terraform
 ```
 
-`test:terraform` initializes every root with `-backend=false` in an isolated temporary data
-directory before validate/test, so a clean checkout needs no backend credentials and cannot contact
-production state. Provider downloads still require network access on the first run.
+`test:terraform` инициализирует каждый корень с `-backend=false` в отдельном временном каталоге. Ключи backend не нужны; production-state недоступен. Первая загрузка провайдеров требует сети.
 
-Run `infra:plan` with real credentials before any release. A mock-provider test proves the intended
-shape; only a real plan can prove account limits, regions, domain ownership, and current cloud state.
+Перед релизом выполни `infra:plan` с реальными ключами. Mock-тест доказывает форму конфигурации; только реальный план проверяет лимиты аккаунта, регионы, домены и текущее облачное состояние.

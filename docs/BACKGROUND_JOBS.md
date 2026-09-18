@@ -1,155 +1,101 @@
-# Background Jobs
+# Фоновые задачи
 
-Work that happens without a user waiting for it: cleaning up expired sessions, retrying a delivery,
-refreshing something on a timer. This document is provider-neutral — the same jobs run on
-DigitalOcean, on Yandex Cloud, and on your own server.
+Фоновые задачи работают без ожидания пользователя: очищают сессии, повторяют отправку, обновляют данные по расписанию. Одни задания выполняются в DigitalOcean, Yandex Cloud и на своём сервере.
 
-## Three ways to work off the request path
+## Три способа фоновой работы
 
-Two of them are not this document's job registry, and picking the wrong one is the mistake worth
-avoiding. The question is what happens if the work is lost.
+Выбирай механизм по последствиям потери задачи:
 
-| | `background-tasks.ts` | `outbox` | `jobs.ts` |
+| Свойство | `background-tasks.ts` | `outbox` | `jobs.ts` |
 | --- | --- | --- | --- |
-| Survives a restart | no | **yes** | n/a, it runs again on the next tick |
-| Retries | none | until it succeeds or gives up | next tick |
-| Starts | immediately after the response | on the next drain | on a schedule |
-| Idempotency | none | a dedupe key you choose | job's own business |
-| Use it for | work whose loss is acceptable | work you promised someone | recurring upkeep |
+| Переживает перезапуск | Нет | Да | Выполняется снова на следующем тике |
+| Повторы | Нет | До успеха или окончательной ошибки | Следующий тик |
+| Старт | После ответа | Следующий drain | По расписанию |
+| Идемпотентность | Не задана | Выбранный dedupe-ключ | Ответственность задания |
+| Назначение | Допустимо потерять | Нельзя потерять обещанную работу | Регулярное обслуживание |
 
-Losing a best-effort cleanup costs a stray file. Losing a password-reset email costs a user their
-account. The first is `background-tasks.ts`; the second is the outbox.
+Потеря очистки может оставить файл; потеря письма сброса — лишить пользователя доступа. Для первого подходит `background-tasks.ts`, для второго — outbox.
 
-## One registry, three processes
+## Один реестр и три процесса
 
-A job is declared once, in `backend/src/jobs.ts`. It says *what* to do and never *when* or *where*:
+Задание объявляется один раз в `backend/src/jobs.ts`. Оно задаёт действие, не время и место запуска:
 
 ```ts
 export const backgroundJobs = {
   'auth:sessions:cleanup': async ({ env, prisma }, now) => { /* … */ },
   'notifications:process': async (runtime) => { /* … */ },
-  'uploads:pending:cleanup': async ({ prisma, privateStorage }, now) => { /* … */ },
   'maintenance:process': async (runtime, now) => { /* … */ },
+  'uploads:pending:cleanup': async ({ prisma, privateStorage }, now) => { /* … */ },
 } satisfies Record<string, BackgroundJob>
 ```
 
-The recurring schedule is declared once in `backend/src/job-schedules.json`, including the standard
-five-field expression and Yandex's six-field expression. The scheduler and Yandex Terraform both
-read this file, so a timing change cannot drift between providers.
+`backend/src/job-schedules.json` хранит стандартное выражение из пяти полей, выражение Yandex из шести полей и лимиты выполнения/блокировки. Его читают scheduler и Terraform Yandex, поэтому расписания не расходятся.
 
-Three processes run the same job registry. Which one you use is a hosting decision, not a new job.
-
-| Process | Shape | Use it when |
+| Процесс | Поведение | Когда нужен |
 | --- | --- | --- |
-| `backend/src/cron.ts` | One-job executor: CLI mode exits; Yandex mode exposes it through a tiny HTTP adapter. | A provider timer or system cron exists. No job runs between ticks/calls. |
-| `backend/src/scheduler.ts` | Long-running process with timers inside. | You want schedules to live in the repository instead of a cloud console, or you run on your own server. Also the natural fit for a cloud worker component. |
-| `backend/src/worker.ts` | Long-running loop. | Work must run more often than once a minute, must run continuously, or several jobs should run side by side. No cron expression goes below one minute — this is the way around that. |
+| `backend/src/cron.ts` | Одно задание: CLI завершается, Yandex вызывает HTTP-адаптер | Есть таймер провайдера или system cron; между вызовами работы нет |
+| `backend/src/scheduler.ts` | Постоянный процесс с таймерами | Расписание хранится в репозитории; свой сервер или облачный worker |
+| `backend/src/worker.ts` | Постоянные циклы | Интервал меньше минуты, непрерывная работа или параллельные задания |
 
-The mobile schedule ships with `outbox:drain` and `notifications:process` every minute,
-abandoned-upload cleanup hourly at minute 15, and `maintenance:process` every 15 minutes. That
-combined maintenance job cleans auth state and redacts terminal notification payloads; after native
-subscriptions are enabled it can also own bounded Google Play reconciliation. The loop worker ships
-**empty**: `workerLoops` contains only a commented example, so an install that never needs
-sub-minute work pays nothing for it. Terraform deploys the scheduler as a DigitalOcean worker and
-the same `cron.ts` executor as Yandex HTTP job containers/timer triggers. An own server still has to
-supervise `scheduler.ts`.
+Включены `outbox:drain` и `notifications:process` каждую минуту, очистка загрузок каждый час на 15-й минуте, `maintenance:process` каждые 15 минут. Maintenance очищает auth и содержимое завершённых уведомлений. После включения подписок он также может выполнять ограниченную сверку Google Play. `workerLoops` пуст и содержит только закомментированный пример.
 
-## The push pipeline is the exception
+Terraform запускает scheduler как worker DigitalOcean. В Yandex он создаёт HTTP-контейнеры `cron.ts` и таймеры. На своём сервере нужен supervisor для `scheduler.ts`.
 
-`bun run --cwd backend start:worker:notifications` runs the Expo push outbox and receipt check, and
-it is **not** a `workerLoop`. Do not reimplement it as one: an interval is all a loop gets, and this
-pipeline needs more. Outbox processing is handed the shutdown `AbortSignal` and a runtime budget
-derived from `SHUTDOWN_GRACE_SECONDS`, so a long batch is cut short cleanly instead of being killed
-mid-send with its retry state unpersisted, and quiet periods emit a sparse heartbeat rather than a
-log line per poll. It lives in `worker.ts` alongside the loops, selected by the `notifications`
-argument.
+## Отдельный исполнитель push
 
-The same work is also the scheduled `notifications:process` job in the registry. The default
-one-minute schedule means a separate persistent worker is optional; use it only when the product
-needs lower latency than the scheduled topology provides.
+`bun run --cwd backend start:worker:notifications` обрабатывает очередь Expo и проверяет receipts. Это отдельный путь в `worker.ts`, выбранный аргументом `notifications`, а не `workerLoop`.
 
-## Adding a job
+Исполнитель получает `AbortSignal` завершения и лимит времени из `SHUTDOWN_GRACE_SECONDS`. Длинная пачка останавливается с сохранённым состоянием повторов. Во время простоя он редко пишет heartbeat. Не заменяй этот путь обычным циклом с интервалом.
 
-1. Add an entry to `backgroundJobs` in `backend/src/jobs.ts`.
-2. Cover it with a fake Prisma client the way `auth:sessions:cleanup` is covered in
-   `backend/src/jobs.test.ts`; a job with real logic deserves its own test file next to it.
-3. If it is recurring, add its two cron dialects to `backend/src/job-schedules.json`; Terraform and
-   the scheduler will consume the same entry. If it is sub-minute, add a deliberate worker loop.
+Та же работа доступна через задание `notifications:process`. Стандартного минутного расписания достаточно, если продукту не нужна меньшая задержка. Постоянный worker необязателен.
 
-Run it once by hand at any time: `bun run --cwd backend start:cron -- <job>`.
+## Добавление задания
 
-## Choosing a runner, with the honest trade-offs
+1. Добавь запись в `backgroundJobs` файла `backend/src/jobs.ts`.
+2. Проверь её, как `auth:sessions:cleanup` в `backend/src/jobs.test.ts`. Для реальной бизнес-логики добавь отдельный тест рядом с владельцем; подставной Prisma подходит только для простой проверки вызовов.
+3. Для расписания добавь оба cron-формата в `backend/src/job-schedules.json`. Для интервала меньше минуты добавь явный worker loop.
 
-**Provider timer + `cron.ts`.** The platform owns execution, so a crashed invocation does not stop
-the next tick. Yandex timer triggers take a six-field UTC expression; both forms remain versioned
-in `job-schedules.json` together with the lock and provider-execution budgets, and Terraform
-creates the triggers. The executor takes the same PostgreSQL advisory lock as the scheduler, so a
-retry or adjacent tick skips while the previous invocation still owns it. CLI mode exits nonzero
-on failure. Yandex runs `cron.ts --http <job>` because command/task mode always returns HTTP 200;
-the adapter instead returns 503 so the trigger's configured retries can observe the failure. The
-adapter runs the job only for the trigger's own invocation, `POST /`: any other method gets 405 and
-any other path 404 without touching the job, so invoker rights alone do not let a probe, a warm-up,
-or a stray `GET /favicon.ico` run it.
-DigitalOcean's baseline uses the scheduler worker because its durable outbox must run more often
-than the scheduled-job cadence permits.
-A timer that stops is as silent as a stopped scheduler: on Yandex the runbook creates a Monitoring
-alert on the outbox container's invocation rate by hand, because the provider has no alert
-resource. "Who is told" under "What to watch" says what it covers.
+Ручной разовый запуск: `bun run --cwd backend start:cron -- <job>`.
 
-**`scheduler.ts` on your own server or a cloud worker.** Schedules are versioned and reviewed with
-the code, local runs behave exactly like production, and moving between providers touches nothing.
-The cost is that the process is now yours to keep alive: put it under systemd or a Docker restart
-policy, and alert on "the job has not reported success recently" — a stopped scheduler is silent.
-On DigitalOcean the closest thing App Platform offers is the restart, memory, and CPU rules
-Terraform puts on the worker: they catch a scheduler that keeps dying or is stuck, not one that
-stays up and fails every pass, which remains a log check. "Who is told" under "What to watch"
-says exactly what it covers.
-Two copies of the process are handled: each job takes a Postgres advisory lock before running, so a
-rolling deploy cannot run the same job twice, and the copy that loses the race logs that it skipped.
+## Выбор исполнителя
 
-**`worker.ts`.** The only option below one-minute granularity, and the right one for continuous
-processing. Same operational duties as the scheduler, with one difference to know: loops run
-without the database lock by default, so scaling the worker to two instances runs every loop twice.
-That is often what you want for parallel throughput; when it is not, set `singleInstance: true` on
-the loop and it takes the same lock the scheduler uses. Add your own backpressure if a loop can
-fall behind its own interval.
+**Таймер провайдера и `cron.ts`.** Сбой одного вызова не останавливает следующий. Yandex использует шестипольное UTC-выражение. PostgreSQL advisory lock не допускает параллельный запуск того же задания; повтор или соседний тик пропускается, пока блокировка занята.
 
-Whatever you pick, keep locked jobs short. The advisory lock is held by an open transaction for
-the length of the run, so a long job holds a connection - and, more importantly, the lock only
-lasts as long as `timeoutMs` (15 minutes only for undeclared/manual jobs; production schedules set
-explicit budgets). A job that outruns it loses the lock while still working: another instance can
-start the same job, and the first one then fails with a transaction-expired error after its side
-effects have already landed. The scheduler recognises that case and says so in the log; the
-one-shot runner exits nonzero for its provider. Raise the shared schedule budget or make the job
-idempotent before increasing its workload.
+CLI при ошибке возвращает ненулевой код. Yandex запускает `cron.ts --http <job>`, поскольку command/task-режим всегда возвращает HTTP 200. HTTP-адаптер возвращает 503 при ошибке, чтобы таймер выполнил повтор. Только `POST /` запускает задание. Другой метод получает 405, другой путь — 404. Проверка доступности и случайный `GET /favicon.ico` не выполняют работу.
 
-## Running the scheduler on your own server
+DigitalOcean использует scheduler worker: его outbox нужен чаще, чем позволяет период scheduled jobs. Остановка таймера тоже может быть незаметной. В Yandex вручную создаётся Monitoring-alert на частоту вызовов outbox; Terraform-провайдер не имеет такого ресурса.
+
+**`scheduler.ts`.** Расписание проверяется вместе с кодом, одинаково работает локально и в облаках. Но процесс нужно поддерживать через systemd или Docker restart policy. Требуется сигнал, если задание давно не сообщало об успехе.
+
+Правила DigitalOcean по рестартам, памяти и CPU обнаруживают падения и зависание, но не все ошибки живого процесса. Два экземпляра scheduler безопасны: advisory lock допускает только один запуск задания; проигравший пишет о пропуске.
+
+**`worker.ts`.** Подходит для непрерывной работы и интервалов меньше минуты. По умолчанию циклы не блокируются через БД: два экземпляра выполняют два цикла. Это полезно для параллельной обработки. Если нужен один, задай `singleInstance: true`. Если цикл не успевает к следующему интервалу, добавь ограничение входящего объёма.
+
+Задания под блокировкой должны быть короткими. Открытая транзакция держит соединение и advisory lock до `timeoutMs`. Для ручных/необъявленных заданий это 15 минут; production-расписания задают сроки явно.
+
+Если задание превышает срок, блокировка исчезает раньше его работы. Другой процесс может запустить то же задание. Первый затем получит ошибку истёкшей транзакции, хотя побочные действия уже выполнены. Scheduler распознаёт и пишет этот случай; разовый исполнитель возвращает ошибку. До роста нагрузки увеличь общий лимит или обеспечь идемпотентность.
+
+## Scheduler на своём сервере
 
 ```bash
 bun run --cwd backend start:scheduler
 ```
 
-Under systemd, the unit needs `Restart=always`, `NODE_ENV=production` (without it the backend
-still accepts `EMAIL_DELIVERY=console`, so a real install could write reset links to a log instead
-of sending them), the backend environment, and a working directory of
-`backend`. Under Docker, the same image the API uses with the command overridden and
-`restart: unless-stopped`. The shipped `schedules` already has an entry, so the process stays up;
-if you empty the list it logs that it has nothing to do and exits, and a restart policy turns that
-into a loop. On `SIGINT`/`SIGTERM` the scheduler stops its timers, waits for jobs
-already in flight to finish, and only then closes the database - so give the process a shutdown
-grace period at least as long as your slowest job.
+Для systemd задай `Restart=always`, `NODE_ENV=production`, окружение backend и рабочий каталог `backend`. Без production приложение разрешит `EMAIL_DELIVERY=console` и может писать ссылки вместо отправки.
 
-## The task outbox
+В Docker используй образ API с другой командой и `restart: unless-stopped`. Непустой `schedules` удерживает процесс. Пустой список завершает его; restart policy тогда создаст цикл перезапусков.
 
-Durable one-off work, in one PostgreSQL table. Not a queue service - `docs/ARCHITECTURE.md`
-explains why the template reaches for a table first and what would justify more.
+При `SIGINT`/`SIGTERM` scheduler останавливает таймеры, ждёт текущие задания и закрывает БД. Дай срок завершения не меньше длительности самого медленного задания.
 
-A row is claimed by whichever drain gets there first, run once, and written back. Two drains can
-run at the same time safely: the claim is a conditional update, so the loser simply moves on.
+## Outbox задач
 
-### Adding a task type
+Надёжная разовая работа хранится в одной таблице PostgreSQL. Причины выбора и условия новой инфраструктуры — в `docs/ARCHITECTURE.md`.
 
-1. Add an entry to `taskHandlers` in `backend/src/outbox/handlers.ts`:
+Первый drain захватывает строку условным update, выполняет и записывает результат. Два drain безопасны: проигравший захват переходит дальше.
+
+### Добавление типа задачи
+
+1. Добавь обработчик в `taskHandlers` файла `backend/src/outbox/handlers.ts`:
 
 ```ts
 'invoices:send': {
@@ -161,254 +107,138 @@ run at the same time safely: the claim is a conditional update, so the loser sim
 },
 ```
 
-   Import the module **inside** `run`. A top-level import of `../modules/*` would load that
-   module into every process that can enqueue.
+Импортируй модуль внутри `run`. Верхнеуровневый импорт `../modules/*` загрузит его в каждый процесс, который ставит задачи.
 
-2. Enqueue it from wherever the work is decided:
+2. Поставь задачу там, где принято решение о работе:
 
 ```ts
 await enqueueTask(prisma, { type: 'invoices:send', dedupeKey: `invoice:${id}`, payload: { id } })
 ```
 
-3. Cover the handler the way `auth:password-reset` is covered in
-   `backend/src/modules/auth/application/auth-service.test.ts`.
+3. Проверь обработчик по примеру `auth:password-reset` в `backend/src/modules/auth/application/auth-service.test.ts`.
 
-There is no migration: the type is a text column validated against the registry. A typo throws at
-the call site, naming the types that exist.
+Миграция не нужна: тип — текст с проверкой по реестру. Опечатка сразу вызывает ошибку со списком допустимых типов.
 
-Always enqueue through `enqueueTask`. A raw `INSERT` has to set `updated_at` itself - it is the
-lease clock, and Prisma, not the database, is what fills it in.
+Используй только `enqueueTask`. При сыром `INSERT` нужно самому задать `updated_at`: это часы аренды, которые заполняет Prisma, не БД.
 
-### What the handler is promised, and what it must promise back
+### Гарантии и обязанности обработчика
 
-- **At least once, not exactly once.** A process killed after the side effect but before the
-  completion write will run the task again. Make the work idempotent, or make a duplicate
-  harmless. This is the one rule that cannot be moved into the framework.
-- `finalAttempt` tells the handler its failure is the last one, so compensating work happens
-  there and only there. Password reset uses it to invalidate a token that will never be received.
-- `signal` aborts at the type's `deadlineMs` (15s by default). Pass it to every provider call.
-- Returning `'skipped'` says the handler deliberately did nothing. Without it, a system where
-  every task finds nothing to do looks exactly like a healthy one.
-- A row that gives up keeps `lastError` as its dead-letter diagnostic for the retention window,
-  while the payload is blanked immediately. Whatever your handler lets escape ends up there - and
-  a provider error rethrown verbatim often quotes the recipient, which would outlive the payload
-  it was redacted with. Wrap or trim provider errors that can carry personal data.
-- Throwing retries. Throwing `TerminalTaskError` gives up immediately - for work that can never
-  succeed, such as a payload that will not validate.
-- Five attempts by default, so four retries: 2, 4, 8 and 15 minutes apart, with jitter that only
-  ever adds. The lower bound is
-  load-bearing: the first retry has to clear the 60-second password-reset cooldown.
+- Задача может выполниться повторно после сбоя между побочным действием и записью успеха. Обеспечь идемпотентность или безвредный повтор.
+- `finalAttempt` означает последнюю попытку. Компенсацию выполняй только тогда. Сброс пароля аннулирует токен, который уже не будет доставлен.
+- `signal` отменяется по `deadlineMs` типа, по умолчанию 15 секунд. Передавай его каждому провайдеру.
+- Верни `'skipped'`, если намеренно ничего не сделал. Иначе пустая обработка будет выглядеть как успех.
+- После окончательной ошибки `lastError` хранится весь срок retention, а payload очищается сразу. Не пробрасывай текст провайдера с персональными данными; сократи или оберни ошибку.
+- Обычная ошибка вызывает повтор. `TerminalTaskError` завершает задачу сразу, например при неверном payload.
+- По умолчанию пять попыток: четыре повтора через 2, 4, 8 и 15 минут. Jitter только увеличивает задержку. Первый повтор должен быть позже 60-секундной паузы сброса пароля.
 
-### Dedupe keys
+### Ключи дедупликации
 
-`(type, dedupeKey)` is unique, and enqueueing an existing pair returns the existing row instead of
-failing. The key is how you choose the window:
+Пара `(type, dedupeKey)` уникальна. Повторная постановка возвращает существующую строку.
 
-- a natural identity - `invoice:<id>` - collapses for as long as the row exists, which is
-  `TASK_OUTBOX_RETENTION_DAYS`. The sweeper deletes the row and the uniqueness with it, so this is
-  not a permanent once-only guard; if the work must never happen twice, keep that fact in your own
-  tables;
-- a time bucket - `<hash>:<minute>` - collapses a burst, which is what password reset does;
-- a random value never collapses.
+- `invoice:<id>` объединяет задачи, пока строка существует: `TASK_OUTBOX_RETENTION_DAYS`. После её удаления уникальность исчезает. Для постоянного запрета повтора храни факт в продуктовой таблице.
+- `<hash>:<minute>` объединяет всплеск за интервал; так работает сброс пароля.
+- Случайный ключ ничего не объединяет.
 
-Derive the key from what the caller submitted, never from what you looked up: a key that depends
-on whether an account exists is an oracle for which addresses are registered.
+Выводи ключ из входных данных, не результата поиска аккаунта. Иначе он раскроет, какие адреса зарегистрированы.
 
-### What an anonymous caller may queue
+### Что может поставить анонимный клиент
 
-The request half of a password reset writes one row for any address - that is what keeps its
-response identical for registered and unknown addresses - so the inflow to `auth:password-reset`
-is bounded only by the auth rate limit times the addresses an attacker holds. Five IPs sending
-sixty fresh addresses a minute is 300 rows in against the 250 a pass moves out: the backlog grows
-for as long as the flood lasts, and every real reset queues behind it, FIFO, for up to
-`TASK_OUTBOX_RETENTION_DAYS`.
+Сброс пароля ставит задачу для любого адреса, чтобы ответ не выдавал аккаунт. Одного IP-лимита недостаточно: пять IP по 60 новых адресов в минуту дают 300 строк при ёмкости drain 250. Без общего предела реальные письма ждали бы за этим потоком вплоть до `TASK_OUTBOX_RETENTION_DAYS`.
 
-The queue is the ceiling. `createPasswordResetTaskQueue` admits a new row only while fewer than
-one drain pass (`TASK_OUTBOX_BATCH_LIMIT` times the five loops a pass makes, 250 by default) of
-`auth:password-reset` rows are pending and due; past that the request gets the same 202 and
-nothing is written. The count is read before the address is looked at and keyed on nothing the
-caller sent, so neither its cost nor its answer says whether an account exists.
+`createPasswordResetTaskQueue` принимает задачу, пока число готовых pending-строк `auth:password-reset` меньше ёмкости одного прохода: `TASK_OUTBOX_BATCH_LIMIT` × 5, по умолчанию 250. Сверх предела запрос получает тот же 202, но строка не создаётся.
 
-One pass, because that is what the drain can move before the next one starts: everything the
-ceiling admits is claimable by the next pass, so this type's backlog can never carry over from
-one pass to the next - which is the whole defect. Two things can leave part of it behind: the
-pass is shared, so other types' due rows take their share of it oldest-first, and
-`TASK_OUTBOX_MAX_RUNTIME_MS` can end a pass of slow real sends before it reaches the capacity.
-What either leaves of this type is still due, still counted, and narrows what the ceiling admits
-next - a bounded remainder, never a compounding backlog - so raising `TASK_OUTBOX_BATCH_LIMIT`
-widens the ceiling only as far as the runtime lets a pass use it. A flood never binds on
-runtime: an address with no account costs one lookup. Anything smaller would refuse requests the
-drain could have delivered on time: a ceiling of one batch, say, would close the door for part of
-every minute at sixty fresh addresses a minute - one IP inside the auth rate limit - where before
-nothing happened at all. The ceiling is derived from the same variable the runner reads its batch
-from, so raising `TASK_OUTBOX_BATCH_LIMIT` for throughput raises it in step; an own-server install
-sets the variable identically in the API's and the scheduler's environment. Only due rows count:
-a reset whose delivery failed is parked as pending with a due time minutes ahead, and counting
-those would let a provider outage fill the ceiling with real resets in backoff and then silently
-drop every new request until the outage ends. Flood rows do not park - an address with no account
-is skipped on its first attempt, terminally; only an attempt that fails on the database before
-the lookup answers goes into backoff - so the bound on a flood is unchanged. The bound is soft under
-concurrency - a read followed by a write, so simultaneous requests can overshoot it by their own
-number - and it is deliberately not a fair share inside the drain: junk and real resets are the
-same task type, the drain cannot tell them apart, and only the door can refuse to let the queue
-become the bottleneck. A pass full of resets delays every other task type by one pass at most:
-the drain claims oldest-first, and a notice queued behind a full ceiling is the oldest due row
-when the next pass begins.
+Счётчик читается до поиска адреса и не зависит от входных данных. Стоимость проверки и ответ не раскрывают аккаунт.
 
-What it costs: nothing below the pass capacity - every request is admitted and delivered by the
-next pass, as before. Above it, a real request that lands while the ceiling is full gets its 202
-and no email, with nothing to tell the user which attempts were dropped. After a one-off burst
-the next pass clears everything and a retry goes through. While a flood is sustained the ceiling
-refills soon after every pass - at the example rate, within fifty seconds of a 250-row ceiling -
-and real requests are admitted only in that gap, so a retry is a matter of luck for as long as
-the flood lasts. The due rows of this type never exceed the pass capacity (a per-type count; the
-logged `backlog` sums every type), and a pass never claims more than its capacity, so `claimed`
-at the pass capacity pass after pass, with `skipped` making up nearly all of it, is the cue to
-raise `TASK_OUTBOX_BATCH_LIMIT` or shorten the
-drain interval, which widens the gap. Rows admitted while a pass is running carry a due time after
-the pass clock and wait for the next one. The per-IP auth limit still applies on top and is not
-the knob for this.
+Один проход выбран по реальной пропускной способности. Меньший предел отбрасывал бы запросы, которые успели бы отправиться. Например, предел одного batch ограничил бы даже один IP с 60 запросами в минуту.
 
-The ceiling also ties the request path to the drain being alive. Only a pass empties the queue,
-so with the runner down - crash-looping, mid-deploy, or never started next to `start:api` - the
-first pass worth of real requests is kept and every later one is answered and discarded until a
-pass runs. Before the ceiling the same outage delayed those resets; now it loses them, and no
-metric shows it, because refusals are unlogged by design and the `skipped` cue comes from the
-drain that is not running. That is the price of a bound that needs no new state or index, and it
-makes "the drain has not reported a pass recently" the alert an install with a provider must
-have - the scheduler section above asks for the same alert for a different reason. "Who is told"
-under "What to watch" says where it lives on each hosting.
+Другие типы задач и `TASK_OUTBOX_MAX_RUNTIME_MS` могут оставить часть строк на следующий проход. Они остаются готовыми и уменьшают свободное место. Остаток ограничен, а не растёт бесконечно. Увеличение batch помогает только в пределах времени прохода.
 
-### Running the drain
+В предел входят только уже готовые строки. Не учитывай отложенные повторы: при сбое провайдера они иначе заблокировали бы все новые запросы. Несуществующий аккаунт сразу завершается как skipped; только ошибка БД до результата поиска может отложить такую задачу.
 
-`outbox:drain` is an ordinary job, so every runner in the table above can run it. `bun run dev`
-starts the shared scheduler next to the API; both Terraform production stacks also deploy the
-matching runner. Latency is whatever the schedule allows:
+Предел мягкий: чтение и запись разделены, поэтому одновременные запросы могут превысить его на своё число. Это не распределение долей внутри drain. Он не отличает мусор от реального сброса до обработки. Старейшие строки выбираются первыми; задача другого типа после заполненного прохода будет старейшей к следующему.
 
-| Hosting | How | Achievable |
+Ниже предела поведение прежнее. При заполнении настоящий пользователь может получить 202 без письма. После разового всплеска повтор пройдёт после drain. При постоянном потоке окно приёма может быть коротким: 250 строк при 300 запросах в минуту заполняются за 50 секунд. Повтор в это время не гарантирует доставку.
+
+Если `claimed` постоянно равен ёмкости прохода, а почти всё — `skipped`, увеличь `TASK_OUTBOX_BATCH_LIMIT` или сократи интервал. Per-IP auth-лимит сохраняется и не решает эту проблему. На своём сервере API и scheduler должны иметь одинаковый batch.
+
+Строки, принятые во время прохода, имеют время готовности позже его часов и ждут следующего. Предел относится к одному типу; метрика `backlog` суммирует все типы.
+
+Без drain очередь не освобождается. При остановке, релизе или запуске только `start:api` сохраняется первый объём прохода, а следующие запросы теряются с обычным ответом. Отказы намеренно не логируются, поэтому отдельной метрики потерь нет. При настроенной почте обязателен сигнал «drain давно не выполнялся». Покрытие по хостингам описано ниже.
+
+### Запуск drain
+
+`outbox:drain` — обычное задание для любого исполнителя. `bun run dev` запускает scheduler рядом с API. Оба Terraform-стека создают production-исполнитель.
+
+| Хостинг | Исполнитель | Интервал |
 | --- | --- | --- |
-| Local development | `bun run dev` runs the scheduler alongside the API | 1 minute |
-| Own server | supervised `scheduler.ts` | 1 minute |
-| Yandex Cloud | Terraform timer trigger `* * ? * * *` invokes HTTP-mode `cron.ts` | 1 minute |
-| DigitalOcean | Terraform App Platform worker runs `start:scheduler` | 1 minute |
-| Anywhere, sub-minute | a `workerLoops` entry with `intervalMs` | seconds |
+| Локально | Scheduler в `bun run dev` | 1 минута |
+| Свой сервер | `scheduler.ts` под supervisor | 1 минута |
+| Yandex | Таймер `* * ? * * *` → HTTP `cron.ts` | 1 минута |
+| DigitalOcean | Worker App Platform с `start:scheduler` | 1 минута |
+| Любой, чаще минуты | `workerLoops` с `intervalMs` | Секунды |
 
-**A password-reset email arriving fifteen minutes late is not acceptable**, which is why the
-DigitalOcean Terraform stack always creates the worker rather than a scheduled job. With email
-delivery disabled, `requestPasswordReset` writes no outbox row, but the same minute runner remains
-useful for future durable task types.
+Для сброса пароля 15 минут ожидания недопустимы. Поэтому DigitalOcean создаёт worker, не scheduled job. При отключённой почте `requestPasswordReset` не создаёт задач, но исполнитель пригодится другим типам.
 
-The App Platform worker and the loop worker are different things: the component runs
-`bun run start:scheduler`; `bun run start:worker` remains idle until `workerLoops` has an entry.
+Worker App Platform запускает `bun run start:scheduler`. Это не циклический `bun run start:worker`, который пуст без `workerLoops`.
 
-If you use a `workerLoops` entry, leave `singleInstance` off. It looks like the careful choice and
-is the wrong one: the job lock would serialise the whole outbox across instances and throw away
-the per-row claim that already makes parallel drains safe.
+Для drain в `workerLoops` оставь `singleInstance` выключенным. Общая блокировка зря сериализует outbox; построчный захват уже защищает параллельные drain.
 
-Running several drains buys resilience, not throughput. They read the same ordered window of due
-rows and mostly lose claims to each other, so one pass moves at most
-`TASK_OUTBOX_BATCH_LIMIT * 5` rows however many drains you start - measured at ~250 rows whether
-one drain runs or eight. If `backlog` is climbing, raise `TASK_OUTBOX_BATCH_LIMIT` or shorten the
-interval; adding instances will not help, and the measurement is what `docs/ARCHITECTURE.md` asks
-you to record before reaching for a queue service.
+Несколько drain повышают устойчивость, не скорость. Они читают одно упорядоченное окно и конкурируют за одни строки. Измерено около 250 строк за проход и с одним, и с восемью drain. Предел — `TASK_OUTBOX_BATCH_LIMIT * 5`. При росте `backlog` меняй batch или интервал; новые экземпляры не помогут. Запиши измерение до выбора отдельной очереди по `docs/ARCHITECTURE.md`.
 
-### What to watch
+### Наблюдение
 
-Each pass logs one entry - `Job outbox:drain completed.` followed by the metrics object, which a
-plain-text log spreads over a dozen lines. Four numbers matter:
+Каждый проход пишет `Job outbox:drain completed.` и объект метрик, который занимает несколько строк обычного лога.
 
-- `backlog` climbing across consecutive runs - the drain cannot keep up. That is the measurement
-  `docs/ARCHITECTURE.md` asks for before reaching for a queue service.
-- `terminalFailed` above zero - work was given up on. `lastError` on the row says why.
-- `claimed` at the pass capacity (`TASK_OUTBOX_BATCH_LIMIT` times five) pass after pass, with
-  `skipped` making up nearly all of it - the reset ceiling is full of addresses that have no
-  account, which is what a flood looks like from here. The request path deliberately logs
-  nothing about refusals: a log line per refused request
-  would be a second flood. See "What an anonymous caller may queue".
-- `unhandled` above zero - rows are queued for a type this deployment has no handler for, which
-  means an API is ahead of its runner. Roll the runner forward.
+- `backlog` растёт несколько проходов подряд: drain не успевает.
+- `terminalFailed` > 0: задача окончательно не выполнена; причина в `lastError`.
+- `claimed` постоянно равен batch × 5, почти всё `skipped`: поток сбросов для несуществующих адресов заполняет предел. Отказ каждого запроса не логируется, чтобы не создать второй поток нагрузки.
+- `unhandled` > 0: API поставил тип без обработчика в текущем исполнителе. Обнови его версию.
 
-**Who is told, and about what.** None of the four numbers reaches an alert by itself: neither
-hosting can alert on a value inside a plain-text log line. DigitalOcean would need log forwarding
-to an external service, Yandex would need the drain to write structured JSON lines, and this
-repository does neither; `docs/ARCHITECTURE.md` says what would have to be measured before adding
-one. What each hosting tells someone on its own, and what still needs a person reading the
-log:
+Эти числа сами не вызывают уведомлений. DigitalOcean потребовал бы внешней пересылки логов, Yandex — структурированных JSON-логов. В шаблоне нет ни того, ни другого. Условия новой инфраструктуры — в `docs/ARCHITECTURE.md`.
 
-| Signal | DigitalOcean | Yandex Cloud | Own server |
+| Сигнал | DigitalOcean | Yandex Cloud | Свой сервер |
 | --- | --- | --- | --- |
-| The scheduler stopped or keeps dying | Terraform: scheduler worker `RESTART_COUNT` > 1 in five minutes, plus the app's `DEPLOYMENT_FAILED`; e-mail to the team's default address. This catches a worker that keeps dying, not one that stays up and fails every pass - see "A pass fails" below. See [DIGITALOCEAN.md](DIGITALOCEAN.md#alerts). | By hand: Monitoring alert `outbox drain stopped` on `serverless.containers.started_per_second` of the outbox container, no data counted as Alarm. See [YANDEX_CLOUD.md](YANDEX_CLOUD.md#alerts). | Whatever your supervisor alerts on; `systemctl status` shows the last exit. |
-| The worker is about to die or never idles | Terraform: `MEM_UTILIZATION` > 85% for ten minutes, `CPU_UTILIZATION` > 90% for thirty. | Not applicable: each tick is its own invocation with its own memory. | Host monitoring. |
-| A pass fails | Only when the failure crashes or pins the worker; otherwise `Scheduler job outbox:drain failed.` in the runtime log. | By hand: Monitoring alert `job failed` on `serverless.containers.errors_per_second`; `cron.ts --http` answers 503 for a failed pass. | The journal. |
-| `backlog`, `terminalFailed`, `claimed`/`skipped`, `unhandled` | Read the entry in the worker's runtime log; the runbook has the `doctl` command. | Read the entry in the log group; the runbook has the `yc logging read` command and the `min_level` caveat. | The journal. |
+| Исполнитель остановился или падает | Terraform: `RESTART_COUNT` > 1 за 5 минут и `DEPLOYMENT_FAILED`; email команды. Не выявляет каждую ошибку живого worker. См. [уведомления](DIGITALOCEAN.md#уведомления). | Ручной Monitoring-alert `outbox drain stopped`: `serverless.containers.started_per_second`, отсутствие данных = Alarm. См. [уведомления](YANDEX_CLOUD.md#уведомления). | Уведомления supervisor; `systemctl status` показывает последний выход. |
+| Мало памяти или постоянная нагрузка | `MEM_UTILIZATION` > 85% за 10 минут, `CPU_UTILIZATION` > 90% за 30 минут. | Каждый вызов имеет собственную память. | Мониторинг сервера. |
+| Проход завершился ошибкой | Уведомление только при падении/зависании worker; иначе ищи `Scheduler job outbox:drain failed.`. | Ручной `job failed` по `serverless.containers.errors_per_second`; HTTP-исполнитель возвращает 503. | Журнал. |
+| Метрики outbox выше | Runtime-лог worker через `doctl`. | Log group через `yc logging read` с учётом `min_level`. | Журнал. |
 
-Tuning lives in `TASK_OUTBOX_*` (see `backend/.env.example`). One invariant holds them together:
-a task's `deadlineMs` must stay well inside `TASK_OUTBOX_LEASE_STALE_MS`, or a second drain could
-claim a row whose first runner is still working. The code floors the lease at twice the slowest
-deadline so the two cannot cross.
+Настройки — `TASK_OUTBOX_*` в `backend/.env.example`. `deadlineMs` задачи должен быть значительно меньше `TASK_OUTBOX_LEASE_STALE_MS`. Иначе второй drain заберёт ещё работающую строку. Код задаёт минимум аренды вдвое больше самого долгого deadline.
 
-### What this table is not for
+### Для чего outbox не подходит
 
-Work that fans out to N recipients and then polls each one for a delivery receipt is a two-level
-problem, and squeezing it in here would mean a row that is partly done. The `mobile` branch's Expo
-push pipeline is exactly that case and keeps its own tables.
+Рассылка N получателям с последующим опросом квитанций требует двух уровней состояния. Одна частично выполненная строка не подходит. Expo Push в ветке `mobile` использует отдельные таблицы.
 
-## Rebuilding a static site
+## Пересборка статического сайта
 
-Read the cross-surface contract in [WEB_SURFACES.md](WEB_SURFACES.md) before implementing this
-capability. It defines which data may enter static output and when rebuild is part of the owning
-product write flow.
+Сначала прочитай [WEB_SURFACES.md](WEB_SURFACES.md): какие данные допустимы в статике и когда запись продукта требует пересборки.
 
-The website ships as static output, and rung one of its freshness ladder is "rebuild and
-redeploy". If a project ever needs that rebuild to happen automatically, implement a durable
-controller rather than treating one outbox attempt as the whole deployment. Its state row stores
-`desiredRevision`, `publishedRevision`, and the active provider deployment id/status/revision. The
-publishing transaction advances `desiredRevision` and enqueues a uniquely keyed
-`website:rebuild:<revision>` wake-up. The wake-up runs one short reconcile pass; a configured
-`website:rebuild:reconcile` recurring job runs the same pass to recover after restarts, lost
-wake-ups, expired terminal rows, or hosted builds longer than an outbox deadline.
+Автопересборка требует постоянного контроллера, не одной долгой outbox-попытки. Строка хранит `desiredRevision`, `publishedRevision`, ID/статус/ревизию активного деплоя. Транзакция публикации обновляет желаемую ревизию и ставит `website:rebuild:<revision>`.
 
-The controller allows at most one provider deployment at a time. It adopts an ambiguously triggered
-deployment instead of blindly sending another, records the provider id, and polls on later passes.
-The backend build snapshot returns its actual revision. The provider builds an immutable revisioned
-artifact and promotes it atomically or through an equivalent blue-green release; an in-place
-recursive upload is not safe enough. The artifact contains that revision in a cache-busted public
-marker, and provider success is accepted only after promotion and marker verification. Then the
-controller advances `publishedRevision`; if `desiredRevision` is newer, it starts one follow-up.
-This single-flight state machine prevents a slow older deployment from overwriting a newer one.
-`backend/src/outbox/handlers.ts` carries only a commented shape; it is documentation, not an enabled
-controller or provider adapter.
+Задача запускает короткую сверку. Периодический `website:rebuild:reconcile` делает то же после перезапуска, потери сигнала, удаления строк или долгой сборки.
 
-The template documents this instead of shipping it, because the two hosting paths are not one
-feature:
+Контроллер допускает один активный деплой. После неоднозначного запуска находит его у провайдера, записывает ID и опрашивает в следующих проходах. Backend возвращает снимок с реальной ревизией. Провайдер создаёт неизменяемую сборку и переключает её атомарно или через blue-green. Рекурсивная перезапись действующего сайта недостаточно безопасна.
 
-- **DigitalOcean** builds the site from Git, so the adapter triggers a deployment through
-  `/v2/apps/{app_id}/deployments`, tracks the returned deployment to success, and reconciles the
-  deployed revision. The build runs from your branch, so database content appears only when the
-  site fetches it at build time.
-- **Yandex Object Storage** has no remote build. The operator-invoked unified release builds and
-  uploads locally. Automatic rebuild remains unavailable until the project adds the dedicated,
-  authenticated builder described in `YANDEX_CLOUD.md`; the backend runtime container must not
-  grow a website toolchain and broad storage credentials for this purpose.
+Сборка содержит публичный маркер с обходом кэша. Только после успеха провайдера, переключения и проверки маркера обновляется `publishedRevision`. Если желаемая ревизия новее, запускается один следующий деплой. Медленная старая сборка не может заменить новую.
 
-Before building either, check you need it. If the site must be fresher than a deploy cycle, climb
-the ladder in `website/README.md` - cached SSR with `stale-while-revalidate`, then server islands -
-rather than building a rebuild pipeline. Neither hosting offers per-page ISR.
+В `backend/src/outbox/handlers.ts` есть только закомментированный пример, не рабочий контроллер или адаптер.
 
-## Provider specifics
+- **DigitalOcean:** адаптер вызывает `/v2/apps/{app_id}/deployments`, отслеживает деплой из Git и сверяет ревизию. Данные БД попадут на сайт только если сборка получает их из backend.
+- **Yandex Object Storage:** удалённого сборщика нет. Ручной релиз собирает и загружает локально. Автопересборка недоступна до отдельного защищённого сборщика из `YANDEX_CLOUD.md`. Не добавляй сайт, toolchain и широкие ключи хранилища в backend-runtime.
 
-- DigitalOcean: [DIGITALOCEAN.md](DIGITALOCEAN.md) — Terraform deploys the scheduler worker with
-  the API image and database environment, and puts restart, memory, and CPU alert rules on it.
-- Yandex Cloud: [YANDEX_CLOUD.md](YANDEX_CLOUD.md) — Terraform reads `job-schedules.json` and
-  creates one HTTP job container and timer trigger per entry; the two Monitoring alerts are a
-  documented manual step, because the provider has no alert resource.
+Если нужная свежесть меньше цикла релиза, рассмотри кэшируемый SSR с `stale-while-revalidate`, затем server islands по `website/README.md`. Ни один стандартный хостинг не даёт постраничный ISR.
 
-## Upstream documentation
+## Особенности провайдеров
 
-- DigitalOcean App Platform jobs: https://docs.digitalocean.com/products/app-platform/how-to/create-jobs/
-- DigitalOcean App Platform workers: https://docs.digitalocean.com/products/app-platform/concepts/worker/
-- Yandex Serverless Containers timer trigger: https://yandex.cloud/en/docs/serverless-containers/operations/timer-create
-- systemd timers: https://www.freedesktop.org/software/systemd/man/latest/systemd.timer.html
-- Docker restart policies: https://docs.docker.com/engine/containers/start-containers-automatically/
-- croner, the scheduler library used here: https://github.com/hexagon/croner
-- PostgreSQL advisory locks: https://www.postgresql.org/docs/current/explicit-locking.html#ADVISORY-LOCKS
+- [DigitalOcean](DIGITALOCEAN.md): scheduler worker с образом API и окружением БД; Terraform-уведомления по рестартам, памяти и CPU.
+- [Yandex Cloud](YANDEX_CLOUD.md): HTTP-контейнер и таймер для каждой записи `job-schedules.json`. Два Monitoring-alert создаются вручную: ресурса провайдера нет.
+
+## Официальная документация
+
+- [Задания App Platform](https://docs.digitalocean.com/products/app-platform/how-to/create-jobs/)
+- [Workers App Platform](https://docs.digitalocean.com/products/app-platform/concepts/worker/)
+- [Таймер Serverless Containers](https://yandex.cloud/en/docs/serverless-containers/operations/timer-create)
+- [Таймеры systemd](https://www.freedesktop.org/software/systemd/man/latest/systemd.timer.html)
+- [Перезапуск Docker](https://docs.docker.com/engine/containers/start-containers-automatically/)
+- [Библиотека croner](https://github.com/hexagon/croner)
+- [PostgreSQL advisory locks](https://www.postgresql.org/docs/current/explicit-locking.html#ADVISORY-LOCKS)

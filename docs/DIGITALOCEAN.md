@@ -1,38 +1,25 @@
-# DigitalOcean Terraform Runbook
+# Terraform в DigitalOcean
 
-Use this path when [CHECKLIST.md](../CHECKLIST.md) records an audience outside Russia and no Russian
-data-residency requirement. Common safety and release rules live in [DEPLOYMENT.md](DEPLOYMENT.md);
-the Terraform source lives under [`infra/digitalocean`](../infra/digitalocean).
+Выбирай этот путь для аудитории вне России без требования хранить данные в России, согласно [CHECKLIST.md](../CHECKLIST.md). Общие правила — в [DEPLOYMENT.md](DEPLOYMENT.md), код — в [`infra/digitalocean`](../infra/digitalocean).
 
-## What Terraform creates
+## Ресурсы Terraform
 
-- one Project and one regional VPC;
-- one account-wide Container Registry (protected from destroy);
-- one PostgreSQL 18 cluster, application database, separate runtime user, and a
-  Terraform-managed trusted-source firewall;
-- one private versioned Spaces bucket for user media plus a bucket-scoped runtime key; its
-  lifecycle rule expires noncurrent versions after 30 days and aborts incomplete multipart uploads
-  after 7;
-- one App Platform API app containing the API service, long-running scheduler worker, and
-  `PRE_DEPLOY` migration job;
-- separate App Platform Static Site apps for `webapp` and `website`;
-- alert rules on the API app: failed deployment and failed domain at app level, and restart,
-  memory, and CPU rules on the scheduler worker, delivered to the team's default email;
-- a private versioned Space and scoped key for Terraform state; its lifecycle rule expires
-  noncurrent versions after 30 days and aborts incomplete multipart uploads after 7.
+- Один Project и региональный VPC.
+- Один Container Registry на аккаунт с защитой от удаления.
+- PostgreSQL 18, БД приложения, отдельная runtime-роль и firewall доверенных источников.
+- Приватный media Space с версиями и ограниченным ключом. Старые версии удаляются через 30 дней, незавершённые multipart — через 7.
+- API-приложение App Platform: API-сервис, постоянный scheduler worker и миграция `PRE_DEPLOY`.
+- Отдельные Static Sites для `webapp` и `website`.
+- Уведомления API о сбоях деплоя/домена и scheduler о рестартах, памяти и CPU. Получатель — email команды по умолчанию.
+- Приватный Space для state с версиями и отдельным ключом. Те же сроки очистки: 30 и 7 дней.
 
-The scheduler runs `outbox:drain` and `notifications:process` every minute, abandoned-upload
-cleanup hourly at minute 15, and combined auth/notification maintenance every 15 minutes. The
-migration job uses the same immutable backend digest and must succeed before App Platform promotes
-the API.
+Scheduler запускает `outbox:drain` и `notifications:process` каждую минуту, очистку загрузок каждый час на 15-й минуте, auth/уведомлений — каждые 15 минут. Миграция использует тот же неизменяемый digest backend и должна завершиться до переключения API.
 
-## Account preparation
+## Подготовка аккаунта
 
-Install and authenticate `doctl` 1.164 or newer, authorize App Platform to read the configured
-GitHub repository, and create one account-level Spaces access key for Terraform to manage buckets.
-The bootstrap then creates a narrower key used only by the Terraform state backend.
+Установи `doctl` 1.164+ и войди в аккаунт. Разреши App Platform читать нужный GitHub-репозиторий. Создай ключ аккаунта Spaces для управления бакетами. Bootstrap создаст отдельный узкий ключ для state.
 
-Set the account guard and credentials without printing them:
+Передай ключи и защиту аккаунта без вывода секретов:
 
 ```bash
 export DO_EXPECTED_TEAM_UUID='<immutable Team UUID from doctl account get --output json>'
@@ -41,17 +28,11 @@ export SPACES_ACCESS_KEY_ID='<account Spaces key id>'
 export SPACES_SECRET_ACCESS_KEY='<account Spaces secret>'
 ```
 
-The API token needs `spaces_key:read` in addition to the scopes required by Terraform. The wrapper
-passes `DIGITALOCEAN_TOKEN` to both Terraform and `doctl`, forces `doctl` to its default context,
-verifies the immutable `DO_EXPECTED_TEAM_UUID`, and checks that this token can read the exact
-`SPACES_ACCESS_KEY_ID`. A duplicate/renamed team, saved CLI context, or Spaces key from another
-team therefore cannot redirect Terraform silently.
+API-токен требует `spaces_key:read` кроме прав Terraform. Скрипт передаёт один `DIGITALOCEAN_TOKEN` в Terraform и `doctl`, выбирает default-контекст CLI и сверяет неизменяемый `DO_EXPECTED_TEAM_UUID`. Затем проверяет доступ токена к точному `SPACES_ACCESS_KEY_ID`.
 
-The account Spaces key remains necessary for bucket administration; it is not reused by the app.
-Terraform creates a separate key restricted to the media Space and injects that key into the API
-and scheduler as secret App Platform environment variables.
+Это защищает от похожих имён команд, старого CLI-контекста и ключей другого аккаунта. Ключ управления бакетами не передаётся приложению. Для API/scheduler Terraform создаёт отдельный media-ключ и задаёт его как secret-переменные App Platform.
 
-## Configuration
+## Настройка
 
 ```bash
 cp infra/digitalocean/bootstrap/terraform.tfvars.example \
@@ -61,36 +42,25 @@ cp infra/digitalocean/production/terraform.tfvars.example \
 export TF_VAR_jwt_secret="$(openssl rand -hex 32)"
 ```
 
-Use compatible region slugs (`fra` for App Platform and `fra1` for VPC/database/Spaces in the
-example), a globally unique state Space, a globally unique media Space, the GitHub repository in
-`owner/repository` form, and the exact pushed release branch. `registry_name` is account-wide: if
-the account already has a registry, set its real name and import it before the first apply.
-The generated S3 backend keeps `fra1` in the Spaces endpoint but uses the S3-compatible signing
-region `us-east-1`; do not replace it with the Spaces region.
+Выбирай совместимые регионы: в примере `fra` для App Platform, `fra1` для VPC/БД/Spaces. Имена state/media Space должны быть глобально уникальны. Репозиторий задаётся как `owner/repository`, ветка — точная и уже отправленная.
 
-Three production domains are required. Set `dns_zone` to a DigitalOcean-managed zone to let App
-Platform manage records, or leave it `null` and configure the App Platform domain records at the
-external DNS provider.
+`registry_name` действует на весь аккаунт. Если registry уже есть, укажи его имя и импортируй до первого apply. S3-backend использует `fra1` в endpoint, но регион подписи — `us-east-1`. Не заменяй его регионом Spaces.
 
-Optional Resend delivery uses sensitive Terraform input, never committed HCL:
+Нужны три production-домена. Для DNS в DigitalOcean задай `dns_zone`; иначе оставь `null` и создай записи App Platform у внешнего DNS-провайдера.
+
+Для Resend передай секрет вне HCL:
 
 ```bash
 export TF_VAR_extra_runtime_secret_env='{"EMAIL_RESEND_API_KEY":"<secret>"}'
 ```
 
-Then set `email_delivery = "resend"` and `email_from` in the production tfvars.
+В production tfvars задай `email_delivery = "resend"` и `email_from`.
 
-Alerts need no configuration: App Platform sends them to the team's default email. Routing them
-to specific team members is a console step (the API app, Settings tab, Alert Policies, Edit, then
-expand the rule and set its notification method), deliberately not a Terraform input. Provider
-2.99.1 never reads alert destinations back into state, so a list in Terraform would plan an
-update on every run, and removing it would not restore the default because the provider only ever
-replaces destinations with a declared list and never clears them. On the provider side an apply
-leaves console-set destinations alone: the app spec carries none, and the provider syncs them only
-when Terraform declares some. Whether App Platform itself keeps them when the spec is re-applied
-is not verified; check once after the first release that follows a console change.
+Уведомления отправляются на email команды без настройки. Для конкретных получателей открой API-приложение → Settings → Alert Policies → Edit, раскрой правило и задай способ уведомления.
 
-## Commands
+Получатели намеренно не задаются в Terraform. Провайдер 2.99.1 не читает их обратно: объявленный список создаёт вечное изменение плана, а удаление списка не возвращает defaults. При отсутствии списка провайдер не синхронизирует получателей. Сохраняет ли их сама App Platform при повторе spec, не проверено. Проверь после первого релиза, следующего за ручной правкой.
+
+## Команды
 
 ```bash
 bun run infra:bootstrap -- digitalocean --new --dry-run
@@ -103,117 +73,77 @@ bun run release -- digitalocean --dry-run
 bun run release -- digitalocean
 ```
 
-`infra:apply` creates or changes only the stateful foundation; routine releases refuse to continue
-while that root has drift. The release then logs Docker into DOCR, builds `backend/Dockerfile` from
-a `git archive` of the captured pushed commit, pushes it, resolves the `sha256` digest, and applies
-the API-only runtime root. Terraform waits for App Platform's `PRE_DEPLOY` migration and API
-deployment before the separate static root is allowed to change.
+`infra:apply` меняет только постоянную основу. Релиз запрещён при расхождении её плана. Затем он входит в DOCR, собирает `backend/Dockerfile` из `git archive` опубликованного коммита, отправляет образ и получает `sha256` digest.
 
-The App Platform spec binds the managed cluster twice without copying either password: API and
-scheduler use the restricted application user, while only the `PRE_DEPLOY` job uses the cluster's
-administrative connection for Prisma DDL. After every migration, `db:deploy` grants the runtime user
-database/schema access, DML on current tables, sequence use, and matching owner default privileges
-for future tables and sequences. Before granting, it removes unsafe schema/object/routine/default
-privileges inherited through PostgreSQL `PUBLIC` plus direct database/schema/table/sequence and
-default-ACL drift; it fails closed if the runtime role has inherited/elevated roles or owns objects.
-DigitalOcean creates database users with minimal privileges, so this deterministic reconciliation
-is part of the migration gate rather than an undocumented console task.
+Runtime-корень применяет API. Terraform ждёт успешные `PRE_DEPLOY` и API-деплой. Только затем меняется отдельный static-корень.
 
-For an imported cluster, `db:deploy` also inventories public-schema ownership before Prisma. If a
-legacy role owns objects, use the reviewed `db:adopt-owner` inventory/apply sequence in
-[DEPLOYMENT.md](DEPLOYMENT.md); changing the Terraform database/user resources alone cannot transfer
-PostgreSQL object ownership.
+Spec подключает кластер дважды без копирования паролей. API/scheduler используют ограниченную роль; только PRE_DEPLOY получает административное подключение для Prisma DDL.
 
-The App Platform image source intentionally sets `registry_type = "DOCR"`, repository, and digest,
-but leaves `registry` unset: DigitalOcean's DOCR contract rejects a registry name in that field.
+После миграции `db:deploy` выдаёт runtime доступ к БД/схеме, DML текущих таблиц, sequences и default privileges владельца для будущих объектов. Сначала он снимает опасные права `PUBLIC` и прямые лишние права runtime. Наследуемые/повышенные роли и владение объектами запрещены. Это часть миграции, не ручная настройка консоли.
 
-App Platform source configuration has a branch but no commit-SHA field. The wrapper therefore
-creates a never-overwritten `infra-release/<40-character-sha>` branch for each release, points both
-static apps at it with `deploy_on_push = false`, and checks each active deployment's
-`source_commit_hash`. A newer push to `master` cannot change the in-flight release.
+Для импортированного кластера сначала проверяются владельцы public-схемы. При старом владельце выполни проверенный `db:adopt-owner` по [DEPLOYMENT.md](DEPLOYMENT.md). Изменение ресурса БД/пользователя в Terraform не передаёт владение объектами.
 
-If `ADMIN_SEED_*` is supplied, the first deployment runs the migration with it. After success the
-script removes the bootstrap variables and applies once more; the second migration is deliberately
-idempotent and verifies the created administrator.
+Источник образа задаёт `registry_type = "DOCR"`, repository и digest, но не `registry`: DOCR отвергает имя registry в этом поле.
 
-## Alerts
+App Platform принимает ветку, не SHA коммита. Скрипт создаёт неизменяемую `infra-release/<40-character-sha>`, задаёт её обоим статическим приложениям с `deploy_on_push = false` и проверяет `source_commit_hash`. Новый push в `master` не меняет текущий релиз.
 
-Terraform creates these on the API app (`infra/digitalocean/runtime/main.tf`); nothing is clicked
-in the console. Each one is an e-mail to the team's default address; "Configuration" above says how
-to route them to specific people.
+Если переданы `ADMIN_SEED_*`, первая миграция создаёт администратора. После успеха скрипт удаляет эти переменные и повторяет apply. Вторая миграция идемпотентна и проверяет готовность администратора.
 
-| Alert                                          | Fires when                                          | What it means                                                                                                         |
-| ---------------------------------------------- | --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `DEPLOYMENT_FAILED` (app)                      | a deployment fails                                  | the migration gate or a component failed; the previous deployment stays live                                          |
-| `DOMAIN_FAILED` (app)                          | `api_domain` fails to configure                     | a DNS or certificate problem on the API domain                                                                        |
-| `RESTART_COUNT` > 1 in 5 min (scheduler)       | the worker restarted more than once in five minutes | a crash loop: the outbox drain and cleanups are not running. One restart after a deploy stays quiet                   |
-| `MEM_UTILIZATION` > 85% for 10 min (scheduler) | memory stays above 85% of `worker_instance_size`    | the worker is about to be killed for running out of memory                                                            |
-| `CPU_UTILIZATION` > 90% for 30 min (scheduler) | CPU stays above 90% for half an hour                | a healthy scheduler idles between ticks; this is a stuck job. A pass is bounded whatever the backlog, so backlog never shows here |
+## Уведомления
 
-What these do not cover: the numbers in the `Job outbox:drain completed.` entry - `backlog`,
-`terminalFailed`, `claimed`/`skipped`, `unhandled`. App Platform cannot alert on a value inside a
-log entry without forwarding logs to an external service, which this repository does not run. Read
-them from the worker's runtime log; the app is `<project_slug>-prod-api`. The metrics object is
-printed over a dozen lines after the message, so ask for the lines that follow each match:
+Terraform создаёт правила API в `infra/digitalocean/runtime/main.tf`. Они отправляют email команды. Настройка других получателей описана выше.
+
+| Правило | Условие | Значение |
+| --- | --- | --- |
+| `DEPLOYMENT_FAILED` | Ошибка деплоя | Сбой миграции или компонента; прежний релиз остаётся активным |
+| `DOMAIN_FAILED` | Не настроен `api_domain` | Ошибка DNS или сертификата |
+| `RESTART_COUNT` > 1 за 5 минут | Scheduler перезапустился больше раза | Цикл падений; outbox и очистка не работают. Один рестарт после релиза не тревожит |
+| `MEM_UTILIZATION` > 85% за 10 минут | Память выше 85% `worker_instance_size` | Риск остановки из-за нехватки памяти |
+| `CPU_UTILIZATION` > 90% за 30 минут | Высокий CPU полчаса | Вероятно, задание зависло. Нормальный scheduler ждёт между тиками; backlog здесь не виден |
+
+Числа `backlog`, `terminalFailed`, `claimed`/`skipped` и `unhandled` из `Job outbox:drain completed.` не вызывают уведомлений. Для этого App Platform потребовала бы внешнюю пересылку логов, которой здесь нет.
+
+Читай runtime-лог worker приложения `<project_slug>-prod-api`. Объект метрик идёт после строки сообщения:
 
 ```bash
 doctl apps list --format ID,Spec.Name
 doctl apps logs <app id> scheduler --type run --tail 500 | grep -A 11 'outbox:drain completed'
 ```
 
-`docs/BACKGROUND_JOBS.md`, "What to watch", says what each number means and when to act. A pass
-that fails without crashing the worker appears there as `Scheduler job outbox:drain failed.`, not
-as an alert.
+Значения и действия описаны в разделе наблюдения `docs/BACKGROUND_JOBS.md`. Ошибка прохода без падения процесса видна как `Scheduler job outbox:drain failed.`, но не как alert.
 
-## Operations
+## Эксплуатация
 
-- The starting PostgreSQL size and single node prioritize launch cost. Backups are managed by the
-  service, but restore testing and an HA upgrade remain operator work.
-- PostgreSQL initially trusts only the dedicated VPC CIDR while no app ID exists. After the
-  migration-gated API deployment succeeds, the wrapper feeds its App ID back into the independent
-  foundation root and replaces the bootstrap rule with that exact trusted source. If the runtime
-  state stops reporting that App ID while the API app still exists, `infra:plan` and
-  `infra:apply` fail closed instead of widening the rule back to the VPC range; recover or import
-  the runtime state first. Adding an external admin client requires a deliberate Terraform
-  firewall rule, not a console-wide allow.
-- App Platform Static Sites use DigitalOcean's edge delivery; no separate Spaces CDN or Terraform
-  CDN resource is created.
-- DigitalOcean documents Spaces lifecycle rules only for object expiration and incomplete multipart
-  uploads. The noncurrent-version rule on the state Space and on the media Space is the standard
-  S3 lifecycle element the provider sends, but nothing in this repository can prove Spaces honors
-  it. After the apply that installs each (`infra:bootstrap -- digitalocean --new` for the state
-  Space, `infra:apply -- digitalocean` for the media Space, or the rerun of either on an existing
-  install), read it back once with any S3 client and the account Spaces key exported as
-  `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, for example
-  `aws s3api get-bucket-lifecycle-configuration --endpoint-url https://<spaces_region>.digitaloceanspaces.com --bucket <Space>`,
-  and expect `NoncurrentVersionExpiration` of 30 days. If the read-back omits that element, Spaces
-  accepted the rule without keeping it and every later rerun will plan the same in-place update:
-  treat it exactly like a refusal. If Spaces refuses the rule instead, the apply fails at the
-  lifecycle step. In both cases drop `noncurrent_version_expiration` from both rules and both
-  assertions (`infra/digitalocean/bootstrap/tests/bootstrap.tftest.hcl` and
-  `infra/digitalocean/production/tests/production.tftest.hcl`) the first time Spaces refuses it:
-  the state Space fails first, and the media Space would fail the same way at `infra:apply`. Record
-  the gap in `CHECKLIST.md` and rerun (`infra:bootstrap` without `--new`, then `infra:apply`). For
-  the media Space that gap also means the 30-day recovery window in [STORAGE.md](STORAGE.md) never
-  closes, so deleted versions accumulate until someone prunes them by hand. On a first run a
-  refusal also leaves the created Space tainted, which `prevent_destroy` refuses to replace; clear
-  it with `terraform untaint digitalocean_spaces_bucket.terraform_state` against the local
-  bootstrap state, or `terraform untaint digitalocean_spaces_bucket.media` in the initialized
-  foundation root with `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` exported from the `TF_STATE_*`
-  values in `infra/digitalocean/.env.terraform-state` (the wrapper's own backend credentials),
-  before the rerun, and never delete a Space or the state to get past it.
-- Private media is never served through a public CDN. The backend issues short-lived signed URLs.
-- Do not enable `deploy_on_push`: the guarded release command is the one promotion authority.
-- Keep wrapper-owned `infra-release/*` branches immutable. Old branches are release evidence and
-  may be removed only after the corresponding deployment is no longer a rollback target.
-- App Platform's GitHub connection is an account authorization and cannot be made portable in this
-  repository; verify it before the first release.
+- Один узел PostgreSQL снижает стартовую цену. Сервис делает резервные копии; проверка восстановления и переход к HA остаются оператору.
+- До появления App ID БД доверяет только выделенному VPC CIDR. После успешной миграции и API-деплоя скрипт передаёт App ID в foundation и заменяет правило точным источником. Если runtime-state потерял ID, но приложение существует, plan/apply останавливаются. Сначала восстанови или импортируй state; не расширяй доступ обратно до VPC.
+- Внешний администратор БД требует явного firewall-правила Terraform, не общего разрешения в консоли.
+- Static Sites используют встроенную доставку DigitalOcean. Отдельный Spaces CDN не создаётся.
+- Приватные media доступны только по коротким подписанным URL, не через публичный CDN.
+- Не включай `deploy_on_push`: только защищённый release управляет переключением.
+- Не меняй `infra-release/*`. Удалять старую ветку можно, только когда её релиз больше не нужен для отката.
+- GitHub-подключение App Platform — право аккаунта, не переносимая часть репозитория. Проверь его до первого релиза.
 
-## Official references
+Поддержку удаления старых версий Spaces нужно проверить отдельно. DigitalOcean документирует expiration объектов и незавершённые multipart, но не гарантирует `NoncurrentVersionExpiration`, который отправляет провайдер.
 
-- [DigitalOcean Terraform provider](https://docs.digitalocean.com/reference/terraform/)
+После настройки state (`infra:bootstrap -- digitalocean --new`) и media (`infra:apply -- digitalocean`), либо их повторов, прочитай правило S3-клиентом. Передай ключ аккаунта как `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`:
+
+`aws s3api get-bucket-lifecycle-configuration --endpoint-url https://<spaces_region>.digitaloceanspaces.com --bucket <Space>`.
+
+Ожидается `NoncurrentVersionExpiration` на 30 дней. Если элемент отсутствует, считай это отказом: провайдер принял запрос, но не сохранил правило, и каждый план будет повторять изменение. Явный отказ остановит apply на lifecycle.
+
+При первом отказе убери `noncurrent_version_expiration` из обоих правил и проверок в `infra/digitalocean/bootstrap/tests/bootstrap.tftest.hcl` и `infra/digitalocean/production/tests/production.tftest.hcl`. State упадёт первым; media иначе повторит ошибку позже. Запиши ограничение в `CHECKLIST.md`. Повтори `infra:bootstrap` без `--new`, затем `infra:apply`.
+
+Для media это означает, что окно восстановления из [STORAGE.md](STORAGE.md) не закрывается через 30 дней. Старые версии будут копиться до ручной очистки.
+
+Первый отказ может оставить Space tainted. `prevent_destroy` запретит замену. Сними taint командой `terraform untaint digitalocean_spaces_bucket.terraform_state` в локальном bootstrap-state либо `terraform untaint digitalocean_spaces_bucket.media` в инициализированном foundation.
+
+Для foundation передай backend-ключи `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` из `TF_STATE_*` файла `infra/digitalocean/.env.terraform-state`. Затем повтори команду. Не удаляй Space или state ради обхода ошибки.
+
+## Официальная документация
+
+- [Terraform DigitalOcean](https://docs.digitalocean.com/reference/terraform/)
 - [App Platform](https://docs.digitalocean.com/products/app-platform/)
-- [App Platform alerts](https://docs.digitalocean.com/products/app-platform/how-to/create-alerts/)
+- [Уведомления App Platform](https://docs.digitalocean.com/products/app-platform/how-to/create-alerts/)
 - [Managed PostgreSQL](https://docs.digitalocean.com/products/databases/postgresql/)
 - [Container Registry](https://docs.digitalocean.com/products/container-registry/)
 - [Spaces](https://docs.digitalocean.com/products/spaces/)

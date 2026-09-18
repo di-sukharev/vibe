@@ -1,41 +1,34 @@
-# Infrastructure as Code
+# Инфраструктура как код
 
-Terraform state is split at operational boundaries, not merely across files:
+Terraform state разделён по операциям:
 
 ```text
 infra/
 ├── digitalocean/
-│   ├── bootstrap/   # remote-state Space and scoped key
-│   ├── operations/  # provider-wide production mutation lease
-│   ├── production/  # stateful foundation: VPC, PostgreSQL, registry, media
-│   ├── runtime/     # API, scheduler, and PRE_DEPLOY migration
-│   └── static/      # webapp and website, applied only after runtime succeeds
+│   ├── bootstrap/   # Space для удалённого state и ограниченный ключ
+│   ├── operations/  # общая блокировка изменений production у провайдера
+│   ├── production/  # постоянная основа: VPC, PostgreSQL, registry, файлы
+│   ├── runtime/     # API, scheduler и миграция PRE_DEPLOY
+│   └── static/      # webapp и website; после успешного runtime
 └── yandex/
-    ├── bootstrap/   # remote-state Object Storage bucket and scoped key
-    ├── operations/  # provider-wide production mutation lease
-    ├── production/  # stateful foundation: network, DB, secrets, buckets, IAM
-    ├── migration/   # isolated one-shot migration container
-    └── runtime/     # API, gateway, jobs, DNS, and optional CDN
+    ├── bootstrap/   # бакет Object Storage для state и ограниченный ключ
+    ├── operations/  # общая блокировка изменений production у провайдера
+    ├── production/  # постоянная основа: сеть, БД, секреты, бакеты, IAM
+    ├── migration/   # отдельный контейнер разовой миграции
+    └── runtime/     # API, gateway, задания, DNS и необязательный CDN
 ```
 
-The split is a release guarantee. A routine code release first requires a clean foundation plan,
-then changes only release-owned state. DigitalOcean applies the API app and waits for its
-`PRE_DEPLOY` migration before touching either static app. Yandex invokes the isolated migration
-task successfully before changing the API or HTTP timer containers. A failed migration therefore
-cannot partially publish the frontend or mutate the old runtime configuration.
+Релиз требует план без изменений базовой инфраструктуры. Затем он меняет только ресурсы релиза. DigitalOcean сначала обновляет API и ждёт успешной миграции `PRE_DEPLOY`, затем обновляет статику. Yandex сначала выполняет отдельную миграцию, затем меняет API и контейнеры заданий. При ошибке миграции старый runtime и frontend остаются прежними.
 
-Every root has a separate locked S3-compatible state key. The bootstrap state remains separate
-because a bucket cannot store its own state before it exists. Provider versions and dependency
-checksums are pinned per root. Non-dry foundation applies, releases, and production imports also
-hold the provider's `operations` state lock for their complete multi-root sequence, so two wrappers
-cannot interleave migration, runtime, static, or foundation changes. The wrapper rechecks the lease
-between every mutating phase and stops the sequence if ownership is lost.
+У каждого корня отдельный S3-совместимый ключ state с блокировкой. State bootstrap хранится отдельно: бакет не может хранить своё состояние до создания. Версии провайдеров и контрольные суммы закреплены для каждого корня.
 
-## Commands
+Применение основы, релиз и импорт в production удерживают блокировку `operations` на всю последовательность, кроме режима dry-run. Она не даёт двум запускам перемешать миграции и изменения ресурсов. Скрипт проверяет владение блокировкой перед каждой фазой изменений и останавливается при его потере.
+
+## Команды
 
 ```bash
-bun run infra:bootstrap -- <digitalocean|yandex> --new [--dry-run] # first creation only
-bun run infra:bootstrap -- <digitalocean|yandex>                   # resume/reconnect
+bun run infra:bootstrap -- <digitalocean|yandex> --new [--dry-run] # только первое создание
+bun run infra:bootstrap -- <digitalocean|yandex>                   # продолжение или подключение
 bun run infra:apply -- <digitalocean|yandex> [--dry-run]
 bun run infra:plan -- <digitalocean|yandex>
 bun run infra:output -- <digitalocean|yandex>
@@ -43,45 +36,26 @@ bun run infra:import -- <provider> <root> <terraform-address> <provider-resource
 bun run release -- <digitalocean|yandex> [--dry-run]
 ```
 
-Use `infra:apply` for deliberate foundation changes and then require a clean `infra:plan` before a
-release. Do not call `terraform apply` directly. `scripts/infra.mjs` creates a saved plan, inspects
-machine-readable actions, refuses protected destruction, applies that exact plan, enforces phase
-ordering, and verifies public endpoints.
+Меняй базовую инфраструктуру через `infra:apply`. Перед релизом требуй чистый `infra:plan`. Не вызывай `terraform apply` напрямую. `scripts/infra.mjs` сохраняет план, проверяет действия, запрещает разрушение защищённых ресурсов и применяет именно этот план. Он также контролирует порядок фаз и проверяет публичные адреса.
 
-`terraform.tfvars.example` exists only in the provider's bootstrap and production roots. Runtime
-roots receive mode-`0600`, ignored input files generated from foundation outputs and the immutable
-release. Generated backend HCL, auto variables, plans, local state, and credentials are ignored.
+`terraform.tfvars.example` есть только в bootstrap и production. Для runtime скрипт создаёт игнорируемые входные файлы с правами `0600` из выходов основы и зафиксированного релиза. Git игнорирует созданные backend HCL, auto variables, планы, локальный state и ключи.
 
-The explicit `--new` flag prevents an empty local bootstrap from being mistaken for infrastructure
-whose generated credential file was lost. For that recovery case, use the reattach procedure in
-[docs/DEPLOYMENT.md](../docs/DEPLOYMENT.md); it verifies the existing bucket and state before it
-reconciles the Terraform-managed backend key.
+Флаг `--new` отличает первое создание от потери локального файла доступа. При потере файла следуй восстановлению в [docs/DEPLOYMENT.md](../docs/DEPLOYMENT.md). Оно проверяет существующие бакет и state, затем восстанавливает ключ backend под управлением Terraform.
 
-## Source identity
+## Источник релиза
 
-The wrapper accepts only a clean pushed commit on the configured upstream. Docker builds consume a
-`git archive` of that captured commit, rather than the mutable working directory. Yandex static
-artifacts are also built from that archive in `static.Dockerfile`.
+Скрипт принимает только чистый опубликованный коммит настроенной upstream-ветки. Docker собирает `git archive` этого коммита, а не меняющееся рабочее дерево. Yandex также собирает статику из архива через `static.Dockerfile`.
 
-DigitalOcean App Platform supports a branch source but no commit field. The wrapper creates a
-never-overwritten `infra-release/<40-character-sha>` remote branch, configures both static apps to
-that branch, and checks each active deployment's `source_commit_hash` before reporting success.
+App Platform принимает ветку, но не отдельный коммит. Скрипт создаёт неизменяемую удалённую ветку `infra-release/<40-character-sha>` для обоих статических приложений. Перед успехом он проверяет `source_commit_hash` каждого активного деплоя.
 
-Provider static-access-key resources are intentionally never import targets: the pinned Yandex and
-DigitalOcean providers cannot import them or recover their secret. Adopt the surrounding resources,
-let Terraform create replacement keys, switch and verify consumers, then revoke legacy keys using
-the sequence in [docs/DEPLOYMENT.md](../docs/DEPLOYMENT.md).
+Не импортируй ресурсы статических ключей доступа. Закреплённые провайдеры Yandex и DigitalOcean не поддерживают их импорт и восстановление секрета. Импортируй остальные ресурсы, создай новые ключи через Terraform, переключи и проверь потребителей, затем отзови старые ключи. Порядок описан в [docs/DEPLOYMENT.md](../docs/DEPLOYMENT.md).
 
-## Ownership rules
+## Ответственность
 
-- Terraform owns cloud resources, IAM, runtime configuration, domains, timers, and storage policy.
-- `backend/src/jobs.ts` owns job names; `backend/src/job-schedules.json` declares scheduler and
-  Yandex timer expressions plus lock and execution budgets once.
-- `scripts/infra.mjs` owns generated inputs and the release sequence.
-- Provider consoles are for observation, account authorization, and emergency diagnosis. Import a
-  deliberate console-created resource or revert drift; do not leave it unmanaged.
-- Secret values may enter through `TF_VAR_*`, but Terraform state necessarily contains them.
-  Protect every state key and the generated local state-credential file accordingly.
+- Terraform управляет ресурсами облака, IAM, runtime, доменами, таймерами и политиками хранения.
+- `backend/src/jobs.ts` задаёт имена заданий. `backend/src/job-schedules.json` задаёт расписания scheduler/Yandex, сроки блокировок и лимиты выполнения.
+- `scripts/infra.mjs` создаёт входные файлы и управляет релизом.
+- Консоль провайдера нужна для наблюдения, доступа к аккаунту и аварийной диагностики. Импортируй созданный вручную ресурс или отмени расхождение. Не оставляй его вне управления.
+- Секреты можно передать через `TF_VAR_*`, но Terraform всё равно хранит их в state. Защищай каждый ключ state и локальный файл доступа.
 
-See [docs/DEPLOYMENT.md](../docs/DEPLOYMENT.md) and the provider runbooks for prerequisites,
-adoption commands, rollback, and provider-specific constraints.
+Требования, импорт, откат и ограничения провайдера описаны в [docs/DEPLOYMENT.md](../docs/DEPLOYMENT.md) и инструкциях провайдеров.

@@ -1,56 +1,36 @@
-# Yandex Cloud Terraform Runbook
+# Terraform в Yandex Cloud
 
-Use this path when [CHECKLIST.md](../CHECKLIST.md) records users in Russia or a Russian
-data-residency requirement. Common safety and release rules live in
-[DEPLOYMENT.md](DEPLOYMENT.md); Terraform source lives under
-[`infra/yandex`](../infra/yandex).
+Используй этот путь для пользователей в России или требования хранить данные в России, согласно [CHECKLIST.md](../CHECKLIST.md). Общие правила — в [DEPLOYMENT.md](DEPLOYMENT.md), код — в [`infra/yandex`](../infra/yandex).
 
-## What Terraform creates
+## Ресурсы Terraform
 
-- a private network with subnets in `ru-central1-a`, `-b`, and `-d`;
-- one private PostgreSQL 18 host, application database, login-capable migration owner, blue/green
-  DML-only runtime users, seven-day backups, disk autoscaling, and deletion protection;
-- a Container Registry and a seven-day log group;
-- an HTTP Serverless Container behind API Gateway;
-- one migration task container plus four HTTP job containers invoked by timer triggers;
-- public Object Storage website buckets for `webapp` and `website`;
-- a separate private versioned media bucket and bucket-scoped runtime credentials stored in
-  Lockbox; its lifecycle rule expires noncurrent versions after 30 days and aborts incomplete
-  multipart uploads after 7;
-- separate migration, runtime, gateway, trigger, publisher, and storage-management service
-  accounts with narrow roles;
-- an optional Postbox sender and optional Cloud CDN resources;
-- a private versioned Object Storage bucket and scoped key for Terraform state; its lifecycle rule
-  expires noncurrent versions after 30 days and aborts incomplete multipart uploads after 7;
-- no alerts: the pinned provider has no Monitoring alert or notification-channel resource, so the
-  two alerts in "Alerts" below are created by hand once per folder.
+- Приватная сеть с подсетями `ru-central1-a`, `-b`, `-d`.
+- Один приватный PostgreSQL 18, БД, владелец для миграций и DML-пользователи blue/green. Резервные копии на 7 дней, авторасширение диска, защита от удаления.
+- Container Registry и log group на 7 дней.
+- HTTP Serverless Container за API Gateway.
+- Отдельный контейнер миграции и четыре HTTP-контейнера заданий с таймерами.
+- Публичные website-бакеты Object Storage для `webapp` и `website`.
+- Приватный media-бакет с версиями и ограниченными ключами в Lockbox. Старые версии удаляются через 30 дней, незавершённые multipart — через 7.
+- Отдельные аккаунты миграции, runtime, gateway, таймеров, публикатора и управления хранилищем с узкими правами.
+- Postbox и Cloud CDN по необходимости.
+- Приватный state-бакет с версиями, ограниченным ключом и теми же сроками очистки 30/7 дней.
+- Без уведомлений: закреплённый провайдер не умеет создавать Monitoring-alert и каналы. Два правила ниже создаются вручную один раз на folder.
 
-`enable_cdn = false` and `route_static_through_cdn = false` by default. Static files then come
-directly from Object Storage HTTPS website hosting. The first flag provisions two CDN origin
-groups/resources with gzip while DNS stays direct; the second flag is a separate routing phase.
-Direct bucket HTTPS remains a rollback path, and the media bucket stays private and outside CDN.
+По умолчанию `enable_cdn = false` и `route_static_through_cdn = false`. Статика доступна напрямую через HTTPS Object Storage. Первый флаг создаёт два CDN-ресурса и группы источников с gzip, не меняя DNS. Второй отдельно переключает трафик.
 
-## Account preparation
+Прямой HTTPS бакета остаётся путём отката. Приватный media-бакет не входит в CDN.
 
-Install `yc`, select the intended cloud/folder, and authenticate Docker through the release script.
-The current CLI target must exactly match `cloud_id` and `folder_id` in both tfvars files; this
-prevents a valid credential from changing the wrong account.
+## Подготовка аккаунта
 
-The first state bootstrap temporarily grants its new service account folder-level `storage.admin`
-because the target bucket does not exist yet and versioning requires that role. The same command
-installs a bucket policy scoped to that dedicated service account, removes the folder-wide role,
-verifies bucket refresh and state access, and only then migrates local state. Because policy scope is
-the service account rather than one key ID, a replacement key created on that same account can run
-the documented lost-credential recovery; keys from other identities remain denied. That policy also
-denies the state account `s3:DeleteBucket` and `s3:PutBucketVersioning`; the foundation section
-below explains what such a Deny does and does not guarantee on Yandex.
+Установи `yc`, выбери нужные cloud/folder. Скрипт релиза выполнит вход Docker. Активная цель CLI должна точно совпадать с `cloud_id` и `folder_id` в обоих tfvars. Это защищает от изменений чужого аккаунта действующим ключом.
 
-Create and validate three Certificate Manager certificates for the API, webapp, and website
-domains. Each static bucket name must exactly equal its domain because direct Object Storage HTTPS
-remains configured even after optional CDN activation. This keeps the existing origin healthy
-during DNS propagation and gives rollback a working target.
+Первый bootstrap временно выдаёт новому state-аккаунту folder-level `storage.admin`: бакета ещё нет, а настройка версий требует роли. Затем команда устанавливает политику только для этого аккаунта, снимает общую роль, проверяет доступ и переносит локальный state.
 
-## Configuration
+Политика привязана к аккаунту, не к одному ключу. Поэтому новый ключ того же аккаунта подходит для восстановления; другие личности запрещены. Deny для `s3:DeleteBucket` и `s3:PutBucketVersioning` имеет ограничения, описанные ниже.
+
+Создай и подтверди три сертификата Certificate Manager: API, webapp, website. Имя каждого статического бакета должно совпадать с доменом. Прямой HTTPS остаётся настроенным и после CDN, чтобы пережить распространение DNS и обеспечить откат.
+
+## Настройка
 
 ```bash
 cp infra/yandex/bootstrap/terraform.tfvars.example infra/yandex/bootstrap/terraform.tfvars
@@ -61,36 +41,30 @@ export TF_VAR_database_green_password='<different strong random value, at least 
 export TF_VAR_jwt_secret="$(openssl rand -hex 32)"
 ```
 
-Fill real cloud, folder, exact pushed `git_branch`, domain, certificate, and globally unique bucket
-values. Release digests do not belong in this file: the wrapper writes them to the separate ignored
-migration/runtime roots. Keep the owner password, both database slot passwords, and JWT secret in
-the project secret manager and export all four for every plan/apply. Start every password version
-at `1`, set `database_active_slot = "blue"`, and never change the password or version of the slot
-reported as live by `infra:output`.
+Заполни cloud, folder, опубликованную `git_branch`, домены, сертификаты и глобально уникальные имена бакетов. Digest релиза не хранится здесь: скрипт записывает его в игнорируемые migration/runtime-корни.
 
-Set `dns_zone_domain` to the exact zone root and `dns_zone_id` to a Yandex Cloud DNS zone ID for
-Terraform-managed CNAME records. API, webapp, and website must all be subdomains of that root, not
-the zone apex: this topology uses CNAME records, while direct apex hosting needs a different
-ANAME-capable design and Cloud CDN itself requires CNAME. With external DNS leave `dns_zone_id`
-`null`; after the first release, read:
+Сохрани три пароля БД и JWT в менеджере секретов. Передавай все четыре при каждом plan/apply. Начни версии паролей с `1`, задай `database_active_slot = "blue"`. Не меняй пароль или версию слота, который `infra:output` показывает активным.
+
+Для Terraform DNS задай точный корень `dns_zone_domain` и `dns_zone_id` зоны Yandex Cloud DNS. Все три домена должны быть его поддоменами, не apex. Схема использует CNAME; apex требует другого решения с ANAME, а CDN требует CNAME.
+
+Для внешнего DNS оставь `dns_zone_id` равным `null`. После первого релиза прочитай безопасные выходы:
 
 ```bash
 bun run infra:output -- yandex
 ```
 
-The command prints the safe output allowlist; use its `required_dns_records` entry.
+Используй `required_dns_records`.
 
-Optional Postbox delivery needs a verified sender and:
+Для Postbox нужен подтверждённый отправитель:
 
 ```hcl
 email_delivery = "postbox"
 email_from     = "Product <hello@example.com>"
 ```
 
-Terraform creates the sender service-account key directly into Lockbox; it is not returned to the
-terminal or written to a runtime env file.
+Terraform помещает ключ отправителя прямо в Lockbox, не в терминал или runtime env-файл.
 
-## Commands
+## Команды
 
 ```bash
 bun run infra:bootstrap -- yandex --new --dry-run
@@ -103,255 +77,143 @@ bun run release -- yandex --dry-run
 bun run release -- yandex
 ```
 
-`infra:apply` creates only the stateful foundation and leaves release-owned roots untouched. During
-the first bucket creation it gives the storage-management account temporary folder-level
-`storage.admin`, which the provider requires for versioning and full bucket configuration. It then
-installs that role only on the webapp, website, and media buckets and removes the broad role in the
-same command. Access-key-specific bucket policies give publishers only sync operations without
-bucket/version deletion and give the media runtime only object read/write/delete. The two static
-buckets allow anonymous object reads only; no anonymous request can list them. Website hosting,
-the optional CDN origin, and the release-marker check fetch objects by path, and the publisher's
-`ListBucket` is granted to its access key: the publisher holds no IAM role, and the key-conditioned
-policy authorizes its listing exactly as it authorizes its uploads. Yandex asks for both: its
-console guide opens object reads and object listing, and its hosting concept page lists a bucket
-with anonymous listing off among the configurations hosting does not support. This template opens
-reads only anyway, because listing is not what hosting uses, so it sits outside that stated
-envelope: a future Yandex change may legitimately break it, the rollback below restores the
-supported configuration, and the release proves the current state on every run: `bun run release
--- yandex` syncs with the publisher key (a list on
-every run), reads the release marker through the public domains, requests a webapp path that does
-not exist and requires the index shell back with whatever 2xx/4xx status carries it (every deep
-link into the single-page app, including emailed password-reset links, depends on that
-error-document fallback), and finally fetches `/` on both domains. On an existing install the
-flags take effect the moment `infra:apply` finishes, so once a release has run (the runtime root
-exists) the apply itself ends by requiring the release marker and `/` of both static domains to
-still be readable and by running that same probe, and fails with a pointer to this rollback if any
-of them does not come back; before the first release there is nothing to read, and that release
-runs the same checks. If that post-apply check fails, the static sync fails with
-`AccessDenied` on a list request (the sync runs after the runtime deploy, so the runtime serves
-the new commit with the previous static build until a rerun), hosting answers 403, or the release
-probe fails, restore `list = true` in both static
-`anonymous_access_flags` blocks, re-add an anonymous `s3:ListBucket` allow on the bucket ARN in
-both static policies, flip the `infra/yandex/production/tests/production.tftest.hcl` assertions
-that pin anonymous listing off, and rerun `infra:apply`. Nested directory paths without a trailing
-slash (`/docs` redirecting to `/docs/`) are exercised by no current surface or check; probe one by
-hand when the website gains such a route. The media bucket has no anonymous rule. The public read
-rule intentionally admits Yandex Cloud CDN's documented HTTP origin request, while user-facing
-domains redirect to HTTPS.
+`infra:apply` меняет только постоянную основу. При создании бакетов он временно выдаёт storage-аккаунту folder-level `storage.admin`. После настройки оставляет эту роль только на webapp, website и media, снимая общую в той же команде.
 
-Each policy also lets the bucket-scoped IaC service account refresh and update bucket configuration
-(`s3:*` on the bucket ARN, never on objects) and denies it `s3:DeleteBucket` and
-`s3:PutBucketVersioning`; object-version deletion is never granted. Read that Deny for exactly what
-it is. Yandex checks a policy's Deny before anything else and lists `s3:PutBucketVersioning` as a
-policy action, so a Terraform change that suspends versioning fails and the 30-day recovery window
-stays intact. Bucket deletion and policy management are not policy actions on Yandex; IAM alone
-authorizes them (`storage.configurer` is the documented minimum to apply or delete a policy from
-the console, `storage.admin` for a service account through the S3 API as Terraform does, and
-`storage.editor` deletes a bucket), and the IaC account holds `storage.admin` on its three
-buckets. So the `s3:DeleteBucket` Deny is defense in depth at most: Terraform removes the policy
-resource before it would delete a bucket, and `force_destroy = false`, the media bucket's
-`prevent_destroy`, and the wrapper's destroy allowlist are the Terraform-side stops. Neither Deny
-protects against whoever holds the IaC key or a folder-level `storage.admin`: either can rewrite
-the policy first. Treat that key as an operator credential. The Deny cannot lock Terraform out:
-versioning is set once at creation, before the policy exists, the provider sends
-`PutBucketVersioning` only when the `versioning` block changes, and policy updates are authorized
-by the IAM binding, so the next `infra:apply` rewrites the policies with the same key it always
-used; `s3:*` stays so that they remain allowed should the policy be consulted as well. Do not
-replace it with an enumerated list: that would protect nothing (the same key rewrites the policy
-through IAM) and would break bucket refresh the day the provider reads one more attribute. If a
-future change must alter versioning, drop the Deny in one apply and change versioning in the next.
-A media bucket created before this template versioned it is that case with a shorter path: enable
-versioning once with your own identity,
-`yc storage bucket update --name <media bucket> --versioning versioning-enabled`
-(`yc` goes through the Cloud API, where IAM authorizes the call; an S3 `put-bucket-versioning`
-from any other key would match no Allow statement and be rejected, and if Yandex rejects the `yc`
-update too, the two-apply path above is the fallback), then rerun `infra:apply`; the refreshed
-bucket already matches the configuration, so the provider sends no `PutBucketVersioning` and the
-apply installs the lifecycle rule.
-The IaC key cannot access the separate Terraform-state bucket in steady state.
+Политики по точному access-key дают публикатору только синхронизацию двух статических бакетов без удаления бакетов/версий. Runtime получает чтение, запись и удаление обычных media-объектов.
 
-The release refuses foundation drift, builds and pushes one Linux AMD64 image from a `git archive`
-of the captured commit, and applies it to the independent migration root. The script invokes the
-authenticated task endpoint and requires HTTP 200 with `X-Task-Exit-Code: 0`; only then does it
-apply the independent API/jobs runtime root. Foundation or runtime configuration cannot change as
-a side effect of preparing the migration revision.
+Статические бакеты разрешают анонимное чтение объектов, но не список. Публикатор имеет `ListBucket` через политику ключа, без IAM-роли. Хостинг, CDN и проверка маркера читают объекты по пути.
 
-After promotion, the release builds both static workspaces from the same immutable Git archive in
-`infra/yandex/static.Dockerfile`. It uploads
-hashed `assets/` and `_astro/` objects first with immutable cache headers, then HTML/page shells
-with revalidation headers. The second sync excludes hashed directories and uses `--delete`, so a
-removed route stops being publicly current while old hashed assets remain available to clients
-that loaded the previous HTML during rollout. Bucket versioning preserves deleted/replaced mutable
-objects for recovery and expires those noncurrent versions after 30 days. Hashed objects remain
-current by design; prune them only with a separately reviewed retention policy if their storage
-cost becomes material. Each surface also publishes a revalidated release marker containing the
-captured commit. Final verification reads that marker through the public domain with a cache-busting
-query and requires an exact match, so a healthy stale CDN object or misdirected DNS target cannot be
-reported as the new release. It then requests a webapp path that does not exist and requires the
-index shell, proving the single-page fallback still works on the public domain.
+Это осознанное отклонение от заявленной конфигурации Yandex: официальная инструкция хостинга требует также анонимный список. В будущем провайдер может перестать поддерживать чтение без списка. Поэтому каждый `bun run release -- yandex` проверяет:
 
-The static publisher key is a sensitive Terraform output consumed in memory by the release
-process. Its exact-key bucket policies cover only the two public static buckets and cannot delete a
-bucket or a noncurrent object version. The API runtime uses a different exact-key policy scoped to
-ordinary objects in the private media bucket, so a delete through it leaves a version it cannot
-remove for the 30 days [STORAGE.md](STORAGE.md) describes, and its credentials are delivered
-through Lockbox. Restoring one of those versions needs an operator identity first. Yandex checks
-IAM before the bucket policy, rejects an S3 request that no policy statement allows, and disables
-console access to a bucket that has a policy; the media policy names only the IaC account (bucket
-actions) and the runtime key (ordinary objects), so nothing it names can read a noncurrent version
-or remove a delete marker, and the IaC key is not an output. Use a service account of your own
-with a static access key (user accounts hold none, and `yc` has no version-listing command): bind
-it bucket-scoped `storage.editor`, the role Yandex documents for restoring object versions, in the
-console or through the Cloud API, so the request passes IAM; then add a temporary policy statement
-for it (`CanonicalUser` = its id) allowing `s3:ListBucketVersions` on the bucket ARN and
-`s3:GetObjectVersion`, `s3:PutObject`, and `s3:DeleteObjectVersion` on `<bucket>/*`: start from
-the current policy, the `policy` field of `yc storage bucket get <media bucket> --full --format json`
-(`| jq .policy` isolates it), append the statement to its `Statement` list, and write that policy
-document back with `yc storage bucket update --policy-from-file`,
-which replaces the policy rather than merging into it; a file holding only the new statement
-would cut the runtime key off from media until the next apply (policy edits are IAM-authorized;
-`storage.configurer` on the bucket is enough for the account running `yc`). Restore through an S3
-client signed with that key, for example
-`aws s3api list-object-versions --endpoint-url https://storage.yandexcloud.net --bucket <media bucket>`,
-then a copy of the version back over its key or a delete of the marker. Afterwards remove the
-binding and rerun `infra:apply`, which rewrites the policy without that statement; the release
-refuses foundation drift until it does.
-Runtime access to Lockbox is also granted per referenced secret, including every
-`extra_secret_bindings` entry; the runtime identity is not a folder-wide payload viewer and cannot
-read the database-owner migration secret.
+- Синхронизацию с ключом публикатора, включая list.
+- Маркер через публичные домены.
+- Несуществующий путь webapp: должна вернуться index-оболочка при допустимом для неё 2xx/4xx.
+- `/` обоих доменов.
 
-Migrations connect as the dedicated database owner, which owns the schema objects Prisma creates.
-The API and jobs connect as the selected blue/green user and receive only Yandex's managed read and
-write roles plus database `CONNECT`; after each migration, `db:deploy` also removes unsafe schema,
-temporary-table, object, routine, and default privileges inherited through PostgreSQL `PUBLIC`.
-The runtime users therefore do not get schema DDL or routine execution. The owner URL is held in a
-separate migration-only Lockbox secret readable only by a dedicated one-shot migration identity.
-That task receives only the owner URL and optional administrator seed, never the runtime JWT, media,
-email, or blue/green database credentials. Each runtime slot has a persistent exact secret version
-so an inactive-slot rotation cannot schedule destruction of the live runtime's version.
+От fallback зависят все глубокие SPA-ссылки, включая сброс пароля. После первого релиза те же публичные проверки завершает каждый `infra:apply`. До релиза проверять ещё нечего.
 
-Importing a legacy database does not transfer its tables, sequences, routines, or enum/domain
-types. Before the first migration, run the inventory and confirmed `db:adopt-owner -- --apply`
-sequence in [DEPLOYMENT.md](DEPLOYMENT.md). The deployment preflight runs before Prisma and names
-any object still owned by the legacy role instead of failing halfway through a migration.
+Если после apply исчезли страницы, sync получает `AccessDenied` на list, хостинг отвечает 403 или probe не прошёл, верни поддерживаемую конфигурацию:
 
-## Jobs and networking
+1. Задай `list = true` в обоих статических `anonymous_access_flags`.
+2. Верни анонимный `s3:ListBucket` на ARN обоих бакетов.
+3. Измени соответствующие проверки в `infra/yandex/production/tests/production.tftest.hcl`.
+4. Повтори `infra:apply`.
 
-The provider timers use UTC:
+Sync идёт после runtime. До успешного повтора при его ошибке новый backend может работать со старой статикой. Пути каталогов без завершающего `/`, например переход `/docs` → `/docs/`, текущие проверки не покрывают. Проверь такой путь при его добавлении.
 
-| Job                       | Timer expression | Lock / invocation timeout | Purpose                                           |
-| ------------------------- | ---------------- | ------------------------- | ------------------------------------------------- |
-| `outbox:drain`            | `* * ? * * *`    | 240s / 180s               | Durable email/task delivery every minute          |
-| `notifications:process`   | `* * ? * * *`    | 240s / 180s               | Push delivery and Expo receipt polling every minute |
-| `uploads:pending:cleanup` | `15 * ? * * *`   | 900s / 840s               | Abandoned uploads hourly                          |
-| `maintenance:process`     | `*/15 * ? * * *` | 240s / 180s               | Auth cleanup, rate windows, notification redaction |
+Media не имеет анонимного доступа. Публичное чтение статики допускает HTTP-запрос CDN к website-origin; пользовательский домен переводит на HTTPS.
 
-The API and job containers join the VPC; Managed PostgreSQL has no public IP. Yandex assigns
-connected Serverless Containers addresses from its documented `198.19.0.0/16` service range, so
-the database security group allows TCP/6432 from exactly that range. The user-defined `10.20.*`
-subnets host the database/network prerequisites but are not the containers' source addresses. API
-Gateway has the only invoker identity for the HTTP container; the trigger identity can invoke only
-job containers.
+IaC-аккаунт имеет `s3:*` только на ARN бакета для чтения/изменения конфигурации, не на объекты. Ему запрещены `s3:DeleteBucket`, `s3:PutBucketVersioning`; удаление версий не разрешено.
 
-The timer containers run `cron.ts --http <job>`. A successful locked run returns HTTP 204; a job or
-cleanup failure returns 503, which is visible to the trigger and activates its three configured
-retries. Only the trigger's `POST /` runs the job (Yandex invokes a container from a trigger with an
-HTTP POST, and the trigger sets no path): other methods get 405, other paths 404, and nothing runs,
-so a probe or a stray `GET /favicon.ico` from an identity with invoker rights cannot execute the
-cleanup. Command/task mode is used only for the explicitly invoked migration because Yandex always
-returns HTTP 200 for that mode and exposes the process result through `X-Task-Exit-Code`; the release
-script checks that header before promotion.
+Yandex проверяет Deny первым и признаёт `s3:PutBucketVersioning` действием политики. Поэтому Terraform не может приостановить версии и убрать 30-дневное окно восстановления.
 
-## Alerts
+Но удаление бакета и управление политикой проверяются только через IAM. Для консоли достаточно `storage.configurer`, для S3 API сервисного аккаунта нужен `storage.admin`; `storage.editor` может удалить бакет. IaC-аккаунт имеет bucket-level `storage.admin`.
 
-Terraform cannot create these: the Yandex provider pinned in `infra/yandex/*/versions.tf` exposes
-only `yandex_monitoring_dashboard`, and the official Terraform reference for Monitoring lists no
-alert or notification-channel resource. Create them once per folder in the console after the first
-release. They survive later releases because the job containers keep their IDs; recreate them if
-the folder or the containers are recreated.
+Поэтому Deny удаления — лишь дополнительная защита. Terraform перед удалением бакета снимает policy-ресурс. Его реальные ограничения — `force_destroy = false`, media `prevent_destroy` и список разрешённых удалений скрипта. Владелец IaC-ключа или folder-level `storage.admin` может переписать политику. Считай ключ операторским.
 
-The job containers are `<project_slug>-prod-outbox`, `-notifications`, `-uploads`, and
-`-maintenance`; their IDs are the `container` label values below:
+Обычный apply не блокируется: версии включаются при создании до политики, а `PutBucketVersioning` отправляется только при изменении блока. Правки политики разрешает IAM. Сохраняй `s3:*` на ARN бакета: ручной список не защитит от владельца ключа, но может сломать чтение нового атрибута провайдера.
+
+Если нужно изменить версионирование, сначала сними Deny одним apply, затем измени версии следующим. Для старого media-бакета без версий возможен короткий путь от своей личности:
+
+`yc storage bucket update --name <media bucket> --versioning versioning-enabled`.
+
+`yc` использует Cloud API и IAM. S3 `put-bucket-versioning` другого ключа не совпадёт ни с одним Allow. Если Cloud API тоже отказал, используй два apply. После включения повтори `infra:apply`: refresh увидит нужное состояние и установит lifecycle без изменения версий.
+
+В обычном режиме IaC-ключ не имеет доступа к отдельному state-бакету.
+
+Релиз требует чистый план основы. Он собирает один Linux AMD64-образ из `git archive` коммита, отправляет его и применяет отдельный migration-корень. Защищённый task endpoint должен вернуть HTTP 200 и `X-Task-Exit-Code: 0`. Только затем меняются API и задания. Подготовка миграции не меняет основу/runtime.
+
+После переключения статика собирается из того же архива через `infra/yandex/static.Dockerfile`. Сначала загружаются хешированные `assets/` и `_astro/` с immutable-заголовками. Затем HTML с ревалидацией. Второй sync исключает хешированные каталоги и использует `--delete`, чтобы удалить старые маршруты, сохранив ресурсы клиентов со старым HTML.
+
+Версии удалённого/заменённого HTML сохраняются 30 дней. Хешированные объекты остаются текущими. Удаляй их только по отдельной проверенной политике хранения, когда стоимость существенна.
+
+Каждое приложение публикует ревалидируемый маркер с коммитом. Проверка читает его через публичный домен с обходом кэша и требует точное совпадение. Старый CDN или неверный DNS не могут дать ложный успех. Затем проверяется index-оболочка отсутствующего пути.
+
+Ключ публикатора читается в память из sensitive output Terraform. Он не удаляет бакет или старые версии. Runtime использует другой ключ только для обычных media-объектов и получает его через Lockbox. Его удаление оставляет версию на 30 дней по [STORAGE.md](STORAGE.md).
+
+Для восстановления версии нужен отдельный операторский доступ. Политика media разрешает IaC только действия бакета, runtime — только обычные объекты. Никто из них не читает старые версии и не снимает delete marker. Yandex сначала проверяет IAM, затем требует Allow политики; консольный доступ к бакету с политикой отключён.
+
+Порядок восстановления:
+
+1. Создай собственный сервисный аккаунт со статическим ключом. У пользователя такого ключа нет; `yc` не умеет перечислять версии.
+2. Через консоль или Cloud API дай ему bucket-level `storage.editor` для восстановления версий.
+3. Получи текущую policy из `yc storage bucket get <media bucket> --full --format json`; `| jq .policy` выделит поле.
+4. Добавь временный Statement с `CanonicalUser` = ID аккаунта: `s3:ListBucketVersions` на ARN бакета, `s3:GetObjectVersion`, `s3:PutObject`, `s3:DeleteObjectVersion` на `<bucket>/*`.
+5. Запиши весь документ через `yc storage bucket update --policy-from-file`. Команда заменяет, не объединяет политику. Один новый Statement отключил бы runtime до следующего apply. Личности, запускающей `yc`, достаточно `storage.configurer` на бакете.
+6. S3-клиентом с новым ключом выполни `aws s3api list-object-versions --endpoint-url https://storage.yandexcloud.net --bucket <media bucket>`. Скопируй версию поверх ключа или удали marker.
+7. Сними временную привязку и повтори `infra:apply`, чтобы убрать Statement. До этого release запрещён из-за расхождения основы.
+
+Runtime читает Lockbox только по ссылкам на конкретные секреты, включая `extra_secret_bindings`. Общего folder-level доступа к payload нет; секрет владельца БД ему недоступен.
+
+Миграция подключается отдельным владельцем схемы. API/задания — выбранным blue/green с управляемыми правами чтения/записи Yandex и `CONNECT`. После миграции `db:deploy` снимает опасные права `PUBLIC`: schema, temporary tables, objects, routines и defaults. Runtime не получает DDL или выполнение routines.
+
+Owner URL хранится в отдельном Lockbox-секрете только для разовой migration-личности. Задание получает лишь этот URL и необязательный seed, без JWT, media, почты и runtime-паролей. У каждого runtime-слота постоянная точная версия секрета.
+
+Импорт старой БД не переносит владельцев таблиц, sequences, routines и enum/domain. До миграции выполни просмотр и подтверждённый `db:adopt-owner -- --apply` по [DEPLOYMENT.md](DEPLOYMENT.md). Preflight до Prisma назовёт оставшиеся старые объекты.
+
+## Задания и сеть
+
+Таймеры используют UTC:
+
+| Задание | Выражение | Блокировка / вызов | Работа |
+| --- | --- | --- | --- |
+| `outbox:drain` | `* * ? * * *` | 240 / 180 секунд | Письма и задачи каждую минуту |
+| `uploads:pending:cleanup` | `15 * ? * * *` | 900 / 840 секунд | Незавершённые загрузки каждый час |
+| `notifications:process` | `* * ? * * *` | 240 / 180 секунд | Отправка push и проверка Expo receipts каждую минуту |
+| `maintenance:process` | `*/15 * ? * * *` | 240 / 180 секунд | Очистка auth, окон лимитов и содержимого уведомлений |
+
+API и задания подключены к VPC; PostgreSQL не имеет публичного IP. Serverless Containers получают адреса `198.19.0.0/16`, поэтому группа БД разрешает TCP/6432 именно оттуда. Пользовательские `10.20.*` — подсети БД/сети, не исходные адреса контейнеров.
+
+Только API Gateway вызывает HTTP API-контейнер. Личность таймера вызывает только задания.
+
+`cron.ts --http <job>` возвращает 204 после успешной работы под блокировкой, 503 при ошибке задания/очистки. Это включает три повтора таймера. Только `POST /` выполняет задание: другой метод — 405, путь — 404. Проверки и случайный `GET /favicon.ico` не запускают очистку.
+
+Command/task-режим используется только для явной миграции. Yandex всегда возвращает для него 200, а результат — в `X-Task-Exit-Code`. Скрипт проверяет заголовок до переключения.
+
+## Уведомления
+
+Провайдер из `infra/yandex/*/versions.tf` поддерживает только `yandex_monitoring_dashboard`, без alert/channel. После первого релиза создай правила вручную один раз на folder. Они переживают релизы, пока ID контейнеров прежние. После пересоздания folder/контейнеров создай их снова.
+
+Задания: `<project_slug>-prod-outbox`, `-notifications`, `-uploads`, `-maintenance`. Найди ID для метки `container`:
 
 ```bash
 yc serverless container list --folder-id <folder_id>
 ```
 
-1. **Notification channel.** Monitoring, Notification channels, Create channel. Method `Email`.
-   Recipients are Yandex Cloud accounts, not arbitrary addresses: each one needs the
-   `monitoring.viewer` role on the folder and an e-mail address saved under the console's profile
-   settings, Monitoring section, or the channel delivers nowhere. Name it `prod-alerts`.
-2. **Alert `outbox drain stopped`.** Monitoring, Alerts, Create alert. Query:
-   `series_sum(drop_empty_series("serverless.containers.started_per_second"{folderId="<folder_id>", service="serverless-containers", container="<outbox container id>"}))`.
-   The two functions matter: the metric carries a `revision` label, every release creates a new
-   revision, and an alert is evaluated per line with the worst status winning, so the bare
-   selector would let the previous revision's empty line count as no data and hold the alert in
-   Alarm forever after the second release. Dropping empty lines first and summing the rest leaves
-   one line while the timer runs and no line at all once it has stopped. Trigger condition:
-   aggregation `Maximum`, evaluation window `10m`, Alarm when less than `0.001`. A healthy outbox
-   container is invoked every minute, so any ten-minute window holds a point above zero. No data
-   policies: set both `No selector metrics` and `No points in evaluation window` to `Alarm`, so a
-   timer that stopped, was disabled, or was deleted alarms instead of showing nothing. Channel
-   `prod-alerts`. Not verified against a live folder: after the first release the alert must sit
-   in OK, and it must still sit in OK after the second release, when the first stale revision
-   exists. Then prove it can fire: `yc serverless trigger pause <timer id>` (the timer is
-   `<project_slug>-prod-outbox-timer` in `yc serverless trigger list`), wait longer than the
-   evaluation window, confirm the status is Alarm and the e-mail arrived, then
-   `yc serverless trigger resume <timer id>`. If the paused timer leaves the alert in OK, the
-   empty result matched neither no-data policy: switch the query to the timer's own metric,
-   `"serverless.triggers.read_events_per_second"{folderId="<folder_id>", service="serverless-functions", trigger="<timer id>"}`,
-   which carries no `revision` label, so the bare selector works with both policies at `Alarm`,
-   and repeat the pause test.
-3. **Alert `job failed`.** Same page. Query:
-   `"serverless.containers.errors_per_second"{folderId="<folder_id>", service="serverless-containers", container="<outbox id>|<notifications id>|<uploads id>|<maintenance id>"}`.
-   Aggregation `Maximum`, evaluation window `5m`, Alarm when greater than `0`. `cron.ts --http`
-   answers 503 for a failed pass, which counts as an invocation error and is what activates the
-   timer's retries. The `|` list names the four job containers so the API container,
-   `<project_slug>-prod-api` in the same folder, is not paged as a job. No data policies: set both `No selector metrics` and `No points in evaluation window`
-   to `OK`, because a quiet container reports no errors. Channel `prod-alerts`. Not verified
-   against a live folder either: the metrics reference says only "errors when processing
-   container invocations". If a failed pass - a 503 in the log group - does not move this alert,
-   switch its query to `"serverless.triggers.error_per_second"{folderId="<folder_id>", service="serverless-functions", trigger="<timer id>"}`
-   (`yc serverless trigger list`), which counts the invocations the timer had to retry.
+1. **Канал.** Monitoring → Notification channels → Create channel, метод `Email`, имя `prod-alerts`. Получатели — аккаунты Yandex Cloud, не любые адреса. Каждому нужны `monitoring.viewer` на folder и email в настройках профиля консоли, раздел Monitoring.
+2. **`outbox drain stopped`.** Monitoring → Alerts → Create alert. Запрос: `series_sum(drop_empty_series("serverless.containers.started_per_second"{folderId="<folder_id>", service="serverless-containers", container="<outbox container id>"}))`. Агрегация `Maximum`, окно `10m`, Alarm при значении меньше `0.001`. Для `No selector metrics` и `No points in evaluation window` задай `Alarm`. Канал — `prod-alerts`.
+3. **`job failed`.** Запрос: `"serverless.containers.errors_per_second"{folderId="<folder_id>", service="serverless-containers", container="<outbox id>|<notifications id>|<uploads id>|<maintenance id>"}`. Агрегация `Maximum`, окно `5m`, Alarm выше `0`. Обе политики отсутствия данных — `OK`, канал `prod-alerts`. Список через `|` включает только задания, не `<project_slug>-prod-api`.
 
-Neither alert reads the numbers in the `Job outbox:drain completed.` entry. Cloud Logging does
-export per-group metrics to Monitoring (`group.saved_records_per_second` by `level`), but the
-drain writes plain-text lines, which land at `LEVEL_UNSPECIFIED`, so nothing separates a pass
-with `terminalFailed: 3` from any other line. A structured JSON line with `level` and `message`
-fields is what would unlock a `terminalFailed` alert here without a new service. Until then,
-`backlog`, `terminalFailed`, `claimed`/`skipped`, and `unhandled` are read from the seven-day log
-group. Not verified against a live folder either, and there is one thing to check first: every
-container is deployed with `log_options { min_level = "INFO" }` (`infra/yandex/runtime/containers.tf`),
-and the official docs say only that custom stdout/stderr lines carry level `UNSPECIFIED`, not
-whether a minimum level keeps or drops them. If the command below returns nothing while the
-containers run, that is the reason: drop `min_level` from the `log_options` blocks in
-`infra/yandex/runtime/containers.tf`, `infra/yandex/runtime/ingress.tf`, and
-`infra/yandex/migration/main.tf`, release, and record the finding in `CHECKLIST.md`. The metrics
-object is printed over a dozen lines after the message and plain-text stdout is ingested line by
-line, so filter by the container rather than by message text and read the records that follow
-each `Job outbox:drain completed.`:
+В первом запросе важны обе функции. Метрика имеет `revision`: после релиза старая серия пуста. Голый selector может навсегда оставить Alarm из-за худшего состояния старой ревизии. Сначала удаляются пустые серии, затем суммируются остальные. Пока таймер работает, остаётся одна линия; после остановки — ни одной.
+
+Эта схема ещё не проверена на живом folder. Проверь OK после первого и второго релиза, когда появится старая ревизия. Затем останови таймер через `yc serverless trigger pause <timer id>`, подожди больше окна, проверь Alarm и email, верни `yc serverless trigger resume <timer id>`. Таймер `<project_slug>-prod-outbox-timer` виден в `yc serverless trigger list`.
+
+Если остановленный таймер оставляет OK, пустой результат не попал под no-data-политику. Замени запрос на `"serverless.triggers.read_events_per_second"{folderId="<folder_id>", service="serverless-functions", trigger="<timer id>"}`. Здесь нет `revision`; оставь обе политики `Alarm` и повтори проверку остановки.
+
+`job failed` также не проверен на живом folder. HTTP 503 должен учитываться как ошибка вызова. Если 503 в логах не меняет alert, используй `"serverless.triggers.error_per_second"{folderId="<folder_id>", service="serverless-functions", trigger="<timer id>"}`. Эта метрика считает вызовы, которые таймер повторил.
+
+Оба alert не читают числа `Job outbox:drain completed.`. Cloud Logging даёт `group.saved_records_per_second` по `level`, но обычные строки drain имеют `LEVEL_UNSPECIFIED`. Нельзя отличить `terminalFailed: 3` от другой строки. Для такого alert потребуются JSON-логи с `level` и `message`.
+
+Пока читай `backlog`, `terminalFailed`, `claimed`/`skipped`, `unhandled` в log group на 7 дней. Здесь тоже нужна живая проверка: контейнеры задают `log_options { min_level = "INFO" }`, а уровень stdout/stderr — `UNSPECIFIED`. Документация не уточняет, отбрасывает ли их этот минимум.
+
+Если работающие контейнеры не дают строк ниже, убери `min_level` из `infra/yandex/runtime/containers.tf`, `infra/yandex/runtime/ingress.tf` и `infra/yandex/migration/main.tf`. Выполни релиз и запиши результат в `CHECKLIST.md`.
+
+Фильтруй по контейнеру, не тексту сообщения: метрики идут следующими отдельными строками после `Job outbox:drain completed.`.
 
 ```bash
 yc logging read --folder-id <folder_id> --group-name <project_slug>-prod-containers \
   --resource-ids <outbox container id> --since 10m
 ```
 
-`docs/BACKGROUND_JOBS.md`, "What to watch", says what each number means and when to act.
+Значения и действия описаны в разделе наблюдения `docs/BACKGROUND_JOBS.md`.
 
-## Operator database access
+## Доступ оператора к БД
 
-Use IAM authentication through the Yandex Cloud CLI for an interactive `psql` session. The
-`yc managed-postgresql connect` command runs a local PostgreSQL proxy, so it works with this
-template's private cluster: do not give the database host a public IP, add a `0.0.0.0/0` security
-group rule, download a database password from Lockbox, or create a bastion VM just for routine
-operator access.
+Для `psql` используй личный IAM через CLI. `yc managed-postgresql connect` запускает локальный PostgreSQL-proxy и работает с приватным кластером. Не выдавай публичный IP, не открывай `0.0.0.0/0`, не скачивай пароль из Lockbox и не создавай bastion ради обычного просмотра.
 
-The cluster name is `<project_slug>-prod-postgres`. The database name is `project_slug` with every
-hyphen replaced by an underscore. For example, `project_slug = "example-app"` produces cluster
-`example-app-prod-postgres` and database `example_app`.
+Кластер — `<project_slug>-prod-postgres`. В имени БД дефисы slug заменены подчёркиваниями: `example-app` → `example_app`.
 
-Install `psql`, authenticate `yc` as the person who needs access, and confirm that the active cloud
-and folder match both Yandex tfvars files:
+Установи `psql`, войди в `yc` от своего имени и проверь цель:
 
 ```bash
 yc version
@@ -362,15 +224,11 @@ yc iam whoami
 yc managed-postgresql cluster list
 ```
 
-If the installed CLI does not have `yc managed-postgresql connect`, update it with
-`yc components update`. Do not authenticate this session as one of the Terraform runtime or
-migration service accounts: operator access is personal and auditable.
+Если команды connect нет, выполни `yc components update`. Не используй migration/runtime-аккаунты: доступ оператора должен быть личным и проверяемым.
 
-### One-time access setup
+### Первичная выдача доступа
 
-`yc iam whoami` prints the current subject type and ID. Give that output to a cloud administrator
-who can manage cluster access and users. The administrator grants the connector role on this exact
-cluster. For a Yandex account or an organization-local user:
+Передай тип и ID из `yc iam whoami` администратору облака. Он выдаёт connector на конкретный кластер. Для Yandex-аккаунта или локального пользователя организации:
 
 ```bash
 yc managed-postgresql cluster add-access-binding \
@@ -379,15 +237,13 @@ yc managed-postgresql cluster add-access-binding \
   --user-account-id <iam_subject_id>
 ```
 
-For a federated user, replace the last argument with:
+Для федеративного пользователя замени последний аргумент:
 
 ```bash
 --subject federatedUser:<iam_subject_id>
 ```
 
-Then the administrator creates a PostgreSQL IAM user whose name is the same IAM subject ID. Start
-with read-only access; `mdb_read_all_data` permits `SELECT` over application data without granting
-read-all access to system catalogs or allowing DML/DDL:
+Затем создай IAM-пользователя PostgreSQL с именем, равным subject ID. Начни с чтения: `mdb_read_all_data` разрешает SELECT данных приложения, но не общее чтение системных каталогов или DML/DDL.
 
 ```bash
 yc managed-postgresql user create <iam_subject_id> \
@@ -397,39 +253,29 @@ yc managed-postgresql user create <iam_subject_id> \
   --grants mdb_read_all_data
 ```
 
-The CLI creates the user with deletion protection set to `Same as cluster`, while this template
-protects the cluster. In the management console, open the cluster's **Users** tab, configure this
-new personal user, and set **Deletion protection** to **Disabled**. This does not weaken cluster or
-application-user protection; it only ensures that offboarding can remove this person's access.
+CLI наследует защиту удаления кластера (`Same as cluster`). В консоли открой Users, настрой личного пользователя и задай Deletion protection → Disabled. Это не меняет защиту кластера или приложений, но позволяет удалить личный доступ при уходе сотрудника.
 
-Create one IAM database user per person. Do not share the migration owner, reuse the blue/green
-application users, or grant `mdb_admin`/`mdb_superuser` for ordinary inspection. Schema changes
-remain release-owned and run through `bun run release -- yandex`; direct production writes require
-a separately reviewed, time-bounded access decision.
+Один IAM-пользователь БД соответствует одному человеку. Не дели владельца миграций, blue/green или `mdb_admin`/`mdb_superuser` для обычного просмотра. Схему меняет `bun run release -- yandex`. Прямая production-запись требует отдельно проверенного временного доступа.
 
-### Connect and verify
+### Подключение и проверка
 
-The operator can now connect without a database password or CA file:
+Подключись без пароля БД и CA-файла:
 
 ```bash
 yc managed-postgresql connect <project_slug>-prod-postgres \
   --db <project_slug_with_underscores>
 ```
 
-Inside `psql`, verify the identity, target database, and read-only grant before inspecting data:
+До чтения проверь личность, БД и роль:
 
 ```sql
 SELECT current_user, current_database();
 SELECT pg_has_role(current_user, 'mdb_read_all_data', 'member') AS can_read_application_data;
 ```
 
-Use `\q` to close the session and local proxy. If the CLI reports that its local proxy port is
-already occupied, repeat the connect command with `--port <free_local_port>`.
+`\q` закрывает сессию и proxy. Если локальный порт занят, повтори connect с `--port <free_local_port>`.
 
-Access created here is deliberately person-specific and is not one of the application's
-Terraform-managed credentials. During offboarding, delete the IAM database user and remove the
-matching connector binding; use the same `--user-account-id` or federated `--subject` form used
-when access was granted:
+Этот личный доступ не входит в Terraform-ключи приложения. При отзыве удали пользователя БД и connector, используя тот же `--user-account-id` или федеративный `--subject`:
 
 ```bash
 yc managed-postgresql user delete <iam_subject_id> \
@@ -441,63 +287,44 @@ yc managed-postgresql cluster remove-access-binding \
   --user-account-id <iam_subject_id>
 ```
 
-## Database credential rotation
+## Ротация паролей БД
 
-The two runtime users make password rotation an expand/contract transition across independent
-Terraform states:
+Два runtime-слота позволяют безопасный expand/contract между независимыми state:
 
-1. Run `bun run infra:output -- yandex` and note `database_credential_slot`.
-2. Keep that live slot's exported password and version unchanged. Generate a new password for the
-   inactive slot, export it, increment only its version in `terraform.tfvars`, and set
-   `database_active_slot` to that inactive slot.
-3. Run `bun run infra:apply -- yandex --dry-run`, then `bun run infra:apply -- yandex`. This prepares
-   the second login and a new exact Lockbox version; the old runtime still uses the untouched slot.
-4. Run `bun run release -- yandex`. Migration and runtime promotion use the prepared slot.
-5. Rotate the now-inactive old slot only after `infra:output` confirms the new live slot.
+1. Выполни `bun run infra:output -- yandex`, запиши `database_credential_slot`.
+2. Не меняй пароль и версию активного слота. Для неактивного создай пароль, передай его в env, увеличь только его версию и выбери его в `database_active_slot`.
+3. Выполни `bun run infra:apply -- yandex --dry-run`, затем `bun run infra:apply -- yandex`. Второй логин и точная версия Lockbox готовы; старый runtime ещё работает.
+4. Выполни `bun run release -- yandex` для миграции и переключения.
+5. Меняй прежний слот только после подтверждения нового активного слота в `infra:output`.
 
-The wrapper stores only password fingerprints in sensitive foundation output and compares the live
-runtime slot before every foundation plan/apply. It refuses a version or password change to that
-slot, including after a failed release. It also fingerprints the JWT secret and refuses to replace
-it after a runtime exists: the application currently accepts one signing key, so safe JWT rotation
-requires a future keyring/overlap change rather than invalidating every session or destroying both
-slot versions. If the runtime state no longer reports a slot, the wrapper checks the provider for
-the project's deployed API/job containers and fails closed while any remain; recover or import the
-runtime state instead of treating it as a first release. Do not bypass the wrapper with raw
-`terraform apply` for credential rotation.
+Sensitive output основы хранит отпечатки паролей. Перед каждым plan/apply скрипт сравнивает активный слот и запрещает изменение его пароля/версии, в том числе после неудачного релиза.
 
-## Operations
+После появления runtime также запрещена замена JWT-секрета. Приложение принимает один ключ; безопасная ротация требует будущей поддержки нескольких ключей и переходного периода, а не сброса всех сессий.
 
-- The single `s3-c2-m8` database host is the economical launch profile. Add hosts/HA only after the
-  availability requirement justifies the cost.
-- Serverless retries are safe because recurring jobs use PostgreSQL advisory locks and the outbox
-  claims rows idempotently. Both the long-running scheduler and HTTP-mode `cron.ts` use the same
-  locked executor; the timeout budgets above come from the same versioned schedule file.
-- CDN activation is two releases. First set only `enable_cdn = true`, run `infra:apply`, then
-  `release`; DNS stays direct while `cdn_dns_records` exposes the new targets. Verify them, set
-  `route_static_through_cdn = true`, and run `infra:apply` plus `release` again. For external DNS,
-  switch the CNAMEs to `cdn_dns_records` between those phases and still record the routing flag.
-- CDN removal reverses that order. With managed DNS, set only `route_static_through_cdn = false`,
-  apply and release, wait at least the 300-second record TTL plus observed propagation, and verify
-  direct Object Storage. With external DNS, switch to `direct_static_dns_records`, wait and verify,
-  then record the false routing flag. Only afterward set `enable_cdn = false`, apply, and release
-  with exact `--allow-destroy` entries for the two CDN resources and two origin groups reported by
-  the saved-plan guard. Never destroy CDN in the same release that redirects DNS away from it.
-- Do not put the private media bucket behind CDN.
-- The API uses the last `X-Forwarded-For` value from trusted Yandex ingress; never expose the
-  container directly through an untrusted proxy chain.
+Если runtime-state потерял слот, скрипт ищет существующие API/job-контейнеры у провайдера и останавливается. Восстанови или импортируй state, не считай это первым релизом. Не обходи скрипт сырым `terraform apply`.
 
-## Official references
+## Эксплуатация
 
-- [Yandex Cloud Terraform provider](https://yandex.cloud/en/docs/tutorials/infrastructure-management/terraform-quickstart)
-- [Serverless Containers operation modes](https://yandex.cloud/en/docs/serverless-containers/concepts/container)
-- [Timer trigger retries](https://yandex.cloud/en/docs/serverless-containers/concepts/trigger/)
-- [Managed Service for PostgreSQL](https://yandex.cloud/en/docs/managed-postgresql/)
-- [Connecting to Managed PostgreSQL with IAM](https://yandex.cloud/en/docs/managed-postgresql/operations/connect/clients#iam-auth)
-- [`yc managed-postgresql connect` CLI reference](https://yandex.cloud/en/docs/managed-postgresql/cli-ref/connect)
-- [Managing PostgreSQL users](https://yandex.cloud/en/docs/managed-postgresql/operations/cluster-users)
-- [Managed PostgreSQL roles](https://yandex.cloud/en/docs/managed-postgresql/concepts/roles)
-- [Object Storage static hosting](https://yandex.cloud/en/docs/storage/operations/hosting/setup)
+- Один узел БД `s3-c2-m8` — экономный старт. Добавляй HA/узлы, когда требования оправдывают стоимость.
+- Повторы безопасны благодаря advisory locks заданий и построчному захвату outbox. Scheduler и HTTP cron используют один исполнитель и лимиты одного файла расписания.
+- Включай CDN в два релиза. Сначала только `enable_cdn = true`, затем `infra:apply` и `release`. DNS остаётся прямым; проверь `cdn_dns_records`. Затем задай `route_static_through_cdn = true` и повтори apply/release. Для внешнего DNS переключи CNAME между фазами и также запиши флаг.
+- Отключай CDN в обратном порядке. Для управляемого DNS сначала `route_static_through_cdn = false`, apply/release, ожидание не менее TTL 300 секунд плюс фактическое распространение, затем проверка прямого Object Storage. Для внешнего DNS сначала перейди на `direct_static_dns_records`, дождись и проверь, затем запиши false.
+- Только после отвода трафика задай `enable_cdn = false`, выполни apply/release с точными `--allow-destroy` для двух CDN-ресурсов и двух origin groups из плана. Не удаляй CDN в том же релизе, который отводит DNS.
+- Не помещай приватные media за CDN.
+- API доверяет последнему `X-Forwarded-For` от ingress Yandex. Не открывай контейнер через недоверенную цепочку прокси.
+
+## Официальная документация
+
+- [Terraform Yandex Cloud](https://yandex.cloud/en/docs/tutorials/infrastructure-management/terraform-quickstart)
+- [Режимы Serverless Containers](https://yandex.cloud/en/docs/serverless-containers/concepts/container)
+- [Повторы таймеров](https://yandex.cloud/en/docs/serverless-containers/concepts/trigger/)
+- [Managed PostgreSQL](https://yandex.cloud/en/docs/managed-postgresql/)
+- [Подключение через IAM](https://yandex.cloud/en/docs/managed-postgresql/operations/connect/clients#iam-auth)
+- [Команда connect](https://yandex.cloud/en/docs/managed-postgresql/cli-ref/connect)
+- [Пользователи PostgreSQL](https://yandex.cloud/en/docs/managed-postgresql/operations/cluster-users)
+- [Роли PostgreSQL](https://yandex.cloud/en/docs/managed-postgresql/concepts/roles)
+- [Статический хостинг Object Storage](https://yandex.cloud/en/docs/storage/operations/hosting/setup)
 - [Cloud CDN](https://yandex.cloud/en/docs/cdn/)
 - [Lockbox](https://yandex.cloud/en/docs/lockbox/)
-- [Monitoring alerts](https://yandex.cloud/en/docs/monitoring/concepts/alerting/alert)
-- [Serverless Containers metrics](https://yandex.cloud/en/docs/monitoring/metrics-ref/serverless-containers-ref)
+- [Monitoring-alert](https://yandex.cloud/en/docs/monitoring/concepts/alerting/alert)
+- [Метрики Serverless Containers](https://yandex.cloud/en/docs/monitoring/metrics-ref/serverless-containers-ref)

@@ -1,214 +1,194 @@
-# Install Checklist
+# Чеклист установки
 
-This file is the intake record for this repository. The installing agent fills it in during first-run setup and keeps it current afterwards.
+Агент заполняет этот файл при установке и обновляет при изменении продукта. Пользователь может исправить любое решение.
 
-**For the agent:** ask the questions below in the user's language, in product terms, and write the answers into this file as you go. Do not start feature work until everything through _First-version capabilities_ and every conditional section activated by those answers is completed. Never ask the user anything under _Decided by the agent_ - make those calls yourself and explain them in product terms.
+Задавай вопросы на языке пользователя, в терминах продукта. До разработки заполни разделы от «Проект» до «Возможности первой версии» и все применимые условные разделы. Решения из раздела «Решения агента» принимай сам.
 
-**For the product owner:** this is the record of what was decided about your project. If something here is wrong, say so - the agent treats this file as the source of truth for what your product needs.
+До ответа оставляй `_unanswered_`. Для неприменимого вопроса укажи `n/a`. Сохраняй все разделы. При доработке шаблона оставляй ответы незаполненными, флажки — снятыми. Обновляй только реестр возможностей: он описывает текущую ветку.
 
-Answer cells hold `_unanswered_` until the question is asked, and `n/a` when the question cannot apply to this project. Answers are written in the product owner's language, but the section headings and the capability-ledger state words stay in English: other documents refer to them by those exact names. Keep every section heading, even when its rows are all `n/a`.
+**Статус установки:** `not started`
+<!-- Допустимо: not started | in progress | completed YYYY-MM-DD -->
 
-**When working on the template itself** (not installing it for a project), there is nothing to record: leave every answer cell at `_unanswered_` and every checkbox unchecked - those would otherwise ship to each future install. The capability ledger is the exception: it always describes the current branch, so keep it current when template work adds or removes a capability.
+## 1. Проект
 
-**Install status:** `not started`
-<!-- Set to: not started | in progress | completed YYYY-MM-DD -->
+| Вопрос | Ответ |
+| --- | --- |
+| Новый проект из шаблона или доработка самого шаблона? | _unanswered_ |
+| Название проекта / slug | _unanswered_ |
+| Адрес своего репозитория GitHub, если он есть | _unanswered_ |
 
----
+При установке отключи remote шаблона. Без своего адреса GitHub оставь репозиторий без `origin` и публикации. При доработке шаблона remote сохраняется.
 
-## 1. Project identity
+## 2. Продукт
 
-| Question                                                        | Answer       |
-| --------------------------------------------------------------- | ------------ |
-| New project from this template, or work on the template itself? | _unanswered_ |
-| Project name / slug                                             | _unanswered_ |
-| Your own GitHub repository URL, if you have one                 | _unanswered_ |
+| Вопрос | Ответ |
+| --- | --- |
+| Какой продукт нужно создать сначала? | _unanswered_ |
+| Какой пользовательский путь должен первым работать от начала до конца? | _unanswered_ |
 
-If no GitHub destination is chosen, the repository is left without `origin` and publishing stays unconfigured. The template remote is detached during setup unless this checkout is explicitly for improving the template.
+## 3. Активные приложения
 
-## 2. Product
+Отметь нужные приложения. После ответа установи статус `in progress`. Остальные приложения отложены: не добавляй функции, настройку и тестовые сценарии. При статусе `not started` снятый флажок означает, что вопрос ещё не задан.
 
-| Question                                                  | Answer       |
-| --------------------------------------------------------- | ------------ |
-| What product do you want to build first?                  | _unanswered_ |
-| What is the first user journey that must work end to end? | _unanswered_ |
+- [ ] `backend` — API, БД и вход
+- [ ] `webapp` — браузерные экраны после входа, без SEO
+- [ ] `website` — публичные страницы для поиска и предпросмотра ссылок
+- [ ] `mobile` — приложение Expo из ветки `mobile`; выбери ветку до установки
 
-## 3. Active surfaces
+| Вопрос | Ответ |
+| --- | --- |
+| Почему остальные приложения отложены, если нужно пояснение | _unanswered_ |
+| Для активного `mobile`: нужны ли сейчас сборки Expo/EAS, Expo Push и Maestro E2E? | _unanswered_ |
 
-Mark what is active now, and set the install status to `in progress` as soon as this section is answered. From then on, everything unmarked is deferred and must be left alone: no features, no setup, no test flows. While the status is still `not started` nothing has been decided yet, so unmarked boxes mean "not asked", not "forbidden".
+Разделение `webapp` и `website` выбирает агент по README. Отложенные мобильные службы оставь ненастроенными.
 
-- [ ] `backend` - API, database, auth
-- [ ] `webapp` - browser screens behind sign-in (no SEO)
-- [ ] `website` - public pages that must rank in search or preview when shared
-- [ ] `mobile` - Expo app (lives on the `mobile` branch; switch branches before setup)
+## 4. Возможности первой версии
 
-| Question                                                                                                             | Answer       |
-| -------------------------------------------------------------------------------------------------------------------- | ------------ |
-| Why the unmarked surfaces are deferred, if it needs explaining                                                       | _unanswered_ |
-| If `mobile` is active: are Expo/EAS builds, Expo Push, and Maestro E2E needed now, or left unconfigured until later? | _unanswered_ |
+Спрашивай о потребностях продукта. Отметь нужное и заполни строку ограничений, даже если ничего не выбрано. Это отличает отказ от незаданного вопроса.
 
-The split between `webapp` and `website` is the agent's call, not the user's; `README.md` explains how to route a feature between them.
+- [ ] Учётные записи / вход
+- [ ] Данные, которые сохраняются после перезапуска
+- [ ] Загрузка файлов, изображений или медиа → заполни «Файлы, изображения и медиа»
+- [ ] Подписки или разовые платежи → заполни «Платежи»
+- [ ] Администрирование или роли
+- [ ] Внешние интеграции (какие: _unanswered_)
+- [ ] Чат, присутствие, совместная работа или обновления в реальном времени
 
-## 4. First-version capabilities
+| Вопрос | Ответ |
+| --- | --- |
+| Что первая версия НЕ должна делать? Если запретов нет, запиши «ничего не исключено» | _unanswered_ |
 
-Ask about product needs, not implementations. Mark what the first version actually needs, then fill the row below even when nothing was ticked, so a later session can tell "asked, and the answer was no" from "not asked yet".
+## 5. Файлы, изображения и медиа
 
-- [ ] Accounts / sign-in
-- [ ] Saved data that survives a restart
-- [ ] File, image, or media uploads → also answer _Files, images, and media_
-- [ ] Paid subscriptions or one-off payments → also answer _Payments_
-- [ ] Admin tools or roles
-- [ ] External integrations (which: _unanswered_)
-- [ ] Real-time chat, presence, collaboration, or live updates
+Шаблон включает приватное хранилище и аватары. Ответь о дополнительных файлах продукта. Если их нет, укажи `n/a`. Сохрани раздел для будущих задач из `docs/STORAGE.md`.
 
-| Question                                                                                          | Answer       |
-| ------------------------------------------------------------------------------------------------- | ------------ |
-| What the first version explicitly should NOT do (write "nothing ruled out" if that is the answer) | _unanswered_ |
+| Вопрос | Ответ |
+| --- | --- |
+| Что загружают пользователи? | _unanswered_ |
+| Доступ: всем, владельцу, выбранным людям или смешанный? | _unanswered_ |
+| Кто может загружать, смотреть, заменять и удалять файлы? | _unanswered_ |
+| Максимальный размер и допустимые типы файлов | _unanswered_ |
+| Нужны ли миниатюры, изменение размера/формата, сжатие, обрезка или модерация? | _unanswered_ |
+| Сколько хранить файл после удаления связанной записи? | _unanswered_ |
+| Нужно ли показывать имена файлов пользователям или скрывать их за идентификаторами? | _unanswered_ |
 
-## 5. Files, images, and media
+## 6. Данные сайта и частота обновления
 
-This project ships private file storage with user avatars, so answer these for the files your product adds on top; otherwise mark the rows `n/a`. Keep the section either way - `docs/STORAGE.md` sends the agent here when uploads are added later.
+Заполни для активного `website`. Иначе укажи `n/a`. Храни решения здесь, контракт реализации — в `docs/WEB_SURFACES.md`.
 
-| Question                                                                                      | Answer       |
-| --------------------------------------------------------------------------------------------- | ------------ |
-| What do users upload?                                                                         | _unanswered_ |
-| Public, private, shared with selected people, or mixed?                                       | _unanswered_ |
-| Who can upload, view, replace, and delete?                                                    | _unanswered_ |
-| Maximum file size and allowed file types                                                      | _unanswered_ |
-| Do images need thumbnails, resizing, format conversion, compression, cropping, or moderation? | _unanswered_ |
-| How long do files live after the owning record is deleted?                                    | _unanswered_ |
-| Should filenames be visible to users, or opaque?                                              | _unanswered_ |
+| Вопрос | Ответ |
+| --- | --- |
+| Какие публичные данные нужно брать из backend/БД при сборке сайта? | _unanswered_ |
+| Как быстро сайт должен показывать изменение данных? | _unanswered_ |
+| Какие изменения требуют автоматической пересборки и публикации? | _unanswered_ |
 
-## 6. Website data and freshness
+По умолчанию используй Astro SSG. Получай публичные данные БД при сборке. Для автоматического обновления реализуй путь outbox `website:rebuild` по инструкции. SSR допустим, если пересборка не обеспечивает нужную свежесть или персонализацию. Запиши исключение здесь.
 
-Answer these when `website` is active; otherwise mark the rows `n/a`. Keep product choices here and
-follow the implementation contract in `docs/WEB_SURFACES.md`.
+## 7. Платежи
 
-| Question                                                                                    | Answer       |
-| ------------------------------------------------------------------------------------------- | ------------ |
-| Which public product or content data comes from the backend/database at website build time? | _unanswered_ |
-| How soon after that data changes must the public website show the change?                   | _unanswered_ |
-| Which changes require an automatic rebuild/redeploy rather than a manual release?           | _unanswered_ |
+Заполни при выбранных платежах. Иначе укажи `n/a`. При добавлении платежей замени эти ответы.
 
-The default is Astro SSG. Database-backed public data is fetched while building static output. If
-published database changes must appear automatically, implement the documented `website:rebuild`
-outbox path. SSR or request-time rendering is an exception recorded here only when the required
-freshness or personalization cannot be met by rebuild/redeploy.
+| Вопрос | Ответ |
+| --- | --- |
+| За что платят пользователи? | _unanswered_ |
+| Подписка, разовая покупка или оба варианта? | _unanswered_ |
+| Нужны ли на публичном сайте корзина или выбор предложения до входа? | _unanswered_ |
+| Где нужна оплата: браузер, App Store / Google Play, нативный ввод карты, Apple Pay или Google Pay? | _unanswered_ |
+| Что недоступно без оплаты? | _unanswered_ |
 
-## 7. Payments
+Состояние платежей определяет реестр ниже. До реализации прочитай `docs/WEB_SURFACES.md`. Единственный браузерный checkout принадлежит `webapp` после входа и backend. `website` может передать корзину.
 
-Answer these only when payments are active above; otherwise mark the rows `n/a`. Keep the section either way, and replace the `n/a` answers if payments are added later.
+Ветка `mobile` содержит рабочий, но выключенный код подписок App Store и Google Play. При необходимости добавляй отдельную оплату картой, Apple Pay или Google Pay с соблюдением правил платформ. При отказе от поставляемой оплаты удали её код во время установки и запиши `removed`. Не оставляй её частично и не возвращай без запроса.
 
-| Question                                                                                                                    | Answer       |
-| --------------------------------------------------------------------------------------------------------------------------- | ------------ |
-| What exactly do users pay for?                                                                                              | _unanswered_ |
-| Recurring subscription, one-off purchase, or both?                                                                          | _unanswered_ |
-| Does the public website need a local cart or offer selection before registration/sign-in?                                   | _unanswered_ |
-| Which active surfaces need payment: browser checkout, App Store / Google Play, native card entry, Apple Pay, or Google Pay? | _unanswered_ |
-| What stops working when someone does not pay?                                                                               | _unanswered_ |
+## 8. Деплой
 
-Whatever this project ends up with, the ledger below is what states it. Read `docs/WEB_SURFACES.md`
-before implementing any payment surface. Browser checkout is built in authenticated `webapp` plus
-the backend; `website` may pass a local cart but never owns a second payment flow. The `mobile`
-template line ships App Store and Google Play subscriptions as working code that is switched off,
-and may independently add policy-compliant card, Apple Pay, or Google Pay flows when the product
-needs them. Declining a shipped payment capability means deleting its code during setup and
-recording it as `removed`. Payments are never half-present and are never reintroduced on a guess.
+| Вопрос | Ответ |
+| --- | --- |
+| Нужен деплой сейчас или пока достаточно локального запуска? | _unanswered_ |
+| Где находятся пользователи? Должны ли данные оставаться в России? | _unanswered_ |
+| Выбор агента по аудитории и данным: DigitalOcean / Yandex Cloud / свой сервер | _unanswered_ |
+| Рабочие домены / URL для API, webapp и website; нужен ли сейчас Yandex CDN? | _unanswered_ |
+| Какие приложения публикуем первыми | _unanswered_ |
 
-## 8. Deployment
+Спроси об аудитории и размещении данных. Хостинг выбери сам:
 
-| Question                                                                                     | Answer       |
-| -------------------------------------------------------------------------------------------- | ------------ |
-| Is deployment needed now, or local-only for the moment?                                      | _unanswered_ |
-| Where are your users, and must the data stay in Russia?                                      | _unanswered_ |
-| Hosting, picked by the agent from the answer above: DigitalOcean / Yandex Cloud / own server | _unanswered_ |
-| Production domains / URLs for API, webapp, and website; is Yandex CDN needed now?            | _unanswered_ |
-| Which surfaces are released first                                                            | _unanswered_ |
+| Хостинг | Когда выбрать | Что даёт шаблон |
+| --- | --- | --- |
+| DigitalOcean | По умолчанию для аудитории вне России. | Terraform: API и статические сайты App Platform, scheduler worker, проверка миграций, Managed PostgreSQL, DOCR, приватный Spaces и удалённый state. Релиз: `bun run release -- digitalocean`. |
+| Yandex Cloud | Аудитория в России или данные должны оставаться в России. | Terraform: Serverless Containers/таймеры, Managed PostgreSQL, API Gateway, статический и приватный Object Storage, удалённый state, CDN по выбору. Релиз: `bun run release -- yandex`. |
+| Свой сервер | Нужны полный контроль и независимость от провайдера; есть ответственный за сервер. | Тот же Docker-образ и scheduler. См. «Свой сервер» в `docs/DEPLOYMENT.md`. Скрипта релиза нет. TLS, резервные копии, обновления и мониторинг настраиваешь сам. |
 
-**Ask the audience question, not the provider question.** A product owner knows where their users
-are and whether data must stay in Russia; they should not be asked to compare clouds. The agent
-picks the hosting from that answer:
+Выбери один хостинг и запиши ответ. В установленном проекте удали каталог невыбранного провайдера из `infra/` и его инструкцию. Для своего сервера удали оба. Сохрани `scripts/infra.mjs` и `docs/DEPLOYMENT.md`: они задают общие правила безопасности и релиза. Локальная разработка не требует облачных ключей.
 
-| Hosting      | Chosen when                                                                        | What the template gives you                                                                                                                                                                                       |
-| ------------ | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| DigitalOcean | Default for an audience outside Russia.                                            | Terraform creates App Platform API/static sites, a scheduler worker, migration gate, Managed PostgreSQL, DOCR, private media Spaces, and remote state. Release everything with `bun run release -- digitalocean`. |
-| Yandex Cloud | Users in Russia, or data must stay there.                                          | Terraform creates Serverless Containers/timers, Managed PostgreSQL, API Gateway, static and private media Object Storage, remote state, and opt-in CDN. Release everything with `bun run release -- yandex`.      |
-| Own server   | Full control wanted, no vendor lock-in, and someone is willing to run the machine. | The same Docker image plus the in-repo scheduler, with a short runbook in the "Own Server" section of `docs/DEPLOYMENT.md`. No release script: you own TLS, backups, updates, and monitoring.                     |
+Если деплой отложен, ответы могут остаться `_unanswered_`. Заполни их при запросе деплоя до выполнения `docs/DEPLOYMENT.md`.
 
-Pick exactly one and record it above. In an installed project, delete the unused provider directory
-under `infra/` and its provider runbook rather than keeping a second possible production state.
-Keep `scripts/infra.mjs` and `docs/DEPLOYMENT.md`: they own the shared safety/release contract. An
-own-server project deletes both provider directories and runbooks. Local development never requires
-cloud credentials regardless of the choice.
+## 9. Решения агента
 
-Deployment is often deferred at install time, which leaves these rows `_unanswered_`. When the user later asks to deploy, ask the unanswered questions then and write the answers back here before following `docs/DEPLOYMENT.md`.
+Принимай эти решения сам. Объясняй их через результат для продукта:
 
-## 9. Decided by the agent - do not ask the user
+- `website` — публичные страницы и SEO; `webapp` — экраны после входа.
+- Почта: Postbox для Yandex Cloud, Resend для остальных. Спрашивай об аудитории, не о почтовом сервисе.
+- Публичные данные: SSG, запрос backend при сборке, пересборка и публикация. Рендеринг при запросе требует записанной потребности в свежести или персонализации.
+- Один браузерный checkout в `webapp` после входа. `website` передаёт корзину. Мобильная оплата нативная и отдельная.
+- Монолитный backend. Не вводи микросервисы при установке.
+- Локальный PostgreSQL через Docker Compose на любой ОС. Нативная установка — только по выбору пользователя.
+- Astro для `website`. Next.js — только при явном требовании ISR типа Vercel.
+- Профиль Terraform, размеры ресурсов, serverless/статическая схема, необходимость HA/CDN.
+- Хостинг: Россия — Yandex Cloud, остальные страны — DigitalOcean, явный запрос полного контроля — свой сервер.
+- Управляемый Redis-совместимый Pub/Sub — только для обмена в реальном времени между экземплярами.
+- Уведомления: штатные правила App Platform в DigitalOcean; ручная настройка Yandex Monitoring по инструкции. Новые сервисы мониторинга, пересылка логов и дежурства нужны лишь после записанного инцидента, где проверки логов не хватило.
+- Границы тестов — по [AGENTS.md](AGENTS.md#тестирование-и-проверка), команды — в [docs/TESTING.md](docs/TESTING.md).
+- Библиотеки, файлы, имена, рефакторинг и объём проверок.
 
-The user is a product owner, not an engineer. These are engineering decisions the agent owns, makes, and explains only in product terms:
+## 10. Реестр возможностей
 
-- Which browser surface a feature belongs to (`website` for SEO/public, `webapp` for behind-login).
-- Which email provider the recorded hosting implies: Yandex Cloud means Postbox, anything else means Resend. Ask where the users are, not which mail service the owner prefers.
-- SSG plus build-time backend data and rebuild/redeploy for public product information unless a recorded freshness or personalization need requires runtime rendering.
-- One browser checkout in authenticated `webapp`; `website` may hand off a local cart but never owns payment. Mobile payment UI stays native and separate.
-- Monolithic backend; no microservices during setup.
-- Docker Compose for local PostgreSQL on every OS; never a native install unless the user insists.
-- Astro for `website`; Next.js only if Vercel-style ISR is a stated product requirement.
-- The selected Terraform launch profile, machine sizes, serverless/static shape, and when an HA or CDN upgrade is justified.
-- Which hosting the recorded audience implies: Russia means Yandex Cloud, elsewhere means DigitalOcean, and an explicit wish for full control means an own server. Explain the pick in product terms; never ask the owner to compare providers.
-- Managed Redis-compatible Pub/Sub only when real-time needs to scale across instances.
-- Alerting uses only what the recorded hosting already offers: App Platform alert rules on DigitalOcean, Yandex Monitoring alerts created by hand from the runbook. No log forwarding, monitoring service, or paging integration until a recorded incident shows the log check was not enough.
-- Test boundaries and validation scope follow [AGENTS.md](AGENTS.md#testing-and-validation); local commands live in [docs/TESTING.md](docs/TESTING.md).
-- Libraries, file layout, naming, refactors, and validation scope.
+Обновляй реестр при добавлении или удалении возможности. Допустимо одно состояние:
 
-## 10. Capability ledger
+- `included` — реализовано и должно работать.
+- `available` — частично готово; в примечании указано, чего не хватает: настройки, маршрутов или интерфейса.
+- `absent` — отсутствует. Добавляй только по запросу пользователя.
+- `removed` — намеренно удалено при установке. Возвращай только по запросу; старый код, миграция или документация не заменяют его.
 
-What this project actually contains. The agent updates it whenever a capability is added or removed. Every row carries exactly one state:
+Без строки возможность считается `absent`. Прямого запроса на добавление/возврат достаточно: запиши решение и обновляй строку по ходу работы. Не спрашивай повторного разрешения. Имена возможностей и значения состояний — служебные ключи проверок. Не переводь их. В состоянии недопустимы `_unanswered_` и `n/a`.
 
-- `included` - present and expected to work.
-- `available` - partly there but not usable yet; the note says exactly what is still missing, which may be configuration, routes, or UI.
-- `absent` - not part of this project. Build it only after the product owner asks.
-- `removed` - deliberately deleted during setup. Restore it only when the product owner asks; a leftover reference, migration, or doc mention is not a product requirement.
+| Возможность | Состояние | Примечание |
+| --- | --- | --- |
+| Auth (email + password) | included | Базовая возможность шаблона. |
+| Admin roles | included | Роли и seed в `backend`, интерфейс администратора в `webapp`. |
+| Password reset email delivery | included | Postbox/Resend за одним портом; выбор через `EMAIL_DELIVERY`. Значение схемы `disabled` не отправляет и не ставит письма в очередь. Локальный `backend/.env.example` выбирает `console` и печатает ссылки. Запрос создаёт `task_outbox`, scheduler обрабатывает очередь каждую минуту. Для production нужны аккаунт провайдера и запущенный runner. См. `docs/EMAIL.md`. |
+| File/media storage | included | Приватная загрузка в обоих клиентах с аватарами как примером. По умолчанию локальный диск; S3-совместимый бакет выбирается через `PRIVATE_STORAGE_*` без правок кода. См. `docs/STORAGE.md`. |
+| Infrastructure as code | included | Terraform-корни bootstrap, foundation, migration/runtime и static для DigitalOcean/Yandex Cloud. Включают удалённый state, защищённый plan/apply, неизменяемые релизы с проверкой миграций, медиа, статику и jobs. Единая точка операций — `scripts/infra.mjs`. См. `infra/README.md`, `docs/DEPLOYMENT.md`. |
+| Static asset precompression | included | `bun run static:precompress` создаёт `.br`/`.gz` рядом с текстовыми ресурсами `webapp/dist` и `website/dist` через `node:zlib`, без зависимости. Для своего сервера. Облачные релизы не загружают эти файлы; используют сжатие платформы, где оно доступно. |
+| Storybook component catalogs | included | Отдельные локальные React/Vite-каталоги для всех модулей `src/components/ui` в `webapp` и `website`. Включают официальные docs/a11y addons и примеры компоновки только для stories. Не публикуются. Секции Astro вне Storybook; website остаётся SSG. |
+| Website build-time backend data | absent | Контент лендинга хранится в репозитории. При потребности в данных БД добавь общий публичный DTO и запрос при сборке. |
+| Automatic SSG rebuild | absent | Не реализованы постоянные desired/published revisions, сверка единственного деплоя, атомарное/blue-green переключение неизменяемого релиза, проверка публичного маркера и адаптер провайдера. Для Yandex также нужен отдельный сборщик/загрузчик. См. `docs/WEB_SURFACES.md`. |
+| Website cart handoff | absent | Нет локальной корзины и передачи между origin. При добавлении она ведёт в единственный браузерный checkout по `docs/WEB_SURFACES.md`. |
+| Browser checkout / payments | absent | Кода браузерной оплаты нет. Добавляй в `webapp` и backend. Нативные подписки магазинов — отдельная возможность ниже. |
+| Payments / subscriptions | available | Подписки App Store и Google Play реализованы, но выключены: таблицы закомментированы, маршруты не подключены. Включи или удали по `docs/IAP.md`. |
+| Push notifications | available | Expo Push подключён, но требует EAS project ID и ключи провайдеров. Расписание включает отправку и проверку receipts. `ENABLE_TEST_PUSH` по умолчанию выключен. |
+| Social sign-in (Apple / Google) | available | Реализован, но выключен: маршрут и кнопки не подключены. Включи или удали по `docs/SOCIAL_AUTH.md`. |
+| Real-time / WebSockets | absent | Требуется явная потребность продукта. |
+| Shared rate-limit state | included | `RATE_LIMIT_STORE` выбирает счётчики auth/admin в `backend/src/rate-limit`. По умолчанию `memory` для одного API в DigitalOcean или одного процесса на своём сервере. `database` выполняет один upsert в `rate_limit_buckets` на ограничиваемый запрос. Terraform выбирает его для Yandex Serverless Containers, которые масштабируются по конкурентным запросам. Auth-очистка внутри `maintenance:process` удаляет истёкшие окна. См. `docs/DEPLOYMENT.md`. |
+| Background jobs | included | Реестр `backend/src/jobs.ts`. Scheduler обрабатывает task outbox и push каждую минуту, загрузки — ежечасно на 15-й минуте, auth/уведомления — каждые 15 минут. Terraform развёртывает worker DigitalOcean или HTTP-контейнеры jobs с таймерами Yandex. Свой сервер запускает scheduler под supervisor. `workerLoops` пуст. См. `docs/BACKGROUND_JOBS.md`. |
+| Durable task outbox | included | `task_outbox` в PostgreSQL, обработчики в `backend/src/outbox/handlers.ts`, запуск через `outbox:drain`. Единственный поставляемый источник — письма сброса пароля. Очередь пуста до добавления задачи. Новый тип требует кода, не миграции. |
+| Background job alerting | included | DigitalOcean: Terraform добавляет правила перезапуска, памяти и CPU scheduler рядом с ошибками деплоя/домена. Получатель — почта команды; другой адрес задаётся в консоли, поскольку провайдер создаёт постоянный diff. Yandex: ресурса alert нет; один раз на folder вручную создай два уведомления Monitoring: outbox-контейнер не вызывается и любой job-контейнер отвечает ошибкой. `backlog` и прочие числа drain проверяй в логах: метрики из простого текста требуют структурированных логов или сервиса пересылки, которых здесь нет. См. «Наблюдение» в `docs/BACKGROUND_JOBS.md`. |
 
-A capability with no row is `absent` by default. A direct request to add or restore one is sufficient authorization: record the decision and update the row as implementation progresses without asking for the same approval again. The State column always holds one of the four states above - never `_unanswered_` or `n/a`.
+## 11. Проверка окружения
 
-| Capability                      | State    | Note                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| ------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Auth (email + password)         | included | Template baseline.                                                                                                                                                                                                                                                                                                                                                                                                   |
-| Admin roles                     | included | Roles and seeding in `backend`; admin UI in `webapp`.                                                                                                                                                                                                                                                                                                                                                                |
-| Password reset email delivery   | included | Two providers behind one port, Yandex Cloud Postbox and Resend, selected by `EMAIL_DELIVERY`. The schema fallback is `disabled`, so an unset deployment sends and queues nothing; the copied local `backend/.env.example` intentionally selects `console` so reset links print locally. Delivery is durable: a request queues a `task_outbox` row and the shipped scheduler drains it every minute. Production needs an account with a provider and a deployed runner. See `docs/EMAIL.md`. |
-| File/media storage              | included | Private uploads end to end on both clients, with user avatars as the worked example. Stores on local disk by default and on any S3-compatible bucket via `PRIVATE_STORAGE_*`, with no code change between them. See `docs/STORAGE.md`.                                                                                                                                                                              |
-| Infrastructure as code          | included | Provider-specific Terraform bootstrap, foundation, migration/runtime, and static roots cover DigitalOcean and Yandex Cloud, with remote state, guarded plan/apply, migration-gated immutable releases, media storage, static hosting, and jobs. `scripts/infra.mjs` is the one operations entry point. See `infra/README.md` and `docs/DEPLOYMENT.md`.                                                               |
-| Static asset precompression     | included | `bun run static:precompress` writes `.br` and `.gz` next to the text assets in `webapp/dist` and `website/dist`, using `node:zlib` and no dependency. It is own-server tooling: hosted releases do not upload those sidecars and use their edge/runtime compression when available.                                                                                                                                  |
-| Storybook component catalogs    | included | Separate local React/Vite catalogs cover every `src/components/ui` module in `webapp` and `website`, with official docs/a11y addons and story-only composition examples. They are not deployed; Astro sections remain outside Storybook and the website stays static SSG.                                                                                                                                       |
-| Website build-time backend data | absent   | The baseline landing content is repository-owned; add a shared public DTO and build fetch only when `website` needs database-backed information.                                                                                                                                                                                                                                                                     |
-| Automatic SSG rebuild           | absent   | Durable desired/published revision state, single-flight deployment reconciliation, immutable atomic/blue-green release promotion, public-marker verification, and a provider adapter are not implemented. Yandex additionally needs a separate builder/upload component. See `docs/WEB_SURFACES.md`.                                                                                                                 |
-| Website cart handoff            | absent   | No local cart or cross-origin handoff exists. When activated, it feeds the one authenticated browser checkout defined in `docs/WEB_SURFACES.md`.                                                                                                                                                                                                                                                                      |
-| Browser checkout / payments     | absent   | No browser checkout or payment code exists. Build it in `webapp` plus the backend, never in `website`; native store subscriptions remain the separate mobile path below.                                                                                                                                                                                                                                            |
-| Payments / subscriptions        | available | App Store and Google Play subscriptions are implemented but switched off: tables are commented out and routes are unmounted. Turn on or delete them per `docs/IAP.md`.                                                                                                                                                                                                                                             |
-| Push notifications              | available | Expo Push is wired but inert until the installed project has an EAS project ID and configured credentials. The shared schedule includes delivery/receipt processing; `ENABLE_TEST_PUSH` remains off by default.                                                                                                                                                                                                     |
-| Social sign-in (Apple / Google) | available | Implemented but switched off: the route is not mounted and the buttons are not rendered. Turn on or delete per `docs/SOCIAL_AUTH.md`.                                                                                                                                                                                                                                                                                 |
-| Real-time / WebSockets          | absent   | Requires an explicit product need.                                                                                                                                                                                                                                                                                                                                                                                   |
-| Shared rate-limit state         | included | `RATE_LIMIT_STORE` selects where the auth and admin limiters count (`backend/src/rate-limit`). `memory`, the default, is the whole truth on DigitalOcean's single API instance and on an own server running one API process; `database` counts in the `rate_limit_buckets` table through one upsert per limited request, and Terraform sets it for Yandex Serverless Containers, which scale out per concurrent request. The auth cleanup inside `maintenance:process` sweeps spent windows. See `docs/DEPLOYMENT.md`. |
-| Background jobs                 | included | Jobs live in `backend/src/jobs.ts`. The mobile schedule runs task-outbox and push processing every minute, upload cleanup hourly, and combined auth/notification maintenance every 15 minutes. Terraform deploys that scheduler as a DigitalOcean worker and the same executor in Yandex HTTP job containers/timer triggers; own servers run it under a supervisor. `workerLoops` stays empty. See `docs/BACKGROUND_JOBS.md`. |
-| Durable task outbox             | included | `task_outbox` in PostgreSQL with handlers in `backend/src/outbox/handlers.ts`, drained by `outbox:drain`. Ships with the password-reset emails as its only producers, and stays empty until something enqueues. Adding a task type is a code change, never a migration.                                                                                                                                              |
-| Background job alerting         | included | DigitalOcean: Terraform puts restart, memory, and CPU alert rules on the scheduler worker next to the failed-deployment and failed-domain rules; they go to the team's default e-mail, and routing them elsewhere is a console step because the provider cannot manage destinations without a permanent plan diff. Yandex Cloud: the provider has no alert resource, so the runbook creates two Monitoring alerts by hand once per folder (outbox container never invoked; any job container answering errors). No alert reads `backlog` or the other drain numbers; those stay a log check, because a value inside a plain-text log line needs structured log lines or a log-forwarding service to become a metric, and this project has neither. See `docs/BACKGROUND_JOBS.md`, "What to watch".                                                                                                       |
+Проверь сам:
 
-## 11. Environment checks
+- [ ] `docker compose version` и `docker info` успешны, если нужны backend/API, загрузки или проверки с БД
+- [ ] `git remote -v` проверен; remote шаблона отключён, кроме доработки шаблона
+- [ ] `.env` приложений созданы из `.env.example`; `JWT_SECRET` сгенерирован локально и не закоммичен
+- [ ] Выполнены минимальные значимые проверки активных приложений
 
-Verified by the agent during setup, not asked.
+## 12. После установки
 
-- [ ] `docker compose version` and `docker info` succeed (needed for backend/API, uploads, or DB-backed validation)
-- [ ] `git remote -v` inspected; template remote detached unless contributing to the template
-- [ ] App-local `.env` files created from `.env.example`, with a locally generated `JWT_SECRET` (never committed)
-- [ ] Smallest meaningful validation run for the active surfaces
+- [ ] Ответы заполнены; статус — `completed YYYY-MM-DD`
+- [ ] Проверки перед завершением задачи записаны (какие: _unanswered_)
+- [ ] Имена шаблона заменены: `web_app_demo`, `web-app-demo`, `vibecoding-template`, заголовок `Vibe Coding Template`; `bun.lock` пересоздан
+- [ ] README отложенных приложений содержат пояснение
+- [ ] Раздел «Только для первой установки» и его маркеры удалены из `AGENTS.md`
+- [ ] Пользователю сообщены локальные URL, выполненные команды и действия, требующие его разрешения
 
-## 12. After setup
-
-- [ ] Durable answers above filled in, install status set to `completed YYYY-MM-DD`
-- [ ] Validation scope recorded for this project (which suites run before a change is called done): _unanswered_
-- [ ] Project renamed from the template identifiers (`web_app_demo`, `web-app-demo`, `vibecoding-template`, the `Vibe Coding Template` page title), `bun.lock` regenerated
-- [ ] Deferred-surface notes added to the READMEs of surfaces that are not active
-- [ ] `Bootstrap-Only Instructions` block deleted from `AGENTS.md`
-- [ ] Local URLs, commands run, and anything the user must authorize manually reported back to the user
-
-`README.md`, `AGENTS.md`, and some `docs/` runbooks route agents into this file by section name, so renaming a heading breaks those pointers silently. Add rows and sections a project needs, and cross-reference sections by name rather than by number so renumbering stays harmless.
+Ссылайся на разделы по имени, не по номеру. При смене заголовка обнови ссылки и `scripts/checklist-labels.mjs`. Добавляй нужные проекту вопросы и разделы.

@@ -72,7 +72,7 @@ test('the mobile publication gate requires its three available capabilities', ()
   ])
 
   const commentedCapabilities = validMobileChecklist.replace(
-    /(## 10\. Capability ledger\n\n)([\s\S]*?)(\n\n## 11\. Environment checks)/,
+    /(## 10\. (?:Capability ledger|Реестр возможностей)\n\n)([\s\S]*?)(\n\n## 11\. (?:Environment checks|Проверка окружения))/,
     '$1<!--\n$2\n-->$3',
   )
   expect(validateMobileCapabilityContract(commentedCapabilities)).toEqual([

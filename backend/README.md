@@ -1,20 +1,14 @@
 # Backend
 
-The backend owns the API, authentication, integrations, persistence, and server-side business logic. Web and mobile clients rely on the shared data contract in `packages/contracts`.
+Backend управляет API, входом, интеграциями, хранением данных и серверной бизнес-логикой. Web и mobile используют общие контракты из `packages/contracts`.
 
-## Stack
+## Стек
 
-- Bun
-- Hono
-- Prisma 7
-- PostgreSQL
-- Zod
-- jose JWT
-- TypeScript
+Bun, Hono, Prisma 7, PostgreSQL, Zod, jose JWT и TypeScript.
 
-## Commands
+## Команды
 
-Run these from the repository root:
+Из корня репозитория:
 
 ```bash
 docker compose version
@@ -44,97 +38,105 @@ bun run --cwd backend prisma:seed
 bun run --cwd backend db:deploy
 ```
 
-On Windows PowerShell, use `Copy-Item backend/.env.example backend/.env` instead of `cp`. Workspace aliases are also available from the repository root: `bun run dev:backend`, `bun run build:backend`, `bun run typecheck:backend`, and `bun run test:backend`.
+В PowerShell вместо `cp` используй `Copy-Item backend/.env.example backend/.env`. Из корня также доступны `bun run dev:backend`, `bun run build:backend`, `bun run typecheck:backend` и `bun run test:backend`.
 
-`test:unit` and `test:integration` accept exact discovered file paths relative to `backend/` plus Bun's `-t` name filter. Without filters they run their complete suites. `bun run test:integration` starts `postgres_test` from `../docker-compose.yml`, applies Prisma migrations to `web_app_demo_test`, and runs the selected DB-backed tests. Every managed invocation owns a unique Compose project, so its `finally` cleanup can remove only that run's service, named test volume, and default network, including after a partial startup failure. Set `TEST_KEEP_DOCKER=1` to retain those resources for investigation. If Docker is managed separately, set `TEST_SKIP_DOCKER=1` and `TEST_DATABASE_URL`; the runner requires both and will not touch Docker resources. The test database name must end with `_test` unless `TEST_ALLOW_NON_TEST_DATABASE=1` is set intentionally.
+`test:unit` и `test:integration` принимают точные найденные пути относительно `backend/` и фильтр имени Bun `-t`. Без фильтров запускается весь набор.
 
-`bun run smoke:docker` builds the backend Docker image, starts it against `postgres_test`, waits for `/health/ready`, and removes only the smoke container it created.
+`bun run test:integration` запускает `postgres_test` из `../docker-compose.yml`, применяет миграции к `web_app_demo_test` и выполняет выбранные тесты. Каждый запуск получает отдельный Compose-проект. Блок `finally` удаляет только его сервис, именованный том и сеть, в том числе после частичной ошибки запуска.
 
-## Env
+- `TEST_KEEP_DOCKER=1` сохраняет эти ресурсы для диагностики.
+- Для внешнего Docker задай вместе `TEST_SKIP_DOCKER=1` и `TEST_DATABASE_URL`. В этом режиме скрипт не меняет Docker-ресурсы.
+- Имя БД должно оканчиваться на `_test`. Исключение требует явного `TEST_ALLOW_NON_TEST_DATABASE=1`.
 
-Copy `backend/.env.example` to `backend/.env` for local development and pass it to manual Compose commands with `docker compose --env-file backend/.env ...`. The example `DATABASE_URL` matches the Docker Compose `postgres` service documented in [../docs/LOCAL_DATABASE.md](../docs/LOCAL_DATABASE.md): database `web_app_demo`, user `superuser`, password `superpassword`, host port `54329`.
+`bun run smoke:docker` собирает Docker-образ backend, запускает его с `postgres_test`, ждёт `/health/ready` и удаляет только свой smoke-контейнер.
 
-The example `TEST_DATABASE_URL` matches the Docker Compose `postgres_test` service: database `web_app_demo_test`, user `superuser`, password `superpassword`, manual host port `54330`. Automated runners may replace the port with a repository-derived value so parallel checkouts do not collide.
+## Переменные окружения
 
-Keep an explicit username and password in Prisma connection URLs even on local native PostgreSQL installs. Peer-auth style URLs without a user can make Prisma schema-engine commands such as `migrate dev`, `migrate deploy`, and `db push` fail with an unhelpful generic engine error.
+Скопируй `backend/.env.example` в `backend/.env`. Для ручных команд Compose передавай `docker compose --env-file backend/.env ...`.
 
-`JWT_SECRET` must be at least 32 characters locally. Production accepts the 64-or-more-character hexadecimal output of `openssl rand -hex 32`; do not use the `.env.example` placeholder, repeated characters, or human phrases.
+| Переменная | Локальный сервис | БД | Пользователь / пароль | Порт |
+| --- | --- | --- | --- | --- |
+| `DATABASE_URL` | `postgres` | `web_app_demo` | `superuser` / `superpassword` | `54329` |
+| `TEST_DATABASE_URL` | `postgres_test` | `web_app_demo_test` | `superuser` / `superpassword` | `54330` при ручном запуске |
 
-`bun run prisma:seed` (or `bun run dev:seed` from the repository root) is the
-explicit local development seed. It requires the paired `DEV_SEED_ADMIN_*` and
-`DEV_SEED_USER_*` email/password values from `backend/.env`, creates login-ready
-administrator and ordinary-user accounts, gives the ordinary user a local-only
-`DevelopmentSeed` premium entitlement, and rejects `NODE_ENV=production` and any
-non-loopback PostgreSQL URL.
+Это публичные локальные значения из [инструкции PostgreSQL](../docs/LOCAL_DATABASE.md). Автоматические тесты могут выбрать порт по репозиторию, чтобы копии проекта не конфликтовали.
 
-The development seed is idempotent: unchanged passwords preserve their hashes,
-active sessions, and push registrations. Replacing a configured credential
-updates its Argon2id hash and revokes stale authentication and push authority.
-The committed values are public local defaults and must never be reused in a
-deployed environment.
+Всегда указывай имя и пароль в URL Prisma, даже для локального нативного PostgreSQL. URL без пользователя с peer-auth может вызвать непонятную ошибку schema engine в `migrate dev`, `migrate deploy` и `db push`.
 
-Production remains a separate path. `bun run db:deploy` checks migration ownership before Prisma,
-applies migrations, removes unsafe PostgreSQL `PUBLIC` privileges for both cloud paths, reconciles a
-separate DigitalOcean runtime role back to DML-only access, and optionally bootstraps only the first administrator from paired
-`ADMIN_SEED_EMAIL` and `ADMIN_SEED_PASSWORD`, then fails unless at least one
-administrator has a password credential. Production bootstrap rejects blank,
-known-placeholder, and repeated-pattern passwords in addition to enforcing the
-12–128 character limit; it never creates the local demo user or entitlement.
+Локальный `JWT_SECRET` содержит не менее 32 символов. Production принимает шестнадцатеричный результат `openssl rand -hex 32` длиной от 64 символов. Не используй заглушку `.env.example`, повторяющиеся символы или фразы.
 
-`COOKIE_SECURE=false` is appropriate for local HTTP; production requires `COOKIE_SECURE=true` with exact HTTPS origins in `CORS_ORIGINS`. Production browser auth uses `SameSite=None; Secure` refresh cookies, so wildcard, empty, HTTP, or path-bearing CORS origins are invalid. Every cookie-backed auth write (`register`, `login`, `refresh`, and `logout`) also requires a trusted `Origin` in production cookie mode.
+`bun run prisma:seed` создаёт локального администратора и обычного пользователя без подписки или premium-доступа. Из корня доступна команда `bun run dev:seed`. Нужны пары email/пароль `DEV_SEED_ADMIN_*` и `DEV_SEED_USER_*` в `backend/.env`. Команда запрещает `NODE_ENV=production` и нелокальный URL PostgreSQL.
 
-`WEBAPP_ORIGIN` is the public browser-app origin used to compose transactional links such as password reset. It defaults to the first `CORS_ORIGINS` entry. Email delivery is provider-neutral and built in one place, `createEmailDelivery` in `src/email`, so the API and the `outbox:drain` job share it. `EMAIL_DELIVERY` selects one of four drivers: `disabled`, `console`, `postbox` for Yandex Cloud Postbox, and `resend`. The schema fallback is `disabled` when the variable is absent; the committed `.env.example` intentionally selects `console` so a fresh local checkout can print and follow reset links. Production refuses `console`. With delivery disabled, password-reset requests still return the same generic accepted response and do not create tokens or tasks. The provider groups, the failure classification, and the live suites are in [../docs/EMAIL.md](../docs/EMAIL.md).
+При повторе seed сохраняет хеши неизменённых паролей, сессии и push-регистрации. Если пароль изменён, команда обновляет Argon2id-хеш и отзывает прежние права auth и push. Публичные демопароли нельзя использовать в production.
 
-Auth, IAP, and webhook ingress use separate body and rate-limit budgets. `INGRESS_RATE_LIMIT_PROVIDER=local` keeps the in-process fixed-window limiters enabled; `yandex-sws` is valid only after the documented Smart Web Security policy replaces them at the edge. `TRUST_PROXY=false` uses the direct Bun connection address. Behind a trusted proxy, set `TRUST_PROXY=true` together with the provider's authoritative client-IP header. DigitalOcean uses `do-connecting-ip`; the documented Yandex path uses the last `X-Forwarded-For` value. `RATE_LIMIT_STORE` says where the enabled limiters count: `memory`, the default, is one process's own table and enough while one API instance serves every request; `database` counts in PostgreSQL (`src/rate-limit`, one upsert per limited request) so any number of instances share one budget, which is what Terraform sets for Yandex Serverless Containers. Under `database` the `rate_limit_buckets` table holds each limited client's address or user id for the window it counted, plus whatever accumulates until the auth cleanup inside `maintenance:process` sweeps spent windows every 15 minutes: transient personal data with a short horizon, and one row per client per window with no in-table cap like the memory store's 10 000 keys, so a deployment that selects `database` must also run the scheduler. See [../docs/DEPLOYMENT.md](../docs/DEPLOYMENT.md).
+Production использует отдельную команду `bun run db:deploy`. Она:
 
-`REFRESH_TOKEN_TTL_DAYS` is the sliding credential lifetime, while `SESSION_ABSOLUTE_TTL_DAYS` limits the total logical session lifetime. `REFRESH_REUSE_GRACE_SECONDS` tolerates a short concurrent refresh race; replaying an older family credential after that window revokes the logical session. The mobile schedule runs `maintenance:process`, which combines auth cleanup (revoked, sliding-expired, and absolute-expired session rows after `SESSION_RETENTION_DAYS`, expired password-reset tokens, and spent rate-limit windows) with notification redaction and, once enabled, bounded Google Play reconciliation.
+1. До Prisma проверяет владельцев объектов БД.
+2. Применяет миграции и убирает опасные права `PUBLIC` в обоих облаках.
+3. Возвращает отдельной runtime-роли DigitalOcean только DML-права.
+4. При необходимости создаёт первого администратора из пары `ADMIN_SEED_EMAIL` и `ADMIN_SEED_PASSWORD`.
+5. Требует хотя бы одного администратора с паролем для входа.
 
-Mobile social auth ships switched off: routes and buttons stay unmounted until the product enables
-them. Configure Apple/Google identifiers only then; see [../docs/SOCIAL_AUTH.md](../docs/SOCIAL_AUTH.md).
+Пароль первого администратора должен содержать 12–128 символов. Пустые значения, известные заглушки и повторяющиеся шаблоны запрещены. Production не создаёт локального демопользователя или premium-доступ.
 
-Expo Push is implemented but inert until EAS and provider credentials are configured. The API only
-registers installations and enqueues durable messages; `notifications:process` or
-`start:worker:notifications` owns delivery and receipt polling. Native subscriptions likewise ship
-switched off; enable or delete them as one product capability using [../docs/IAP.md](../docs/IAP.md).
+Для локального HTTP подходит `COOKIE_SECURE=false`. Production требует `COOKIE_SECURE=true`, refresh-cookie `SameSite=None; Secure` и точные HTTPS-origin в `CORS_ORIGINS`. Пустые значения, wildcard, HTTP и URL с путём запрещены. В cookie-режиме production операции `register`, `login`, `refresh` и `logout` также требуют доверенный `Origin`.
 
-Private file storage is on by default and needs no configuration: `PRIVATE_STORAGE_DRIVER=filesystem` stores uploads under `backend/.storage`, so `bun run dev` works with no cloud account and no Docker. Switch to `s3` to develop against the local container (`bun run storage:local:start`) or a real bucket; production refuses the filesystem driver. The full rule set and the upload contract are in [../docs/STORAGE.md](../docs/STORAGE.md).
+`WEBAPP_ORIGIN` задаёт origin приложения для ссылок, например сброса пароля. По умолчанию это первый `CORS_ORIGINS`.
 
-## Runtime Entrypoints
+Общая функция `createEmailDelivery` в `src/email` создаёт доставку для API и `outbox:drain`. `EMAIL_DELIVERY` выбирает `disabled`, `console`, `postbox` или `resend`. Без переменной схема выбирает `disabled`; локальный `.env.example` задаёт `console`, чтобы печатать ссылки сброса. Production запрещает `console`. При `disabled` запрос сброса возвращает обычный общий ответ, но не создаёт токен или задачу. Провайдеры, ошибки и проверки описаны в [docs/EMAIL.md](../docs/EMAIL.md).
 
-The backend is one workspace with one Prisma schema and one Dockerfile, but it has separate runtime entrypoints:
+Auth, IAP и webhooks имеют отдельные лимиты тела и частоты запросов. `AUTH_BODY_LIMIT_BYTES` ограничивает auth. `INGRESS_RATE_LIMIT_PROVIDER=local` включает локальные лимиты фиксированных окон. `yandex-sws` допустим только после замены этих лимитов описанной политикой Smart Web Security на границе сети. При `TRUST_PROXY=false` адрес берётся из соединения Bun. За доверенным прокси задай `TRUST_PROXY=true` и его `TRUSTED_PROXY_CLIENT_IP_HEADER`. Используй `TRUSTED_PROXY_CLIENT_IP_POSITION=last` только если провайдер дописывает клиента в конец цепочки. App Platform использует `do-connecting-ip`; описанный путь Yandex — последнее значение `X-Forwarded-For`.
 
-- API: `bun run start:api`, backed by `src/index.ts`.
-- Jobs: declared once in `src/jobs.ts` and shared by the runners below. The mobile line adds `notifications:process` and combined `maintenance:process` to the baseline registry; see [../docs/BACKGROUND_JOBS.md](../docs/BACKGROUND_JOBS.md).
-- Cron: `bun run start:cron -- <job>`, backed by `src/cron.ts`. CLI mode runs one job and exits;
-  Yandex Terraform starts the same executor in HTTP mode so a failed job returns non-2xx to the
-  timer trigger.
-- Scheduler: `bun run start:scheduler`, backed by `src/scheduler.ts`. Keeps schedules in the repository instead of a cloud console. `bun run dev` runs it next to the API, so a queued email leaves in development without a second terminal.
-- Worker: `bun run start:worker`, backed by `src/worker.ts`. A loop for work that must run more often than once a minute. `src/job-schedules.json` ships task-outbox and push processing every minute, upload cleanup hourly, and combined auth/notification maintenance every 15 minutes; `bun run dev` starts that scheduler alongside the API, and Terraform deploys the matching production runner. The loop worker ships empty, so give it a loop before deploying it - a process that exits immediately gets restarted forever.
-- Notification worker: `bun run start:worker:notifications` continuously drains the Expo outbox and checks receipts with abort-aware shutdown. The default mobile schedule also runs `notifications:process` every minute, so a separate persistent worker is optional when that latency is acceptable.
+`RATE_LIMIT_STORE` выбирает счётчики:
 
-All entrypoints use `src/runtime.ts` for env loading, Prisma creation, and cleanup. Background entrypoints use `createBackgroundRuntime`, which never uses the API's signing key.
+- `memory` — таблица одного процесса, до 10 000 ключей. Подходит, когда все запросы принимает один API-процесс.
+- `database` — PostgreSQL, один upsert на ограничиваемый запрос через `src/rate-limit`. Все экземпляры делят лимит. Terraform включает этот режим для Yandex Serverless Containers.
 
-## Push Notifications API
+`rate_limit_buckets` хранит адрес клиента или ID пользователя для каждого окна. Это временные персональные данные. Число строк не ограничено, как в memory-режиме. Отработанные окна удаляет auth-очистка в `maintenance:process` каждые 15 минут. Для `database` обязательно запускай scheduler; без него данные накапливаются. См. [docs/DEPLOYMENT.md](../docs/DEPLOYMENT.md).
 
-- `POST /api/notifications/push-token` registers one authorized installation generation.
-- `POST /api/notifications/push-token/unregister` advances it to an inactive tombstone.
-- `POST /api/notifications/test-push` queues a bounded test message only while `ENABLE_TEST_PUSH=true`.
+`REFRESH_TOKEN_TTL_DAYS` задаёт продлеваемый срок refresh-токена. `SESSION_ABSOLUTE_TTL_DAYS` ограничивает весь срок логической сессии. `REFRESH_REUSE_GRACE_SECONDS` допускает краткую гонку refresh, по умолчанию 10 секунд. Повтор более старого токена семейства после этого окна отзывает сессию. Не увеличивай окно без необходимости.
 
-Push is durable and at-least-once across the Expo send/ticket boundary. Deep-link destinations and
-notification effects must therefore remain idempotent.
+Расписание запускает `maintenance:process`. Auth-очистка удаляет отозванные и просроченные сессии после `SESSION_RETENTION_DAYS`, истёкшие токены сброса и окна лимитов. Maintenance также удаляет содержимое завершённых уведомлений и после включения подписок выполняет ограниченную сверку Google Play.
 
-Primary keys use database-generated UUIDv7 values in PostgreSQL (`@default(dbgenerated("uuidv7()")) @db.Uuid`). Use UUIDv7 consistently for new primary keys and foreign-key references that point at them; do not introduce new `cuid()`, `uuid()`, `serial`, or `bigserial` IDs into this template. PostgreSQL 18+ is required anywhere the backend schema is applied so IDs are generated consistently through Prisma, raw SQL, imports, and future non-Prisma writers.
+Социальный вход выключен: маршруты и кнопки не подключены. Настраивай Apple/Google ID при включении по [SOCIAL_AUTH.md](../docs/SOCIAL_AUTH.md). Expo Push требует настройки EAS и ключей провайдеров. API регистрирует установки и ставит сообщения в очередь; `notifications:process` или `start:worker:notifications` отправляет их и проверяет receipts. Нативные подписки также выключены: включи или удали всю возможность по [IAP.md](../docs/IAP.md).
 
-## Deployment
+Приватное файловое хранилище включено по умолчанию: `PRIVATE_STORAGE_DRIVER=filesystem`, каталог `backend/.storage`. Само хранилище не требует облака или Docker. Для локального S3 используй `bun run storage:local:start` и драйвер `s3`; он же работает с реальным бакетом. Production запрещает filesystem. Контракт загрузок — в [docs/STORAGE.md](../docs/STORAGE.md).
 
-Production infrastructure is Terraform under [../infra](../infra/README.md). Follow the shared safety and release contract in [../docs/DEPLOYMENT.md](../docs/DEPLOYMENT.md), then the provider runbook selected in `CHECKLIST.md`: [DigitalOcean](../docs/DIGITALOCEAN.md) or [Yandex Cloud](../docs/YANDEX_CLOUD.md). One `bun run release -- <provider>` build uses `backend/Dockerfile`, gates promotion on `db:deploy`, deploys the API and scheduled work, and verifies readiness. Never put a secret in committed tfvars or backend configuration.
+## Точки запуска
 
-When adopting a legacy database, run `bun run db:adopt-owner` first for a read-only public-schema
-ownership inventory. The exact confirmation and `-- --apply` sequence lives in
-[../docs/DEPLOYMENT.md](../docs/DEPLOYMENT.md); normal deployment never transfers ownership
-implicitly.
+У backend одна Prisma-схема и один Dockerfile, но несколько процессов:
 
-## Auth API
+- API: `bun run start:api`, файл `src/index.ts`.
+- Задания: общий реестр `src/jobs.ts`. Включены `noop`, `db:ping`, `auth:sessions:cleanup`, `uploads:pending:cleanup`, `outbox:drain`, `notifications:process` и `maintenance:process`; см. [docs/BACKGROUND_JOBS.md](../docs/BACKGROUND_JOBS.md).
+- Cron: `bun run start:cron -- <job>`, файл `src/cron.ts`. CLI выполняет одно задание и завершается. Yandex запускает тот же исполнитель по HTTP; ошибка задания возвращает non-2xx таймеру.
+- Scheduler: `bun run start:scheduler`, файл `src/scheduler.ts`. Хранит расписание в репозитории. `bun run dev` запускает его рядом с API, поэтому письма уходят без второго терминала.
+- Worker: `bun run start:worker`, файл `src/worker.ts`. Нужен для циклов чаще раза в минуту. По умолчанию пуст; не деплой пустой процесс, иначе он будет постоянно перезапускаться.
+
+`src/job-schedules.json` задаёт task outbox и push каждую минуту, очистку загрузок каждый час, общее обслуживание auth/уведомлений каждые 15 минут. Terraform создаёт соответствующий production-исполнитель.
+
+Все процессы используют `src/runtime.ts` для env, Prisma и завершения работы. Фоновые процессы используют `createBackgroundRuntime`, который не получает ключ подписи API. Не дублируй схему или подключение к БД.
+
+Первичные ключи — UUIDv7, которые создаёт PostgreSQL: `@default(dbgenerated("uuidv7()")) @db.Uuid`. Используй UUIDv7 и для новых ключей, и для ссылок на них. Не вводи `cuid()`, `uuid()`, `serial` или `bigserial`. Для этой схемы везде нужен PostgreSQL 18+, включая raw SQL, импорт и запись без Prisma.
+
+## API push-уведомлений
+
+- `POST /api/notifications/push-token` регистрирует разрешённое поколение установки.
+- `POST /api/notifications/push-token/unregister` оставляет неактивную запись с новым поколением.
+- `POST /api/notifications/test-push` ставит ограниченное тестовое сообщение только при `ENABLE_TEST_PUSH=true`.
+
+Очередь надёжная, доставка через границу отправки/ticket Expo — как минимум один раз. Переходы по ссылкам и эффекты уведомлений должны быть идемпотентными.
+
+`bun run start:worker:notifications` непрерывно обрабатывает push и receipts с корректной отменой при завершении. Минутного задания `notifications:process` достаточно, если меньшая задержка не нужна.
+
+## Деплой
+
+Инфраструктура находится в [infra](../infra/README.md). Следуй [общей инструкции](../docs/DEPLOYMENT.md), затем выбранному в `CHECKLIST.md` провайдеру: [DigitalOcean](../docs/DIGITALOCEAN.md) или [Yandex Cloud](../docs/YANDEX_CLOUD.md).
+
+`bun run release -- <provider>` собирает `backend/Dockerfile`, требует успешный `db:deploy`, запускает API и задания, затем проверяет готовность. Не коммить секреты в tfvars или backend-конфигурации.
+
+Для старой БД сначала выполни `bun run db:adopt-owner`: команда только показывает владельцев public-схемы. Подтверждение и `-- --apply` описаны в [инструкции](../docs/DEPLOYMENT.md). Обычный деплой не передаёт владение автоматически.
+
+## API входа и аккаунтов
 
 - `POST /api/auth/register`
 - `POST /api/auth/login`
@@ -143,8 +145,8 @@ implicitly.
 - `POST /api/auth/logout`
 - `POST /api/auth/token/register`
 - `POST /api/auth/token/login`
-- `POST /api/auth/token/social/apple` (mounted only when social sign-in is enabled)
-- `POST /api/auth/token/social/google` (mounted only when social sign-in is enabled)
+- `POST /api/auth/token/social/apple` — только при включённом социальном входе
+- `POST /api/auth/token/social/google` — только при включённом социальном входе
 - `POST /api/auth/token/refresh`
 - `POST /api/auth/token/logout`
 - `POST /api/auth/password-reset/request`
@@ -157,52 +159,60 @@ implicitly.
 - `GET /health/live`
 - `GET /health/ready`
 
-`GET /health/live` only proves the process answers. `GET /health/ready` runs `SELECT 1` against the database and answers `200` or `503`; because it sits outside every rate limiter, it memoises the last probe outcome for one second, so any number of overlapping probes cost the pool one query and a change in database health shows up within a second.
+`GET /health/live` проверяет только ответ процесса. `GET /health/ready` выполняет `SELECT 1` и возвращает `200` или `503`. Этот маршрут не ограничивает частоту запросов, но объединяет параллельные проверки и хранит результат одну секунду. Изменение доступности БД видно в пределах секунды.
 
-`GET /api/admin/users` has a separate read budget, keyed by administrator ID and shared across that administrator's sessions and search filters. It defaults to 120 requests per 60 seconds through `ADMIN_USERS_READ_RATE_LIMIT_*` and does not consume the account-mutation budget. It counts in the same store as the auth limiter, so `RATE_LIMIT_STORE=database` makes it global across backend processes too.
+`GET /api/admin/users` имеет отдельный лимит по ID администратора: по умолчанию 120 запросов за 60 секунд через `ADMIN_USERS_READ_RATE_LIMIT_*`. Его делят все сессии и фильтры поиска администратора. Лимит не расходует бюджет изменений аккаунта. Хранилище общее с auth; при `RATE_LIMIT_STORE=database` бюджет един для всех процессов.
 
-Passwords are hashed through `Bun.password` with Argon2id. Access tokens are short-lived JWTs through `jose`. Initial refresh tokens are random; rotated successors are opaque, domain-separated HMAC values derived with the server secret so concurrent uses of the same credential receive the same successor. Only current and immediately previous SHA-256 hashes are stored in the database. Refresh atomically rotates the credential inside the same logical session, so another browser tab's still-valid access token is not revoked. Reuse of the previous credential after the short race-tolerance window revokes that session as potentially compromised.
+Пароли хеширует `Bun.password` через Argon2id. Короткие access JWT создаёт `jose`. Первый refresh-токен случаен. При ротации следующий непрозрачный токен выводится через HMAC с серверным секретом и отдельным доменом. Поэтому конкурентные запросы с одним токеном получают одного преемника. БД хранит только SHA-256-хеши текущего и предыдущего токенов.
 
-Password reset uses a random 32-byte, 30-minute token and stores only its SHA-256 hash. With email delivery configured, every request commits one durable `auth:password-reset` task derived from the submitted address before returning the same generic response - or none, for any address alike, while a flood of requests keeps the queue's ceiling of one drain pass full; account lookup, token creation, and delivery happen later in `outbox:drain`, so the request path does not reveal whether the account exists. An admitted task survives process loss and retries transient failures; requests past the ceiling while no drain is running are answered and discarded, which is why an install with a provider alerts on a drain that stops reporting passes. A permanent rejection or exhausted retry budget invalidates the undelivered token before the task becomes terminal. Requests are limited to one token per account per minute. A successful confirmation atomically changes the Argon2id password hash, consumes every outstanding reset token, revokes every active session, clears the browser refresh cookie, and does not sign the user in automatically. Reset links place the raw token in the URL fragment so it is not sent in the initial HTTP request or referrer. Scheduled auth cleanup removes expired reset-token rows. The delivery and retry contract lives in [../docs/EMAIL.md](../docs/EMAIL.md) and [../docs/BACKGROUND_JOBS.md](../docs/BACKGROUND_JOBS.md).
+Refresh атомарно меняет токен в той же логической сессии. Действующий access-токен соседней вкладки сохраняется. Повтор предыдущего refresh-токена после окна гонки отзывает сессию как потенциально скомпрометированную.
 
-Every password registration and new social account is created with role `user`;
-clients cannot submit a role. `UserDto` includes the current `user | admin` role,
-but access JWTs do not. Authenticated requests load the active session and user
-from PostgreSQL, so a role change takes effect without waiting for a token to
-expire. All `/api/admin/*` routes apply the same server-side `403 FORBIDDEN`
-guard.
+Сброс пароля использует случайный 32-байтовый токен на 30 минут; БД хранит только SHA-256-хеш. При настроенной почте запрос сначала фиксирует задачу `auth:password-reset` по переданному адресу, затем возвращает общий ответ. Поиск аккаунта, создание токена и отправка идут позже в `outbox:drain`. Ответ не раскрывает существование аккаунта.
 
-The users module owns self-service profile updates, safe admin summaries,
-dashboard counts, and role changes. A role change is serialized in PostgreSQL,
-cannot demote the acting administrator or leave the system without an
-administrator, and revokes every session of the affected user only when the role
-actually changes. Role/bootstrap authority changes and existing-account session
-issuance share a per-user fence; login re-reads the current user and re-verifies
-the password before inserting a session.
-Admin list responses expose only `id`, `email`, `displayName`,
-`role`, and `createdAt`.
+Очередь ограничена объёмом одного прохода drain. При заполнении новые запросы получают тот же ответ без задачи для любых адресов. Принятая задача переживает потерю процесса и повторяет временные ошибки. Поэтому остановка drain требует уведомления: при полной очереди и отсутствии обработки новые запросы теряются.
 
-## Architecture
+Постоянная ошибка доставки или исчерпание повторов аннулирует неотправленный токен до завершения задачи. Допускается один токен на аккаунт в минуту. Успешное подтверждение атомарно меняет Argon2id-хеш, погашает все токены сброса, отзывает все сессии и удаляет refresh-cookie. Автоматического входа нет.
 
-`src/index.ts` only starts the API server. `src/runtime.ts` loads env and creates the Prisma client for API, worker, and cron entrypoints. `src/app.ts` is the composition root. Product contexts live under `src/modules/<context>` and expose only `index.ts` across context boundaries. Auth is the authentication/principal golden path; the separate users context owns profiles, admin directory reads, and role policy. `transport` owns Hono/HTTP, `application` owns use cases and ports, optional `domain` code stays pure, and `infrastructure` owns Prisma and token/password adapters. Route factories capture dependencies in closures; request context contains only the authenticated principal. Run `bun run architecture:check` to enforce these dependency rules. `src/db.ts` normalizes DigitalOcean Managed PostgreSQL URLs that use `sslmode=require` so the Prisma PostgreSQL adapter uses libpq-compatible TLS handling.
+Ссылка хранит токен во фрагменте URL: он не попадает в первый HTTP-запрос или referrer. Истёкшие токены удаляет auth cleanup. Контракты доставки и повторов — в [EMAIL](../docs/EMAIL.md) и [BACKGROUND_JOBS](../docs/BACKGROUND_JOBS.md).
 
-The storage service lives in `src/storage` and wraps private S3-compatible storage. Product-specific upload routes should validate ownership and permissions, then delegate object key generation, presigned upload/download URLs, and deletion to that service. Terraform creates a dedicated private media bucket and scoped runtime credentials on either supported cloud.
+Новые аккаунты с паролем или социальным входом получают роль `user`; клиент не задаёт роль. `UserDto` содержит текущую роль `user | admin`, access JWT — нет. Каждый авторизованный запрос читает сессию и пользователя из PostgreSQL. Поэтому смена роли действует сразу. Все `/api/admin/*` используют серверную проверку `403 FORBIDDEN`.
 
-Prisma migration SQL is not written by hand. Change `prisma/schema.prisma`, then run `bun run prisma:migrate`.
+Модуль users управляет профилем, безопасным списком администратору, счётчиками и ролями. Смена роли сериализована в PostgreSQL. Нельзя понизить себя или оставить систему без администратора. При реальной смене роли отзываются все сессии пользователя.
 
-## Current Upstream Documentation
+Смена роли, bootstrap и выдача сессии существующему аккаунту используют общую блокировку по пользователю. До записи сессии login повторно читает пользователя и проверяет пароль. Список администратора возвращает только `id`, `email`, `displayName`, `role` и `createdAt`.
 
-For backend framework, ORM, auth, validation, and runtime questions, consult the current upstream documentation linked here first. This README describes this backend's conventions; upstream docs are authoritative for API behavior.
+## Архитектура
 
-- [Bun docs](https://bun.sh/docs)
-- [Hono docs](https://hono.dev/docs)
-- [Hono Zod OpenAPI example](https://hono.dev/examples/zod-openapi)
-- [Prisma docs](https://www.prisma.io/docs)
-- [Prisma migrations](https://www.prisma.io/docs/orm/prisma-migrate)
-- [PostgreSQL docs](https://www.postgresql.org/docs/)
-- [Zod docs](https://zod.dev/)
-- [jose documentation](https://github.com/panva/jose)
-- [Docker Compose docs](https://docs.docker.com/compose/)
-- [PostgreSQL Docker Official Image](https://hub.docker.com/_/postgres)
-- [DigitalOcean Spaces docs](https://docs.digitalocean.com/products/spaces/)
-- [DigitalOcean Spaces CDN docs](https://docs.digitalocean.com/products/spaces/how-to/enable-cdn/)
+`src/index.ts` запускает API. `src/runtime.ts` создаёт окружение и Prisma для всех процессов. `src/app.ts` связывает зависимости.
+
+Контексты находятся в `src/modules/<context>` и доступны друг другу только через `index.ts`. Auth управляет входом и текущим пользователем; users — профилями, списком пользователей и политикой ролей.
+
+- `transport`: Hono и HTTP.
+- `application`: сценарии и порты.
+- Необязательный `domain`: чистые бизнес-правила.
+- `infrastructure`: Prisma, токены и пароли.
+
+Фабрики маршрутов получают зависимости через замыкания. Контекст запроса содержит только авторизованного пользователя. Проверяй границы командой `bun run architecture:check`.
+
+`src/db.ts` нормализует URL DigitalOcean PostgreSQL с `sslmode=require`, чтобы адаптер Prisma использовал TLS как libpq.
+
+`src/storage` управляет приватным S3-хранилищем. Маршрут загрузки проверяет владельца и права, затем поручает сервису ключ объекта, подписанные URL и удаление. Terraform создаёт приватный бакет и ограниченные runtime-ключи в обоих облаках.
+
+Не пиши Prisma SQL вручную. Измени `prisma/schema.prisma`, затем выполни `bun run prisma:migrate`.
+
+## Официальная документация
+
+Правила backend описаны выше. Поведение API проверяй по актуальной документации:
+
+- [Bun](https://bun.sh/docs)
+- [Hono](https://hono.dev/docs)
+- [Пример Hono Zod OpenAPI](https://hono.dev/examples/zod-openapi)
+- [Prisma](https://www.prisma.io/docs)
+- [Миграции Prisma](https://www.prisma.io/docs/orm/prisma-migrate)
+- [PostgreSQL](https://www.postgresql.org/docs/)
+- [Zod](https://zod.dev/)
+- [jose](https://github.com/panva/jose)
+- [Docker Compose](https://docs.docker.com/compose/)
+- [Официальный образ PostgreSQL](https://hub.docker.com/_/postgres)
+- [DigitalOcean Spaces](https://docs.digitalocean.com/products/spaces/)
+- [CDN для Spaces](https://docs.digitalocean.com/products/spaces/how-to/enable-cdn/)

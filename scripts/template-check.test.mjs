@@ -4,6 +4,8 @@ import { mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 
+import { normalizeChecklistLabels } from './checklist-labels.mjs'
+
 import {
   validateAgentInstructions,
   validateChecklist,
@@ -12,7 +14,8 @@ import {
 } from './template-check.mjs'
 
 const repositoryRoot = resolve(import.meta.dir, '..')
-const currentChecklist = readFileSync(resolve(repositoryRoot, 'CHECKLIST.md'), 'utf8')
+const russianChecklist = readFileSync(resolve(repositoryRoot, 'CHECKLIST.md'), 'utf8')
+const currentChecklist = normalizeChecklistLabels(russianChecklist)
 const currentAgents = readFileSync(resolve(repositoryRoot, 'AGENTS.md'), 'utf8')
 const currentClaude = readFileSync(resolve(repositoryRoot, 'CLAUDE.md'), 'utf8')
 const temporaryDirectories = []
@@ -24,6 +27,52 @@ afterEach(() => {
 })
 
 describe('template checklist validation', () => {
+  test('accepts Russian labels and keeps legacy English labels compatible', () => {
+    for (const source of [russianChecklist, currentChecklist]) {
+      expect(validateChecklist(source, { agents: currentAgents, claude: currentClaude })).toEqual([])
+    }
+    expect(normalizeChecklistLabels(currentChecklist)).toBe(currentChecklist)
+  })
+
+  test('preserves answers and notes while normalizing Russian labels', () => {
+    const source = [
+      '| Название проекта / slug | Ответ \\| Продукт |',
+      '| Auth (email + password) | included | Ответ: Свой сервер |',
+      'Продукт и Ответ в обычном тексте.',
+    ].join('\n')
+    expect(normalizeChecklistLabels(source)).toBe(source.replace('Название проекта / slug', 'Project name / slug'))
+  })
+
+  test('rejects missing or duplicate Russian headings, questions, and status', () => {
+    const options = { agents: currentAgents, claude: currentClaude }
+    expect(validateChecklist(russianChecklist.replace('## 2. Продукт', '## Другое'), options))
+      .toContain('CHECKLIST.md is missing required heading "Product".')
+    expect(validateChecklist(`${russianChecklist}\n## Product\n`, options))
+      .toContain('CHECKLIST.md contains duplicate heading "Product".')
+    expect(validateChecklist(russianChecklist.replace(/^\| Название проекта \/ slug.*$/m, ''), options))
+      .toContain('CHECKLIST.md section "Project identity" is missing required question "Project name / slug".')
+    expect(validateChecklist(`${russianChecklist}\n**Install status:** ` + '`not started`', options))
+      .toContain('CHECKLIST.md must contain exactly one install status declaration.')
+    expect(validateChecklist(russianChecklist.replace('## 1. Проект', '```md\n## 1. Проект\n```'), options))
+      .toContain('CHECKLIST.md is missing required heading "Project identity".')
+  })
+
+  test('enforces pristine and completed intake with Russian labels', () => {
+    const options = { agents: currentAgents, claude: currentClaude }
+    const answered = russianChecklist.replace('| Название проекта / slug | _unanswered_ |', '| Название проекта / slug | demo |')
+    expect(validateChecklist(answered, options)).toContain(
+      'A reusable template with status "not started" must keep every intake answer `_unanswered_`.',
+    )
+    const deploymentStart = russianChecklist.indexOf('## 8. Деплой')
+    const completed = (russianChecklist.slice(0, deploymentStart).replaceAll('_unanswered_', 'n/a') + russianChecklist.slice(deploymentStart))
+      .replace('**Статус установки:** `not started`', '**Статус установки:** `completed 2026-08-16`')
+      .replace('- [ ] `website`', '- [x] `website`')
+    expect(validateChecklist(completed, { ...options, agents: withoutBootstrapBlock(currentAgents) })).toEqual([])
+    expect(validateChecklist(completed, options)).toContain(
+      'A completed install must remove Bootstrap-Only Instructions from AGENTS.md.',
+    )
+  })
+
   test('accepts the pristine reusable template', () => {
     expect(validateChecklist(currentChecklist, { agents: currentAgents, claude: currentClaude })).toEqual([])
   })
@@ -102,14 +151,14 @@ describe('template checklist validation', () => {
       'CHECKLIST.md must contain exactly one install status declaration.',
     )
 
-    const invalidState = currentChecklist.replace('| Auth (email + password)         | included |', '| Auth (email + password)         | enabled  |')
+    const invalidState = currentChecklist.replace('| Auth (email + password) | included |', '| Auth (email + password) | enabled |')
     expect(validateChecklist(invalidState, { agents: currentAgents, claude: currentClaude })).toContain(
       'Capability "Auth (email + password)" has invalid state "enabled".',
     )
 
     const duplicateCapability = currentChecklist.replace(
-      '| Admin roles                     | included |',
-      '| Auth (email + password)         | included |',
+      '| Admin roles | included |',
+      '| Auth (email + password) | included |',
     )
     expect(validateChecklist(duplicateCapability, { agents: currentAgents, claude: currentClaude })).toContain(
       'Capability ledger contains duplicate capability "Auth (email + password)".',
@@ -188,12 +237,12 @@ describe('template checklist validation', () => {
   })
 
   test('keeps a reusable not-started intake pristine', () => {
-    const answered = currentChecklist.replace('| Project name / slug                                             | _unanswered_ |', '| Project name / slug                                             | demo         |')
+    const answered = currentChecklist.replace('| Project name / slug | _unanswered_ |', '| Project name / slug | demo |')
     expect(validateChecklist(answered, { agents: currentAgents, claude: currentClaude })).toContain(
       'A reusable template with status "not started" must keep every intake answer `_unanswered_`.',
     )
 
-    const checked = currentChecklist.replace('- [ ] `backend` - API, database, auth', '- [x] `backend` - API, database, auth')
+    const checked = currentChecklist.replace('- [ ] `backend`', '- [x] `backend`')
     expect(validateChecklist(checked, { agents: currentAgents, claude: currentClaude })).toContain(
       'A reusable template with status "not started" must keep every checklist item unchecked.',
     )
@@ -207,7 +256,7 @@ describe('template checklist validation', () => {
     )
 
     const missingSeparator = currentChecklist.replace(
-      '| --------------------------------------------------------------- | ------------ |',
+      '| --- | --- |',
       '',
     )
     expect(validateChecklist(missingSeparator, { agents: currentAgents, claude: currentClaude })).toContain(
@@ -233,8 +282,8 @@ describe('template checklist validation', () => {
     const escapedPipe = currentChecklist
       .replace('**Install status:** `not started`', '**Install status:** `in progress`')
       .replace(
-        '| Project name / slug                                             | _unanswered_ |',
-        '| Project name / slug                                             | web \\| mobile |',
+        '| Project name / slug | _unanswered_ |',
+        '| Project name / slug | web \\| mobile |',
       )
     expect(
       validateChecklist(escapedPipe, { agents: currentAgents, claude: currentClaude }),
@@ -288,7 +337,7 @@ describe('template checklist validation', () => {
       'CHECKLIST.md section "Product" is missing required question "What product do you want to build first?".',
     )
 
-    const noSurface = completed.replace('- [x] `website` - public pages', '- [ ] `website` - public pages')
+    const noSurface = completed.replace('- [x] `website`', '- [ ] `website`')
     expect(validateChecklist(noSurface, { agents: cleanAgents, claude: cleanClaude })).toContain(
       'A completed install must mark at least one active surface.',
     )
@@ -456,7 +505,7 @@ function completedChecklist() {
 
 function withoutBootstrapBlock(source) {
   return source.replace(
-    /## Bootstrap-Only Instructions\n\n<!-- BOOTSTRAP_ONLY_START -->[\s\S]*?<!-- BOOTSTRAP_ONLY_END -->\n\n/,
+    /## [^\n]+\n\n<!-- BOOTSTRAP_ONLY_START -->[\s\S]*?<!-- BOOTSTRAP_ONLY_END -->\n\n/,
     '',
   )
 }

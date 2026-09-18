@@ -1,47 +1,45 @@
-# Contracts
+# Контракты
 
-The contracts package is the shared source of truth for API payloads, DTOs, and error shapes. Backend, web, and mobile import these schemas instead of redefining request or response shapes locally.
+Этот пакет задаёт общие данные запросов, DTO и ошибки API. Backend, web и mobile импортируют его схемы. Не описывай те же запросы и ответы повторно в приложениях.
 
-## Stack
+## Стек
 
-- TypeScript
-- Zod
+TypeScript и Zod.
 
-## Commands
+## Команды
 
-From the repository root:
+Из корня репозитория:
 
 ```bash
 bun run --cwd packages/contracts typecheck
 ```
 
-From `packages/contracts`:
+Из `packages/contracts`:
 
 ```bash
 bun run typecheck
 bun run build
 ```
 
-## Practice
+## Правила работы
 
-Add or change API shapes here before updating backend routes or client forms. Export schemas and inferred TypeScript types from `src/index.ts` so all consumers use the same contract.
+Сначала измени контракт здесь, затем маршруты backend и формы клиентов. Экспортируй схемы и выведенные TypeScript-типы из `src/index.ts`.
 
-When a schema changes, validate both sides in the same pass:
+При изменении схемы проверь всех потребителей:
 
-- backend transport/application validation and serialization;
-- web feature API adapter, form parsing, and UI state;
-- mobile feature API adapters, form parsing, and UI state;
-- relevant unit/integration/E2E tests from [../../docs/TESTING.md](../../docs/TESTING.md).
+- Backend: валидацию transport/application и сериализацию.
+- Web и mobile: API-адаптеры функций, разбор формы и состояние интерфейса.
+- Нужные unit-, integration- и E2E-проверки по [инструкции](../../docs/TESTING.md).
 
-Do not add runtime-only business logic here. Contracts should stay focused on data validation, normalization, and shared TypeScript types.
+Храни здесь только валидацию, нормализацию данных и общие типы. Бизнес-логика выполнения сюда не входит.
 
-For user-provided or database-stored public media URLs, validate the scheme explicitly instead of relying on `.url()` alone. Public image, video, and file URL fields should require `https:` unless a product has a documented reason to accept another scheme.
+Для публичных URL файлов, изображений и видео явно проверяй схему протокола. Одной `.url()` недостаточно. Требуй `https:`, если продукт не обосновывает другой протокол. Это правило относится и к данным пользователя, и к URL из БД.
 
-## Current Upstream Documentation
+## Официальная документация
 
-For schema, TypeScript, or consumer integration questions, consult the current upstream documentation linked here first. This README describes this package's conventions; upstream docs are authoritative for library behavior.
+Правила пакета описаны выше. Поведение библиотек проверяй по актуальной документации:
 
-- [Zod docs](https://zod.dev/)
-- [TypeScript docs](https://www.typescriptlang.org/docs/)
-- [Hono docs](https://hono.dev/docs)
-- [TanStack Form React docs](https://tanstack.com/form/latest/docs/framework/react/quick-start)
+- [Zod](https://zod.dev/)
+- [TypeScript](https://www.typescriptlang.org/docs/)
+- [Hono](https://hono.dev/docs)
+- [TanStack Form для React](https://tanstack.com/form/latest/docs/framework/react/quick-start)

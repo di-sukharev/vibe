@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { normalizeChecklistLabels } from './checklist-labels.mjs'
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const requiredHeadings = [
@@ -69,7 +70,7 @@ const requiredDeploymentHosts = ['DigitalOcean', 'Yandex Cloud', 'Own server']
 
 export function validateChecklist(source, { agents = '', claude = '' } = {}) {
   const errors = []
-  const checklist = withoutFencedCode(source)
+  const checklist = normalizeChecklistLabels(withoutFencedCode(source))
   const sections = checklistSections(checklist)
 
   for (const required of requiredHeadings) {
@@ -171,7 +172,7 @@ export function validateCapabilityContract(
   requiredCapabilities,
   { exclusiveState } = {},
 ) {
-  const checklist = withoutFencedCode(source)
+  const checklist = normalizeChecklistLabels(withoutFencedCode(source))
   const sections = checklistSections(checklist)
   const tables = markdownTableBlocks(sectionBody(checklist, sections, 'Capability ledger'))
   const rows = (tables.length === 1 ? tables[0].map((entry) => entry.cells) : []).filter(

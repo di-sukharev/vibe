@@ -1,51 +1,43 @@
-# Local PostgreSQL
+# Локальный PostgreSQL
 
-Use Docker Compose for local PostgreSQL on Windows, macOS, and Linux. Do not ask users to install PostgreSQL natively during first-run setup unless they explicitly choose to manage their own database.
+Используй Docker Compose в Windows, macOS и Linux. Нативная установка допустима только по явному выбору пользователя.
 
-This template currently uses the official `postgres:18-alpine` image. The major version is pinned to PostgreSQL 18 instead of `postgres:latest` so patch updates are easy while unexpected major upgrades do not break local volumes. PostgreSQL 18 is also a schema requirement for this template because Prisma models use database-generated UUIDv7 defaults through the native `uuidv7()` function.
+Шаблон использует официальный `postgres:18-alpine`. Major-версия закреплена: обновления патчей не должны случайно менять формат тома. PostgreSQL 18 также нужен схеме Prisma для UUIDv7 через `uuidv7()`.
 
-Use explicit `postgresql://user:password@host:port/db?schema=public` URLs for Prisma commands, even on native local installs. Peer-auth style URLs without a user can make Prisma schema-engine commands fail with a generic error instead of a useful connection diagnostic.
+Для Prisma всегда задавай полный URL `postgresql://user:password@host:port/db?schema=public`, даже при нативной установке. Peer-auth URL без пользователя может вызвать общую ошибку schema engine вместо понятной диагностики соединения.
 
-## Drift After Pulling A Switched-Off Capability
+## Drift после отключения возможности
 
-If a local database already applied the subscription migrations that a later template version
-removed (they ship commented out now, see `docs/IAP.md`), `prisma migrate dev` reports drift
-against those leftover tables. Reset the local database - it holds only demo data - or turn
-subscriptions back on. Deployed databases must not be reset; generate a drop migration instead.
+Если локальная БД уже применила удалённые миграции подписок, `prisma migrate dev` обнаружит оставшиеся таблицы. Подписки сейчас закомментированы; см. `docs/IAP.md`. Включи их снова или сбрось локальную БД, если данные не нужны. Рабочую БД не сбрасывай: создай миграцию удаления.
 
-## Prerequisites
+## Требования
 
-- Windows: Docker Desktop with the WSL 2 backend enabled.
-- macOS: Docker Desktop or another Docker Engine with Compose v2.
-- Linux: Docker Engine and the Docker Compose plugin.
+- Windows: Docker Desktop с WSL 2.
+- macOS: Docker Desktop или Docker Engine с Compose v2.
+- Linux: Docker Engine и плагин Docker Compose.
 
-Check that Compose is available and the Docker daemon is running:
+Из корня репозитория проверь Compose и Docker daemon:
 
 ```bash
 docker compose version
 docker info
 ```
 
-Run commands from the repository root.
+## Если Docker недоступен
 
-## If Docker Is Missing
+До настройки БД или E2E выполни обе проверки выше. При ошибке:
 
-Agents should check `docker compose version` and `docker info` before database or E2E setup. If either command fails, do this:
+1. Объясни, что Docker запускает локальный PostgreSQL шаблона. Не предлагай нативную БД.
+2. Попроси установить и запустить Docker для ОС пользователя по требованиям выше.
+3. Повтори `docker compose version` и `docker info`.
+4. Продолжай только после успеха обеих команд. Создай `backend/.env`, затем запусти БД.
 
-1. Tell the user that Docker is the local app this template uses to run PostgreSQL. Do not ask them to install native PostgreSQL.
-2. Ask them to install/start the right Docker option for their OS:
-   - Windows: Docker Desktop with the WSL 2 backend enabled.
-   - macOS: Docker Desktop, or another Docker Engine that includes Compose v2.
-   - Linux: Docker Engine plus the Docker Compose plugin, with the Docker service running.
-3. After installation, rerun `docker compose version` and `docker info`.
-4. Continue only after both commands succeed. Then create `backend/.env` and run the start commands below.
+Если Docker установить нельзя, локальная работа и проверки с БД заблокированы. Не переходи самовольно на облачную БД или другой локальный PostgreSQL.
 
-If Docker cannot be installed on the machine, local database-backed development and E2E are blocked. Do not silently fall back to a cloud database or a different local PostgreSQL setup.
-
-Create the backend env file:
+Создай файл окружения:
 
 ```bash
-# macOS, Linux, or Git Bash on Windows
+# macOS, Linux или Git Bash в Windows
 cp backend/.env.example backend/.env
 ```
 
@@ -54,11 +46,9 @@ cp backend/.env.example backend/.env
 Copy-Item backend/.env.example backend/.env
 ```
 
-## Start Development Database
+## Запуск БД разработки
 
-Pass the backend-owned env file explicitly because Docker Compose only auto-loads
-an env file from the repository root, where this template intentionally keeps no
-environment files:
+Передавай env backend явно. Compose автоматически ищет его только в корне, где шаблон не хранит файлы окружения.
 
 ```bash
 docker compose --env-file backend/.env pull postgres
@@ -67,7 +57,7 @@ docker compose --env-file backend/.env ps postgres
 docker compose --env-file backend/.env exec postgres pg_isready -U superuser -d web_app_demo
 ```
 
-The development database is:
+Локальное подключение:
 
 ```text
 host: localhost
@@ -78,39 +68,33 @@ password: superpassword
 DATABASE_URL: postgresql://superuser:superpassword@localhost:54329/web_app_demo?schema=public
 ```
 
-Then apply Prisma migrations:
+Примени миграции:
 
 ```bash
 bun run --cwd backend prisma:deploy
 ```
 
-Optionally seed the login-ready local administrator and user configured by
-`DEV_SEED_ADMIN_*` and `DEV_SEED_USER_*` in `backend/.env`:
+При необходимости создай локальные аккаунты из `DEV_SEED_ADMIN_*` и `DEV_SEED_USER_*` в `backend/.env`:
 
 ```bash
 bun run dev:seed
 ```
 
-This command is local-only: it rejects production mode and non-loopback database
-URLs. On the `mobile` branch, the ordinary demo user also receives an active
-development entitlement so the mobile app opens its main authenticated surface
-without a store purchase. Deployment runs `db:deploy`, not the development seed.
+Seed запрещает production и нелокальные URL БД. В ветке `mobile` демопользователь получает локальный доступ к основному экрану без покупки в магазине. Деплой запускает `db:deploy`, а не локальный seed.
 
-## Optional Port Overrides
+## Изменение порта
 
-If `54329` is already in use, change both `POSTGRES_PORT` and the port inside
-`DATABASE_URL` in `backend/.env`, then keep using
-`docker compose --env-file backend/.env ...`.
+Если `54329` занят, поменяй `POSTGRES_PORT` и порт в `DATABASE_URL` файла `backend/.env`. Продолжай передавать `docker compose --env-file backend/.env ...`.
 
-## Test Database
+## Тестовая БД
 
-`postgres_test` is reserved for integration, Docker smoke, and Playwright flows:
+`postgres_test` предназначен для integration, Docker smoke и Playwright:
 
 ```bash
 docker compose --env-file backend/.env up -d postgres_test
 ```
 
-Manual default connection:
+Ручное подключение по умолчанию:
 
 ```text
 host: localhost
@@ -121,31 +105,31 @@ password: superpassword
 TEST_DATABASE_URL: postgresql://superuser:superpassword@localhost:54330/web_app_demo_test?schema=public
 ```
 
-Automated test runners normally set a repository-derived `POSTGRES_TEST_PORT` and derive `TEST_DATABASE_URL` from it so multiple template checkouts can run in parallel. Set `POSTGRES_TEST_PORT` only when a fixed test database port is required.
+Автоматические скрипты выбирают `POSTGRES_TEST_PORT` по репозиторию и формируют `TEST_DATABASE_URL`. Это позволяет запускать копии проекта параллельно. Задавай порт вручную только при необходимости фиксированного значения.
 
-The test database name must end with `_test`. Backend integration, Docker smoke, and Playwright E2E refuse non-test database names by default so they do not write to development data.
+Имя БД должно оканчиваться на `_test`. Integration, smoke и E2E по умолчанию отвергают другие имена, чтобы не менять данные разработки.
 
-## Reset Local Data
+## Сброс локальных данных
 
-Stop containers but keep local data:
+Остановить контейнеры, сохранив данные:
 
 ```bash
 docker compose --env-file backend/.env down
 ```
 
-Delete local PostgreSQL data only when you intentionally want a clean database:
+Следующая команда удаляет локальные данные PostgreSQL. Выполняй её только для намеренного сброса:
 
 ```bash
 docker compose --env-file backend/.env down -v
 ```
 
-PostgreSQL major upgrades are not automatic data migrations. If this template bumps from one PostgreSQL major version to another, either export/import the data manually or delete the local development volumes with `docker compose --env-file backend/.env down -v` when the data is disposable.
+Смена major-версии PostgreSQL не переносит данные автоматически. Экспортируй и импортируй их либо удали ненужные локальные тома через `docker compose --env-file backend/.env down -v`.
 
-### When migrations were rewritten
+### Если история миграций изменилась
 
-If `prisma migrate deploy` fails with `P3018` and a message like `type "user_role" already exists`, the database still carries a migration history this repository no longer has - because the history was squashed, or because the database was migrated on the other branch. Prisma also records the failed attempt, so every later run reports `P3009` until it is cleared.
+Ошибка `P3018` с `type "user_role" already exists` означает, что БД содержит другую историю миграций. Возможные причины — объединение миграций или работа на другой ветке. Prisma записывает неудачу; следующие запуски возвращают `P3009`.
 
-Nothing is wrong with your setup and there is nothing to repair by hand. Local development data is disposable: delete the volumes, then migrate and seed again.
+Для локальной БД с ненужными данными удали тома, затем повтори миграции и seed. Не исправляй историю вручную. Если данные нужны, сначала сохрани их и согласуй удаление.
 
 ```bash
 docker compose --env-file backend/.env down -v
@@ -154,10 +138,10 @@ bun run --cwd backend prisma:deploy
 bun run dev:seed
 ```
 
-Switching from `mobile` to `master` needs the same reset, for a different reason and with a different symptom: `mobile` adds tables `master`'s schema does not know about, so `prisma migrate deploy` reports nothing to apply while `prisma migrate dev` reports drift. Going `master` -> `mobile` needs nothing, because `mobile`'s history is `master`'s plus one migration.
+Переход `mobile` → `master` требует такого же сброса. В mobile есть дополнительные таблицы: `prisma migrate deploy` не видит новых миграций, а `prisma migrate dev` сообщает drift. Переход `master` → `mobile` не требует сброса: mobile добавляет одну миграцию к истории master.
 
-## Current Upstream Documentation
+## Официальная документация
 
-- Docker Compose: https://docs.docker.com/compose/
-- PostgreSQL Docker Official Image: https://hub.docker.com/_/postgres
-- PostgreSQL docs: https://www.postgresql.org/docs/
+- [Docker Compose](https://docs.docker.com/compose/)
+- [Официальный образ PostgreSQL](https://hub.docker.com/_/postgres)
+- [PostgreSQL](https://www.postgresql.org/docs/)
