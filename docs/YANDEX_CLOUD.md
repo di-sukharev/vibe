@@ -315,6 +315,7 @@ Sensitive output основы хранит отпечатки паролей. П
 
 ## Официальная документация
 
+- [Serverless Containers](https://yandex.cloud/en/docs/serverless-containers/)
 - [Terraform Yandex Cloud](https://yandex.cloud/en/docs/tutorials/infrastructure-management/terraform-quickstart)
 - [Режимы Serverless Containers](https://yandex.cloud/en/docs/serverless-containers/concepts/container)
 - [Повторы таймеров](https://yandex.cloud/en/docs/serverless-containers/concepts/trigger/)
@@ -328,3 +329,8 @@ Sensitive output основы хранит отпечатки паролей. П
 - [Lockbox](https://yandex.cloud/en/docs/lockbox/)
 - [Monitoring-alert](https://yandex.cloud/en/docs/monitoring/concepts/alerting/alert)
 - [Метрики Serverless Containers](https://yandex.cloud/en/docs/monitoring/metrics-ref/serverless-containers-ref)
+- [CLI](https://yandex.cloud/en/docs/cli/quickstart)
+- [Container Registry](https://yandex.cloud/en/docs/container-registry/quickstart)
+- [AWS CLI для Object Storage](https://yandex.cloud/en/docs/storage/tools/aws-cli)
+- [Концепции Cloud CDN](https://yandex.cloud/en/docs/cdn/concepts/)
+- [Image Resizer](https://yandex.cloud/en/marketplace/products/yc/image-resizer)

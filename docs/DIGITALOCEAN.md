@@ -15,6 +15,14 @@
 
 Scheduler запускает `outbox:drain` и `notifications:process` каждую минуту, очистку загрузок каждый час на 15-й минуте, auth/уведомлений — каждые 15 минут. Миграция использует тот же неизменяемый digest backend и должна завершиться до переключения API.
 
+## Выбор ресурсов
+
+Начни с одного API `apps-s-1vcpu-1gb` и минимального production-кластера БД. До согласования расходов проверь цены.
+
+Предсобранные webapp/website размещай в App Platform Static Sites, без `instance_size_slug` и `instance_count`. SSR и server islands требуют runtime. Встроенного CDN достаточно, кроме необходимых внешних фильтров ботов, лимитов или геоправил.
+
+Файлы пользователей храни в приватном Spaces Standard Storage. Backend запрещает filesystem в production.
+
 ## Подготовка аккаунта
 
 Установи `doctl` 1.164+ и войди в аккаунт. Разреши App Platform читать нужный GitHub-репозиторий. Создай ключ аккаунта Spaces для управления бакетами. Bootstrap создаст отдельный узкий ключ для state.
@@ -147,3 +155,5 @@ doctl apps logs <app id> scheduler --type run --tail 500 | grep -A 11 'outbox:dr
 - [Managed PostgreSQL](https://docs.digitalocean.com/products/databases/postgresql/)
 - [Container Registry](https://docs.digitalocean.com/products/container-registry/)
 - [Spaces](https://docs.digitalocean.com/products/spaces/)
+- [Static Sites](https://docs.digitalocean.com/products/app-platform/how-to/manage-static-sites/)
+- [doctl](https://docs.digitalocean.com/reference/doctl/)
