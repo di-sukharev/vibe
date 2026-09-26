@@ -1,292 +1,127 @@
-# App Store and Google Play IAP
-
-This template implements premium subscriptions through `expo-iap` on iOS and Android. The mobile app is only the store transport; the backend is the entitlement source of truth.
-
-## Status: Off By Default
-
-The whole implementation is here and it works, but it is switched off: the billing tables are
-commented out in `backend/prisma/schema/billing.prisma`, the IAP routes are not mounted, and the
-mobile app does not mount `IapProvider`. A project that never sells anything pays nothing for it,
-and a project that does sell turns it on without writing the hard parts again.
-
-Reference implementation, if this copy ever drifts: `github.com/di-sukharev/vibe`, branch `mobile`,
-directories `backend/src/modules/billing` and `mobile/src/features/billing`.
-
-### How To Turn Subscriptions On
-
-Most steps below are commented-out blocks waiting for you, and `rg -l 'docs/IAP.md'` finds them.
-
-1. Uncomment the models in `backend/prisma/schema/billing.prisma` and the three billing relations
-   on `User` in `backend/prisma/schema/base.prisma`.
-2. Run `bun run --cwd backend prisma:migrate` to create the tables.
-3. Delete `backend/src/modules/billing/infrastructure/prisma-billing-types.ts`, restore the imports
-   it replaced (its header lists all six importing files), and drop the `createBillingTestApp`
-   helper in `billing.integration.test.ts` in favour of calling `createApp` directly. Then drop the
-   header comments that describe the stand-ins - `rg -l prisma-billing-types` finds them, including
-   the ones in `billing-routes.test.ts` and `infrastructure/billing-operations.test.ts`, and the
-   parked-marker notes at the top of every suite in that directory.
-4. Uncomment the billing wiring in `backend/src/app.ts`: the module import, the two verifier
-   options, `createBillingModule`, the `/api/iap` and `/api/webhooks` routes, their ingress groups,
-   and the webhook limit constants.
-5. Uncomment the billing job, its `GooglePlayReconcileResult` type and three helpers, and the
-   `maintenance:process` rows in
-   `backend/src/jobs.ts`. Keep the module import inside the job body: `jobs.ts` must stay
-   type-only at the top level, so tooling can read the registry without a database.
-6. Restore the tests. Delete the `@parked-test` line from the header of every suite under
-   `backend/src/modules/billing/`, and move `mobile/tests/parked/*` up into `mobile/tests/`; both
-   runners pick them up again with no further edit. Add back what a switched-off capability cannot
-   carry: the App Store webhook ingress cases in `backend/src/app.test.ts`, the Google Play
-   reconcile case in `backend/src/jobs.test.ts` plus a `reconcile: 1` counter in the `calls`
-   assertion beside it, and the entitlement assertion in
-   `backend/src/modules/users/users.integration.test.ts`. `git log -p` on those three files has the
-   removed versions. Nothing else needs touching: the job-list assertion reads the registry, and
-   the parked-suite assertion reads `billing.prisma`, so neither hard-codes a list step 1
-   invalidates.
-7. Schedule the job where it is deployed. On DigitalOcean add a `SCHEDULED` component running
-   `bun run start:cron -- billing:google-play:reconcile` to `.do/api-app.yaml`, with the complete
-   Google Play group in its `envs`. `bun run deploy:do api` validates job names against
-   `backend/src/jobs.ts` directly, so step 5 is what makes the job schedulable - there is no
-   second list to update.
-8. Uncomment `<IapProvider>` in `mobile/src/composition/AppProviders.tsx`, then in
-   `mobile/src/app/(tabs)/profile.tsx` uncomment all three parked pieces: the `@/features/billing`
-   imports, the `const iap = useSubscriptionIap()` line, and the `SubscriptionSummary` block.
-9. Configure the store credentials described below, then decide what your product gates behind
-   `useSubscriptionIap()?.subscription` - the hook returns `null` while `IapProvider` is not
-   mounted, and the template gates nothing on its own.
-
-Then run `bun run typecheck`, `bun run test`, and `bun run architecture:check`. The paywall stops
-showing its "not enabled" notice as soon as the provider is mounted.
-
-### If Subscriptions Are Not Wanted
-
-Deleting is safe but touches more than the billing directories, because a few neutral files
-reference them. Remove all of it in one pass:
-
-- `backend/prisma/schema/billing.prisma` and the commented relations in `base.prisma`
-- `backend/src/modules/billing/` (module, tests, Apple root certificates)
-- `mobile/src/features/billing/`, `mobile/src/app/paywall.tsx`, the paywall entries in
-  `mobile/src/constants/testIds.ts` (the paywall entries and `profile.manageSubscriptionButton`),
-  the `EXPO_PUBLIC_IAP_*` declarations in
-  `mobile/src/types/env.d.ts`, and the billing globs in `mobile/eslint.config.js`
-- `packages/contracts/src/iap.ts`, `iap.test.ts`, the `export * from './iap'` line in
-  `packages/contracts/src/index.ts`, and the `IAP_*` codes in `packages/contracts/src/errors.ts`
-- the commented wiring in `backend/src/app.ts` and `backend/src/jobs.ts`, plus the
-  `@apple/app-store-server-library` dependency in `backend/package.json`
-- the notes that would otherwise point at deleted code: the removed-suite notes in
-  `backend/src/app.test.ts` and `backend/src/jobs.test.ts`, the entitlement assertion in
-  `backend/src/modules/users/users.integration.test.ts`, the `IapProvider` lines in
-  `mobile/src/composition/AppProviders.tsx`, and the billing block in
-  `mobile/src/app/(tabs)/profile.tsx`
-- the billing entry in `mobile/src/composition/api.ts`; the Maestro policy audit is scoped to the
-  active auth flow and intentionally contains no dormant paywall paths or checks to remove
-- the billing cases in `mobile/tests/api.test.ts` and `mobile/tests/select-registration.test.tsx`;
-  the whole of `mobile/tests/parked/` and `mobile/tests/offer-code-controller.test.ts`
-  (entirely billing)
-- the commented store credential groups and the `IAP_*` and `WEBHOOK_*` entries in
-  `.do/api-app.yaml.example`, plus the store paragraphs in `docs/DEPLOYMENT.md`
-- the `APPLE_IAP_*`, `GOOGLE_PLAY_*`, `IAP_*`, and `WEBHOOK_*` entries in `backend/src/env.ts`
-  (the webhook limits exist only for App Store notifications) with their
-  validators, their assertions in `backend/src/env.test.ts`, the same keys in every backend test
-  env fixture, and `backend/.env.example` (removing them from `env.ts` narrows `AppEnv`, so
-  anything still naming them fails typecheck)
-- `expo-iap` in `mobile/package.json`, its plugin entry in `mobile/app.config.js`, the
-  `EXPO_PUBLIC_IAP_*` keys in `mobile/.env.example`, and the subscription bullets in
-  `mobile/README.md`
-
-Then record `removed` in the `CHECKLIST.md` capability ledger and run `bun run typecheck`,
-`bun run test`, and `bun run --cwd mobile e2e:maestro:audit`.
-
-## Runtime Shape
-
-- Mobile fetches configured subscription products through `expo-iap`.
-- iOS purchases use `request.apple`, `appAccountToken: user.id`, and `andDangerouslyFinishTransactionAutomatically: false`.
-- Android purchases use `request.google`, `subscriptionOffers`, and the same `user.id` for `obfuscatedAccountId` and `obfuscatedProfileId`. The backend rejects conflicting identity fields, serializes ownership claims across the current and linked purchase-token chain, and never reassigns a stored token to another user.
-- Mobile sends App Store signed transaction JWS or Google Play `{ productId, purchaseToken, basePlanId? }` to the backend.
-- Backend verifies App Store data with `@apple/app-store-server-library` and Google Play data with Android Publisher API `subscriptionsv2.get`.
-- Apple verification is pinned to `APPLE_IAP_ENVIRONMENT`; production never retries an invalid payload against Sandbox or silently migrates a stored environment.
-- Backend rejects products outside `APPLE_IAP_PRODUCT_IDS` or `GOOGLE_PLAY_PRODUCT_IDS`; Google Play verification also requires `GOOGLE_PLAY_BASE_PLAN_IDS` to explicitly allow every accepted base plan.
-- Mobile calls `finishTransaction` only after backend verification and entitlement write succeed.
-- Restore and foreground sync use store available purchases, then backend reconcile. Android also supports empty reconcile so the backend can refresh stored Google purchase tokens.
-- Public subscription snapshots never expose raw Google purchase tokens.
+# App Store and Google Play subscriptions
 
-## Store Setup
+The mobile app sells a premium subscription through `expo-iap` on iOS and Android. The app only talks to the store. The backend verifies every purchase and owns the entitlement.
 
-### App Store Connect
+The capability is implemented and switched off, so a product that sells nothing carries no billing tables. The tables are commented out in `backend/prisma/schema/billing.prisma`, the `/api/iap` and `/api/webhooks` routes are not mounted, and the app does not mount `IapProvider`. Until you turn it on, `/paywall` says that subscriptions are not enabled. Store rules for payment methods are in [WEB_SURFACES](WEB_SURFACES.md#mobile-payments). The upstream template keeps a working copy on branch `mobile` of `github.com/di-sukharev/vibe`.
 
-Create auto-renewable subscription products, for example:
+## How To Turn Subscriptions On
 
-- `com.example.app.premium.monthly`
-- `com.example.app.premium.yearly`
+Code comments that mention `docs/IAP.md` mark each spot: `rg -n 'docs/IAP.md'`.
 
-Create sandbox testers and test on a real iOS development build. Expo Go cannot load the native IAP module.
+1. Uncomment the enums and models in `backend/prisma/schema/billing.prisma` and the three billing relations on `User` in `base.prisma`. Run `bun run --cwd backend prisma:migrate`.
+2. Delete `backend/src/modules/billing/infrastructure/prisma-billing-types.ts`, and restore the imports in the six files its header lists. Replace the `createBillingTestApp` helper in `billing.integration.test.ts` with `createApp`. Remove the stand-in notes that `rg -l prisma-billing-types` finds.
+3. In `backend/src/app.ts`, uncomment the billing import, the verifier options, `createBillingModule`, the webhook limit constants, the `/api/iap` and `/api/webhooks` ingress groups, and both routes. As the comment there says, add a `RateLimitPolicy` for each group in `backend/src/rate-limit/port.ts` and pass `store: rateLimitStore(...)`, so that `RATE_LIMIT_STORE=database` covers them.
+4. In `backend/src/jobs.ts`, uncomment the `billing:google-play:reconcile` job, its result type, the three helpers, and the Google Play lines in `maintenance:process`. Keep the billing import inside the job body: `jobs.ts` stays type-only at the top level.
+5. Bring the tests back:
+   - Remove the `@parked-test` line from every suite under `backend/src/modules/billing/`.
+   - Move the suites in `mobile/tests/parked/` up to `mobile/tests/`, and delete the directory.
+   - In `backend/src/app.test.ts`, restore the four body-limit and rate tests for `/api/iap` and `/api/webhooks` from `git show 13e67da -- backend/src/app.test.ts`, and add both prefixes to the Yandex SWS loop.
+   - `backend/src/jobs.test.ts` keeps no billing case. Test the Google Play job with the real-database job tests in `backend/src/jobs.integration.test.ts`.
+   - In `backend/src/modules/users/users.integration.test.ts`, uncomment the check that the demo seed grants no entitlement.
+6. In `mobile/src/composition/AppProviders.tsx`, uncomment the `IapProvider` import, and wrap the tree in `<IapProvider api={apis.billing}>` where its comment says. In `mobile/src/app/(tabs)/profile.tsx`, uncomment the billing import, the `useSubscriptionIap()` line, and the `SubscriptionSummary` block.
+7. Set up the stores and the configuration below.
+8. Decide what premium unlocks. The template gates nothing. In the app, `useSubscriptionIap()?.subscription?.isActive` is a UX check only. An API that serves premium data must check the entitlement on the server, and the billing module exports no entitlement reader yet.
+9. Run `bun run typecheck`, `bun run test`, and `bun run architecture:check`. Set the `Payments / subscriptions` row in [CHECKLIST](../CHECKLIST.md) to `included`.
 
-### Google Play Console
+`maintenance:process` already runs every 15 minutes from `backend/src/job-schedules.json`. After step 4 it also reconciles Google Play when `GOOGLE_PLAY_PACKAGE_NAME` is set. To run `billing:google-play:reconcile` on its own schedule, see [BACKGROUND_JOBS](BACKGROUND_JOBS.md).
 
-Create subscription products and base plans. The template env supports either two product IDs or one product ID with two base plans:
+## If Subscriptions Are Not Wanted
 
-- monthly product/base plan
-- yearly product/base plan
+Remove the whole capability in one pass. Shared files reference it too:
 
-Activate the base plans/offers, add license testers, and test with an Android build whose package name and signing match Play Console. Google Play products may take time to become queryable.
+- Backend: `backend/src/modules/billing/`, `billing.prisma` and the commented relations in `base.prisma`, the commented billing code in `backend/src/app.ts` and `backend/src/jobs.ts`, and `@apple/app-store-server-library` in `backend/package.json`.
+- Backend env: the `APPLE_IAP_*`, `GOOGLE_PLAY_*`, `IAP_*`, and `WEBHOOK_*` keys with their validators in `backend/src/env.ts`, their cases in `env.test.ts`, and `backend/.env.example`. Removing a key narrows `AppEnv`, so typecheck finds every other use.
+- Contracts: `packages/contracts/src/iap.ts` and `iap.test.ts`, `export * from './iap'` in `index.ts`, and the `IAP_*` codes in `errors.ts`.
+- Mobile: `mobile/src/features/billing/`, `mobile/src/app/paywall.tsx`, the billing entry in `mobile/src/composition/api.ts`, the paywall IDs and `profile.manageSubscriptionButton` in `mobile/src/constants/testIds.ts`, the `EXPO_PUBLIC_IAP_*` keys in `mobile/src/types/env.d.ts` and `mobile/.env.example`, the billing files in `mobile/eslint.config.js`, and `expo-iap` in `mobile/package.json` and `mobile/app.config.js`.
+- Tests and notes: `mobile/tests/parked/`, `mobile/tests/offer-code-controller.test.ts`, the billing cases in `mobile/tests/api.test.ts`, the commented lines in `AppProviders.tsx` and `profile.tsx`, the other comments that `rg -n 'docs/IAP.md'` finds, and the docs that link here.
 
-## Backend Env
+Keep `google-auth-library` while social sign-in uses it. The Maestro policy audit has no billing checks. Then set the `Payments / subscriptions` row in [CHECKLIST](../CHECKLIST.md) to `removed`, and run `bun run typecheck`, `bun run test`, and `bun run --cwd mobile e2e:maestro:audit`.
 
-App Store:
+## How it works
 
-```bash
-APPLE_IAP_BUNDLE_ID=com.example.app
-APPLE_IAP_APP_APPLE_ID=1234567890
-APPLE_IAP_ENVIRONMENT=Sandbox
-APPLE_IAP_ISSUER_ID=...
-APPLE_IAP_KEY_ID=...
-APPLE_IAP_PRIVATE_KEY_BASE64=...
-APPLE_IAP_PRODUCT_IDS=com.example.app.premium.monthly,com.example.app.premium.yearly
-```
+- iOS sets `appAccountToken` to the user ID and never finishes a transaction automatically. Android sets `obfuscatedAccountId` and `obfuscatedProfileId` to the user ID.
+- The app sends the App Store signed transaction or the Google Play `{ productId, purchaseToken, basePlanId? }` to `/api/iap`. It calls `finishTransaction` only after the backend has verified the purchase and written the entitlement.
+- The backend verifies with `@apple/app-store-server-library` and the Android Publisher API, and acknowledges new Google Play purchases. It accepts only auto-renewable subscriptions whose product, and Google base plan, is in the allowlist.
+- Apple verification uses only `APPLE_IAP_ENVIRONMENT`. Production never retries a payload against Sandbox and never switches a stored environment. With `NODE_ENV=production`, Google Play test purchases fail.
+- A purchase belongs to the user in its store identity fields, or to the user who already owns it. Conflicting Google identity fields fail, claims on linked Google tokens are serialized, and a stored token never moves to another user.
+- Premium is active in `active` and `billing_grace_period` until expiry. A pending purchase is not sent or finished, and it unlocks nothing; the app shows a pending notice. Responses never expose a Google purchase token.
+- At launch and on return to the foreground, the app reads `GET /api/iap/entitlement`, then reconciles the store's available purchases. Restore reconciles them on both stores, after an App Store sync on iOS. An empty Android reconcile refreshes the user's stored tokens.
+- For an iOS offer code, the app gets a 15-minute token from the backend and opens `presentCodeRedemptionSheetIOS()`. Only that token lets the backend link a redeemed transaction without `appAccountToken`.
+- `POST /api/webhooks/app-store` takes App Store Server Notifications V2. The `WEBHOOK_*` limits bound bodies and rates before verification. A replay changes nothing. Of concurrent deliveries, one takes the processing lease and the others get a retryable `503`; a stale lease is reclaimed. A failed verification deletes its provisional row, so no attacker-controlled payload hash stays.
+- The Google Play reconcile job refreshes stored non-terminal purchases not tried in the last 15 minutes. Runs are bounded: 100 rows, 15 seconds per call, 50 seconds in total. Each row is claimed before the call, so overlapping runs never repeat a purchase, and failing rows cannot starve newer ones. The job logs the due backlog and its oldest age, and exits non-zero on any failure.
+- App Store status lookups abort after 15 seconds through an override of the SDK's protected `makeFetchRequest`. Recheck it after an SDK upgrade.
 
-The backend image bundles the public Apple trust anchors published by Apple. Leave
-`APPLE_IAP_ROOT_CERTS_DIR` unset normally; set it only when the deployment intentionally mounts a
-reviewed replacement directory. Use `APPLE_IAP_ENVIRONMENT=Production` and the numeric
-`APPLE_IAP_APP_APPLE_ID` in production. Sandbox and Production payloads are not interchangeable.
+## Store setup
 
-Google Play:
+App Store Connect:
 
-```bash
-GOOGLE_PLAY_PACKAGE_NAME=com.example.app
-GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64=...
-GOOGLE_PLAY_PRODUCT_IDS=com.example.app.premium
-GOOGLE_PLAY_BASE_PLAN_IDS=monthly,yearly
-```
+- Create auto-renewable subscriptions, for example `com.example.app.premium.monthly` and `com.example.app.premium.yearly`.
+- Create an In-App Purchase API key for the backend, and note its issuer ID and key ID.
+- Set the App Store Server Notifications URL, version 2, to `https://<api-domain>/api/webhooks/app-store` for the environment that backend verifies.
+- Create sandbox testers. Test on a [development build](../mobile/README.md#development-build), not Expo Go.
 
-Create a Google Cloud service account, link it in Play Console, grant subscription/order read access, enable the Android Publisher API, then base64-encode the downloaded service-account JSON for `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64`.
+Google Play Console:
 
-Backend credentials are secrets. Do not put App Store API keys, Apple private keys, or Google service-account JSON in mobile env.
+- Create subscriptions with monthly and yearly base plans: two products, or one product with two base plans. Activate the base plans and offers.
+- Create a Google Cloud service account, and enable the Android Publisher API. Link the account in Play Console with access to orders and subscriptions; the backend reads and acknowledges them.
+- Add license testers. Test with a build whose package name and signing match Play Console, against a backend without `NODE_ENV=production`. New products can take time to become queryable.
 
-For the default DigitalOcean path, uncomment either complete store group in `.do/api-app.yaml` and
-set the two credential payloads - the Apple private key and the Google service-account JSON - as
-`SECRET` values in the DigitalOcean console, where `bun run deploy:do api` carries them forward
-without ever reading them. Keep each group whole, keep `APPLE_IAP_ENVIRONMENT=Production`, and
-leave `APPLE_IAP_ROOT_CERTS_DIR` at the bundled certificate path.
+## Configuration
 
-## Mobile Env
+`backend/.env.example` lists the backend variables. At startup, `backend/src/env.ts` refuses a partial App Store or Google Play group, and a group without its allowlists.
 
-Create `mobile/.env`:
+- `APPLE_IAP_ENVIRONMENT` is `Sandbox` by default. Production uses `Production` and the numeric `APPLE_IAP_APP_APPLE_ID`.
+- `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64` holds the base64-encoded service-account JSON key.
+- The IDs must match the app: `APPLE_IAP_BUNDLE_ID` is `ios.bundleIdentifier`, and `GOOGLE_PLAY_PACKAGE_NAME` is `android.package` in `mobile/app.config.js`.
+- The backend image bundles Apple's root certificates ([manifest](../backend/src/modules/billing/certs/apple/README.md)). Leave `APPLE_IAP_ROOT_CERTS_DIR` unset unless the deployment deliberately mounts a reviewed replacement directory.
+- Backend credentials are secrets. Never put the Apple private key, the service-account JSON, or another backend credential in the mobile env.
 
-```bash
-EXPO_PUBLIC_API_URL=http://localhost:3000
+`mobile/.env.example` lists the `EXPO_PUBLIC_IAP_*` values. The app bundle includes every `EXPO_PUBLIC_*` value, so these hold only public product IDs and package names. An Android plan needs a product ID and a base plan ID. Subscription management on Android needs `EXPO_PUBLIC_IAP_ANDROID_PACKAGE_NAME`.
 
-EXPO_PUBLIC_IAP_IOS_MONTHLY_PRODUCT_ID=com.example.app.premium.monthly
-EXPO_PUBLIC_IAP_IOS_YEARLY_PRODUCT_ID=com.example.app.premium.yearly
+In production, put the public values in `extra_runtime_env`. Put the two secrets in `TF_VAR_extra_runtime_secret_env` as JSON on DigitalOcean, or in Lockbox through `extra_secret_bindings` on Yandex Cloud ([DEPLOYMENT](DEPLOYMENT.md)). Terraform gives the API and every job runner the same environment.
 
-EXPO_PUBLIC_IAP_ANDROID_PACKAGE_NAME=com.example.app
-EXPO_PUBLIC_IAP_ANDROID_MONTHLY_PRODUCT_ID=com.example.app.premium
-EXPO_PUBLIC_IAP_ANDROID_MONTHLY_BASE_PLAN_ID=monthly
-EXPO_PUBLIC_IAP_ANDROID_YEARLY_PRODUCT_ID=com.example.app.premium
-EXPO_PUBLIC_IAP_ANDROID_YEARLY_BASE_PLAN_ID=yearly
-```
+## Not implemented
 
-`EXPO_PUBLIC_*` values are bundled into the app. They may contain public product IDs and package names, never backend credentials.
+- In-app Google Play code redemption. Users redeem codes in Google Play, and the next app sync ingests the purchase.
+- Google Real-time developer notifications (RTDN). The scheduled reconcile refreshes only tokens that the app already sent. Add RTDN when the product must see out-of-app purchases before the next app sync or react sooner. Route it through the same ingest and reconcile service.
+- Alternative billing, external purchase links, signed promotional offers, user-choice billing, and developer-billing reporting.
 
-## Development Builds
+Before you enable alternative billing or external purchase links, change the product scope and the code together:
 
-`expo-iap` is native. Use custom development builds, not Expo Go:
+- Get the required Apple or Google approval for each country and billing mode.
+- Configure the `expo-iap` alternative-billing plugin options deliberately, including the iOS external purchase countries, entitlements, and HTTPS external URLs without query parameters.
+- Handle the deep-link return, and tell the user clearly that they are leaving the app to pay.
+- Validate externally completed purchases on the backend before granting premium access.
+- For a Google Play billing program, choose the exact mode, collect the required reporting token, and report it to Google within the required window.
 
-```bash
-bunx eas-cli build --profile development --platform ios
-bunx eas-cli build --profile development --platform android
-```
+## Errors and diagnostics
 
-Start Metro with a device-reachable API URL:
+The app trusts the `expo-iap` `ErrorCode` values. It stays silent only for `user-cancelled` or a legacy message that says the user cancelled the purchase or payment.
 
-```bash
-EXPO_PUBLIC_API_URL=http://<LAN_IP>:3000 bunx expo start --dev-client --host lan
-```
-
-After changing native purchase setup or config plugin options, rebuild the development client.
-
-## Restore, Sync, and Freshness
-
-The paywall exposes restore on both stores.
-
-- iOS restore asks StoreKit for available purchases, sends signed transactions to `POST /api/iap/app-store/transactions`, and sends known original transaction IDs to `POST /api/iap/app-store/reconcile`.
-- Android restore asks Google Play Billing for available purchases, sends `{ productId, purchaseToken }` pairs to `POST /api/iap/google-play/reconcile`, and falls back to empty reconcile so the backend can refresh stored tokens.
-- Launch and foreground sync call backend entitlement first, then store available purchases when the store connection is available.
-
-The backend includes a bounded scheduled safety net for already stored Google Play purchase tokens. `maintenance:process` selects only `pending`, active, grace-period, and billing-retry rows whose last reconcile attempt is at least 15 minutes old, then atomically advances that timestamp before the provider call so overlapping cron/manual runs cannot process the same purchase. It processes at most 100 rows per run and gives each Android Publisher request a 15-second timeout. It admits another purchase only while at least 31 seconds remain in the 50-second task budget, covering the worst-case verification plus acknowledgement calls. Every claimed attempt advances the separate reconcile timestamp, including provider failures, so permanently failing rows cannot starve newer purchases. Failures do not block the remaining admitted batch, but any failures make the scheduled job exit non-zero after reporting aggregate counts. Cron metrics also report the total due backlog and the oldest due age, so a batch that succeeds but remains persistently undersized is visible. Terminal purchases leave the polling set.
-
-Schedule `maintenance:process` at least every 15 minutes in production. Once subscriptions are turned on it combines Google Play reconcile with auth-session cleanup and skips billing when Google Play is not configured; while they are off it performs the auth and notification maintenance only. `billing:google-play:reconcile` is also available as a dedicated task once subscriptions are turned on and requires the complete Google Play environment group. The DigitalOcean spec generator places Google credentials in the API and the applicable scheduled job, not unrelated workers.
-
-This polling path does not replace Google RTDN: it can refresh only tokens that the app has already ingested. Add RTDN when the product must discover out-of-app purchases or react closer to real time; route RTDN through the same backend ingest/reconcile application service.
-
-App Store subscription status lookup has a 15-second application deadline. The installed Apple server SDK exposes neither a request timeout nor an `AbortSignal` for `getAllSubscriptionStatuses()`, so the backend returns control at the deadline but cannot cancel the SDK's underlying transport request. Keep provider concurrency bounded at the caller/runtime level and re-check this limitation when upgrading the SDK.
-
-## Offer Codes and Deferred Billing Surfaces
-
-App Store offer-code redemption is supported on iOS. Mobile creates a short-lived backend redemption token, opens `presentCodeRedemptionSheetIOS()`, and links tokenless redeemed transactions only after that user action.
-
-Google Play code redemption is not implemented in this template. Users can still redeem Play codes through Google Play. The scheduled reconcile refreshes an already known token; products that must discover a newly redeemed purchase without opening the app still need RTDN.
-
-Alternative billing, external purchase links, signed promotional-offer purchase flows, user-choice billing, and developer-billing reporting are deferred.
-
-Before enabling alternative billing or external purchase links, update product scope and implementation together:
-
-- obtain the required Apple or Google approval for each country and billing mode;
-- configure `expo-iap` alternative-billing plugin options intentionally, including iOS external purchase countries, entitlements, and HTTPS external URLs without query parameters;
-- implement deep-link return handling and clear user copy that the user is leaving the app for external payment;
-- add backend validation for externally completed purchases before granting premium access;
-- for Android billing programs, choose the exact Google Play mode, collect the required reporting token, and report it to Google within the required window.
-
-## Error Handling Policy
-
-Mobile treats structured Expo IAP error codes from Expo IAP's `ErrorCode` enum as the source of truth. User cancellations are silent only for the `user-cancelled` code or legacy messages that explicitly say the purchase/payment action was cancelled by the user.
-
-Pending purchases are not sent to backend ingest and are not finished locally. The user sees pending copy until the store emits a purchased transaction or backend entitlement changes.
-
-IAP diagnostics include event name, platform, normalized code, retryability, message, response code, and product ID when available. Diagnostics must not include raw signed transactions, Google Play purchase tokens, service-account JSON, App Store private keys, cookies, or other secrets.
-
-## Validation
-
-Automated checks:
-
-```bash
-bun run test:contracts
-bun run test:backend
-bun run test:mobile
-bun run typecheck
-bun run --cwd backend prisma:validate
-```
-
-Manual checks:
-
-- authenticated users reach the app without an entitlement; `/paywall` is reachable only when the product navigates there
-- products and Android base plan offers load on real development builds
-- purchase does not auto-finish before backend verification
-- the entitlement returned by `GET /api/iap/entitlement` turns active only after store verification
-- restore rehydrates entitlement after reinstall/logout/login
-- pending purchases do not unlock premium
-- ownership mismatch fails when the store purchase belongs to another app user
-- profile opens App Store or Google Play subscription management
-- App Store webhook replay is idempotent
-- App Store webhook concurrent delivery either owns the processing lease or returns a retryable response; stale leases are reclaimed safely
-- App Store webhook bodies and request rates are bounded before verification through the separate `WEBHOOK_BODY_LIMIT_BYTES` and `WEBHOOK_RATE_LIMIT_*` controls, and failed verification deletes its provisional claim instead of retaining attacker-controlled payload hashes
-- `maintenance:process` runs every 15 minutes and reports zero failed Google Play reconciliations
-- RTDN is configured when newly redeemed or otherwise out-of-app purchases must be discovered before the app next syncs
-
-## Troubleshooting
-
-- Products empty on iOS: verify bundle ID, SKU spelling, subscription group status, sandbox tester, real device, and rebuilt custom dev-client.
-- Products empty on Android: verify package name, Play Console product IDs, active base plans/offers, license tester, Play-enabled build, and that the app was installed through a Play-compatible testing path when required.
-- `IAP_NOT_CONFIGURED`: backend is missing the configured store credentials or required product allowlist.
-- `IAP_INVALID_TRANSACTION`: signed JWS or Google Play purchase token is missing, unverifiable, expired, missing required expiry, or not in the configured product/base-plan allowlist.
-- `IAP_OWNERSHIP_MISMATCH`: App Store `appAccountToken` or Google Play obfuscated account/profile ID does not match the authenticated user, and the store token is not already linked to that user.
-- Purchase succeeds but access stays locked: inspect backend verification errors and confirm mobile can reach `EXPO_PUBLIC_API_URL`.
-- Works in sandbox/internal testing but not production: switch store environments, package/bundle IDs, product IDs, service-account access, and webhook/RTDN setup to production values.
+Diagnostics (`mobile/src/features/billing/iap-diagnostics.ts`) carry the event name, platform, error code, network and retry flags, messages, response code, and product ID. They must never contain signed transactions, Google purchase tokens, service-account JSON, App Store private keys, cookies, or other secrets.
+
+| Code | Status | Cause |
+| --- | --- | --- |
+| `IAP_NOT_CONFIGURED` | 503 | Missing credentials, allowlists, or Apple root certificates; or Google Play refused the service account or is down. |
+| `IAP_INVALID_TRANSACTION` | 400 | Unverifiable payload, wrong environment, not an auto-renewable subscription, no expiry, a Google test purchase in production, or a product or base plan outside the allowlists. |
+| `IAP_OWNERSHIP_MISMATCH` | 403 | The purchase cannot be tied to this user, or the offer-code token is invalid or expired. |
+| `IAP_WEBHOOK_IN_PROGRESS` | 503 | Another worker holds the notification lease. Retry later. |
+
+If no products load, check the bundle ID or package name, the product IDs, the subscription group or active base plans and offers, the tester account, a real device, and a rebuilt development build. On Android, install through a Play testing track when required. If a purchase succeeds but premium stays locked, read the backend error, and check that the device reaches `EXPO_PUBLIC_API_URL`. Before launch, switch the environments, IDs, service-account access, and notification URL to production.
+
+## Manual checks
+
+On development builds with store testers, confirm that:
+
+- a signed-in user without an entitlement uses the app, and `/paywall` opens only when the product navigates there;
+- products and Android offers load, and a purchase finishes only after backend verification turns the entitlement active;
+- restore brings the entitlement back after a reinstall or a new sign-in;
+- a pending purchase unlocks nothing, and another user's purchase fails;
+- the profile opens the store's subscription management;
+- a replayed App Store notification changes nothing, and `maintenance:process` reports zero failed Google Play reconciliations.
 
 ## References
 
-- Expo IAP docs: https://hyochan.github.io/expo-iap/
-- Expo IAP subscription validation: https://hyochan.github.io/expo-iap/guides/subscription-validation/
-- Expo IAP troubleshooting: https://hyochan.github.io/expo-iap/guides/troubleshooting/
-- Google Play subscriptionsv2.get: https://developers.google.com/android-publisher/api-ref/rest/v3/purchases.subscriptionsv2/get
-- Google Play acknowledge: https://developers.google.com/android-publisher/api-ref/rest/v3/purchases.subscriptions/acknowledge
-- Google Play RTDN: https://developer.android.com/google/play/billing/rtdn-reference
-- Apple PKI root certificates: https://www.apple.com/certificateauthority/
+- [Expo IAP](https://hyochan.github.io/expo-iap/): [subscription validation](https://hyochan.github.io/expo-iap/guides/subscription-validation/), [troubleshooting](https://hyochan.github.io/expo-iap/guides/troubleshooting/)
+- Google Play: [subscriptionsv2.get](https://developers.google.com/android-publisher/api-ref/rest/v3/purchases.subscriptionsv2/get), [acknowledge](https://developers.google.com/android-publisher/api-ref/rest/v3/purchases.subscriptions/acknowledge), [RTDN](https://developer.android.com/google/play/billing/rtdn-reference)
+- [Apple PKI root certificates](https://www.apple.com/certificateauthority/)

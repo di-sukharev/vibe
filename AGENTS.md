@@ -35,14 +35,14 @@ Run from the root. If `bun` is missing from `PATH`, prefix `PATH="/opt/homebrew/
 
 ```bash
 bun run typecheck:webapp        # also :backend and :website; the fastest signal
-bun run lint                    # webapp ESLint, including the UI rules
+bun run lint                    # webapp and mobile ESLint, with the UI rules
 bun run architecture:check      # after imports cross a module or feature boundary
 bun run test:backend:unit -- src/path.test.ts -t "name"
 bun run test:backend:integration -- src/path.integration.test.ts -t "name"   # Docker
 bun run test:webapp             # also test:website and test:contracts
 bun run e2e:webapp -- auth.spec.ts -g "name"                                  # Docker
 bun run screens -- -g "/app/profile"                                          # Docker
-bun run --cwd backend prisma:migrate   # after you edit backend/prisma/schema.prisma
+bun run --cwd backend prisma:migrate   # after you edit backend/prisma/schema/
 ```
 
 Run the full `bun run check` only for a release or a change across the whole system.
@@ -56,7 +56,7 @@ Run the full `bun run check` only for a release or a change across the whole sys
 - Copy the shape of the reference slices: `users` for a typical feature, `auth` for cross-cutting work.
 - Stay a monolith on PostgreSQL. Durable async work goes to the outbox, and its handlers must be safe to retry. Periodic work goes to `backend/src/jobs.ts`. Add a queue, cache, broker, or search engine only for a measured limit recorded in `CHECKLIST.md`.
 - One browser checkout: the signed-in `webapp` with the backend. `website` may only hand off an anonymous cart.
-- Change the database through `schema.prisma` and `prisma:migrate`. Write migration SQL by hand only on request. IDs are PostgreSQL `uuidv7()` with `@db.Uuid`. For schema or architecture changes, state compatibility, risk, and rollout order.
+- Change the database through `backend/prisma/schema/` and `prisma:migrate`. Write migration SQL by hand only on request. IDs are PostgreSQL `uuidv7()` with `@db.Uuid`. For schema or architecture changes, state compatibility, risk, and rollout order.
 - `CHECKLIST.md` defines product scope. A capability without a registry row is `absent`. Build or restore it only on request, then update its row. Existing code is not a request. Deferred applications get no features, setup, or tests.
 
 ## Workflow
