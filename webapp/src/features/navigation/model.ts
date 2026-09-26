@@ -5,7 +5,12 @@ import type { UserRole } from '@web-app-demo/contracts'
 // login round-trip whether or not the sidebar links to it. `tests/navigation.test.ts` fails when
 // this table and the router drift apart.
 export const workspaceRoutesByRole = {
-  user: ['/app', '/app/profile', '/app/settings'],
+  user: [
+    '/app',
+    '/app/profile',
+    '/app/settings',
+    // scaffold:route
+  ],
   admin: ['/admin', '/admin/users', '/admin/settings'],
 } as const satisfies Record<UserRole, ReadonlyArray<`/${string}`>>
 
@@ -24,6 +29,7 @@ const navigationByRole = {
     { label: 'Home', to: '/app' },
     { label: 'Profile', to: '/app/profile' },
     { label: 'Settings', to: '/app/settings' },
+    // scaffold:nav-item
   ],
   admin: [
     { label: 'Dashboard', to: '/admin' },

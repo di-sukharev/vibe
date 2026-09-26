@@ -15,6 +15,7 @@ describe('backend layers', () => {
     expect(check([file('backend/src/modules/auth/application/service.ts', "import { repo } from '../infrastructure/repository'")])[0]?.rule).toBe('backend-application-dependencies')
     for (const specifier of [
       '@apple/app-store-server-library',
+      '@aws-sdk/client-s3',
       '@hono/zod-openapi',
       'google-auth-library',
       'new-provider-sdk',
@@ -32,8 +33,28 @@ describe('backend layers', () => {
     expect(check([file('backend/src/modules/auth/transport/routes.ts', "import { repo } from '../infrastructure/auth-repository'")])[0]?.rule).toBe('backend-transport-dependencies')
   })
 
+  test('applies layer rules to imports written with a file extension or an index path', () => {
+    expect(check([file('backend/src/modules/auth/application/service.ts', "import { env } from '../../../env.js'")])[0]?.rule).toBe('backend-application-dependencies')
+    expect(check([file('backend/src/modules/auth/transport/routes.ts', "import { db } from '../../../db.js'")])[0]?.rule).toBe('backend-transport-dependencies')
+    expect(check([file('backend/src/modules/auth/infrastructure/repository.ts', "import { AppError } from '../../../http/errors.ts'")])[0]?.rule).toBe('backend-infrastructure-dependencies')
+    expect(check([file('backend/src/modules/auth/transport/routes.ts', "import { repo } from '../infrastructure/index.js'")])[0]?.rule).toBe('backend-transport-dependencies')
+    expect(check([file('backend/src/app.ts', "import { auth } from './modules/auth/index.js'")])).toEqual([])
+  })
+
+  test('sees a side-effect import even when another import follows it', () => {
+    expect(check([file('backend/src/modules/auth/application/service.ts', "import 'dotenv/config'\nimport { a } from './a'")])[0]?.rule).toBe('backend-application-dependencies')
+    expect(check([file('backend/src/modules/auth/transport/routes.ts', "import '../../../generated/prisma/client'\nimport { a } from './a'")])[0]?.rule).toBe('backend-transport-dependencies')
+    expect(check([file('webapp/src/platform/api.ts', "import '@/features/auth/styles.css'\nimport { a } from './a'")]).map((item) => item.rule)).toContain('client-dependency-direction')
+  })
+
   test('rejects HTTP transport dependencies from infrastructure', () => {
     expect(check([file('backend/src/modules/auth/infrastructure/repository.ts', "import { AppError } from '../../../http/errors'")])[0]?.rule).toBe('backend-infrastructure-dependencies')
+  })
+
+  test('lets inner layers reach backend runtime code only through its ports', () => {
+    expect(check([file('backend/src/modules/uploads/application/ports.ts', "import type { PrivateStorage } from '../../../storage/port'")])).toEqual([])
+    expect(check([file('backend/src/modules/uploads/application/service.ts', "import { S3PrivateStorage } from '../../../storage/s3-storage'")])[0]?.rule).toBe('backend-application-dependencies')
+    expect(check([file('backend/src/modules/uploads/domain/avatar.ts', "import { createPrivateStorage } from '../../../storage'")])[0]?.rule).toBe('backend-domain-dependencies')
   })
 
   test('rejects reverse imports between backend layers', () => {
@@ -67,6 +88,7 @@ describe('public module and feature indexes', () => {
     expect(check([file('webapp/src/features/auth/provider.tsx', "import { usePlan } from '../billing'")])).toEqual([])
     expect(check([file('webapp/src/features/auth/provider.tsx', "import { usePlan } from '../billing/provider'")])[0]?.rule).toBe('client-feature-public-api')
     expect(check([file('mobile/src/composition/api.ts', "import { AuthApi } from '@/features/auth/api'")])[0]?.rule).toBe('client-feature-public-api')
+    expect(check([file('website/src/composition/api.ts', "import { AuthApi } from '@/features/auth/api'")])[0]?.rule).toBe('client-feature-public-api')
 
     expect(check([file('backend/src/app.ts', "import { auth } from './modules/auth'")])).toEqual([])
     const compositionViolation = check([
@@ -90,11 +112,16 @@ describe('dependency direction', () => {
   })
 
   test('rejects feature dependency cycles even through public indexes', () => {
-    const violations = check([
-      file('mobile/src/features/auth/logout.ts', "import type { NotificationsApi } from '@/features/notifications'"),
-      file('mobile/src/features/notifications/provider.tsx', "import { useAuth } from '@/features/auth'"),
-    ])
-    expect(violations.filter((item) => item.rule === 'client-feature-cycle')).toHaveLength(2)
+    for (const [client, apiType, feature] of [
+      ['webapp', 'BillingApi', 'billing'],
+      ['mobile', 'NotificationsApi', 'notifications'],
+    ]) {
+      const violations = check([
+        file(`${client}/src/features/auth/logout.ts`, `import type { ${apiType} } from '@/features/${feature}'`),
+        file(`${client}/src/features/${feature}/provider.tsx`, "import { useAuth } from '@/features/auth'"),
+      ])
+      expect(violations.filter((item) => item.rule === 'client-feature-cycle')).toHaveLength(2)
+    }
   })
 
   test('requires composition code to use feature public indexes', () => {
@@ -108,6 +135,7 @@ describe('dependency direction', () => {
     expect(check([file('packages/contracts/src/auth.ts', "import { Hono } from 'hono'")])[0]?.rule).toBe('contracts-dependency-direction')
     for (const specifier of [
       '@apple/app-store-server-library',
+      '@aws-sdk/client-s3',
       '@hono/zod-openapi',
       'google-auth-library',
       'new-provider-sdk',

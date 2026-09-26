@@ -10,7 +10,9 @@
     --font-heading: var(--font-sans);
     /* Helvetica is the intended face. Arial is metrically compatible on Windows,
        Inter Variable is the bundled fallback for systems that ship neither. */
+    /* THEME_FONT_START */
     --font-sans: 'Helvetica Neue', Helvetica, Arial, 'Inter Variable', sans-serif;
+    /* THEME_FONT_END */
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -57,6 +59,7 @@
    `.dark` class on <html> keeps shadcn `dark:` variants resolving correctly. */
 :root,
 .dark {
+    /* THEME_TOKENS_START */
     --brand: oklch(1 0 0);
     --brand-foreground: oklch(0.06 0 0);
     --background: oklch(0.06 0 0);
@@ -93,6 +96,7 @@
     --sidebar-accent-foreground: oklch(1 0 0);
     --sidebar-border: oklch(1 0 0 / 12%);
     --sidebar-ring: oklch(0.85 0 0);
+    /* THEME_TOKENS_END */
 }
 
 @layer base {

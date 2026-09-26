@@ -39,6 +39,26 @@ describe('loadEnv', () => {
     expect(env.COOKIE_SECURE).toBe(true)
   })
 
+  test('starts a background runner without JWT_SECRET while the API still requires it', () => {
+    // Terraform hands JWT_SECRET only to the API; the scheduler worker and the job containers
+    // boot this image without it.
+    const withoutSigningKey = {
+      NODE_ENV: 'production',
+      DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
+      COOKIE_SECURE: 'true',
+      PRIVATE_STORAGE_DRIVER: 's3',
+      PRIVATE_STORAGE_REGION: 'nyc3',
+      PRIVATE_STORAGE_BUCKET: 'uploads',
+      PRIVATE_STORAGE_ENDPOINT: 'https://storage.example.com',
+      PRIVATE_STORAGE_ACCESS_KEY_ID: 'access-key',
+      PRIVATE_STORAGE_SECRET_ACCESS_KEY: 'secret-key',
+      PRIVATE_STORAGE_ALLOW_REMOTE_ENDPOINT: 'true',
+    }
+
+    expect(() => loadBackgroundEnv(withoutSigningKey)).not.toThrow()
+    expect(() => loadEnv(withoutSigningKey)).toThrow('JWT_SECRET')
+  })
+
   test('a background runner in development accepts the local origin .env.example ships', () => {
     // COOKIE_SECURE is forced only in production. Forcing it everywhere would make the HTTPS rule
     // on WEBAPP_ORIGIN refuse http://localhost:5173, and the scheduler `bun run dev` now starts

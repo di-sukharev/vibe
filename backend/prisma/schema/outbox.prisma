@@ -1,8 +1,8 @@
 // =============================================================================
 // TASK OUTBOX
 //
-// Durable background work, kept in its own file the way every other capability on this branch
-// is. On `master` the same two declarations live in `prisma/schema.prisma`.
+// Durable background work, kept in its own file the way every other capability in this folder
+// is.
 // =============================================================================
 
 /// Work that must survive a process restart. `background-tasks.ts` defers work whose loss is

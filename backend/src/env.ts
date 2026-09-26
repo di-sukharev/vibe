@@ -190,6 +190,11 @@ export function loadEnv(source: Record<string, string | undefined>) {
 
 const backgroundNonSigningJwtPlaceholder = '0123456789abcdef'.repeat(4)
 
+/**
+ * For `cron.ts`, `scheduler.ts`, and `worker.ts`. A background runner serves no browser, so it
+ * needs neither a real `CORS_ORIGINS` allowlist nor the JWT signing secret; overriding both here
+ * means neither has to be handed to a process that has no use for them.
+ */
 export function loadBackgroundEnv(source: Record<string, string | undefined>) {
   return loadEnv({
     ...source,

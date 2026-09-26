@@ -166,6 +166,39 @@ async function smokeAuthApi() {
   process.stdout.write('Backend Docker DB-backed auth smoke passed\n')
 }
 
+/**
+ * Removes only this run's resources: its backend container, and its per-PID Compose project's
+ * database container, volume, and network. `down --volumes` is avoided on purpose: it cannot be
+ * scoped to a service, and the optional local storage volume must survive a smoke run.
+ */
+let cleanedUp = false
+
+function cleanUp() {
+  if (cleanedUp) return
+  cleanedUp = true
+  spawnSync('docker', ['rm', '-f', containerName], { stdio: 'ignore' })
+  spawnSync(
+    'docker',
+    [...composeArgs, 'rm', '--stop', '--force', '--volumes', postgresTestService],
+    { cwd: repositoryRoot, env: dockerEnv, stdio: 'inherit' },
+  )
+  spawnSync(
+    'docker',
+    ['volume', 'rm', '--force', `${smokeComposeProjectName}_${postgresTestDataVolume}`],
+    { cwd: repositoryRoot, env: dockerEnv, stdio: 'ignore' },
+  )
+  spawnSync('docker', ['network', 'rm', networkName], { stdio: 'ignore' })
+}
+
+// The resource names carry this run's PID, so no later run can find what an interrupted one
+// leaves behind. Ctrl+C or a kill must clean up here, before the process exits.
+for (const [signal, exitCode] of [['SIGINT', 130], ['SIGTERM', 143]]) {
+  process.once(signal, () => {
+    cleanUp()
+    process.exit(exitCode)
+  })
+}
+
 try {
   run('docker', [...composeArgs, 'up', '-d', 'postgres_test'], { env: dockerEnv })
   await waitForComposePostgres()
@@ -222,18 +255,5 @@ try {
   await waitForHealth()
   await smokeAuthApi()
 } finally {
-  spawnSync('docker', ['rm', '-f', containerName], { stdio: 'ignore' })
-  // Only the database this smoke test started. `down --volumes` cannot be scoped to a service,
-  // so it would also delete the optional local storage volume and the uploads inside it.
-  spawnSync(
-    'docker',
-    [...composeArgs, 'rm', '--stop', '--force', '--volumes', postgresTestService],
-    { cwd: repositoryRoot, env: dockerEnv, stdio: 'inherit' },
-  )
-  spawnSync(
-    'docker',
-    ['volume', 'rm', '--force', `${smokeComposeProjectName}_${postgresTestDataVolume}`],
-    { cwd: repositoryRoot, env: dockerEnv, stdio: 'ignore' },
-  )
-  spawnSync('docker', ['network', 'rm', networkName], { stdio: 'ignore' })
+  cleanUp()
 }

@@ -23,6 +23,11 @@ email_delivery = "disabled"
 email_from     = null
 
 # For Resend, pass `extra_runtime_secret_env` through TF_VAR_extra_runtime_secret_env as JSON.
+# Extra variables reach the API and the scheduler unless scoped here: api, jobs, or job keys from
+# backend/src/job-schedules.json. See docs/DEPLOYMENT.md#extra-runtime-variables.
+# extra_env_components = {
+#   STORE_API_SECRET = ["api"]
+# }
 
 # Runtime digests, immutable source branches, and one-time administrator values are release-owned
 # inputs. The wrapper writes them only inside the separate runtime/static Terraform roots.

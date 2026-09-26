@@ -30,7 +30,14 @@ describe('development seed configuration', () => {
         },
       },
       databaseUrl: validSource.DATABASE_URL,
+      demo: false,
     })
+  })
+
+  test('parses the demo fixture opt-in from DEV_SEED_DEMO', () => {
+    expect(parseDevelopmentSeedConfig(validSource).demo).toBe(false)
+    expect(parseDevelopmentSeedConfig({ ...validSource, DEV_SEED_DEMO: '1' }).demo).toBe(true)
+    expect(parseDevelopmentSeedConfig({ ...validSource, DEV_SEED_DEMO: 'no' }).demo).toBe(false)
   })
 
   test('rejects production, non-loopback databases, partial credentials, and role collisions', () => {

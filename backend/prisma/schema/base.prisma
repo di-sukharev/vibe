@@ -8,16 +8,16 @@ datasource db {
 }
 
 model User {
-  id                      String                   @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  email                   String                   @unique
-  passwordHash            String?                  @map("password_hash")
-  displayName             String?                  @map("display_name")
-  role                    UserRole                 @default(user)
-  appleSubject            String?                  @unique @map("apple_subject")
-  googleSubject           String?                  @unique @map("google_subject")
-  createdAt               DateTime                 @default(now()) @map("created_at")
-  updatedAt               DateTime                 @updatedAt @map("updated_at")
-  sessions                AuthSession[]
+  id            String        @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  email         String        @unique
+  passwordHash  String?       @map("password_hash")
+  displayName   String?       @map("display_name")
+  role          UserRole      @default(user)
+  appleSubject  String?       @unique @map("apple_subject")
+  googleSubject String?       @unique @map("google_subject")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+  sessions      AuthSession[]
 
   // Uncomment together with prisma/schema/billing.prisma (docs/IAP.md step 1):
   // subscriptionEntitlement SubscriptionEntitlement?
@@ -25,12 +25,13 @@ model User {
   // googlePlaySubscriptions GooglePlaySubscriptionPurchase[]
 
   // Push delivery tables; remove together with prisma/schema/notifications.prisma.
-  pushInstallations       PushInstallation[]
-  pushTokens              PushToken[]
-  pushNotificationOutbox  PushNotificationOutbox[]
-  pushDeliveries          PushDelivery[]
-  passwordResetTokens PasswordResetToken[]
-  avatars             UserAvatar[]
+  pushInstallations      PushInstallation[]
+  pushTokens             PushToken[]
+  pushNotificationOutbox PushNotificationOutbox[]
+  pushDeliveries         PushDelivery[]
+  passwordResetTokens    PasswordResetToken[]
+  avatars                UserAvatar[]
+  // scaffold:user-relations
 
   @@index([role], map: "users_role_idx")
   @@map("users")

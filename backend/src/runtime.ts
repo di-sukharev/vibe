@@ -41,6 +41,11 @@ export function createBackendRuntime(source: Record<string, string | undefined> 
   return createRuntime(loadEnv(source))
 }
 
+/**
+ * For `cron.ts`, `scheduler.ts`, and `worker.ts`: a background runner never serves a browser, so
+ * the env checks that only make sense for one - `WEBAPP_ORIGIN` must be HTTPS - must not block it
+ * from starting against the same `.env` the API uses.
+ */
 export function createBackgroundRuntime(
   source: Record<string, string | undefined> = Bun.env,
 ): BackendRuntime {

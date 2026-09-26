@@ -133,11 +133,6 @@ locals {
       version_id = yandex_lockbox_secret_version_hashed.runtime[var.database_active_slot].id
       key        = "DATABASE_URL"
     }
-    JWT_SECRET = {
-      secret_id  = yandex_lockbox_secret.runtime.id
-      version_id = yandex_lockbox_secret_version_hashed.runtime[var.database_active_slot].id
-      key        = "JWT_SECRET"
-    }
     PRIVATE_STORAGE_ACCESS_KEY_ID = {
       secret_id  = yandex_lockbox_secret.media.id
       version_id = yandex_iam_service_account_static_access_key.media.output_to_lockbox_version_id
@@ -163,11 +158,33 @@ locals {
     }
   } : {}
 
-  runtime_secret_bindings = merge(
-    var.extra_secret_bindings,
+  # Only the API signs and verifies tokens; background runners load their env without the key.
+  # The runtime identity still reads the whole runtime secret, because jobs need its DATABASE_URL.
+  api_secret_bindings = {
+    JWT_SECRET = {
+      secret_id  = yandex_lockbox_secret.runtime.id
+      version_id = yandex_lockbox_secret_version_hashed.runtime[var.database_active_slot].id
+      key        = "JWT_SECRET"
+    }
+  }
+
+  builtin_secret_bindings = merge(
     local.base_secret_bindings,
     local.postbox_secret_bindings,
+    local.api_secret_bindings,
   )
+
+  component_secret_bindings = {
+    for component in local.runtime_components : component => merge(
+      {
+        for name, binding in var.extra_secret_bindings : name => binding
+        if contains(lookup(local.extra_env_receivers, name, toset(local.runtime_components)), component)
+      },
+      local.base_secret_bindings,
+      local.postbox_secret_bindings,
+      component == "api" ? local.api_secret_bindings : {},
+    )
+  }
 
   migration_secret_bindings = {
     DATABASE_URL = {

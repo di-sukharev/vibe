@@ -9,13 +9,21 @@ variable "runtime_service_account" { type = string }
 variable "gateway_service_account" { type = string }
 variable "trigger_service_account" { type = string }
 variable "logging_group_id" { type = string }
-variable "runtime_environment" { type = map(string) }
-variable "runtime_secret_bindings" {
-  type = map(object({
+variable "component_environments" {
+  description = "Environment per container, keyed by api and each job key; composed by the foundation."
+  type        = map(map(string))
+  # Empty only when the foundation outputs predate this shape; the container preconditions then
+  # ask for infra:apply instead of Terraform stopping on a missing variable.
+  default = {}
+}
+variable "component_secret_bindings" {
+  description = "Lockbox bindings per container, keyed by api and each job key; composed by the foundation."
+  type = map(map(object({
     secret_id  = string
     version_id = string
     key        = string
-  }))
+  })))
+  default = {}
 }
 variable "database_credential_slot" {
   type = string

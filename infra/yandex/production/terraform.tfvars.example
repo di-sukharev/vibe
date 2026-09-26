@@ -35,5 +35,12 @@ media_bucket_name   = "example-product-prod-media-globally-unique"
 email_delivery = "disabled"
 email_from     = null
 
+# Extra variables (`extra_runtime_env`, `extra_secret_bindings`) reach the API and every job
+# container unless scoped here: api, jobs, or job keys from backend/src/job-schedules.json.
+# See docs/DEPLOYMENT.md#extra-runtime-variables.
+# extra_env_components = {
+#   STORE_API_SECRET = ["api"]
+# }
+
 # Runtime/migration digests and one-time administrator values are release-owned inputs. The
 # wrapper writes them only inside the separate migration/runtime Terraform roots.

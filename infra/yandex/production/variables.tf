@@ -260,18 +260,52 @@ variable "email_from" {
 }
 
 variable "extra_runtime_env" {
-  type    = map(string)
-  default = {}
+  description = "Non-secret provider/product settings for the API and job containers; extra_env_components can scope each one."
+  type        = map(string)
+  default     = {}
 }
 
 variable "extra_secret_bindings" {
-  description = "Additional Lockbox environment bindings keyed by environment variable name."
+  description = "Additional Lockbox environment bindings keyed by environment variable name; extra_env_components can scope each one."
   type = map(object({
     secret_id  = string
     version_id = string
     key        = string
   }))
   default = {}
+
+  validation {
+    condition     = length(setintersection(keys(var.extra_secret_bindings), keys(var.extra_runtime_env))) == 0
+    error_message = "A variable belongs in either extra_runtime_env or extra_secret_bindings, not both."
+  }
+}
+
+variable "extra_env_components" {
+  description = "Runtime components that receive an extra variable, keyed by its name: api, jobs, or a job key from backend/src/job-schedules.json. An unlisted variable reaches every component."
+  type        = map(set(string))
+  default     = {}
+
+  validation {
+    condition = alltrue([
+      for name in keys(var.extra_env_components) :
+      contains(concat(keys(var.extra_runtime_env), keys(var.extra_secret_bindings)), name)
+    ])
+    error_message = "Every extra_env_components key must name a variable in extra_runtime_env or extra_secret_bindings."
+  }
+
+  validation {
+    condition     = alltrue([for targets in values(var.extra_env_components) : length(targets) > 0])
+    error_message = "Every extra_env_components entry needs at least one target; remove a variable from the extra maps instead."
+  }
+
+  validation {
+    condition = alltrue(flatten([
+      for targets in values(var.extra_env_components) : [
+        for target in targets : contains(local.runtime_env_targets, target)
+      ]
+    ]))
+    error_message = "extra_env_components targets must be api, jobs, or a job key from backend/src/job-schedules.json."
+  }
 }
 
 variable "postgres_resource_preset" {

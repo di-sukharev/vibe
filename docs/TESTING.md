@@ -65,7 +65,7 @@ docker network rm <project>_default
 
 ## Docker smoke
 
-`bun run smoke:backend:docker` builds the backend image and runs it against its own `postgres_test`, in a separate Compose project on free ports. It checks `/health/ready`, a sign-up through `/api/auth/token/register`, and `/api/auth/me`. Then it removes both containers.
+`bun run smoke:backend:docker` builds the backend image and runs it against its own `postgres_test`, in a separate Compose project on free ports. It checks `/health/ready`, a sign-up through `/api/auth/token/register`, and `/api/auth/me`. Then it removes its containers, its volume, and its network, also when interrupted with Ctrl+C or SIGTERM.
 
 ## Live tests
 
@@ -97,7 +97,9 @@ Specs find elements by `data-testid`. Reports and failure traces, screenshots, a
 - `E2E_SKIP_DOCKER=1`: use a running database. Start and remove nothing.
 - `E2E_KEEP_DOCKER=1`: keep the database.
 
-Screenshot tour (`bun run screens`): see [UI](UI.md).
+Screenshot tour (`bun run screens`): see [UI](UI.md). It seeds ~40 fixed fixture users and a
+sample avatar for realistic list, pagination, and empty-state screenshots; plain E2E specs and
+`bun run dev:seed` do not get them unless asked, see [COMMANDS](COMMANDS.md).
 
 ## Mobile E2E
 

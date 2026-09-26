@@ -12,16 +12,34 @@ afterEach(() => {
   globalThis.fetch = originalFetch
 })
 
-test('a browser without Web Locks refuses a cookie auth mutation before sending it', async () => {
-  // Every tab shares the auth cookie, and a late epoch check cannot take back a Set-Cookie. A
-  // login, refresh, or logout that cannot be serialized across tabs must not be sent at all.
-  let mutationRan = false
-  const coordinator = createBrowserAuthCoordinator(() => undefined, () => true)
+test('a browser without Web Locks still serializes cookie auth mutations within the tab', async () => {
+  // Web Locks exist only in secure contexts, so plain http on a LAN address has none. The lock is a
+  // cross-tab optimization; the server enforces rotation and reuse rules, so sign-in must still work.
+  const coordinator = createBrowserAuthCoordinator(() => undefined)
+  const events: string[] = []
+  let releaseFirst = () => {}
+  const firstGate = new Promise<void>((resolve) => {
+    releaseFirst = resolve
+  })
 
-  await expect(coordinator(async () => {
-    mutationRan = true
-  })).rejects.toMatchObject({ code: 'AUTH_BROWSER_LOCK_UNAVAILABLE' })
-  expect(mutationRan).toBe(false)
+  const first = coordinator(async () => {
+    events.push('first:start')
+    await firstGate
+    events.push('first:end')
+    throw new Error('first failed')
+  })
+  const second = coordinator(async () => {
+    events.push('second:start')
+    return 'second'
+  })
+
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  expect(events).toEqual(['first:start'])
+  releaseFirst()
+
+  await expect(first).rejects.toThrow('first failed')
+  await expect(second).resolves.toBe('second')
+  expect(events).toEqual(['first:start', 'first:end', 'second:start'])
 })
 
 test('AuthApi refreshes and retries authenticated requests with the new access token', async () => {

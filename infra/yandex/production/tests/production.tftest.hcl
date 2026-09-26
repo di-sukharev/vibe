@@ -286,7 +286,10 @@ run "steady_state_foundation" {
   }
 
   assert {
-    condition     = output.runtime_inputs.runtime_environment["RATE_LIMIT_STORE"] == "database"
+    condition = alltrue([
+      for environment in values(output.runtime_inputs.component_environments) :
+      environment["RATE_LIMIT_STORE"] == "database"
+    ])
     error_message = "Serverless Containers scale out per request, so the auth limiter must count in PostgreSQL rather than in one instance's memory."
   }
 }
@@ -368,4 +371,267 @@ run "extra_secret_is_granted_exactly" {
     condition     = length(yandex_lockbox_secret_iam_member.runtime_extra) == 1
     error_message = "Every externally bound Lockbox secret needs an exact runtime grant."
   }
+}
+
+run "unscoped_extra_env_reaches_every_component" {
+  command = plan
+
+  variables {
+    extra_runtime_env = { FEATURE_FLAG = "on" }
+    extra_secret_bindings = {
+      EXTERNAL_API_KEY = {
+        secret_id  = "external-lockbox-secret"
+        version_id = "external-lockbox-version"
+        key        = "api_key"
+      }
+    }
+  }
+
+  assert {
+    condition = (
+      toset(keys(output.runtime_inputs.component_environments)) == toset(concat(
+        ["api"],
+        [for schedule in jsondecode(file("../../../backend/src/job-schedules.json")) : schedule.key],
+      )) &&
+      toset(keys(output.runtime_inputs.component_secret_bindings)) == toset(keys(output.runtime_inputs.component_environments))
+    )
+    error_message = "The foundation must compose an environment for the API and every job container."
+  }
+
+  assert {
+    condition = alltrue([
+      for component, environment in output.runtime_inputs.component_environments :
+      environment["FEATURE_FLAG"] == "on" &&
+      environment["NODE_ENV"] == "production" &&
+      contains(keys(output.runtime_inputs.component_secret_bindings[component]), "EXTERNAL_API_KEY") &&
+      contains(keys(output.runtime_inputs.component_secret_bindings[component]), "DATABASE_URL")
+    ])
+    error_message = "Without extra_env_components, every extra variable must reach the API and every job as before."
+  }
+
+  assert {
+    condition = alltrue([
+      for component, environment in output.runtime_inputs.component_environments :
+      environment == output.runtime_inputs.component_environments["api"] &&
+      setunion(keys(output.runtime_inputs.component_secret_bindings[component]), ["JWT_SECRET"]) ==
+      toset(keys(output.runtime_inputs.component_secret_bindings["api"]))
+    ])
+    error_message = "Unscoped variables must reach every container; the JWT secret is the only built-in difference."
+  }
+}
+
+run "jwt_secret_reaches_only_the_api" {
+  command = plan
+
+  assert {
+    condition = (
+      contains(keys(output.runtime_inputs.component_secret_bindings["api"]), "JWT_SECRET") &&
+      alltrue([
+        for component, bindings in output.runtime_inputs.component_secret_bindings :
+        !contains(keys(bindings), "JWT_SECRET") if component != "api"
+      ])
+    )
+    error_message = "Only the API signs tokens: no job container may bind JWT_SECRET."
+  }
+
+  assert {
+    condition     = !contains(keys(output.migration_inputs.migration_secret_bindings), "JWT_SECRET")
+    error_message = "The migration container must stay without the JWT secret."
+  }
+}
+
+run "scoped_extra_env_reaches_only_its_targets" {
+  command = plan
+
+  variables {
+    extra_runtime_env = {
+      APPLE_IAP_BUNDLE_ID      = "com.example.app"
+      GOOGLE_PLAY_PACKAGE_NAME = "com.example.app"
+    }
+    extra_secret_bindings = {
+      APPLE_IAP_PRIVATE_KEY_BASE64 = {
+        secret_id  = "store-lockbox-secret"
+        version_id = "store-lockbox-version"
+        key        = "apple_private_key"
+      }
+      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64 = {
+        secret_id  = "store-lockbox-secret"
+        version_id = "store-lockbox-version"
+        key        = "google_service_account"
+      }
+    }
+    extra_env_components = {
+      APPLE_IAP_BUNDLE_ID                     = ["api"]
+      APPLE_IAP_PRIVATE_KEY_BASE64            = ["api"]
+      GOOGLE_PLAY_PACKAGE_NAME                = ["api", "outbox"]
+      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64 = ["api", "outbox"]
+    }
+  }
+
+  assert {
+    condition = (
+      contains(keys(output.runtime_inputs.component_environments["api"]), "APPLE_IAP_BUNDLE_ID") &&
+      contains(keys(output.runtime_inputs.component_secret_bindings["api"]), "APPLE_IAP_PRIVATE_KEY_BASE64") &&
+      alltrue([
+        for component in ["outbox", "uploads"] :
+        !contains(keys(output.runtime_inputs.component_environments[component]), "APPLE_IAP_BUNDLE_ID") &&
+        !contains(keys(output.runtime_inputs.component_secret_bindings[component]), "APPLE_IAP_PRIVATE_KEY_BASE64")
+      ])
+    )
+    error_message = "A variable scoped to the API must not reach any job container."
+  }
+
+  assert {
+    condition = (
+      contains(keys(output.runtime_inputs.component_environments["outbox"]), "GOOGLE_PLAY_PACKAGE_NAME") &&
+      contains(keys(output.runtime_inputs.component_secret_bindings["outbox"]), "GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64") &&
+      !contains(keys(output.runtime_inputs.component_environments["uploads"]), "GOOGLE_PLAY_PACKAGE_NAME") &&
+      !contains(keys(output.runtime_inputs.component_secret_bindings["uploads"]), "GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64")
+    )
+    error_message = "A variable scoped to one job must reach that job container and no other."
+  }
+
+  assert {
+    condition     = length(yandex_lockbox_secret_iam_member.runtime_extra) == 1
+    error_message = "Scoping changes which containers bind a secret, not the exact runtime grant for it."
+  }
+}
+
+run "jobs_target_reaches_every_job" {
+  command = plan
+
+  variables {
+    extra_runtime_env    = { FEATURE_FLAG = "on" }
+    extra_env_components = { FEATURE_FLAG = ["jobs"] }
+  }
+
+  assert {
+    condition = (
+      !contains(keys(output.runtime_inputs.component_environments["api"]), "FEATURE_FLAG") &&
+      alltrue([
+        for component in ["outbox", "uploads"] :
+        output.runtime_inputs.component_environments[component]["FEATURE_FLAG"] == "on"
+      ])
+    )
+    error_message = "The jobs target must reach every job container and not the API."
+  }
+}
+
+run "mobile_env_defaults_to_the_components_that_read_it" {
+  command = plan
+
+  variables {
+    extra_runtime_env = {
+      APPLE_IAP_BUNDLE_ID      = "com.example.app"
+      GOOGLE_PLAY_PACKAGE_NAME = "com.example.app"
+    }
+    extra_secret_bindings = {
+      APPLE_IAP_PRIVATE_KEY_BASE64 = {
+        secret_id  = "store-lockbox-secret"
+        version_id = "store-lockbox-version"
+        key        = "apple_private_key"
+      }
+      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64 = {
+        secret_id  = "store-lockbox-secret"
+        version_id = "store-lockbox-version"
+        key        = "google_service_account"
+      }
+      EXPO_PUSH_ACCESS_TOKEN = {
+        secret_id  = "push-lockbox-secret"
+        version_id = "push-lockbox-version"
+        key        = "expo_access_token"
+      }
+    }
+  }
+
+  assert {
+    condition = alltrue([
+      for component, environment in output.runtime_inputs.component_environments :
+      contains(keys(environment), "APPLE_IAP_BUNDLE_ID") == (component == "api") &&
+      contains(keys(output.runtime_inputs.component_secret_bindings[component]), "APPLE_IAP_PRIVATE_KEY_BASE64") == (component == "api")
+    ])
+    error_message = "Only the API verifies App Store purchases: the Apple IAP group must reach no job container."
+  }
+
+  assert {
+    condition = alltrue([
+      for component, environment in output.runtime_inputs.component_environments :
+      contains(keys(environment), "GOOGLE_PLAY_PACKAGE_NAME") == contains(["api", "maintenance"], component) &&
+      contains(keys(output.runtime_inputs.component_secret_bindings[component]), "GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64") == contains(["api", "maintenance"], component)
+    ])
+    error_message = "The Google Play group must reach only the API and the maintenance job that reconciles purchases."
+  }
+
+  assert {
+    condition = alltrue([
+      for component, bindings in output.runtime_inputs.component_secret_bindings :
+      contains(keys(bindings), "EXPO_PUSH_ACCESS_TOKEN") == (component == "notifications")
+    ])
+    error_message = "Only the notifications job sends pushes: the Expo access token must reach no other container."
+  }
+}
+
+run "extra_env_components_overrides_a_mobile_default" {
+  command = plan
+
+  variables {
+    extra_secret_bindings = {
+      EXPO_PUSH_ACCESS_TOKEN = {
+        secret_id  = "push-lockbox-secret"
+        version_id = "push-lockbox-version"
+        key        = "expo_access_token"
+      }
+    }
+    extra_env_components = { EXPO_PUSH_ACCESS_TOKEN = ["api", "notifications"] }
+  }
+
+  assert {
+    condition = alltrue([
+      for component, bindings in output.runtime_inputs.component_secret_bindings :
+      contains(keys(bindings), "EXPO_PUSH_ACCESS_TOKEN") == contains(["api", "notifications"], component)
+    ])
+    error_message = "An extra_env_components entry must replace the default targets of a mobile variable."
+  }
+}
+
+run "extra_env_components_rejects_unknown_targets" {
+  command = plan
+
+  variables {
+    extra_runtime_env    = { FEATURE_FLAG = "on" }
+    extra_env_components = { FEATURE_FLAG = ["scheduler"] }
+  }
+
+  expect_failures = [var.extra_env_components]
+}
+
+run "extra_env_components_rejects_unknown_variables" {
+  command = plan
+
+  variables {
+    extra_env_components = { MISSING_VARIABLE = ["api"] }
+  }
+
+  expect_failures = [var.extra_env_components]
+}
+
+run "extra_env_components_rejects_empty_targets" {
+  command = plan
+
+  variables {
+    extra_runtime_env    = { FEATURE_FLAG = "on" }
+    extra_env_components = { FEATURE_FLAG = [] }
+  }
+
+  expect_failures = [var.extra_env_components]
+}
+
+run "extra_env_rejects_builtin_names" {
+  command = plan
+
+  variables {
+    extra_runtime_env = { NODE_ENV = "development" }
+  }
+
+  expect_failures = [output.runtime_inputs]
 }

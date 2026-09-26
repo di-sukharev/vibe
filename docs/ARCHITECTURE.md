@@ -6,6 +6,14 @@ This guide owns module boundaries, auth and sessions, Prisma rules, and infrastr
 
 `packages/contracts` defines API requests, responses, and errors as Zod schemas. Start every endpoint there. Backend routes declare the schemas through `@hono/zod-openapi`, which also generates `GET /openapi.json`. After a change, check the backend route and service. Then check the feature API adapters, forms, and UI state in `webapp` and `mobile`.
 
+## New feature
+
+`bun run scaffold:feature -- <plural-kebab-name>` generates a full-stack owned resource (a list scoped to the signed-in user, plus create) in the shape of the `users`/`admin` reference slices: a contracts file, a three-layer backend module (`transport`/`application`/`infrastructure`, no `domain` - this shape has no rules beyond ownership), its integration test, a Prisma model file, and a webapp feature with a unit-tested pure model. It inserts text only before an explicit `// scaffold:<name>` marker comment already checked into the contracts index, `backend/src/app.ts`, `backend/prisma/schema/base.prisma` (the `User` back-relation), `webapp/src/routes.tsx`, `webapp/src/features/navigation/model.ts`, and the sidebar icon map in `webapp/src/components/WorkspaceShell.tsx`.
+
+It refuses, before it writes anything, a name that is not kebab-case or is reserved, a missing marker, an existing file, a name that collides with an existing module, feature, contracts file, Prisma model, `User` field, mapped table, or contracts export, and a name whose inserted lines would repeat an identifier or path already in the edited file (for example `user-settings`, whose `userSettingsRoute` exists in `routes.tsx`). It prints the singular it derived; it guesses one only for unambiguous English endings and otherwise asks for `--singular <word>` (for example `buses`, `quizzes`, or `cases`). If any later step fails, `prisma generate` included, or SIGINT or SIGTERM arrives, it deletes what it created and restores the files it edited. `--dry-run` lists the files without touching the tree.
+
+After it runs, create the migration (`bun run --cwd backend prisma:migrate -- --name add_<name>`), then add the feature's row to `CHECKLIST.md`. `bun run test:scaffold` generates the sample features `items` and `invoice-items` in a scratch copy of the repository and runs typecheck, `lint`, the webapp tests, `architecture:check`, and the generated integration tests there, against a test database in its own Docker Compose project that it removes afterward. A change to the reference slices that breaks the templates then fails in `bun run check`, not at the next `scaffold:feature` call.
+
 ## Backend modules
 
 A context lives in `backend/src/modules/<context>`. Dependencies point inward: `transport` → `application` → `domain`.
@@ -50,7 +58,7 @@ Route families:
 - `/api/auth/*` (browsers: `webapp` and Expo Web): the refresh token lives only in the HttpOnly cookie `web_app_demo_refresh`, never in JSON. `COOKIE_SECURE=false` (local) sets `SameSite=Lax`. `COOKIE_SECURE=true` (production) sets `Secure; SameSite=None`, and register, login, refresh, and logout require an `Origin` from `CORS_ORIGINS`.
 - `/api/auth/token/*` (iOS and Android): no cookies. The refresh token travels in JSON and lives in `expo-secure-store`. The access token stays in memory.
 - Access tokens travel as `Authorization: Bearer`. Never keep a browser refresh token in `localStorage`, `sessionStorage`, AsyncStorage, or other JavaScript-readable storage.
-- Browser clients change the cookie only under a Web Lock, so tabs change it one at a time. Without Web Locks, the client fails before the request. Client rules: [webapp/README](../webapp/README.md), [mobile/README](../mobile/README.md).
+- Browser clients change the cookie only under a Web Lock, so tabs change it one at a time. Without Web Locks (plain http on a LAN address, old browsers), `webapp` serializes the changes within its tab, and Expo Web fails before the request. Client rules: [webapp/README](../webapp/README.md), [mobile/README](../mobile/README.md).
 
 Rotation:
 

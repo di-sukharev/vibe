@@ -43,7 +43,15 @@ export function parseDevelopmentSeedConfig(
     throw new Error('DEV_SEED_ADMIN_EMAIL and DEV_SEED_USER_EMAIL must be different')
   }
 
-  return { accounts, databaseUrl }
+  return { accounts, databaseUrl, demo: parseDemoFlag(source.DEV_SEED_DEMO) }
+}
+
+/**
+ * Opt-in local demo data (`DEV_SEED_DEMO=1 bun run dev:seed`): about 40 fixture users besides the
+ * two accounts above, for a webapp that otherwise looks empty. See `demo-fixtures.ts`.
+ */
+function parseDemoFlag(value: string | undefined) {
+  return value !== undefined && ['1', 'true', 'yes'].includes(value.trim().toLowerCase())
 }
 
 function parseCredentials(

@@ -1,8 +1,4 @@
-import {
-  createBackendRuntime,
-  createBackgroundRuntime,
-  type BackendRuntime,
-} from './runtime'
+import { createBackgroundRuntime, type BackendRuntime } from './runtime'
 import { backgroundJobNames, isBackgroundJobName } from './jobs'
 import {
   runLockedBackgroundJob,
@@ -73,7 +69,7 @@ export async function handleProviderJobInvocation(
 export async function handleProviderJobRequest(
   request: Request,
   jobName: string,
-  createRuntime: () => BackendRuntime = createBackendRuntime,
+  createRuntime: () => BackendRuntime = createBackgroundRuntime,
   entries: ScheduleEntry[] = schedules,
 ) {
   if (new URL(request.url).pathname !== '/') {

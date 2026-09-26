@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -9,20 +9,26 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 const workspaceScope = JSON.parse(
   readFileSync(path.join(repositoryRoot, 'packages/contracts/package.json'), 'utf8'),
 ).name.split('/')[0]
+// Every client the workspace could have, kept only for the ones actually checked out. The
+// `mobile` app lives on its own branch: on this one its directory is absent, `clientNames` drops
+// it, and every client-scoped rule below simply has nothing to check there.
+const clientNames = ['webapp', 'website', 'mobile'].filter((name) =>
+  existsSync(path.join(repositoryRoot, name, 'src')),
+)
 const workspaceAliasPattern = new RegExp(
-  `^${workspaceScope.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/(backend|contracts|webapp|website|mobile)(?:/(.*))?$`,
+  `^${workspaceScope.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/(backend|contracts|${clientNames.join('|')})(?:/(.*))?$`,
 )
 const sourceRoots = [
   'backend/src',
   'packages/contracts/src',
-  'webapp/src',
-  'website/src',
-  'mobile/src',
+  ...clientNames.map((name) => `${name}/src`),
 ]
 const sourceExtension = /\.(?:[cm]?[jt]sx?)$/
-const importPattern = /(?:^|\n)\s*(?:import|export)\s+(?:type\s+)?(?:[\s\S]*?\s+from\s+)?['"]([^'"]+)['"]/g
+// The clause before `from` cannot cross a quote, so a side-effect import (`import 'x'`) is not
+// swallowed into the next statement's `from '...'`.
+const importPattern = /(?:^|\n)\s*(?:import|export)\s+(?:type\s+)?(?:[^'"]*?\s+from\s+)?['"]([^'"]+)['"]/g
 const runtimeModulePattern = /\b(?:import|require)\s*\(\s*['"]([^'"]+)['"]\s*\)/g
-const innerLayerAllowedPackages = ['@web-app-demo/contracts', 'zod']
+const innerLayerAllowedPackages = [`${workspaceScope}/contracts`, 'zod']
 const contractAllowedPackages = ['zod']
 const transportForbiddenPackages = ['@prisma/', '@aws-sdk/', 'jose', 'pg']
 
@@ -103,12 +109,12 @@ function checkBackendLayers(filePath, specifier, report) {
     specifier.includes('generated/prisma') ||
     packageMatches(specifier, '@prisma/') ||
     target?.startsWith('backend/src/generated/prisma')
+  // Backend code outside the modules is runtime: env, db, HTTP, storage and email adapters. Inner
+  // layers reach it only through a `port` file, which holds types and no provider code.
   const importsBackendRuntime =
-    target === 'backend/src/db' ||
-    target === 'backend/src/env' ||
-    target === 'backend/src/runtime' ||
-    target?.startsWith('backend/src/http/') ||
-    target?.startsWith('backend/src/generated/')
+    target?.startsWith('backend/src/') &&
+    !target.startsWith('backend/src/modules/') &&
+    !target.endsWith('/port')
 
   if (
     (layer === 'domain' || layer === 'application') &&
@@ -159,7 +165,7 @@ function checkBackendLayers(filePath, specifier, report) {
 }
 
 function checkClientFeatureCycles(files, violations) {
-  for (const client of ['webapp', 'website', 'mobile']) {
+  for (const client of clientNames) {
     const edges = []
     const graph = new Map()
 
@@ -240,7 +246,7 @@ function checkBackendModuleBoundary(filePath, specifier, report) {
   const match = target?.match(/^backend\/src\/modules\/([^/]+)(?:\/(.*))?$/)
   if (!match || match[1] === sourceModule) return
 
-  if (match[2] && match[2] !== 'index' && match[2] !== 'index.ts') {
+  if (match[2]) {
     const boundaryMessage = sourceModule
       ? `module ${sourceModule} must import module ${match[1]}`
       : `code outside module ${match[1]} must import it`
@@ -252,7 +258,7 @@ function checkBackendModuleBoundary(filePath, specifier, report) {
 }
 
 function checkClientBoundary(filePath, specifier, report) {
-  const client = filePath.match(/^(webapp|website|mobile)\/src\//)?.[1]
+  const client = filePath.match(new RegExp(`^(${clientNames.join('|')})/src/`))?.[1]
   if (!client) return
 
   const target = resolveRepositoryImport(filePath, specifier)
@@ -260,7 +266,7 @@ function checkClientBoundary(filePath, specifier, report) {
 
   const sourceFeature = filePath.match(new RegExp(`^${client}/src/features/([^/]+)/`))?.[1]
   const targetFeature = target.match(new RegExp(`^${client}/src/features/([^/]+)(?:/(.*))?$`))
-  if (targetFeature && targetFeature[2] && targetFeature[2] !== 'index' && targetFeature[2] !== 'index.ts') {
+  if (targetFeature?.[2]) {
     const crossesPublicBoundary = !sourceFeature || targetFeature[1] !== sourceFeature
     if (crossesPublicBoundary) {
       report(
@@ -297,7 +303,18 @@ function checkContracts(filePath, specifier, report) {
   }
 }
 
+/**
+ * Returns the imported module as an extensionless repository path, with any trailing `/index`
+ * dropped, so `../env`, `../env.js`, and `../env.ts` all resolve to `backend/src/env` and every
+ * rule below compares one spelling. Bundler resolution maps `.js` onto `.ts`, so all of them
+ * compile.
+ */
 function resolveRepositoryImport(importer, specifier) {
+  const target = resolveRepositoryPath(importer, specifier)
+  return target?.replace(/\.[cm]?[jt]sx?$/, '').replace(/\/index$/, '') ?? null
+}
+
+function resolveRepositoryPath(importer, specifier) {
   if (specifier.startsWith('.')) {
     return normalizePath(path.normalize(path.join(path.dirname(importer), specifier)))
   }

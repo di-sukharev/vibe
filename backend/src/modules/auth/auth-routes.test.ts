@@ -6,12 +6,13 @@ import { loadEnv } from '../../env'
 
 const env = loadEnv({
   DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
-  ACCESS_TOKEN_TTL_SECONDS: '60',
-  COOKIE_SECURE: 'true',
+  // COOKIE_SECURE=true makes this a production-like runtime, which requires a generated secret.
+  JWT_SECRET: '0123456789abcdef'.repeat(4),
   CORS_ORIGINS: 'https://web.example.com',
-  JWT_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+  ACCESS_TOKEN_TTL_SECONDS: '60',
   TRUST_PROXY: 'true',
   TRUSTED_PROXY_CLIENT_IP_HEADER: 'do-connecting-ip',
+  COOKIE_SECURE: 'true',
 })
 
 describe('auth routes', () => {

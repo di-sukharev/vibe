@@ -23,6 +23,7 @@ import { createAuthModule, type AuthHttpEnv } from './modules/auth'
 import { createNotificationsModule } from './modules/notifications'
 import { createUploadsModule } from './modules/uploads'
 import { createUsersModule } from './modules/users'
+// scaffold:import
 import { createRateLimitStores } from './rate-limit'
 import {
   apiCorsAllowedHeaders,
@@ -96,6 +97,7 @@ export function createApp({
     requireAuth: auth.requireAuth,
     storage: storage.storage,
   })
+  // scaffold:module
   const app = new OpenAPIHono<AuthHttpEnv>({ defaultHook: validationErrorHook })
   app.openAPIRegistry.registerComponent('securitySchemes', 'BearerAuth', {
     type: 'http',
@@ -147,6 +149,7 @@ export function createApp({
     app.use('/api/users/*', middleware)
     app.use('/api/admin/*', middleware)
     app.use('/api/uploads/*', middleware)
+    // scaffold:security
   }
   // Ingress budget for the subscription routes, uncomment together with them. Without a `store`
   // they count in process memory whatever RATE_LIMIT_STORE says; add their policies to
@@ -208,6 +211,7 @@ export function createApp({
   app.route('/api/notifications', notifications.createRoutes(auth.authenticateAccessToken))
   app.route('/api/uploads', uploads.routes)
   // app.route('/api/webhooks', billing.webhookRoutes)
+  // scaffold:route-mount
 
   // Only the filesystem driver needs the backend to serve the URLs it signs. With an S3 driver
   // the browser uploads straight to the bucket and there is nothing to mount here.

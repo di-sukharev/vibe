@@ -78,7 +78,7 @@ Google Play Console:
 
 `mobile/.env.example` lists the `EXPO_PUBLIC_IAP_*` values. The app bundle includes every `EXPO_PUBLIC_*` value, so these hold only public product IDs and package names. An Android plan needs a product ID and a base plan ID. Subscription management on Android needs `EXPO_PUBLIC_IAP_ANDROID_PACKAGE_NAME`.
 
-In production, put the public values in `extra_runtime_env`. Put the two secrets in `TF_VAR_extra_runtime_secret_env` as JSON on DigitalOcean, or in Lockbox through `extra_secret_bindings` on Yandex Cloud ([DEPLOYMENT](DEPLOYMENT.md)). Terraform gives the API and every job runner the same environment.
+In production, put the public values in `extra_runtime_env`. Put the two secrets in `TF_VAR_extra_runtime_secret_env` as JSON on DigitalOcean, or in Lockbox through `extra_secret_bindings` on Yandex Cloud ([DEPLOYMENT](DEPLOYMENT.md)). Terraform hands the App Store group only to the API, and the Google Play group only to the API and the `maintenance` job ([DEPLOYMENT](DEPLOYMENT.md#extra-runtime-variables)).
 
 ## Not implemented
 
