@@ -1,56 +1,35 @@
-# Мобильный шаблон
+# Mobile template
 
-Рабочее Expo-приложение находится в ветке `mobile`, а не в `master`.
+The working Expo app lives on the `mobile` branch, not on `master`. That branch adds the Expo app, development builds, Maestro E2E, Expo Push, and social sign-in. App Store and Google Play subscriptions are in the code but disabled by configuration.
 
-Для нового проекта:
-
-```bash
-git clone <repo-url>
-cd <repo-directory>
-git switch mobile
-git fetch origin
-bun install --frozen-lockfile
-bun run mobile:template:check -- --published
-```
-
-Для существующего репозитория:
+## Start from the mobile branch
 
 ```bash
 git fetch origin
+git merge-base --is-ancestor origin/master origin/mobile
 git switch mobile
 bun install --frozen-lockfile
-bun run mobile:template:check -- --published
 ```
 
-Ветка содержит Expo-приложение, настройку development build, Maestro E2E, Expo Push и вход через социальные аккаунты. Рабочие подписки App Store и Google Play включены в код, но отключены настройкой.
+Stop setup if the ancestry check fails; the template owner must merge `master` into `mobile` first. Never resolve template conflicts inside a product project.
 
-До работы с платежами прочитай [docs/WEB_SURFACES.md](../docs/WEB_SURFACES.md). Mobile использует отдельный нативный интерфейс оплаты. Основа цифровых подписок — покупки App Store/Google Play. По требованиям продукта можно добавить оплату новой или сохранённой картой, Apple Pay и Google Pay. Не направляй эти платежи через `website` или `webapp`. Перед выбором способа оплаты проверь текущие правила магазина для типа продукта, витрины и региона.
+## Branch ownership
 
-Общие изменения web, backend, инфраструктуры, деплоя и контрактов делай в `master`. Мобильное приложение и нужные только ему изменения backend/контрактов делай в `mobile`.
+- Make shared web, backend, infrastructure, deployment, and contract changes on `master`.
+- Make mobile app changes, and backend or contract changes that only mobile needs, on `mobile`.
+- Mobile payments are native and separate from the browser checkout. Read [WEB_SURFACES.md](../docs/WEB_SURFACES.md) first, and check the current store rules for the product, storefront, and region.
 
-Владелец шаблона переносит `master` в `mobile`, согласует документацию и реестр возможностей, затем проверяет и публикует обе ветки. До публикации чистого кандидата:
+## Template owner: sync and publish
+
+Merge `master` into `mobile`, align docs and the capability registry, then check and publish both branches.
 
 ```bash
 git fetch origin
 bun install --frozen-lockfile
-bun run mobile:template:check
+bun run mobile:template:check                 # before publishing a clean candidate
+bun run mobile:template:check -- --published  # after the push
 ```
 
-После push проверь опубликованную ветку:
+The default mode accepts a clean commit ahead of `origin/mobile`; `--published` requires `HEAD` to equal it. Both modes require a clean tree on `mobile` that contains the current `origin/master`, and exactly the payments, push, and social capabilities in state `available`. The check then runs `bun run check` on the synchronized project and the Maestro rule audit.
 
-```bash
-git fetch origin
-bun run mobile:template:check -- --published
-```
-
-Обычная проверка допускает чистый коммит впереди `origin/mobile`. Режим `--published` требует равенства `HEAD` и этой удалённой ветки. Оба режима требуют:
-
-- Текущий `origin/master` входит в `mobile`.
-- Файлы mobile/IAP, межплатформенные контракты и согласованные инструкции агентов присутствуют.
-- Только возможности payments, push и social имеют состояние `available`.
-
-Проверка выполняет `bun run check` во всём синхронизированном проекте: шаблон, архитектуру, типы, lint и тесты с backend integration. Затем выполняет аудит правил Maestro.
-
-Если команды нет или проверка не прошла, останови установку или публикацию шаблона. Владелец шаблона должен синхронизировать ветки. Не устраняй конфликты шаблона в новом продуктовом проекте.
-
-После установки состояния возможностей меняются на `included` или `removed`. Для релизов такого проекта проверка шаблона больше не подходит. Используй записанные инструкции проекта: локальные тесты, типы, песочницы магазинов и релиз.
+After setup, capability states become `included` or `removed`, and this template check no longer applies. Use the project's own recorded checks for releases.

@@ -1,67 +1,63 @@
-# Команды репозитория
+# Commands
 
-Выполняй `bun run <команда>` из корня. Имена ниже — отдельные команды, не варианты для вставки одной строкой.
+Root scripts from [package.json](../package.json). Run `bun run <script>` from the repository root. "(Docker)" means that it needs Docker.
 
-## Разработка и сборка
+## Develop and build
 
-| Команда | Результат |
-| --- | --- |
-| `dev` | Все приложения параллельно, включая scheduler |
-| `dev:backend`, `dev:webapp`, `dev:website` | Одно приложение |
-| `storybook:webapp`, `storybook:website` | Каталоги компонентов на `6006` / `6007` |
-| `storybook:build`, `storybook:build:webapp`, `storybook:build:website` | Оба каталога или один |
-| `build` | Production build/typecheck/export, где скрипты заданы |
-| `dev:backend:s3` | Backend с локальным S3 |
-| `storage:local:start`, `storage:local:status`, `storage:local:stop`, `storage:local:env` | Локальный S3; stop сохраняет том |
-| `static:precompress` | `.br`/`.gz` рядом с текстовыми файлами в `webapp/dist` и `website/dist` для [Caddy/nginx](DEPLOYMENT.md#свой-сервер) |
+- `dev`: all apps in parallel; the backend includes the scheduler.
+- `dev:backend|webapp|website`: one app.
+- `dev:backend:s3`: backend with local S3 (Docker).
+- `storage:local:start|status|stop|env`: local S3 container; `stop` keeps its volume ([STORAGE](STORAGE.md)).
+- `storybook:webapp|website`: catalogs on ports 6006 and 6007.
+- `storybook:build[:webapp|:website]`: static catalogs.
+- `build[:webapp|:website|:backend]`: production builds; backend and contracts only type-check.
+- `static:precompress`: `.br` and `.gz` copies of text assets in `webapp/dist` and `website/dist` for self-hosting ([DEPLOYMENT](DEPLOYMENT.md)).
 
-Облачные релизы не читают локальный `dist`: Yandex собирает Git-архив в Docker, DigitalOcean — в App Platform. Там сжатие выполняет провайдер, если оно доступно.
+## Checks and tests
 
-## Проверки и тесты
+[TESTING](TESTING.md) has focused runs, test databases, and the audit process.
 
-| Команда | Проверка |
-| --- | --- |
-| `check` | [Полный локальный прогон](../README.md#checks) |
-| `template:check` | Опрос, реестр возможностей, правила агентов, Markdown-ссылки и якоря |
-| `typecheck`, `lint`, `architecture:check` | Типы всех проектов; ESLint webapp; границы модулей |
-| `audit` | Зависимости; ошибка при непроверенной уязвимости; нужен реестр пакетов |
-| `test` | Infra, contracts, backend, webapp, website; нужен Docker |
-| `test:terraform` | Все Terraform-корни; нужен CLI; вне `check` |
-| `test:infra`, `test:contracts` | Защита инфраструктуры без изменений облака; Zod-контракты |
-| `test:backend` | Unit и integration |
-| `test:backend:integration` | PostgreSQL; фильтр: путь относительно backend и `-t "name"` |
-| `test:webapp`, `test:website` | Клиенты; без записи сборок |
-| `test:build-contracts` | Собирает webapp/website; проверяет CSS без story-утилит и отдельный ленивый hero-chunk |
-| `test:storage:s3` | Контракт с настоящим локальным S3; нужен Docker |
-| `e2e:webapp` | Playwright, backend, Vite; фильтр: spec и `-g "name"` |
-| `e2e:webapp:s3` | Аватар с локальным S3 |
+- `check`: `template:check` → `architecture:check` → `typecheck` → `lint` → `test` → `test:build-contracts` → `audit` (Docker, package registry).
+- `template:check`: `CHECKLIST.md` and its registry, the `CLAUDE.md` import, the `AGENTS.md` word budget, Markdown links.
+- `architecture:check`: module and feature import boundaries.
+- `typecheck[:webapp|:website|:backend]`: types, all or one.
+- `lint`: webapp ESLint, including UI rules.
+- `audit`: `bun audit`; fails on any advisory.
+- `test`: `test:infra`, `test:contracts`, `test:backend`, `test:webapp`, `test:website` (Docker).
+- `test:infra`: tests of all repository scripts in `scripts/`; no cloud changes.
+- `test:contracts`: Zod contracts.
+- `test:backend`: `test:backend:unit`, then `test:backend:integration` (Docker).
+- `test:webapp|website`: client unit tests; no build.
+- `test:build-contracts`: builds `webapp` and `website`, then checks `website/dist`.
+- `test:storage:s3`: storage contract against local S3 (Docker).
+- `test:terraform`: every Terraform root; needs the Terraform CLI; not in `check`.
+- `smoke:backend:docker`: backend image against a test database (Docker).
+- `e2e:webapp`: Playwright journeys (Docker).
+- `e2e:webapp:s3`: avatar journey against local S3 (Docker).
+- `screens`: screenshot tour of webapp and website pages (Docker, [UI](UI.md)).
+- `mobile:template:check`: release gate of the `mobile` branch ([mobile/README](../mobile/README.md)).
 
-Из тестовых скриптов только `test:build-contracts` собирает приложения.
+## Database and jobs
 
-## База данных и фоновые задачи
+Run these as `bun run --cwd backend <script>`, except the root `dev:seed`.
 
-Здесь выполняй `bun run --cwd backend <команда>`, кроме корневого `bun run dev:seed`.
+- `dev:seed`: creates or updates the local demo accounts ([LOCAL_DATABASE](LOCAL_DATABASE.md)).
+- `prisma:migrate`: creates and applies a development migration.
+- `prisma:deploy`: applies existing migrations.
+- `prisma:validate`: validates `schema.prisma`.
+- `db:deploy`: the release database step (ownership, migrations, privileges, first administrator if needed).
+- `db:adopt-owner`: lists objects that a legacy owner still owns; `-- --apply` transfers them after the user confirms ([DEPLOYMENT](DEPLOYMENT.md)).
+- `start:cron -- <job>`: one job once, for example `outbox:drain`.
+- `start:scheduler`: jobs on the schedules in `backend/src/job-schedules.json` ([BACKGROUND_JOBS](BACKGROUND_JOBS.md)).
+- `start:worker`: `workerLoops` in `backend/src/worker.ts`, empty by default.
 
-| Команда | Действие |
-| --- | --- |
-| `prisma:migrate`, `prisma:deploy` | Создать и применить миграцию в разработке; применить готовые миграции |
-| `db:deploy` | Миграции релиза, первый администратор при необходимости, проверка его входа |
-| `db:adopt-owner` | Просмотр владельцев объектов старой БД; `-- --apply` — только после проверки и подтверждения по инструкции |
-| `start:cron -- <job>` | Один запуск задания, например `outbox:drain` |
-| `start:scheduler` | `job-schedules.json`: outbox каждую минуту, загрузки каждый час, auth ежедневно в 03:00 UTC |
-| `start:worker` | Циклические задачи; пуст, пока они не добавлены |
+## Infrastructure and releases
 
-`bun run dev:seed` создаёт или обновляет локальные демоаккаунты. Задания описаны в [BACKGROUND_JOBS.md](BACKGROUND_JOBS.md).
+`<provider>` is `digitalocean` or `yandex`. Follow [infra/README](../infra/README.md).
 
-## Инфраструктура и релизы
-
-Здесь `<provider>` — `digitalocean` или `yandex`. Следуй [инструкции инфраструктуры](../infra/README.md).
-
-| Команда для `bun run` | Действие |
-| --- | --- |
-| `infra:bootstrap -- <provider> --new` | Создать удалённый state; без `--new` — продолжить; потерянный доступ восстанавливай по инструкции |
-| `infra:apply -- <provider>` | Применить проверенный сохранённый план основы с постоянными данными |
-| `infra:import -- <provider> <root> <address> <id> [adoption flags]` | Импортировать ресурс и проверить сохранённый план |
-| `infra:output -- <provider>` | Вывести безопасные эксплуатационные параметры |
-| `infra:plan -- <provider>` | Проверить защищённый production-план без применения |
-| `release -- <provider>` | Собрать, мигрировать, переключить релиз, опубликовать и проверить |
+- `infra:bootstrap -- <provider> --new`: creates remote state. Without `--new`, continues.
+- `infra:plan -- <provider>`: the protected production plan; applies nothing.
+- `infra:apply -- <provider>`: applies the reviewed saved plan of the foundation.
+- `infra:import -- <provider> <root> <address> <id> [adoption flags]`: imports a resource and checks a saved plan.
+- `infra:output -- <provider>`: prints safe operational values.
+- `release -- <provider>`: builds, migrates, switches, publishes, and checks a release.

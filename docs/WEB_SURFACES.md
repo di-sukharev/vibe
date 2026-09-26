@@ -1,108 +1,59 @@
-# Приложения, данные и платежи
+# Web surfaces
 
-Этот документ задаёт границы между `website`, `webapp`, `mobile` и `backend`. Прочитай его до работы с публичными данными, каталогом, предложениями, корзиной, checkout, заказами, подписками, доступом и платежами. README каждого приложения описывает реализацию; здесь определён владелец поведения.
+This guide names the owner of public data, carts, checkout, orders, subscriptions, access, and payments.
 
-Состав продукта задаёт `CHECKLIST.md`. Правила ниже применяются после включения возможности владельцем продукта. Они не меняют `absent` на реализованное состояние. В основной ветке нет браузерной корзины, checkout и оплаты.
+`master` has no browser cart, checkout, or payment code; these rules apply once [CHECKLIST](../CHECKLIST.md) includes one. Never infer a payment provider from inactive code.
 
-## Ответственность приложений
+## App ownership
 
-| Приложение | Отвечает за | Не отвечает за |
+| App | Owns | Never owns |
 | --- | --- | --- |
-| `website` | Публичные данные, SEO, статический каталог; при необходимости анонимный локальный выбор или корзина | Кабинеты, окончательные суммы, создание и статус платежа, второй checkout |
-| `webapp` | Вход, минимальный кабинет, импорт корзины, checkout, заказы, подписки и браузерная оплата | Копию SEO-каталога или второй публичный сайт |
-| `mobile` | Нативный кабинет, покупки магазинов и нужные продукту карты/кошельки | Обход правил магазина через браузер или принудительный браузерный checkout ради отказа от нативной реализации |
-| `backend` | Публичные DTO для сборки, цены и наличие, черновики заказа, заказы, доступ, провайдеры, webhooks и задачи пересборки | Композицию страниц и клиентские решения об оплате |
+| `website` | Public data, SEO, the static catalog, an optional anonymous cart, small public auth features such as the header sign-in state | Account areas, payment SDKs, card forms, secrets, final totals, order state, webhooks, a second checkout |
+| `webapp` | Sign-in, a minimal account area, cart import, checkout, orders, subscriptions, browser payments | A copy of the SEO catalog |
+| `mobile` | A native account area, store purchases, native cards and wallets | Store-rule workarounds, a forced browser checkout |
+| `backend` | Public DTOs for builds, prices, availability, orders, access, payment providers, webhooks, rebuild jobs | Page composition, client payment decisions |
 
-Публичный сайт и кабинет разделены намеренно. В кабинет добавляй только нужные регистрацию, checkout, статусы, историю и настройки. Сам факт входа не требует сложной панели.
+The browser has one checkout, in the signed-in `webapp`. A provider page, wallet sheet, or redirect inside it does not move checkout to `website`.
 
-В браузере один checkout. Пользователь выбирает товар на `website`, но начинает оплату в авторизованном `webapp`. Backend управляет заказом и платежом. Страница провайдера, окно кошелька или перенаправление могут быть частью этого пути; они не передают checkout сайту.
+## Website data and freshness
 
-## Данные статического сайта и свежесть
+`astro build` can fetch, validate, and embed a public backend snapshot. When it does:
 
-По умолчанию `website` — SSG с готовыми HTML и ресурсами. При сборке Astro может получить публичный снимок backend, проверить контракт и включить его в статику. Это получение данных при сборке, не рендеринг по запросу.
+- Publish only data that is safe to keep in static files indefinitely.
+- Define the DTO in `packages/contracts`, and check both sides.
+- Keep the build credential on the server, never in `PUBLIC_*` or the build output.
+- Fail the build when a required snapshot is missing or invalid. Never publish an empty or stale catalog.
+- Deploy the backward-compatible backend contract before the cloud build uses it.
+- Displayed prices and availability are informational. The backend decides at order creation.
 
-Если сайт получает данные backend при сборке:
+Database changes reach the site only through a release until the rebuild controller in [BACKGROUND_JOBS](BACKGROUND_JOBS.md) exists. When rebuilds cannot meet the freshness need, use the rendering ladder in [website/README](../website/README.md).
 
-- Публикуй только данные, безопасные для постоянного хранения в HTML и ресурсах.
-- Опиши DTO в `packages/contracts` и проверь источник и потребителя.
-- Храни ключ сборки только на сервере, вне `PUBLIC_*` и результата сборки.
-- Останавливай сборку при недоступном или неверном обязательном снимке. Не публикуй пустой каталог или устаревшую подмену.
-- Сначала разверни обратно совместимый backend-контракт, затем подключай его к облачной сборке.
-- Считай показанные цены и наличие справочными. При создании заказа решает backend.
+## Browser cart and checkout
 
-Если изменения БД должны появляться на сайте, реализуй управление пересборкой и деплоем. Сохраняй как минимум `desiredRevision`, `publishedRevision`, ID/статус активного деплоя провайдера и запрошенную ревизию.
+1. `website` keeps the selection or cart in browser storage.
+2. A versioned schema in `packages/contracts` carries stable product, offer, or variant IDs and quantities. Client prices, discounts, totals, user data, and payment data are untrusted.
+3. The checkout button hands the data to `/app/checkout` at `PUBLIC_WEBAPP_URL`. A small, non-sensitive payload goes in the URL fragment, which stays out of HTTP logs. Large or sensitive data or a cross-device handoff uses a short-lived opaque backend token.
+4. `webapp` validates and imports the data once, removes it from the URL, and keeps it through registration or sign-in.
+5. A guest signs in or registers and returns to `/app/checkout`. A signed-in user continues at once.
+6. The backend resolves current products, prices, availability, discounts, taxes, and entitlements. Show material changes and get consent before payment.
+7. `webapp` asks the backend to create or resume the payment. Secrets, order state changes, and verified idempotent webhooks stay in the backend. A browser success URL never confirms a payment.
 
-В одной транзакции PostgreSQL с публикацией данных обновляй `desiredRevision` и добавляй уникальную задачу `website:rebuild:<revision>`. Главный источник — строка состояния. Outbox только запускает короткую сверку. Корректность не должна зависеть от повторного открытия завершённой задачи.
+Add `/app/checkout` to `workspaceRoutesByRole` (see [webapp/README](../webapp/README.md)) so `returnTo` accepts it. Never accept another origin. Test the guest path from selection through registration to the restored checkout.
 
-Сверка допускает один активный деплой и переживает перезапуск:
+Keep the cart recoverable after a cancel or failure at any step. Handle removed items, changed prices or quantities, repeated requests, an expired handoff, late webhooks, a return in another tab, and access recovery.
 
-1. Заблокируй строку состояния пересборки.
-2. Если деплой уже активен, проверь его по ID. После неоднозначного ответа запуска сначала найди соответствующий деплой у провайдера; не запускай второй вслепую.
-3. Endpoint сборки читает согласованный публичный DTO и реальную ревизию БД. Создай неизменяемую сборку с ревизией. Переключи её атомарно или через равноценный blue-green релиз. Маркер ревизии с обходом кэша входит в эту сборку.
-4. Приём запроса провайдером ещё не означает публикацию. После его успеха проверь маркер через публичный сайт/CDN. Запиши в `publishedRevision` именно ревизию полученной сборки.
-5. Если `desiredRevision` новее, запусти ровно один следующий деплой. Иначе заверши работу.
+On every client, card and wallet details enter only the provider's verified PCI-compliant UI or SDK. PAN and CVC never reach your own fields, APIs, logs, analytics, or storage; the app handles only opaque token IDs.
 
-Периодическое задание `website:rebuild:reconcile` выполняет ту же короткую сверку. Оно восстанавливает работу после перезапуска, потери сигнала, удаления outbox-строки или долгой сборки. Не жди облачную сборку внутри одной outbox-попытки.
+## Mobile payments
 
-Последовательный запуск не даёт старой сборке заменить новую. Публичный маркер доказывает, что реально получает пользователь.
+`mobile` has its own payment UI and transport; it does not need `website` or `webapp`. The `mobile` branch ships App Store and Google Play subscriptions through `expo-iap`, off by default; `docs/IAP.md` on that branch covers setup. Native cards, Apple Pay, and Google Pay are optional; the wallets are not In-App Purchase or Play Billing.
 
-Outbox хранит запросы и повторы без нового сервиса очереди. Исполнитель зависит от хостинга в `CHECKLIST.md`. DigitalOcean может запустить сборку из Git по запросу деплоя. У базового Yandex Object Storage автоматического сборщика нет. Сохраняй `absent`, пока не появится отдельный защищённый компонент сборки/загрузки. Альтернатива по требованиям свежести — ручной релиз или runtime-рендеринг. См. пересборку сайта в [BACKGROUND_JOBS.md](BACKGROUND_JOBS.md).
+Choose the method by product, storefront, region, and current store rules, checked before each change:
 
-SSG с пересборкой остаётся стандартом. SSR, server islands и клиентская загрузка SEO-данных требуют записанной потребности в свежести или персонализации. Если цикл пересборки её не покрывает, до реализации запиши изменение runtime и деплоя в `CHECKLIST.md`. Частые пересборки не заменяют верный выбор границы для постоянно меняющихся цен и остатков.
+- Digital features, content, and subscriptions used in the app usually go through the store, unless a current regional or program exception applies.
+- Physical goods and services used outside the app may use native cards or wallets.
+- Never add a link or a browser workaround that breaks store payment rules.
 
-## Браузерная корзина и checkout
+When web and mobile sell the same order or access, the backend keeps one normalized model. Receipts, tokens, webhooks, and idempotency belong to payment infrastructure, not to UI components.
 
-Стандартный путь до входа:
-
-1. `website` хранит выбор или корзину локально в браузере.
-2. Версионированная схема `packages/contracts` передаёт стабильные ID товара/предложения/варианта и количества. Цены, скидки, суммы, данные пользователя и платёжные данные клиента не считаются достоверными.
-3. Кнопка checkout передаёт данные на `PUBLIC_WEBAPP_URL` в `/app/checkout`. Для небольшого нечувствительного набора используй фрагмент URL, который не попадает в HTTP-логи. Для больших, чувствительных данных или переноса между устройствами нужен краткоживущий непрозрачный токен backend. Второй checkout не нужен.
-4. `webapp` проверяет и однократно импортирует данные, удаляет их из URL и сохраняет выбор при регистрации/входе.
-5. Гость входит или регистрируется и возвращается в `/app/checkout`. Авторизованный пользователь продолжает сразу.
-6. Backend определяет текущие товары, цены, наличие, скидки, налоги и права. Покажи значимые изменения и получи согласие до оплаты.
-7. `webapp` просит backend создать или продолжить платёж. Секреты, смена состояния заказа и проверенные идемпотентные webhooks остаются в backend. Один success URL браузера не подтверждает оплату.
-
-Карты и кошельки в браузере/mobile должны собирать платёжные данные только в проверенном PCI-совместимом интерфейсе или SDK провайдера. Используй его токенизацию. PAN/CVC не должны попадать в собственные поля, API, логи, аналитику или хранилище. Приложение работает только с непрозрачными ID платёжного метода/токена.
-
-Сохраняй возможность восстановить корзину после отмены или ошибки регистрации, входа, оплаты и перехода к провайдеру. Обработай удалённые товары, смену цен/количества, повторные запросы, истёкшую передачу, поздние webhooks и возврат в другой вкладке.
-
-Не размещай в `website` платёжный SDK, форму карты, секреты, окончательную сумму, автомат состояний заказа или webhooks.
-
-Расширь существующий `returnTo`: добавь `/app/checkout` в типизированную карту маршрутов по ролям. Проверь путь гостя через регистрацию к восстановленному checkout. Не разрешай произвольные origin в обратном переходе.
-
-## Мобильные платежи
-
-У mobile собственные интерфейс и транспорт оплаты. В ветке `mobile` уже есть основа backend/контрактов/Expo для подписок App Store и Google Play через `expo-iap`. Она работает после явного включения возможности и настройки реальных товаров, ключей и тестовых аккаунтов. До включения в `CHECKLIST.md` оплата отключена.
-
-По требованиям продукта можно добавить новую или сохранённую карту, Apple Pay и Google Pay. Архитектура не требует направлять их через `website` или `webapp`. Кошельки Apple Pay/Google Pay не равны App Store In-App Purchase/Google Play Billing.
-
-Выбирай метод по товару, витрине, региону и текущим правилам:
-
-- Цифровые функции, контент и подписки внутри приложения обычно используют магазин, кроме действующих региональных или программных исключений.
-- Физические товары и услуги вне приложения могут использовать подходящие нативные карты/кошельки.
-- Не добавляй ссылку или браузерный обход ради нарушения платёжных правил магазинов.
-
-До реализации или изменения пути проверь текущие правила Apple и Google. Если web и mobile продают одинаковый заказ или доступ, backend хранит единую нормализованную модель. Клиенты сохраняют собственный допустимый транспорт и UI. Чеки, токены, webhooks и идемпотентность принадлежат платёжной инфраструктуре, не компонентам интерфейса.
-
-Настройка и проверки магазинов находятся в `docs/IAP.md` ветки `mobile`. Источники:
-
-- [Правила Apple: платежи](https://developer.apple.com/app-store/review/guidelines/#business)
-- [Apple Pay](https://developer.apple.com/apple-pay/)
-- [Платёжные правила Google Play](https://support.google.com/googleplay/android-developer/answer/10281818)
-- [Google Play Billing](https://developer.android.com/google/play/billing)
-- [Google Pay для Android](https://developers.google.com/pay/api/android/overview)
-
-## Проверка реализации
-
-До реализации:
-
-- Убедись, что возможность в `CHECKLIST.md` имеет состояние `included` или явно переводится из `absent` в реализованное состояние.
-- Определи данные из репозитория, данные backend при сборке и допустимую задержку обновления.
-- Сначала задай общие контракты публичного товара и передачи корзины.
-- Выбери один браузерный checkout и нужные нативные пути. Не выводи выбор провайдера из неактивного кода.
-- Определи успех, отмену, ошибку, повторы, идемпотентность, изменение цены, недоступность товара, поздний webhook и восстановление доступа.
-- Для автопересборки реализуй постоянное состояние ревизий, один активный деплой, короткие запуск/сверку и публичный маркер. Следуй `BACKGROUND_JOBS.md`. На Yandex сначала нужен отдельный сборщик/загрузчик.
-- Проверь браузерный путь от публичного выбора через вход до восстановления оплаты. Нативные пути проверь на требуемых устройствах или в песочницах магазинов.
-- Обнови реестр возможностей и README приложения: код готов, ждёт настройки или удалён.
-
-Деплой провайдера описывай в `DEPLOYMENT.md`/`YANDEX_CLOUD.md`, нативные покупки — в ветке `mobile`, правила кода — в README приложения. Здесь сохраняй общие границы продукта.
+Sources: [Apple payment guidelines](https://developer.apple.com/app-store/review/guidelines/#business), [Google Play payments policy](https://support.google.com/googleplay/android-developer/answer/10281818), [Google Play Billing](https://developer.android.com/google/play/billing).

@@ -1,142 +1,76 @@
-# Веб-приложение
+# Webapp
 
-`webapp` — CSR-клиент для работы после входа, с отдельными разделами по ролям. SEO ему не нужен; публичные страницы находятся в `website`. Клиент делит API-контракты с mobile и централизует серверные данные, формы, вход и навигацию.
+`webapp` is the client-rendered (CSR) React app for signed-in users, with one workspace per role. It needs no SEO: public pages live in [website](../website/README.md). Carts, checkout, orders, and payments follow [WEB_SURFACES](../docs/WEB_SURFACES.md); `master` has none of them.
 
-До работы с передачей данных, корзиной, checkout, заказами, подписками, доступом и платежами прочитай [docs/WEB_SURFACES.md](../docs/WEB_SURFACES.md).
+## Stack
 
-## Состояние приложения
+React, TypeScript, Vite, Tailwind CSS, shadcn/ui (Radix UI, Hugeicons), TanStack Router, Query, and Form (writes use `useMutation`), Zod from `@web-app-demo/contracts`, Storybook, Playwright, and ESLint.
 
-Этот раздел обновляется при установке. Если статус в [CHECKLIST.md](../CHECKLIST.md) — `in progress` или `completed`, а `webapp` не выбран, добавь сюда причину отсрочки браузерной части. При подключении приложения отметь его в опросе и обнови заметку до разработки.
+## Commands
 
-## Стек
+From the root: `bun run dev:webapp`, `build:webapp`, `typecheck:webapp`, `lint`, `test:webapp`, and `storybook:webapp` (port 6006). Scripts are in [package.json](package.json); the index is [COMMANDS](../docs/COMMANDS.md).
 
-React, TypeScript, Vite, Tailwind CSS, shadcn/ui, Radix UI, TanStack Query/Form/Router, Zod из `@web-app-demo/contracts`, shadcn CLI, Playwright и ESLint.
+## Environment
 
-## Команды
+`VITE_API_URL` is the backend origin. The default is `http://localhost:3000`; to change it locally, copy [.env.example](.env.example) to `webapp/.env`. Vite inlines the value at build time, and each release sets it from Terraform. After the API origin changes, release again: a deployed build keeps the old address.
 
-```bash
-bun run dev
-bun run build
-bun run typecheck
-bun run lint
-bun run test
-bun run e2e
-bun run e2e:ui
-bun run ui:info
-bun run storybook
-bun run storybook:build
-```
+## Session rules
 
-Из корня: `bun run dev:webapp`, `bun run build:webapp`, `bun run typecheck:webapp`, `bun run test:webapp`, `bun run e2e:webapp`, `bun run storybook:webapp`, `bun run storybook:build:webapp`.
+`src/features/auth` owns the browser session. Keep these rules:
 
-Storybook работает локально на порту `6006`. Он показывает все модули `src/components/ui`, независимые от маршрутов компоненты типографики и панелей, а также учебные формы, метрики, таблицы и состояния данных.
+- Keep the access token only in memory. The refresh token stays in the backend's HttpOnly cookie. Never copy a token to storage that JavaScript can read.
+- A Web Lock (`browser-auth-coordinator.ts`) serializes every auth-cookie change across the tabs of one origin. Put new cookie-changing calls behind it.
+- Each session change publishes a new session version to the other tabs (`session-coordinator.ts`). Before another user's session applies, each tab drops its access token and session cache. Then it restores the session from the cookie or clears its UI.
+- Refresh and retry compare the JWT subject (`sub`). If the refreshed token belongs to another user, the client clears the session and does not retry.
+- Put user-scoped query keys under `['session', ...]`, built from `sessionQueryKeys.all` in `@/features/auth`. Session changes cancel and remove these queries; other keys survive.
+- If the server sign-out fails, keep the cookie and the local state, and show an error with a retry. Never show a sign-out that did not happen.
+- Call authenticated endpoints through `useAuth().transport`. On a 401, it refreshes once and retries. Pass the query `signal` so that a superseded request aborts.
 
-Stories используют реальные глобальные CSS, темы, шрифты, подсказки и порталы. Маршруты, auth/API-состояние и компоненты функций туда не входят. Статический каталог нужен только для локальных проверок; production-сборка Vite его не содержит.
+## Routes and guards
 
-## Переменные окружения
+`src/routes.tsx` registers the routes, and `src/pages.tsx` composes them from public feature APIs.
 
-При необходимости создай `webapp/.env`:
+- Public pages: `/login`, `/signup`, `/forgot-password` (guest-only), and `/reset-password`. The reset page reads the one-time token from the URL fragment and removes it from history.
+- Role `user` owns the `/app` workspace, and role `admin` owns `/admin`. `workspaceRoutesByRole` in `src/features/navigation/model.ts` lists every workspace route; the sidebar shows a subset.
+- Guards wait for the session restore; a restore error shows a retry.
+- A guest on `/` goes to `/login`; on a workspace route, to `/login?returnTo=<path>`.
+- After sign-in, `safeReturnPath` accepts only a same-origin path from the user's own workspace list. Otherwise, the user goes to the role home (`/app` or `/admin`).
+- A signed-in user on `/` or a guest-only page goes to the safe return path or the role home; on another role's workspace, to the role home.
+- To add a workspace route, register it under its role layout and add it to `workspaceRoutesByRole`. `tests/navigation.test.ts` fails when the two differ.
 
-```bash
-VITE_API_URL=http://localhost:3000
-```
+## Code layout
 
-`VITE_API_URL` встраивается при сборке. В production укажи точный origin backend, например `https://api.example.com`. После изменения пересобери и опубликуй App Platform Static Site, иначе клиент сохранит старый адрес.
+- `src/features/<context>` owns its endpoints, queries, forms, and UI. Other code imports a feature only through its `index.ts`.
+- A feature's `api.ts` receives the `AuthenticatedTransport`. Do not give pages a universal API service.
+- `src/platform` holds shared code without endpoint knowledge: `api` (HTTP client, base URL, error parsing) and `intl` (fixed-locale formatters).
+- `src/platform` and `src/components/ui` never import features. Shared compositions in `src/components`, such as `WorkspaceShell`, may import public feature APIs. `bun run architecture:check` enforces these boundaries.
+- Render product text only through `Typography` (`src/components/typography.tsx`). ESLint enforces it in `src`, except `src/components/ui` and `src/stories`.
 
-## Деплой
+## shadcn registry
 
-Хостинг задаёт выбранный Terraform-стек. DigitalOcean создаёт Static Site из неизменяемой ветки `infra-release/<commit>` и использует `index.html` для маршрутов SPA.
+`src/components/ui` is the generated shadcn registry. Keep it regenerable: never edit it for product needs, and import primitives from `@/components/ui/*`. Keep compositions outside it: shared panels in `src/components/dashboard`, product panels in their feature.
 
-Yandex собирает `webapp/dist` из `git archive` того же коммита. Сначала публикует неизменяемые ресурсы, затем HTML в бакет Object Storage. Cloud CDN подключается отдельно.
-
-Используй `bun run release -- <digitalocean|yandex>` по [инструкции деплоя](../docs/DEPLOYMENT.md).
-
-## Правила работы
-
-Используй TanStack Query для серверных данных, TanStack Mutation для записи, TanStack Form для форм и Zod из `packages/contracts` для валидации.
-
-Access-токен живёт только в памяти браузера. Refresh использует HttpOnly-cookie backend. Общий Web Lock последовательно выполняет изменения auth-cookie во вкладках одного origin.
-
-События с версией сессии сбрасывают старые токены и кэш при входе, регистрации, истечении сессии и выходе. Это происходит до применения другого пользователя. Refresh/retry сравнивает JWT subject и не повторяет авторизованную операцию от имени другого пользователя.
-
-`src/features/auth` служит примером контекста. Его публичный index экспортирует провайдер, пользователя, интерфейс входа и авторизованный транспорт для новых API. Адаптер управляет auth-путями и refresh/retry. Формы входа, регистрации и сброса используют общие контракты. Страницы не содержат бизнес-логику.
-
-Помещай пользовательские Query-ключи под `['session', ...]`. Вход, регистрация, подтверждённый выход и истечение сессии отменяют запросы и удаляют старый кэш сессии. Публичный кэш сохраняется.
-
-Успешная смена аккаунта заставляет соседние вкладки восстановить сессию из актуальной HttpOnly-cookie. Подтверждённый выход и истечение сессии очищают их интерфейс. Если logout на сервере не прошёл, cookie и локальное состояние сохраняются. Покажи ошибку с возможностью повтора, не изображай успешный выход.
-
-При добавлении торговли этот проект содержит единственный браузерный checkout. Он принимает недоверенный выбор с сайта, сохраняет его при регистрации/входе и возвращает пользователя на безопасный для роли `/app/checkout`. До оплаты backend заново определяет цены и наличие.
-
-Можно использовать переходы провайдера и окна кошельков. Заказы, платежи и webhooks остаются в backend. Добавляй в кабинет только нужные продукту checkout, статусы покупок/подписок, историю и настройки. В основной ветке пока нет корзины, checkout-маршрута и браузерного платёжного модуля. До реализации обнови реестр возможностей.
-
-Маршруты разделены по ролям:
-
-- `/` проверяет сессию и направляет гостя на `/login`.
-- `/login` и `/signup` используют официальную двухколоночную композицию Vega `login-02`/`signup-02`.
-- `/forgot-password` запрашивает общую инструкцию сброса. `/reset-password` читает одноразовый токен из фрагмента URL и удаляет его из истории.
-- `user`: `/app`, `/app/profile`, `/app/settings`.
-- `admin`: `/admin`, `/admin/users`, `/admin/settings`.
-
-Оболочка появляется после проверки сессии. После входа гость возвращается только на известный безопасный внутренний путь. Пользователь, открывший раздел другой роли, переходит на свою главную страницу.
-
-`WorkspaceShell` управляет `SidebarProvider`, сворачиваемым боковым меню, мобильной панелью, inset/trigger, меню роли, блоком аккаунта и выходом. Страницы составляют только своё содержимое.
-
-- `src/features/users`: API и изменения профиля, пользовательские страницы. Изменение профиля обновляет только запрос текущего пользователя.
-- `src/features/admin`: API панели, списка и ролей, страницы администратора. Смена роли сбрасывает только запросы панели и каталога. Клиент затронутого пользователя замечает отзыв сессии при следующем запросе или восстановлении.
-- `src/features/navigation`: чистое соответствие роли и маршрутов.
-
-Общие fetch, базовый URL и разбор ошибок находятся в `src/platform/api` без знания конкретных endpoint. Каждый `src/features/<context>` владеет путями, схемами, запросами и провайдером. Страницы импортируют только публичные `index.ts`. Функции используют platform и UI; platform и `src/components/ui` не импортируют продуктовые функции. После изменения границ выполни `bun run architecture:check`.
-
-`src/components/ui` — официальный генерируемый реестр shadcn. Он должен допускать полное пересоздание. Импортируй примитивы через `@/components/ui/*`. Храни композиции и обёртки вне реестра: типографику в `src/components/typography.tsx`, общие панели в `src/components/dashboard`, продуктовые панели рядом с их состоянием.
-
-Продуктовый компонент владеет поверхностью, отступами, скруглением, типографикой, адаптацией и размерами элементов. Его props описывают данные, состояния и callbacks. Не открывай обход через `className` или `style`.
-
-Страница размещает закрытые компоненты через внешние обёртки. Ограниченные стилевые props допустимы только у низкоуровневых UI- и layout-примитивов. Сужай DOM-props локальным `Pick`/`Omit`, как в `DashboardLink`. Описывай продуктовые props явно. Используй Tailwind и токены `src/index.css`, не одноразовые глобальные CSS-классы.
-
-Весь продуктовый текст выводи через `Typography` из `src/components/typography.tsx`: обычный текст, `h1`–`h6`, подписи, выделения, сочетания клавиш, code/kbd и текст для скринридеров. ESLint проверяет код приложения, кроме генерируемого `src/components/ui`.
-
-В `components.json` закреплены `radix-vega`, `hugeicons` и CSS-переменные. Реестр ранее обновлён командой `npx shadcn@latest add --all -c webapp --overwrite -y`; формы основаны на `login-02` и `signup-02`. Поля используют стандартный Vega `rounded-md`. Оболочка работает с реальными API-данными, не демонстрационными. Не добавляй сторонние реестры или генераторы без запроса продукта.
-
-Для добавления или обновления компонентов:
+`components.json` pins the `radix-vega` style, the `hugeicons` icon library, and CSS variables in `src/index.css`. The auth pages follow the `login-02` and `signup-02` blocks. Use the local `shadcn` that `package.json` and `bun.lock` pin:
 
 ```bash
 bun run --cwd webapp ui:info
 bun run --cwd webapp ui:add -- <component>
 ```
 
-Используй локальный `shadcn` из `webapp/package.json` и `bun.lock`. Не применяй `shadcn@latest` для обычных обновлений: новый вывод может не соответствовать шаблону. Исправления совместимости в генерируемом коде должны быть малыми; продуктовые композиции остаются снаружи.
+- Never use `shadcn@latest` for routine updates: its output may not match the template.
+- Keep compatibility fixes in generated files small.
+- Add third-party registries or generators only when the product needs them.
 
-## E2E
+Storybook (`src/stories`) shows registry modules and shared compositions with the real theme CSS. It excludes routes, auth, and features. Add a story when a new primitive or composition needs visual review.
 
-Playwright проверяет важные успешные сценарии через настоящий интерфейс и backend по [правилам тестирования](../AGENTS.md#testing-and-verification). Запускай браузер только по явному запросу.
+## Styling
 
-Скрипт запускает `postgres_test`, применяет миграции к `web_app_demo_test`, создаёт E2E-администратора и запускает backend с `DATABASE_URL` из `TEST_DATABASE_URL`. Затем запускает Vite. После прогона он по умолчанию удаляет том тестовой БД.
+Follow [UI](../docs/UI.md) for the UI rules, patterns, and the `bun run screens` visual check.
 
-Первый запуск:
+## E2E tests
 
-```bash
-docker compose version
-docker info
-bun run e2e:install
-bun run e2e -- auth.spec.ts -g "registers, restores"
-```
+Playwright specs live in `e2e/specs`. Setup and commands are in [TESTING](../docs/TESTING.md).
 
-Для задачи выбирай `spec -g "test name"`. Полный `bun run e2e` нужен для явного релиза, аудита или сквозного браузерного изменения.
+## Deployment
 
-Подробности — в [docs/TESTING.md](../docs/TESTING.md).
-
-## Официальная документация
-
-Правила проекта описаны выше. Поведение библиотек проверяй по актуальной документации:
-
-- [React](https://react.dev/reference/react)
-- [Vite](https://vite.dev/guide/)
-- [Tailwind CSS](https://tailwindcss.com/docs)
-- [shadcn/ui](https://ui.shadcn.com/docs)
-- [Radix UI](https://www.radix-ui.com/primitives/docs/overview/introduction)
-- [TanStack Query](https://tanstack.com/query/latest/docs/framework/react/overview)
-- [TanStack Form](https://tanstack.com/form/latest/docs/framework/react/quick-start)
-- [TanStack Router](https://tanstack.com/router/latest/docs/overview)
-- [Zod](https://zod.dev/)
-- [Playwright](https://playwright.dev/docs/intro)
-- [ESLint](https://eslint.org/docs/latest/)
+Follow [DEPLOYMENT](../docs/DEPLOYMENT.md). Every host must serve `index.html` for unknown paths so client routes load. Both Terraform stacks do.

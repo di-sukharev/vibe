@@ -1,214 +1,89 @@
-# Архитектура продуктовых модулей
+# Architecture
 
-Шаблон задаёт общий путь: контракты, модульный backend-монолит, CSR-приложение `webapp`, Astro-сайт `website` и минимум собственной инфраструктуры. Рабочее мобильное приложение находится в ветке `mobile` и подключается по потребности.
+This guide owns module boundaries, auth and sessions, Prisma rules, and infrastructure growth. Use progressive DDD-lite: explicit owners and dependency directions, no mandatory layers. Add `domain` only for real rules. Never add empty layers, generic repositories, CQRS, or event sourcing.
 
-Подход — **progressive DDD-lite**: явные владельцы и направления зависимостей без обязательного набора слоёв. Добавляй `domain` только для реальных правил, расчётов и переходов состояния. Не создавай пустые слои, generic/base repositories, CQRS, event sourcing или сервисы ради схемы архитектуры.
+## Contracts first
 
-## Контракты
+`packages/contracts` defines API requests, responses, and errors as Zod schemas. Start every endpoint there. Backend routes declare the schemas through `@hono/zod-openapi`, which also generates `GET /openapi.json`. After a change, check the backend route and service, the webapp API client and forms, and the mobile API and forms on the `mobile` branch.
 
-`packages/contracts` задаёт запросы, DTO и ошибки API. Начинай новый endpoint с Zod-схемы. Backend использует её для входных данных, webapp — для TanStack Form и API.
+## Backend modules
 
-Не копируй структуры API в клиенты вручную. После изменения проверь источник и потребителей: backend route/service, API-клиент и форму webapp. В ветке `mobile` добавь мобильные API/формы в ту же проверку.
+A context lives in `backend/src/modules/<context>`. Dependencies point inward: `transport` → `application` → `domain`.
 
-## Backend
+- `index.ts`: public API and composition. Other code imports the context only here or through an application port, such as auth's `ProjectUser`.
+- `transport/`: Hono routes and HTTP mapping. Never imports `infrastructure`, Prisma, `pg`, `jose`, or provider SDKs.
+- `application/`: use cases, permissions, transactions, and ports. Never imports `transport`, `infrastructure`, Hono, Prisma, `jose`, `env`, or provider SDKs.
+- `domain/` (optional): pure rules and calculations. Imports only `domain` and contracts.
+- `infrastructure/`: Prisma and SDK adapters that implement application ports. Never imports `transport`.
+- Only `index.ts` and module-wide tests sit at the module root.
 
-Контексты находятся в `src/modules/<context>`:
+Routes translate HTTP into application calls and map failures to the stable API error format. Repositories offer product operations, not generic CRUD. The request context carries only the authenticated user.
 
-```text
-transport -> application -> domain/ports -> infrastructure -> DTO
-```
+Shared code sits outside `modules`: `src/app.ts` (composition, CORS, secure headers, rate limits, errors, OpenAPI), `src/env.ts` (environment validation), `src/runtime.ts` (env, Prisma, email, storage, and shutdown for every process), and `src/db.ts` (Prisma client, advisory locks). [BACKGROUND_JOBS](BACKGROUND_JOBS.md) owns background work and the API, cron, scheduler, and worker processes.
 
-- `src/index.ts`: запуск API.
-- `src/jobs.ts`: общий реестр заданий для трёх исполнителей. Не объявляй задания внутри исполнителя.
-- `src/cron.ts`: одно задание. CLI/system cron завершается после него; Yandex выполняет его по HTTP и возвращает non-2xx для повторов таймера.
-- `src/scheduler.ts`: постоянный процесс расписания. `src/worker.ts`: постоянные циклы. `job-schedules.json` задаёт outbox, очистку загрузок и auth. Terraform запускает scheduler в DigitalOcean или таймеры Yandex. Worker по умолчанию пуст. См. [BACKGROUND_JOBS](BACKGROUND_JOBS.md).
-- `src/runtime.ts`: общие env, Prisma и завершение всех процессов.
-- `src/background-tasks.ts`: работа после ответа, потеря которой допустима, например удаление отклонённого объекта. Задание получает `AbortSignal`. Таймаут отменяет работу, но её очистка остаётся под наблюдением до завершения. Сервер и очистка делят один абсолютный срок остановки.
-- `src/outbox`: разовая работа, которую нельзя потерять. Строку `task_outbox` забирает и повторяет `outbox:drain` до успеха или окончательной ошибки. Для сброса пароля запрос ставит задачу для любого адреса либо не ставит для всех при полной очереди. Поиск аккаунта выполняет обработчик, сохраняя независимость ответа от наличия аккаунта.
-- `src/rate-limit`: счётчики фиксированных окон из `src/http/security.ts`. По умолчанию — ограниченная таблица процесса. При `RATE_LIMIT_STORE=database` — строка PostgreSQL на политику, клиента и окно. Terraform задаёт этот режим для нескольких API-процессов. `createApp` выбирает хранилище; middleware не знает его тип.
-- `src/app.ts`: связывание зависимостей, Hono, CORS, защитные заголовки, ошибки, модули, маршруты и OpenAPI.
-- `src/env.ts`: Zod-проверка окружения.
-- `src/db.ts`: создание Prisma.
-- `src/modules/auth/index.ts`: публичный API auth и образец контекста. Фабрика маршрутов получает зависимости через замыкание. Контекст запроса содержит только авторизованного пользователя.
-- `src/modules/users/index.ts`: профили, чтение администратора и роли. Связь с auth — через пользователя и проверки доступа к маршрутам.
+`bun run architecture:check` enforces these rules plus the client and contract boundaries. It scans imports without running code and reports each violation as `path:line [rule] message`.
 
-Структура контекста:
+## Infrastructure growth
 
-```text
-modules/<context>/
-  index.ts          # единственная граница импорта между контекстами
-  transport/        # Hono, HTTP, валидация и представление
-  application/      # сценарии, права, транзакции и координация
-  domain/           # необязательные чистые правила, переходы и расчёты
-  infrastructure/   # Prisma и внешние адаптеры
-```
+Each new broker, cache, search engine, or log store adds deployment, security, monitoring, backups, and cost. Start with the outbox for durable work, an index for slow reads, PostgreSQL full-text search, a row plus polling for cross-process signals, and `RATE_LIMIT_STORE=database` for shared rate limits.
 
-Transport не импортирует Prisma. Application/domain не импортируют Hono, Prisma, env или SDK провайдеров. Infrastructure реализует порты контекста. Репозитории предлагают продуктовые операции, не общий CRUD.
+Add infrastructure only for a measured limit that it removes. Record the measurement next to the capability in `CHECKLIST.md` first. Examples: the outbox backlog grows at the shortest drain interval; PostgreSQL cannot express the required ordering or exactly-once delivery; events must cross backend instances.
 
-Контексты взаимодействуют через `index.ts` или явные application-порты, например `ProjectUser` и `LogoutCleanup` auth. Внутренние файлы другого контекста недоступны.
+Realtime features start in the same backend, with WebSocket connections in instance memory. Add Redis-compatible Pub/Sub only when clients on different instances need the same events. Use DigitalOcean or Yandex managed Valkey, per the hosting in `CHECKLIST.md`, or a Valkey container on an own server.
 
-Маршрут переводит HTTP в application-вызов, а ошибку — в стабильный API-формат. Не помещай бизнес-правила в Hono, клиент или дочерний UI-компонент.
+Pub/Sub only distributes events. Store messages, notifications, shared state, and audit events in PostgreSQL. Publish short IDs after the commit. After a reconnect, clients recover through the API.
 
-## Процессы и события в реальном времени
+## Auth and sessions
 
-Исходная архитектура — модульный монолит: один backend, одна БД, общие контракты и границы функций. API, worker и cron могут работать отдельными процессами с одной Prisma-схемой, env-проверкой и сервисами.
+`backend/src/modules/auth` uses its own JWT scheme:
 
-Сначала используй существующие PostgreSQL, backend и задания `backend/src/jobs.ts`. Каждый новый брокер, кэш, поисковый движок или журнал требует деплоя, защиты, мониторинга, резервирования и оплаты.
+- Passwords: Argon2id through `Bun.password`. An unknown email still runs a decoy hash check, so timing does not reveal accounts.
+- Access token: a short-lived HS256 JWT (`jose`, `JWT_SECRET`, `ACCESS_TOKEN_TTL_SECONDS`) with `sub`, `sessionId`, and `email`, but no role.
+- Refresh token: opaque. PostgreSQL stores only SHA-256 hashes of the current and previous tokens and of the token family.
 
-Начальные решения:
+Each protected request verifies the JWT and loads the active session and user, so revocations and role changes apply at once.
 
-- Надёжная фоновая работа: `task_outbox` и `outbox:drain`.
-- Медленное чтение: индекс или более узкий запрос до добавления кэша.
-- Текстовый поиск: PostgreSQL full-text до отдельного движка.
-- Уведомление между процессами: строка и опрос до брокера.
-- Общий лимит запросов: PostgreSQL upsert через `RATE_LIMIT_STORE=database` и `backend/src/rate-limit` до Redis.
+Route families:
 
-Добавляй инфраструктуру при измеренном пределе, который она устраняет. Примеры: очередь растёт при минимальном интервале drain; потребители не делят БД; нужные порядок/однократность нельзя выразить в PostgreSQL; нагрузка или срок хранения требуют отделения очереди; события должны идти между экземплярами backend. Сначала запиши измерение рядом с возможностью в `CHECKLIST.md`.
+- `/api/auth/*` (browsers): the refresh token lives only in the HttpOnly cookie `web_app_demo_refresh`, never in JSON. `COOKIE_SECURE=false` (local) sets `SameSite=Lax`. `COOKIE_SECURE=true` (production) sets `Secure; SameSite=None`, and register, login, refresh, and logout require an `Origin` from `CORS_ORIGINS`.
+- `/api/auth/token/*` (native apps): no cookies. The refresh token travels in JSON and lives in native secure storage.
+- Access tokens travel as `Authorization: Bearer`. Expo Web uses the cookie routes. Never keep a browser refresh token in `localStorage`, `sessionStorage`, AsyncStorage, or other JavaScript-readable storage.
 
-Начальные Terraform-профили используют один API-runtime и один узел Managed PostgreSQL. DigitalOcean — `apps-s-1vcpu-1gb` и scheduler worker. Yandex — Serverless Container и таймеры. Оба используют `backend/Dockerfile`; расписание одно, в `backend/src/job-schedules.json`.
+Rotation:
 
-`webapp` и предсобранный `website` используют статический хостинг без подбора runtime. SSR, рендеринг по запросу и server islands требуют отдельного runtime-сервиса в выбранном стеке.
+- Each refresh derives the next token by HMAC from the presented token and the server secret, so concurrent refreshes get the same successor.
+- Rotation swaps the hashes atomically within the same session, so other tabs keep their access tokens. `REFRESH_TOKEN_TTL_DAYS` slides; `SESSION_ABSOLUTE_TTL_DAYS` caps the session.
+- The previous token stays valid for `REFRESH_REUSE_GRACE_SECONDS` (default 10, maximum 60). Any later reuse of an old token revokes the session. Do not widen the window without need.
 
-Для чата, присутствия, совместной работы и событий начни с того же backend. Один экземпляр хранит свои WebSocket-соединения в памяти. Если клиенты на разных экземплярах должны получать общие события, добавь Redis-совместимый Pub/Sub.
+Password reset:
 
-Выбирай DigitalOcean Managed Valkey или Yandex Managed Service for Valkey по `CHECKLIST.md`. На своём сервере допустим соседний контейнер Valkey/Redis. Это нужно только для реального горизонтального масштабирования и межпроцессной доставки WebSocket/SSE, не для исходной настройки.
+- The request always returns the same `202` and never looks up the account. With `EMAIL_DELIVERY=disabled` it writes nothing. Otherwise it enqueues an `auth:password-reset` outbox task for any address, up to the cap in [BACKGROUND_JOBS](BACKGROUND_JOBS.md#anonymous-enqueue).
+- The task handler looks up the account and issues at most one token per account per minute. It stores the SHA-256 of a random 32-byte token valid for 30 minutes and mails a link with the token in its URL fragment. If delivery fails permanently or on the final attempt, the handler invalidates the unsent token.
+- Confirmation is one transaction: it changes the password hash, consumes all reset tokens, revokes all sessions, and enqueues an `auth:password-changed` notice. The response clears the refresh cookie; there is no automatic sign-in.
 
-Pub/Sub только распространяет события. Сообщения, уведомления, совместное состояние и значимые для аудита события храни в PostgreSQL. После commit публикуй короткие ID. После разрыва клиент должен восстановиться через API, даже если пропустил событие.
+Roles:
 
-## Вход и сессии
+- `user | admin` lives in `users.role` and `UserDto`, never in the JWT. Registration creates `user`; clients never choose a role. Only the role endpoint and the admin bootstraps (`db:deploy`, dev seed) grant `admin`.
+- `PATCH /api/admin/users/{userId}/role` runs under a global lock. It refuses self-demotion and removal of the last admin. A real change revokes the target's sessions and unused reset tokens.
+- `/api/admin/*` requires `admin` on the server and returns `403 FORBIDDEN` otherwise.
 
-Auth v1 использует собственную JWT-схему:
+Login, role changes, reset tokens, and bootstraps share a per-user advisory lock (`acquireUserAuthenticationAuthorityLock` in `backend/src/db.ts`). Under it, login re-reads the user and re-checks the password before it inserts the session, so an old password cannot open a session after a reset.
 
-- `Bun.password.hash/verify` и Argon2id для паролей.
-- Короткие access JWT через `jose`.
-- Непрозрачные refresh-токены. PostgreSQL хранит только текущий и предыдущий SHA-256-хеш.
-- `/api/auth/*`: refresh только в HttpOnly-cookie, никогда в JSON. Локально `SameSite=Lax`; в HTTPS production — `Secure` и `SameSite=None` для разных origin API/webapp.
-- `/api/auth/token/*`: без чтения и записи cookies; refresh передаётся явно через JSON/body. Mobile хранит его через нативный адаптер.
+## Clients
 
-Ротация атомарно меняет refresh в той же логической сессии, сохраняя access-токены других вкладок. Предыдущий refresh допустим только в коротком окне гонки. Поздний повтор отзывает сессию. `/api/auth/me` проверяет JWT и активную запись БД, включая абсолютный срок.
-
-Сброс пароля принадлежит application auth. Общий почтовый порт получает транзакционное письмо; исходный адаптер отключён. Ответ запросу общий, частота ограничена паузой аккаунта, хранится только SHA-256 токена. Подтверждение одной транзакцией меняет пароль, погашает все токены сброса и отзывает сессии. Новый вход не создаётся автоматически.
-
-Роли `user | admin` хранятся в PostgreSQL и `UserDto`, но не в JWT. Каждый авторизованный запрос читает текущего пользователя через активную сессию. Повышение и понижение роли действуют сразу.
-
-Регистрация и новый социальный аккаунт всегда создают `user`. Только users/admin меняет роль. Сериализованная транзакция запрещает понижение самого себя и отсутствие администраторов. Реальная смена роли отзывает сессии цели.
-
-Выдача сессии существующему аккаунту, смена роли и bootstrap-пароля делят блокировку пользователя. Login под ней повторно читает пользователя и проверяет пароль до вставки сессии. Старый пароль после сброса не создаёт новую сессию; ответ использует актуальную роль.
-
-## Клиенты
-
-`website` (Astro SSG, SSR по необходимости) владеет публичными SEO-страницами и превью: лендингом, контентом и каталогом. `webapp` (React CSR) владеет кабинетами, checkout, панелями и настройками после входа. Маркетплейсу обычно нужны оба с `@web-app-demo/contracts`.
-
-Выбор описан в [README](../README.md#choose-between-webapp-and-website), границы данных и платежей — в [WEB_SURFACES](WEB_SURFACES.md).
-
-Браузерный checkout один, в авторизованном `webapp`. Сайт может хранить локальную корзину, но не создаёт платёж и не владеет заказом. Mobile сохраняет нативный магазин/кошелёк/карту; backend — общие заказы и доступ. Не создавай второй checkout и не направляй нативную оплату через публичный сайт.
-
-Правила webapp:
-
-- TanStack Query управляет серверными данными, TanStack Form — формами.
-- Zod-схемы берутся из `@web-app-demo/contracts`.
-- `src/platform/api`: общие fetch, base URL, разбор ответов и ошибок без знания endpoint.
-- `src/platform/intl`: общие форматтеры с фиксированной локалью, сейчас для дат.
-- `src/features/<context>`: пути, схемы, серверные адаптеры, провайдеры и UI контекста.
-- Маршруты и `src/main.tsx` только связывают публичные `index.ts`.
-- `src/components/ui` и `src/platform` не импортируют продуктовые функции. Функции могут использовать platform/UI, а другие функции — только через публичный index.
-
-Образец — `src/features/auth`: адаптер владеет endpoint и refresh/retry, провайдер раскрывает только auth. Не передавай страницам универсальный API-сервис. Передавай узкие API, например `BillingApi` или `NotificationsApi`, из точки композиции.
-
-Маршруты разделены: `/app/*` для `user`, `/admin/*` для `admin`. Guards ждут проверки сессии. Гость возвращается по безопасному внутреннему пути с проверкой роли; пользователь другой роли переходит на свою главную.
-
-Список допустимых возвратов — таблица защищённых маршрутов в `src/features/navigation`. Matcher поддерживает литералы и именованные `$param`. Unit-тест сверяет таблицу с маршрутами оболочек и отвергает неподдержанные формы. Меню — только часть этой таблицы для отображения.
-
-Общая оболочка владеет всей композицией shadcn dashboard-01 с sidebar/inset. Карта ролей и маршрутов — чистая функция контекста. Общие блоки находятся в `src/components/dashboard`, панели аккаунта/admin — в своих функциях. Метрики и таблицы показывают только проверенные контрактом API-данные. Фиктивной аналитики в шаблоне нет.
-
-`src/components/ui` содержит полную локальную библиотеку shadcn для будущих задач. Продуктовые компоненты владеют оформлением и принимают данные, состояния и callbacks. Не передавай им `className` или `style`. Страницы размещают их через layout-обёртки. Стилевые props допустимы только у низкоуровневых UI/layout-примитивов. Унаследованные DOM-props сужай локально.
-
-Mobile использует cookie-auth для Expo Web и token-auth для iOS/Android. Никогда не сохраняй браузерный refresh в `localStorage`, `sessionStorage`, AsyncStorage или другом доступном JavaScript хранилище.
-
-Не добавляй новую абстракцию форм, запросов, auth или API, пока существующая решает задачу.
-
-Для сайта повышай динамичность постепенно:
-
-1. SSG с пересборкой — для стабильных объявлений, категорий и контента.
-2. Кэшируемый SSR с `stale-while-revalidate` — если цикл релиза слишком медленный.
-3. Server islands — для динамических/личных фрагментов без SEO.
-4. Некэшируемый или персональный SSR — если начальный HTML требует текущих данных запроса.
-
-SSR и islands требуют адаптер Astro и runtime; Static Site/статический бакет их не выполняет. При кэшировании или постепенном релизе server islands используют общий секрет `ASTRO_KEY` в сборке и runtime. Не коммить его, не передавай через `PUBLIC_*` и не включай в статику.
-
-Общий CDN-кэш разрешён только для анонимного публичного HTML. Персональные ответы требуют `private`/`no-store` или явной стратегии `Vary: Cookie`/`Authorization`. `ASTRO_KEY` не защищает приватность кэша.
-
-SEO-данные должны быть в начальном HTML: заголовки, описания, canonical, social tags, имена товаров/категорий и нужные цены. Islands могут дополнять их, но не быть единственным источником.
-
-Auth сайта ограничен малыми публичными функциями, например состоянием входа в шапке. Не копируй кабинет из `webapp`. При подключении API/DTO добавь `@web-app-demo/contracts` и проверь обе стороны.
-
-Astro — стандарт для контента, статики и малого объёма JavaScript. Next.js нужен при явном требовании платформы ISR/кэша под Vercel. TanStack Start — будущий вариант единого React с выборочным SSR, не исходный путь для проекта без команды разработчиков.
-
-## Тестирование
-
-Backend unit/integration проверяют auth и users/admin RBAC у владельца поведения. Playwright запускает реальный backend и Vite через `webServer`, включая администратора и повышение роли с отзывом сессии. Maestro в ветке `mobile` использует стабильные React Native `testID`.
-
-Границы проверок заданы в [AGENTS.md](../AGENTS.md#testing-and-verification). Локальный PostgreSQL и команды — в [TESTING.md](TESTING.md).
-
-После изменения зависимостей модулей, функций, контрактов, platform или UI выполни `bun run architecture:check`. Проверка без зависимостей сообщает запрещённые статические импорты как `path:line`; каждое семейство правил имеет тестовые примеры. Длина файла не задаёт архитектуру. Её задают владение и направление зависимостей.
+`webapp` (React CSR) owns everything after sign-in. `website` (Astro SSG) owns public SEO pages. Their rules are in [webapp/README](../webapp/README.md) and [website/README](../website/README.md). Data, cart, checkout, and payment boundaries are in [WEB_SURFACES](WEB_SURFACES.md).
 
 ## Prisma
 
-Prisma закреплена на `7.9.0` в `backend/package.json`. Проверка `bun add @prisma/client@7.9.1` в пустом каталоге дала 3 файла (12 КБ) вместо 17 файлов (78 МБ). При исправном архиве `runtime/` оказался пустым. Импорт `@prisma/client/runtime/client` вызвал около 180 ошибок типов.
+- Pin `prisma`, `@prisma/client`, and `@prisma/adapter-pg` to one exact version (now `7.10.0`) in `backend/package.json`, because a patch release once installed an incomplete client. `bun update --latest` can replace the pin. Upgrade all three together, and only after `typecheck`, backend tests, and E2E pass.
+- PostgreSQL 18+ generates primary keys as UUIDv7: `@id @default(dbgenerated("uuidv7()")) @db.Uuid`. Raw SQL and imports therefore get the same IDs as Prisma. Foreign keys to them use `@db.Uuid`. Never use `cuid()`, `uuid()`, `serial`, or `bigserial`. A table reached only by its natural key, like `RateLimitBucket`, keys on it.
+- Closed value sets are Postgres enums, such as `UserRole` and `TaskOutboxStatus`; changing one is a migration. Open sets are `text` checked by a code registry, such as `task_outbox.type` by `backend/src/outbox/handlers.ts`. A new value then needs no irreversible `ALTER TYPE`.
+- Edit `backend/prisma/schema.prisma`, then run `bun run --cwd backend prisma:migrate`. Write migration SQL by hand only on request. Production applies committed migrations with `prisma:deploy` inside `db:deploy`.
 
-`bun update` сохраняет точную версию; `bun update --latest` может заменить её. После него проверь Prisma. Снимай ограничение только после проверки исправления, начиная с `7.9.2`.
+## Local infrastructure
 
-Не пиши SQL миграций вручную. Измени `backend/prisma/schema.prisma`, затем выполни:
+Docker Compose runs PostgreSQL 18 for development and tests. [LOCAL_DATABASE](LOCAL_DATABASE.md) owns its commands, ports, volumes, and resets.
 
-```bash
-bun run --cwd backend prisma:migrate
-```
+## Storage
 
-Первичные ключи создаёт PostgreSQL как UUIDv7: `@default(dbgenerated("uuidv7()")) @db.Uuid`, а не ORM `cuid()`/`uuid()`. Это единый способ для Prisma, SQL, импорта и фоновой записи. Нужен PostgreSQL 18+.
-
-Закрытый набор значений храни как Postgres enum. `task_outbox.status` допускает только pending, processing, done, skipped и failed; изменение набора меняет схему.
-
-Открытый набор хранится текстом. `task_outbox.type` проверяется по реестру обработчиков в коде. Новый тип не требует необратимого `ALTER TYPE`. Так же устроены задания: `scheduler.ts` отвергает неизвестное имя из `job-schedules.json`, а Yandex Terraform читает тот же файл.
-
-UUIDv7 — правило всего репозитория. Новые внешние ключи на эти ID должны иметь `@db.Uuid`.
-
-В production применяй готовые миграции:
-
-```bash
-bun run --cwd backend prisma:deploy
-```
-
-## Локальная инфраструктура
-
-PostgreSQL запускает Docker Compose. Сервис разработки использует `postgres:18-alpine`, БД `web_app_demo`, порт `54329` и том `postgres_18_data`. Тестовый сервис использует тот же образ и `web_app_demo_test`; исполнители задают вычисленный по репозиторию `POSTGRES_TEST_PORT`.
-
-Версия 18 нужна для `uuidv7()`. При изменении имён, портов, ключей, образа или томов согласуй `docker-compose.yml`, `backend/.env.example` и [LOCAL_DATABASE.md](LOCAL_DATABASE.md).
-
-## Хранилище
-
-`src/storage` предоставляет общий порт: подписанные загрузка/скачивание, HEAD, чтение диапазона и удаление. Его реализуют filesystem без внешних сервисов и S3 для совместимого endpoint. Общий набор контрактных тестов проверяет оба. Для переключения меняется конфигурация, не код.
-
-Это общий backend-сервис, не продуктовый модуль. Только здесь используется AWS SDK. `scripts/architecture-check.mjs` запрещает `@aws-sdk/` в domain/application/transport модулей. Пример — `backend/src/modules/uploads`: он владеет аватаром и строками БД, но не знает драйвер.
-
-Владение, состояние и срок хранения находятся в PostgreSQL. Хранилище не знает владельца и завершённость загрузки. Ключи создаёт backend без персональных данных.
-
-Варианты изображений создавай в backend/worker и сохраняй под стабильными ключами. См. [STORAGE.md](STORAGE.md).
-
-## Официальная документация
-
-Правила репозитория описаны выше. Поведение инструментов проверяй по актуальной документации:
-
-- [Bun](https://bun.sh/docs)
-- [Hono](https://hono.dev/docs)
-- [Пример Hono Zod OpenAPI](https://hono.dev/examples/zod-openapi)
-- [Prisma](https://www.prisma.io/docs)
-- [PostgreSQL](https://www.postgresql.org/docs/)
-- [Официальный образ PostgreSQL](https://hub.docker.com/_/postgres)
-- [DigitalOcean Spaces](https://docs.digitalocean.com/products/spaces/)
-- [DigitalOcean Valkey](https://docs.digitalocean.com/products/databases/valkey/)
-- [Yandex Managed Valkey](https://yandex.cloud/en/docs/managed-redis/)
-- [Zod](https://zod.dev/)
-- [jose](https://github.com/panva/jose)
-- [TanStack Query](https://tanstack.com/query/latest/docs/framework/react/overview)
-- [TanStack Form](https://tanstack.com/form/latest/docs/framework/react/quick-start)
-- [TanStack Router](https://tanstack.com/router/latest/docs/overview)
+`backend/src/storage` is a shared service with `filesystem` and `s3` drivers, not a product module. Only `src/storage` imports `@aws-sdk/*`, and `architecture:check` forbids `@aws-sdk/` in module `domain`, `application`, and `transport`. PostgreSQL owns object ownership, state, and retention. Reference module: `backend/src/modules/uploads`. See [STORAGE](STORAGE.md).
