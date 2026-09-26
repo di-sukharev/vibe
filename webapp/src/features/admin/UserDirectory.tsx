@@ -393,7 +393,7 @@ function DirectoryError({
 
 function DirectoryEmpty({ hasQuery }: { hasQuery: boolean }) {
   return (
-    <Empty>
+    <Empty data-testid="user-directory-empty">
       <EmptyHeader>
         <EmptyTitle>No users found</EmptyTitle>
         <EmptyDescription>

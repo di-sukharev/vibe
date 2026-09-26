@@ -24,6 +24,11 @@ process.env.SCREENS_WEBSITE_PORT ??= String(await freePort())
 const websiteUrl = `http://127.0.0.1:${process.env.SCREENS_WEBSITE_PORT}`
 process.env.SCREENS_WEBSITE_URL = websiteUrl
 
+// Read by e2e/global-setup.ts (turns on the backend's DEV_SEED_DEMO fixtures) and by
+// e2e/screens/screens.spec.ts (turns on the demo avatar fixture). Plain `bun run e2e:webapp`
+// never sets this, so its specs keep today's two accounts.
+process.env.SCREENS_SEED_DEMO = '1'
+
 const e2eServers = Array.isArray(e2eConfig.webServer) ? e2eConfig.webServer : []
 
 export default defineConfig({

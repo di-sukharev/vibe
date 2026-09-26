@@ -70,5 +70,8 @@ export default async function globalSetup() {
     DEV_SEED_ADMIN_PASSWORD: e2eAdminPassword,
     DEV_SEED_USER_EMAIL: 'user@example.com',
     DEV_SEED_USER_PASSWORD: e2eAdminPassword,
+    // Set only by playwright.screens.config.ts, so plain `bun run e2e:webapp` keeps the two
+    // accounts and the screens tour gets realistic fixture data. See docs/TESTING.md.
+    ...(process.env.SCREENS_SEED_DEMO ? { DEV_SEED_DEMO: process.env.SCREENS_SEED_DEMO } : {}),
   })
 }
