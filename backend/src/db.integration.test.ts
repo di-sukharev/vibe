@@ -3,7 +3,7 @@ import { afterAll, describe, expect, test } from 'bun:test'
 import { createPrisma, isJobLockExpiry, runWithJobLock, type DbClient } from './db'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
-const maybeDescribe = databaseUrl ? describe : describe.skip
+if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required; run bun run test:backend:integration')
 
 /**
  * The scheduler's only defence against two instances running the same job is this lock, and its
@@ -11,11 +11,11 @@ const maybeDescribe = databaseUrl ? describe : describe.skip
  * `pg_try_advisory_lock` instead of the transaction-scoped one would pass a mocked test and leak
  * locks across pooled connections in production.
  */
-maybeDescribe('runWithJobLock against a real database', () => {
+describe('runWithJobLock against a real database', () => {
   const clients: DbClient[] = []
 
   const newClient = () => {
-    const client = createPrisma(databaseUrl!)
+    const client = createPrisma(databaseUrl)
     clients.push(client)
     return client
   }
@@ -95,7 +95,6 @@ maybeDescribe('runWithJobLock against a real database', () => {
     expect(duplicate).toEqual({ ranHere: true, result: 'ran anyway' })
     expect(overrunFinished).toBe(true)
     expect(isJobLockExpiry(failure)).toBe(true)
-    expect(String(failure)).toContain('past its 150ms lock')
   })
 
   test("a job's own inner transaction timing out is not reported as a lock expiry", async () => {

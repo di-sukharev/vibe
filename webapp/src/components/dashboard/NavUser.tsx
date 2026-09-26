@@ -60,7 +60,7 @@ export function NavUser({
   return (
     <>
       {logoutError && (
-        <Typography role="alert" variant="caption" tone="destructive">
+        <Typography data-testid="logout-error" role="alert" variant="caption" tone="destructive">
           Logout failed. Please try again.
         </Typography>
       )}
@@ -70,6 +70,7 @@ export function NavUser({
             <DropdownMenuTrigger asChild>
               <SidebarMenuButton
                 aria-label="Open account menu"
+                data-testid="account-menu"
                 size="lg"
                 tooltip={user.displayName ?? user.email}
                 className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
@@ -84,7 +85,7 @@ export function NavUser({
                     {user.displayName ?? user.email}
                   </Typography>
                   <div className="flex min-w-0 items-center gap-1.5">
-                    <Typography variant="caption" tone="muted" truncate>
+                    <Typography data-testid="current-user-email" variant="caption" tone="muted" truncate>
                       {user.email}
                     </Typography>
                     <Badge variant="outline" className="shrink-0 capitalize">
@@ -141,6 +142,7 @@ export function NavUser({
               </DropdownMenuGroup>
               <DropdownMenuSeparator />
               <DropdownMenuItem
+                data-testid="account-menu-logout"
                 disabled={logoutPending}
                 onSelect={() => void logout()}
                 variant="destructive"

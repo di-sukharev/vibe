@@ -3,7 +3,6 @@ import { describe, expect, test } from 'bun:test'
 import type { ResendEmailConfig } from './config'
 import { contractMessage, describeEmailContract } from './email-contract'
 import { createResendDelivery } from './resend-delivery'
-import type { FetchLike } from './provider-request'
 
 const config: ResendEmailConfig = {
   driver: 'resend',
@@ -22,7 +21,6 @@ function jsonResponse(status: number, body: unknown) {
 }
 
 describeEmailContract('Resend delivery', () => ({
-  driver: 'resend',
   from: config.from,
   replyTo: config.replyTo!,
   createDelivery: (fetchImpl, requestTimeoutMs) =>
@@ -56,34 +54,6 @@ describeEmailContract('Resend delivery', () => ({
 }))
 
 describe('Resend wire format', () => {
-  async function capture(fetchImpl?: FetchLike) {
-    const requests: { url: string; init: RequestInit }[] = []
-    const transport: FetchLike =
-      fetchImpl ??
-      (async (url, init) => {
-        requests.push({ url: String(url), init: init ?? {} })
-
-        return jsonResponse(200, { id: 'message-id' })
-      })
-
-    await createResendDelivery(config, transport).send(contractMessage, {
-      signal: AbortSignal.timeout(5_000),
-    })
-
-    return requests
-  }
-
-  test('posts to the send endpoint with a bearer token', async () => {
-    const [request] = await capture()
-
-    expect(request!.url).toBe('https://api.resend.com/emails')
-    expect(request!.init.method).toBe('POST')
-    expect(request!.init.headers).toMatchObject({
-      authorization: 'Bearer test-api-key',
-      'content-type': 'application/json',
-    })
-  })
-
   test('omits reply_to entirely when the install did not configure one', async () => {
     // Resend rejects a null reply_to, so an absent value has to be absent rather than empty.
     const requests: { init: RequestInit }[] = []

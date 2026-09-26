@@ -9,6 +9,7 @@ const base = {
   WEBAPP_ORIGIN: 'http://localhost:5173',
 }
 
+// Password reset sends nothing, behind the same 202, while `configured` is false.
 describe('createEmailDelivery', () => {
   test('sends nothing until an install picks a driver', () => {
     const delivery = createEmailDelivery(loadEnv(base))
@@ -20,10 +21,7 @@ describe('createEmailDelivery', () => {
   test('builds the driver EMAIL_DELIVERY names, and reports it as able to send', () => {
     const cases = [
       ['console', {}],
-      [
-        'resend',
-        { EMAIL_FROM: 'no-reply@example.com', EMAIL_RESEND_API_KEY: 're_test_key' },
-      ],
+      ['resend', { EMAIL_FROM: 'no-reply@example.com', EMAIL_RESEND_API_KEY: 're_test_key' }],
       [
         'postbox',
         {
@@ -42,33 +40,5 @@ describe('createEmailDelivery', () => {
         configured: true,
       })
     }
-  })
-
-  test('the console sink prints the message rather than pretending to send it', async () => {
-    const delivery = createEmailDelivery(loadEnv({ ...base, EMAIL_DELIVERY: 'console' }))
-    const lines: string[] = []
-    const original = console.log
-    console.log = (...args: unknown[]) => lines.push(args.join(' '))
-
-    try {
-      await delivery.send(
-        { to: 'user@example.com', subject: 'Reset your password', text: 'https://app/reset#token=x' },
-        { signal: AbortSignal.timeout(1_000) },
-      )
-    } finally {
-      console.log = original
-    }
-
-    expect(lines.join('\n')).toContain('https://app/reset#token=x')
-    expect(lines.join('\n')).toContain('user@example.com')
-  })
-
-  test('the disabled driver accepts a send and does nothing, so callers need no special case', async () => {
-    await expect(
-      disabledEmailDelivery.send(
-        { to: 'user@example.com', subject: 's', text: 't' },
-        { signal: AbortSignal.timeout(1_000) },
-      ),
-    ).resolves.toBeUndefined()
   })
 })

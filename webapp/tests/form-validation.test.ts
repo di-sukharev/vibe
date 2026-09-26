@@ -21,13 +21,13 @@ test('issues on rendered fields become field errors and leave the form-level slo
   const validation = toValidationErrors([...contract.error.issues, ...confirmation.error.issues])
 
   expect(validation.fieldErrors.email).toEqual([{ message: issueMessage(contract, 'email') }])
-  expect(validation.fieldErrors.password).toEqual([
-    { message: 'Password must be at least 8 characters' },
-  ])
+  expect(validation.fieldErrors.password).toEqual([{ message: issueMessage(contract, 'password') }])
   expect(validation.fieldErrors.displayName).toEqual([
     { message: issueMessage(contract, 'displayName') },
   ])
-  expect(validation.fieldErrors.confirmPassword).toEqual([{ message: 'Confirm your password' }])
+  expect(validation.fieldErrors.confirmPassword).toEqual([
+    { message: issueMessage(confirmation, 'confirmPassword') },
+  ])
   expect(validation.formError).toBeNull()
 })
 
@@ -38,7 +38,7 @@ test('an issue on a field the form does not render is reported at form level, no
   const validation = toValidationErrors(result.error.issues)
 
   expect(validation.fieldErrors).toEqual({
-    password: [{ message: 'Password must be at least 8 characters' }],
+    password: [{ message: issueMessage(result, 'password') }],
   })
   expect(validation.formError).toBe(`token: ${issueMessage(result, 'token')}`)
 })
@@ -59,15 +59,9 @@ test('root-level and unknown-field issues are joined at form level in issue orde
   )
 })
 
-test('no issues means no field errors and no form-level error', () => {
-  expect(toValidationErrors([])).toEqual({ fieldErrors: {}, formError: null })
-})
-
-test('password confirmation reports only mismatched values', () => {
-  expect(passwordConfirmationErrors('new-password-123', 'new-password-123')).toBeUndefined()
-  expect(passwordConfirmationErrors('new-password-123', 'different-password-123')).toEqual([
-    { message: 'Passwords do not match' },
-  ])
+test('a password confirmation must match the password', () => {
+  expect(passwordConfirmationErrors('correct horse', 'correct horse')).toBeUndefined()
+  expect(passwordConfirmationErrors('correct horse', 'correct horsE')).toHaveLength(1)
 })
 
 function issueMessage(result: z.ZodSafeParseError<unknown>, field: string) {

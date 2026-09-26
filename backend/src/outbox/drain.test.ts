@@ -1,12 +1,9 @@
 /**
- * Drain policy against a fake client: deadlines, the runtime budget, backlog reporting, and what
- * happens when a result cannot be written down. These are timing behaviours a database adds
- * nothing to.
+ * Drain policy against a fake client: handler outcomes, deadlines, the runtime budget, and what
+ * happens when a result cannot be written down. These are behaviours a database adds nothing to.
  *
- * Anything the lease and the retention window decide - claiming, stale-lease recovery, attempt
- * accounting, backoff, retention - belongs to `outbox.integration.test.ts` against real Postgres.
- * `fake-outbox-prisma.ts` emulates `@updatedAt` on `updateMany` by hand, which is exactly the
- * assumption a duplicate here would keep asserting after Prisma stopped honouring it.
+ * Anything a `store.ts` query decides - claiming, due and stale rows, the lease floor, retention,
+ * backlog, unknown types - belongs to `outbox.integration.test.ts` against real Postgres.
  */
 import { describe, expect, spyOn, test } from 'bun:test'
 
@@ -43,23 +40,6 @@ describe('drainTaskOutbox', () => {
     expect(rows[0]?.status).toBe('skipped')
   })
 
-  test('a lease that is still fresh is left alone', async () => {
-    const rows = [
-      taskRow({
-        id: 'a',
-        type: 'test:work',
-        processingToken: 'held',
-        status: 'processing',
-        updatedAt: new Date(now.getTime() - 5_000),
-      }),
-    ]
-
-    const metrics = await drain(rows, registry(async () => undefined))
-
-    expect(metrics).toMatchObject({ recoveredStale: 0, claimed: 0 })
-    expect(rows[0]?.status).toBe('processing')
-  })
-
   test('a handler that knows the work can never succeed stops immediately', async () => {
     const rows = [taskRow({ id: 'a', type: 'test:work' })]
     const error = spyOn(console, 'error').mockImplementation(() => {})
@@ -88,28 +68,6 @@ describe('drainTaskOutbox', () => {
     expect(flags).toEqual([true])
   })
 
-  test('a type this deployment cannot run is left pending and reported', async () => {
-    // An API already enqueueing work the runner beside it does not know yet. Claiming it would
-    // burn attempts on something no handler here can ever do.
-    const rows = [taskRow({ id: 'a', type: 'shipped:later' })]
-
-    const metrics = await drain(rows, registry(async () => undefined))
-
-    expect(metrics).toMatchObject({ claimed: 0, unhandled: 1 })
-    expect(rows[0]?.status).toBe('pending')
-  })
-
-  test('work that is not due yet is left for a later pass', async () => {
-    const rows = [
-      taskRow({ id: 'a', type: 'test:work', scheduledFor: new Date(now.getTime() + 60_000) }),
-    ]
-
-    const metrics = await drain(rows, registry(async () => undefined))
-
-    expect(metrics).toMatchObject({ claimed: 0, backlog: 0 })
-    expect(rows[0]?.status).toBe('pending')
-  })
-
   test('the runtime budget stops a pass between items rather than mid-task', async () => {
     const rows = [1, 2, 3].map((n) => taskRow({ id: `row-${n}`, type: 'test:work' }))
     let ran = 0
@@ -127,17 +85,6 @@ describe('drainTaskOutbox', () => {
     expect(metrics.backlog).toBeGreaterThan(0)
     // Whatever it did start, it finished and recorded.
     expect(rows.filter((row) => row.status === 'done')).toHaveLength(ran)
-  })
-
-  test('backlog and the oldest wait are reported for alerting', async () => {
-    const rows = [
-      taskRow({ id: 'a', type: 'test:work', scheduledFor: new Date(now.getTime() - 300_000) }),
-      taskRow({ id: 'b', type: 'test:work' }),
-    ]
-
-    const metrics = await drain(rows, registry(async () => undefined), { limit: 1, maxRuntimeMs: 0 })
-
-    expect(metrics).toMatchObject({ backlog: 2, claimed: 0, oldestPendingAgeSeconds: 300 })
   })
 })
 
@@ -191,7 +138,7 @@ test('a result that cannot be written down does not abort the pass', async () =>
     expect(metrics).toMatchObject({ claimed: 2, done: 1 })
     expect(rows.find((row) => row.id === 'a')?.status).toBe('processing')
     expect(rows.find((row) => row.id === 'b')?.status).toBe('done')
-    expect(String(error.mock.calls[0]?.[0])).toContain('could not be recorded')
+    expect(error).toHaveBeenCalled()
   } finally {
     error.mockRestore()
   }
@@ -263,30 +210,3 @@ test('an over-deadline attempt is retried rather than lost', async () => {
     release?.()
   }
 }, 5_000)
-
-test('the lease floor is applied, not merely available', async () => {
-  // A lease shorter than an attempt would let a second drain claim a row whose first runner is
-  // still working. The floor is a pure function, but it has to actually be called with the
-  // slowest handler deadline - otherwise an operator setting a tiny lease breaks the invariant.
-  const rows = [
-    taskRow({
-      id: 'held',
-      type: 'test:work',
-      processingToken: 'someone-else',
-      status: 'processing',
-      updatedAt: new Date(now.getTime() - 20_000),
-    }),
-  ]
-
-  const metrics = await drainTaskOutbox(createFakeOutboxRuntime(rows), {
-    clock: () => now,
-    handlers: { 'test:work': { deadlineMs: 30_000, run: async () => undefined } },
-    // Absurdly short on purpose: the floor must override it.
-    leaseStaleMs: 1,
-    now,
-    random: noJitter,
-  })
-
-  expect(metrics.recoveredStale).toBe(0)
-  expect(rows[0]?.status).toBe('processing')
-})

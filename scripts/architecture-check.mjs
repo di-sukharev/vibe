@@ -1,8 +1,17 @@
+import { readFileSync } from 'node:fs'
 import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+// Workspace packages share one npm scope. Read it from the contracts package so a project rename
+// keeps the alias rules working.
+const workspaceScope = JSON.parse(
+  readFileSync(path.join(repositoryRoot, 'packages/contracts/package.json'), 'utf8'),
+).name.split('/')[0]
+const workspaceAliasPattern = new RegExp(
+  `^${workspaceScope.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/(backend|contracts|webapp|website|mobile)(?:/(.*))?$`,
+)
 const sourceRoots = [
   'backend/src',
   'packages/contracts/src',
@@ -298,9 +307,9 @@ function resolveRepositoryImport(importer, specifier) {
     return `${workspace}/src/${specifier.slice(2)}`
   }
 
-  const workspaceAlias = specifier.match(/^@(web-app-demo)\/(backend|contracts|webapp|website|mobile)(?:\/(.*))?$/)
+  const workspaceAlias = specifier.match(workspaceAliasPattern)
   if (workspaceAlias) {
-    return `${workspaceAlias[2]}/src/${workspaceAlias[3] ?? 'index'}`
+    return `${workspaceAlias[1]}/src/${workspaceAlias[2] ?? 'index'}`
   }
 
   return null

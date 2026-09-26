@@ -1,7 +1,7 @@
 import { describe, expect, spyOn, test } from 'bun:test'
 
 import { EmailDeliveryError } from './errors'
-import type { EmailDelivery, EmailDriverName, EmailMessage } from './port'
+import type { EmailDelivery, EmailMessage } from './port'
 import type { FetchLike } from './provider-request'
 
 /**
@@ -29,7 +29,6 @@ export const contractMessage: EmailMessage = {
 export type CapturedRequest = { url: string; init: RequestInit }
 
 export type EmailContractSetup = {
-  driver: EmailDriverName
   /** The `from` the setup configured, so the contract can prove it survives the mapping. */
   from: string
   replyTo: string
@@ -75,41 +74,19 @@ export function describeEmailContract(name: string, createSetup: () => EmailCont
     }
 
     async function failureFrom(send: () => Promise<void>) {
+      // A transport failure is logged on purpose; keep it out of the test output.
+      const transportLog = spyOn(console, 'error').mockImplementation(() => {})
+
       try {
         await send()
       } catch (error) {
         return error
+      } finally {
+        transportLog.mockRestore()
       }
 
       throw new Error('Expected the send to reject, but it resolved.')
     }
-
-    async function transportFailureFrom(provider: string, send: () => Promise<void>) {
-      const error = spyOn(console, 'error').mockImplementation(() => {})
-
-      try {
-        const failure = await failureFrom(send)
-
-        expect(error).toHaveBeenCalledTimes(1)
-        expect(String(error.mock.calls[0]?.[0]).toLowerCase()).toBe(
-          `${provider.toLowerCase()} transport failure:`,
-        )
-        expect(error.mock.calls[0]?.[1]).toBeInstanceOf(Error)
-        return failure
-      } finally {
-        error.mockRestore()
-      }
-    }
-
-    test('identifies itself and reports that it can send', () => {
-      const setup = createSetup()
-      const delivery = setup.createDelivery(async () => setup.responses.accepted())
-
-      expect({ driver: delivery.driver, configured: delivery.configured }).toEqual({
-        driver: setup.driver,
-        configured: true,
-      })
-    })
 
     test('the message survives the mapping to the provider request', async () => {
       const setup = createSetup()
@@ -129,47 +106,37 @@ export function describeEmailContract(name: string, createSetup: () => EmailCont
       })
     })
 
-    test('throttling and provider outages are transient, so the outbox tries again', async () => {
+    test('throttling, outages, auth failures, and unconfirmed acceptances are transient', async () => {
+      // 401 and 403 mean a revoked or not-yet-propagated key. A permanent classification makes
+      // the notifier raise TerminalTaskError, and deliverPasswordReset then invalidates the reset
+      // token on the spot: a routine credential rotation would destroy every reset in the window.
+      // A 2xx without a message id could be a proxy's cheerful 200, not a delivered email.
       const setup = createSetup()
-
-      for (const respond of [setup.responses.throttled, setup.responses.serverError]) {
-        const error = await failureFrom(() =>
-          setup
-            .createDelivery(async () => respond())
-            .send(contractMessage, { signal: AbortSignal.timeout(5_000) }),
-        )
-
-        expect(error).toBeInstanceOf(EmailDeliveryError)
-        expect((error as EmailDeliveryError).kind).toBe('transient')
+      const transports: Record<string, FetchLike> = {
+        throttled: async () => setup.responses.throttled(),
+        'server error': async () => setup.responses.serverError(),
+        'transport failure': async () => {
+          throw new Error('getaddrinfo ENOTFOUND')
+        },
+        'status 401': async () => new Response('{}', { status: 401 }),
+        'status 403': async () => new Response('{}', { status: 403 }),
+        'status 408': async () => new Response('{}', { status: 408 }),
+        'accepted without a message id': async () => setup.responses.acceptedWithoutId(),
+        'accepted with a body that is not JSON': async () =>
+          new Response('<html>gateway</html>', { status: 200 }),
       }
-    })
 
-    test('a transport failure is transient', async () => {
-      const setup = createSetup()
-      const error = await transportFailureFrom(setup.driver, () =>
-        setup
-          .createDelivery(async () => {
-            throw new Error(`getaddrinfo ENOTFOUND for ${contractMessage.to}`)
-          })
-          .send(contractMessage, { signal: AbortSignal.timeout(5_000) }),
-      )
-
-      expect((error as EmailDeliveryError).kind).toBe('transient')
-    })
-
-    test('a revoked or not-yet-propagated key is transient, not a reason to burn the token', async () => {
-      // A permanent classification here makes the notifier raise TerminalTaskError, which makes
-      // deliverPasswordReset invalidate the reset token on the spot. A routine credential
-      // rotation would then destroy the reset of every user who asked during the window.
-      for (const status of [401, 403, 408]) {
-        const setup = createSetup()
+      for (const [label, transport] of Object.entries(transports)) {
         const error = await failureFrom(() =>
           setup
-            .createDelivery(async () => new Response('{}', { status }))
+            .createDelivery(transport)
             .send(contractMessage, { signal: AbortSignal.timeout(5_000) }),
         )
 
-        expect((error as EmailDeliveryError).kind).toBe('transient')
+        expect([label, error instanceof EmailDeliveryError && error.kind]).toEqual([
+          label,
+          'transient',
+        ])
       }
     })
 
@@ -186,44 +153,35 @@ export function describeEmailContract(name: string, createSetup: () => EmailCont
       expect((error as EmailDeliveryError).details).toMatchObject({ code: setup.rejectedCode })
     })
 
-    test('an acceptance without a message id is transient rather than a silent success', async () => {
-      // Otherwise a proxy returning a cheerful 200 would look exactly like a delivered email.
+    test('a request cut off by its timeout or by its caller is transient', async () => {
+      // The drain aborts a task at its deadline, so the request has to stop at whichever of the
+      // two fires first rather than hold the drain.
       const setup = createSetup()
-      const error = await failureFrom(() =>
+      const caller = new AbortController()
+      const hangUntilAborted = (afterSubscribing?: () => void): FetchLike => async (_url, init) => {
+        await new Promise((_resolve, reject) => {
+          // Subscribe before aborting: the internal signal fires synchronously, so the other
+          // order would miss the event and hang instead of failing.
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
+          afterSubscribing?.()
+        })
+
+        return setup.responses.accepted()
+      }
+
+      const timedOut = await failureFrom(() =>
         setup
-          .createDelivery(async () => setup.responses.acceptedWithoutId())
+          .createDelivery(hangUntilAborted(), 20)
           .send(contractMessage, { signal: AbortSignal.timeout(5_000) }),
       )
-
-      expect((error as EmailDeliveryError).kind).toBe('transient')
-    })
-
-    test('a body that is not JSON is transient', async () => {
-      const setup = createSetup()
-      const error = await failureFrom(() =>
+      const cancelled = await failureFrom(() =>
         setup
-          .createDelivery(async () => new Response('<html>gateway</html>', { status: 200 }))
-          .send(contractMessage, { signal: AbortSignal.timeout(5_000) }),
+          .createDelivery(hangUntilAborted(() => caller.abort()))
+          .send(contractMessage, { signal: caller.signal }),
       )
 
-      expect((error as EmailDeliveryError).kind).toBe('transient')
-    })
-
-    test('a request slower than the timeout is transient', async () => {
-      const setup = createSetup()
-      const error = await transportFailureFrom(setup.driver, () =>
-        setup
-          .createDelivery(async (_url, init) => {
-            await new Promise((resolve, reject) => {
-              init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
-            })
-
-            return setup.responses.accepted()
-          }, 20)
-          .send(contractMessage, { signal: AbortSignal.timeout(5_000) }),
-      )
-
-      expect((error as EmailDeliveryError).kind).toBe('transient')
+      expect((timedOut as EmailDeliveryError).kind).toBe('transient')
+      expect((cancelled as EmailDeliveryError).kind).toBe('transient')
     })
 
     test('an already-aborted caller is refused without troubling the provider', async () => {
@@ -238,38 +196,6 @@ export function describeEmailContract(name: string, createSetup: () => EmailCont
 
       expect((error as EmailDeliveryError).kind).toBe('transient')
       expect(requests).toHaveLength(0)
-    })
-
-    test('a caller aborting mid-flight cancels the request and leaves no listener behind', async () => {
-      // The drain aborts a task at its deadline and then keeps running. A driver that left its
-      // listener attached would leak one per attempt onto a signal that outlives the send.
-      const setup = createSetup()
-      const controller = new AbortController()
-      const removed: string[] = []
-      const originalRemove = controller.signal.removeEventListener.bind(controller.signal)
-      controller.signal.removeEventListener = ((type: string, ...rest: never[]) => {
-        removed.push(type)
-
-        return (originalRemove as (type: string, ...rest: never[]) => void)(type, ...rest)
-      }) as typeof controller.signal.removeEventListener
-
-      const error = await transportFailureFrom(setup.driver, () =>
-        setup
-          .createDelivery(async (_url, init) => {
-            await new Promise((_resolve, reject) => {
-              // Subscribe before aborting: the internal signal fires synchronously, so the other
-              // order would miss the event and hang instead of failing.
-              init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
-              controller.abort()
-            })
-
-            return setup.responses.accepted()
-          })
-          .send(contractMessage, { signal: controller.signal }),
-      )
-
-      expect((error as EmailDeliveryError).kind).toBe('transient')
-      expect(removed).toContain('abort')
     })
 
     test('no failure ever names the recipient, the subject, or the body', async () => {
@@ -292,29 +218,17 @@ export function describeEmailContract(name: string, createSetup: () => EmailCont
         },
       ]
 
-      const transportError = spyOn(console, 'error').mockImplementation(() => {})
-
-      try {
-        for (const respond of transports) {
-          const error = await failureFrom(() =>
-            setup
-              .createDelivery(respond)
-              .send(contractMessage, { signal: AbortSignal.timeout(5_000) }),
-          )
-
-          const reported = `${(error as Error).message} ${JSON.stringify((error as EmailDeliveryError).details)}`
-          expect(reported).not.toContain(contractMessage.to)
-          expect(reported).not.toContain(contractMessage.subject)
-          expect(reported).not.toContain(contractMessage.text)
-        }
-
-        expect(transportError).toHaveBeenCalledTimes(1)
-        expect(String(transportError.mock.calls[0]?.[0]).toLowerCase()).toBe(
-          `${setup.driver.toLowerCase()} transport failure:`,
+      for (const respond of transports) {
+        const error = await failureFrom(() =>
+          setup
+            .createDelivery(respond)
+            .send(contractMessage, { signal: AbortSignal.timeout(5_000) }),
         )
-        expect(transportError.mock.calls[0]?.[1]).toBeInstanceOf(Error)
-      } finally {
-        transportError.mockRestore()
+
+        const reported = `${(error as Error).message} ${JSON.stringify((error as EmailDeliveryError).details)}`
+        expect(reported).not.toContain(contractMessage.to)
+        expect(reported).not.toContain(contractMessage.subject)
+        expect(reported).not.toContain(contractMessage.text)
       }
     })
   })

@@ -25,9 +25,3 @@ export const jpegImage = {
     'base64',
   ),
 }
-
-/**
- * Matches the direct upload request on either driver: the filesystem driver serves it from the
- * backend under /storage/objects, the S3 driver from the local bucket.
- */
-export const storageUploadUrlPatterns = ['**/storage/objects/**', '**/local-private-storage/**']

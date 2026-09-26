@@ -1,511 +1,139 @@
-import { afterEach, describe, expect, test } from 'bun:test'
-import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { resolve } from 'node:path'
-
-import { normalizeChecklistLabels } from './checklist-labels.mjs'
+import { describe, expect, test } from 'bun:test'
 
 import {
+  agentInstructionsWordBudget,
   validateAgentInstructions,
   validateChecklist,
   validateMarkdownLinks,
-  worktreePaths,
 } from './template-check.mjs'
 
-const repositoryRoot = resolve(import.meta.dir, '..')
-const russianChecklist = readFileSync(resolve(repositoryRoot, 'CHECKLIST.md'), 'utf8')
-const currentChecklist = normalizeChecklistLabels(russianChecklist)
-const currentAgents = readFileSync(resolve(repositoryRoot, 'AGENTS.md'), 'utf8')
-const currentClaude = readFileSync(resolve(repositoryRoot, 'CLAUDE.md'), 'utf8')
-const temporaryDirectories = []
+const agents = [
+  '# AGENTS.md',
+  '',
+  '<!-- BOOTSTRAP_ONLY_START -->',
+  '## New project setup',
+  '<!-- BOOTSTRAP_ONLY_END -->',
+  '',
+  '## Workflow',
+].join('\n')
+const cleanAgents = '# AGENTS.md\n\n## Workflow\n'
 
-afterEach(() => {
-  for (const directory of temporaryDirectories.splice(0)) {
-    rmSync(directory, { force: true, recursive: true })
+function checklist({ status = 'not started', rows = [] } = {}) {
+  return [
+    '# Чеклист установки',
+    '',
+    `**Статус установки:** \`${status}\``,
+    '',
+    '## Реестр возможностей',
+    '',
+    '| Возможность | Состояние | Примечание |',
+    '| --- | --- | --- |',
+    '| Auth (email + password) | included | Базовая возможность. |',
+    ...rows,
+  ].join('\n')
+}
+
+describe('Markdown links', () => {
+  const guide = { path: 'docs/GUIDE.md', source: '# Гайд\n\n## Установка и запуск\n\n## Установка и запуск\n' }
+
+  function linkErrors(readme) {
+    const files = [{ path: 'README.md', source: readme }, guide]
+    return validateMarkdownLinks(files, new Set(['README.md', 'docs/GUIDE.md', 'docs/logo.png']))
   }
-})
 
-describe('template checklist validation', () => {
-  test('accepts Russian labels and keeps legacy English labels compatible', () => {
-    for (const source of [russianChecklist, currentChecklist]) {
-      expect(validateChecklist(source, { agents: currentAgents, claude: currentClaude })).toEqual([])
-    }
-    expect(normalizeChecklistLabels(currentChecklist)).toBe(currentChecklist)
-  })
-
-  test('preserves answers and notes while normalizing Russian labels', () => {
-    const source = [
-      '| Название проекта / slug | Ответ \\| Продукт |',
-      '| Auth (email + password) | included | Ответ: Свой сервер |',
-      'Продукт и Ответ в обычном тексте.',
+  test('accepts files, directories, Cyrillic anchors, and duplicate-heading suffixes', () => {
+    const readme = [
+      '# Readme',
+      '[guide](docs/GUIDE.md) [docs](docs/) [self](#readme) ![logo](docs/logo.png)',
+      '[setup](docs/GUIDE.md#установка-и-запуск) [again](docs/GUIDE.md#установка-и-запуск-1)',
+      '[encoded](docs/GUIDE.md#%D0%B3%D0%B0%D0%B9%D0%B4) [web](https://example.com/missing.md)',
+      '```md',
+      '[example only](missing.md)',
+      '```',
     ].join('\n')
-    expect(normalizeChecklistLabels(source)).toBe(source.replace('Название проекта / slug', 'Project name / slug'))
+    expect(linkErrors(readme)).toEqual([])
   })
 
-  test('rejects missing or duplicate Russian headings, questions, and status', () => {
-    const options = { agents: currentAgents, claude: currentClaude }
-    expect(validateChecklist(russianChecklist.replace('## 2. Продукт', '## Другое'), options))
-      .toContain('CHECKLIST.md is missing required heading "Product".')
-    expect(validateChecklist(`${russianChecklist}\n## Product\n`, options))
-      .toContain('CHECKLIST.md contains duplicate heading "Product".')
-    expect(validateChecklist(russianChecklist.replace(/^\| Название проекта \/ slug.*$/m, ''), options))
-      .toContain('CHECKLIST.md section "Project identity" is missing required question "Project name / slug".')
-    expect(validateChecklist(`${russianChecklist}\n**Install status:** ` + '`not started`', options))
-      .toContain('CHECKLIST.md must contain exactly one install status declaration.')
-    expect(validateChecklist(russianChecklist.replace('## 1. Проект', '```md\n## 1. Проект\n```'), options))
-      .toContain('CHECKLIST.md is missing required heading "Project identity".')
-  })
-
-  test('enforces pristine and completed intake with Russian labels', () => {
-    const options = { agents: currentAgents, claude: currentClaude }
-    const answered = russianChecklist.replace('| Название проекта / slug | _unanswered_ |', '| Название проекта / slug | demo |')
-    expect(validateChecklist(answered, options)).toContain(
-      'A reusable template with status "not started" must keep every intake answer `_unanswered_`.',
-    )
-    const deploymentStart = russianChecklist.indexOf('## 8. Деплой')
-    const completed = (russianChecklist.slice(0, deploymentStart).replaceAll('_unanswered_', 'n/a') + russianChecklist.slice(deploymentStart))
-      .replace('**Статус установки:** `not started`', '**Статус установки:** `completed 2026-08-16`')
-      .replace('- [ ] `website`', '- [x] `website`')
-    expect(validateChecklist(completed, { ...options, agents: withoutBootstrapBlock(currentAgents) })).toEqual([])
-    expect(validateChecklist(completed, options)).toContain(
-      'A completed install must remove Bootstrap-Only Instructions from AGENTS.md.',
-    )
-  })
-
-  test('accepts the pristine reusable template', () => {
-    expect(validateChecklist(currentChecklist, { agents: currentAgents, claude: currentClaude })).toEqual([])
-  })
-
-  test('accepts the mobile template capability states without depending on a branch ref', () => {
-    const checklistWithPayments = /^\| Payments \/ subscriptions\s+\|/m.test(currentChecklist)
-      ? currentChecklist
-      : currentChecklist.replace(
-        /^(\| Browser checkout \/ payments\s+\| absent\s+\|.*)$/m,
-        '$1\n| Payments / subscriptions        | available | Mobile store subscriptions are available. |',
-      )
-    const mobileChecklist = checklistWithPayments
-      .replace(
-        /^(\| Payments \/ subscriptions\s+\|)\s*(?:included|available|absent|removed)(\s+\|)/m,
-        '$1 available$2',
-      )
-      .replace(
-        /^(\| Push notifications\s+\|)\s*(?:included|available|absent|removed)(\s+\|)/m,
-        '$1 available$2',
-      )
-      .replace(
-        /^(\| Social sign-in \(Apple \/ Google\)\s+\|)\s*(?:included|available|absent|removed)(\s+\|)/m,
-        '$1 available$2',
-      )
-
-    expect(
-      validateChecklist(mobileChecklist, { agents: currentAgents, claude: currentClaude }),
-    ).toEqual([])
-  })
-
-  test('rejects missing and duplicate semantic headings even when numbers change', () => {
-    const renumbered = currentChecklist.replace('## 1. Project identity', '## 20. Project identity')
-    expect(validateChecklist(renumbered, { agents: currentAgents, claude: currentClaude })).toEqual([])
-
-    const missing = currentChecklist.replace('## 2. Product', '## Product removed')
-    expect(validateChecklist(missing, { agents: currentAgents, claude: currentClaude })).toContain(
-      'CHECKLIST.md is missing required heading "Product".',
-    )
-
-    const duplicate = currentChecklist.replace('## 2. Product', '## 2. Product\n\n## Product')
-    expect(validateChecklist(duplicate, { agents: currentAgents, claude: currentClaude })).toContain(
-      'CHECKLIST.md contains duplicate heading "Product".',
-    )
-
-    const fencedHeading = currentChecklist.replace(
-      '## 1. Project identity',
-      '```md\n## 1. Project identity\n```',
-    )
-    expect(validateChecklist(fencedHeading, { agents: currentAgents, claude: currentClaude })).toContain(
-      'CHECKLIST.md is missing required heading "Project identity".',
-    )
-
-    const commentedHeading = currentChecklist.replace(
-      '## 2. Product',
-      '<!--\n## 2. Product\n-->',
-    )
-    expect(
-      validateChecklist(commentedHeading, { agents: currentAgents, claude: currentClaude }),
-    ).toContain('CHECKLIST.md is missing required heading "Product".')
-
-    const nestedShorterFence = `${currentChecklist}\n\`\`\`\`md\n\`\`\`\n**Install status:** \`completed 2026-08-16\`\n\`\`\`\``
-    expect(validateChecklist(nestedShorterFence, { agents: currentAgents, claude: currentClaude })).toEqual([])
-  })
-
-  test('rejects malformed install status and invalid or duplicate ledger rows', () => {
-    const malformedStatus = currentChecklist.replace('`not started`', '`almost ready`')
-    expect(validateChecklist(malformedStatus, { agents: currentAgents, claude: currentClaude })).toContain(
-      'CHECKLIST.md has invalid install status "almost ready".',
-    )
-
-    const duplicateStatus = currentChecklist.replace(
-      '**Install status:** `not started`',
-      '**Install status:** `not started`\n**Install status:** `completed 2026-08-16`',
-    )
-    expect(validateChecklist(duplicateStatus, { agents: currentAgents, claude: currentClaude })).toContain(
-      'CHECKLIST.md must contain exactly one install status declaration.',
-    )
-
-    const invalidState = currentChecklist.replace('| Auth (email + password) | included |', '| Auth (email + password) | enabled |')
-    expect(validateChecklist(invalidState, { agents: currentAgents, claude: currentClaude })).toContain(
-      'Capability "Auth (email + password)" has invalid state "enabled".',
-    )
-
-    const duplicateCapability = currentChecklist.replace(
-      '| Admin roles | included |',
-      '| Auth (email + password) | included |',
-    )
-    expect(validateChecklist(duplicateCapability, { agents: currentAgents, claude: currentClaude })).toContain(
-      'Capability ledger contains duplicate capability "Auth (email + password)".',
-    )
-
-    const missingColumns = currentChecklist.replace(
-      /^\| Auth \(email \+ password\).*$/m,
-      '| Auth (email + password) |',
-    )
-    expect(validateChecklist(missingColumns, { agents: currentAgents, claude: currentClaude })).toContain(
-      'Capability ledger row for "Auth (email + password)" must contain exactly three columns (found 1).',
-    )
-
-    const extraColumns = currentChecklist.replace(
-      /^\| Auth \(email \+ password\).*$/m,
-      '| Auth (email + password) | included | Baseline. | unexpected |',
-    )
-    expect(validateChecklist(extraColumns, { agents: currentAgents, claude: currentClaude })).toContain(
-      'Capability ledger row for "Auth (email + password)" must contain exactly three columns (found 4).',
-    )
-
-    const unclosedRow = currentChecklist.replace(
-      /^\| Auth \(email \+ password\).*$/m,
-      '| Auth (email + password) | definitely-invalid | malformed note',
-    )
-    expect(validateChecklist(unclosedRow, { agents: currentAgents, claude: currentClaude })).toContain(
-      'Capability ledger row for "Auth (email + password)" must end with "|".',
-    )
-
-    const missingLedgerScaffold = currentChecklist.replace(
-      /^\| Capability[^\n]*\n\| -[^\n]*$/m,
-      '',
-    )
-    const ledgerErrors = validateChecklist(missingLedgerScaffold, {
-      agents: currentAgents,
-      claude: currentClaude,
-    })
-    expect(ledgerErrors).toContain(
-      'Capability ledger must start with Capability, State, and Note columns.',
-    )
-    expect(ledgerErrors).toContain(
-      'Capability ledger must keep a three-column Markdown table separator.',
-    )
-
-    const commentedLedger = currentChecklist.replace(
-      /(## 10\. Capability ledger\n\n)([\s\S]*?)(\n\n## 11\. Environment checks)/,
-      '$1<!--\n$2\n-->$3',
-    )
-    expect(
-      validateChecklist(commentedLedger, { agents: currentAgents, claude: currentClaude }),
-    ).toContain('Capability ledger must start with Capability, State, and Note columns.')
-
-    const separatorShapedNote = currentChecklist.replace(
-      /^\| Auth \(email \+ password\).*$/m,
-      '| Auth (email + password) | enabled | --- |',
-    )
-    expect(validateChecklist(separatorShapedNote, { agents: currentAgents, claude: currentClaude })).toContain(
-      'Capability "Auth (email + password)" has invalid state "enabled".',
-    )
-
-    const duplicateLedgerHeader = currentChecklist.replace(
-      /^(\| Capability[^\n]*\n\| -[^\n]*)$/m,
-      '$1\n| Capability | State | Note |',
-    )
-    expect(validateChecklist(duplicateLedgerHeader, { agents: currentAgents, claude: currentClaude })).toContain(
-      'Capability ledger must contain exactly one Capability/State/Note header row.',
-    )
-
-    const duplicateLedgerSeparator = currentChecklist.replace(
-      /^(\| Capability[^\n]*\n\| -[^\n]*)$/m,
-      '$1\n| --- | --- | --- |',
-    )
-    expect(validateChecklist(duplicateLedgerSeparator, { agents: currentAgents, claude: currentClaude })).toContain(
-      'Capability ledger must contain exactly one table separator row.',
-    )
-  })
-
-  test('keeps a reusable not-started intake pristine', () => {
-    const answered = currentChecklist.replace('| Project name / slug | _unanswered_ |', '| Project name / slug | demo |')
-    expect(validateChecklist(answered, { agents: currentAgents, claude: currentClaude })).toContain(
-      'A reusable template with status "not started" must keep every intake answer `_unanswered_`.',
-    )
-
-    const checked = currentChecklist.replace('- [ ] `backend`', '- [x] `backend`')
-    expect(validateChecklist(checked, { agents: currentAgents, claude: currentClaude })).toContain(
-      'A reusable template with status "not started" must keep every checklist item unchecked.',
-    )
-
-    const malformedIntake = currentChecklist.replace(
-      /^\| Project name \/ slug.*$/m,
-      '| Project name / slug | answered | extra |',
-    )
-    expect(validateChecklist(malformedIntake, { agents: currentAgents, claude: currentClaude })).toContain(
-      'CHECKLIST.md section "Project identity" intake row "Project name / slug" must contain exactly two columns (found 3).',
-    )
-
-    const missingSeparator = currentChecklist.replace(
-      '| --- | --- |',
-      '',
-    )
-    expect(validateChecklist(missingSeparator, { agents: currentAgents, claude: currentClaude })).toContain(
-      'CHECKLIST.md section "Project identity" must keep a two-column Markdown table separator.',
-    )
-
-    const extraIntakeTable = currentChecklist.replace(
-      '## 2. Product',
-      '| Question | Answer |\n| --- | --- |\n| Shadow answer | answered |\n\n## 2. Product',
-    )
-    expect(validateChecklist(extraIntakeTable, { agents: currentAgents, claude: currentClaude })).toContain(
-      'CHECKLIST.md section "Project identity" must contain exactly one Question/Answer intake table (found 2).',
-    )
-
-    const informationalTable = currentChecklist.replace(
-      '## 3. Active surfaces',
-      '| Example | Meaning |\n| --- | --- |\n| MVP | First useful release |\n\n## 3. Active surfaces',
-    )
-    expect(
-      validateChecklist(informationalTable, { agents: currentAgents, claude: currentClaude }),
-    ).toEqual([])
-
-    const escapedPipe = currentChecklist
-      .replace('**Install status:** `not started`', '**Install status:** `in progress`')
-      .replace(
-        '| Project name / slug | _unanswered_ |',
-        '| Project name / slug | web \\| mobile |',
-      )
-    expect(
-      validateChecklist(escapedPipe, { agents: currentAgents, claude: currentClaude }),
-    ).toEqual([])
-
-    const extraHostingRow = currentChecklist.replace(
-      /^\| Own server\s+\|.*$/m,
-      '$&\n| Shadow host | Never | Nothing |',
-    )
-    expect(validateChecklist(extraHostingRow, { agents: currentAgents, claude: currentClaude })).toContain(
-      'CHECKLIST.md Deployment hosting comparison must contain exactly five rows (found 6).',
-    )
-
-    const duplicateHostingHeader = currentChecklist.replace(
-      /^(\| Hosting\s+\|.*\n\| -.*)$/m,
-      '$1\n| Hosting | Chosen when | What the template gives you |',
-    )
-    expect(validateChecklist(duplicateHostingHeader, { agents: currentAgents, claude: currentClaude })).toContain(
-      'CHECKLIST.md Deployment hosting comparison must contain exactly five rows (found 6).',
-    )
-  })
-
-  test('requires completed installs to finish the core intake and remove bootstrap instructions', () => {
-    const completed = completedChecklist()
-    const cleanAgents = withoutBootstrapBlock(currentAgents)
-    const cleanClaude = currentClaude
-
-    expect(validateChecklist(completed, { agents: cleanAgents, claude: cleanClaude })).toEqual([])
-
-    const incomplete = completed.replace(
-      /^(\| Project name \/ slug\s+\|) n\/a(\s+\|)$/m,
-      '$1 _unanswered_$2',
-    )
-    expect(validateChecklist(incomplete, { agents: cleanAgents, claude: cleanClaude })).toContain(
-      'A completed install must answer every row in sections Project identity through Payments.',
-    )
-
-    const emptyAnswer = completed.replace(
-      /^(\| Project name \/ slug\s+\|) n\/a(\s+\|)$/m,
-      '$1 $2',
-    )
-    expect(validateChecklist(emptyAnswer, { agents: cleanAgents, claude: cleanClaude })).toContain(
-      'A completed install must answer every row in sections Project identity through Payments.',
-    )
-
-    const missingQuestion = completed.replace(
-      /^\| What product do you want to build first\?.*$/m,
-      '',
-    )
-    expect(validateChecklist(missingQuestion, { agents: cleanAgents, claude: cleanClaude })).toContain(
-      'CHECKLIST.md section "Product" is missing required question "What product do you want to build first?".',
-    )
-
-    const noSurface = completed.replace('- [x] `website`', '- [ ] `website`')
-    expect(validateChecklist(noSurface, { agents: cleanAgents, claude: cleanClaude })).toContain(
-      'A completed install must mark at least one active surface.',
-    )
-
-    expect(validateChecklist(completed, { agents: currentAgents, claude: currentClaude })).toContain(
-      'A completed install must remove Bootstrap-Only Instructions from AGENTS.md.',
-    )
+  test('reports a missing file, a missing anchor, and a link outside the repository', () => {
+    const readme = '[gone](docs/GONE.md)\n[anchor](docs/GUIDE.md#нет-такого)\n[up](../secret.md)'
+    expect(linkErrors(readme)).toEqual([
+      'README.md links to missing tracked target "docs/GONE.md".',
+      'README.md links to missing Markdown heading "#нет-такого" in "docs/GUIDE.md".',
+      'README.md contains a local link outside the repository: "../secret.md".',
+    ])
   })
 })
 
-describe('agent instruction imports', () => {
-  test('requires CLAUDE.md to import AGENTS.md instead of restating it', () => {
-    expect(validateAgentInstructions(currentAgents, currentClaude)).toEqual([])
+describe('CLAUDE.md import', () => {
+  const missingImport =
+    'CLAUDE.md must load the shared instructions with a standalone `@AGENTS.md` import line.'
 
-    const missingImport = currentClaude.replace('@AGENTS.md', 'See AGENTS.md for the rules.')
-    expect(validateAgentInstructions(currentAgents, missingImport)).toEqual([
-      'CLAUDE.md must load the shared instructions with a standalone `@AGENTS.md` import line.',
-    ])
+  test('accepts a standalone import line', () => {
+    expect(validateAgentInstructions(agents, '@AGENTS.md\n')).toEqual([])
+  })
 
-    const codeSpanImport = currentClaude.replace('@AGENTS.md', '`@AGENTS.md`')
-    expect(validateAgentInstructions(currentAgents, codeSpanImport)).toEqual([
-      'CLAUDE.md must load the shared instructions with a standalone `@AGENTS.md` import line.',
-    ])
+  test('rejects a missing, inline, or fenced import', () => {
+    expect(validateAgentInstructions(agents, 'Read AGENTS.md first.')).toEqual([missingImport])
+    expect(validateAgentInstructions(agents, 'Load `@AGENTS.md`.')).toEqual([missingImport])
+    expect(validateAgentInstructions(agents, '```text\n@AGENTS.md\n```')).toEqual([missingImport])
+  })
 
-    const fencedImport = ['```text', '@AGENTS.md', '```'].join('\n')
-    expect(validateAgentInstructions(currentAgents, fencedImport)).toEqual([
-      'CLAUDE.md must load the shared instructions with a standalone `@AGENTS.md` import line.',
-    ])
-
-    const copiedBack = `${currentClaude}\n\n${currentAgents}`
-    expect(validateAgentInstructions(currentAgents, copiedBack)).toEqual([
+  test('rejects a restated AGENTS.md section', () => {
+    expect(validateAgentInstructions(agents, '@AGENTS.md\n\n## Workflow\n\nCopied rules.')).toEqual([
       'CLAUDE.md must not restate AGENTS.md sections; it imports them with `@AGENTS.md`.',
     ])
   })
-})
 
-describe('tracked Markdown links', () => {
-  test('accepts files, directories, heading fragments, external links, and fenced examples', () => {
-    const files = [
-      {
-        path: 'README.md',
-        source: [
-          '# Testing',
-          '[file](docs/TESTING.md)',
-          '[file with query](README.md?plain=1)',
-          '[directory](docs/)',
-          '[encoded](docs/My%20Guide.md)',
-          '[parenthesized](docs/My_(Guide).md)',
-          '[nested parentheses](docs/Nested_((Guide)).md)',
-          '[escaped parentheses](docs/A_\\(B\\).md)',
-          '[root](./)',
-          '[fragment](#testing)',
-          '[file fragment](docs/TESTING.md#details--recovery)',
-          '[setext fragment](docs/SETEXT.md#my-heading)',
-          '[indented ATX](docs/Headings.md#heading)',
-          '[inline-link heading](docs/Headings.md#guide)',
-          '[reference-link heading](docs/ReferenceHeading.md#reference-guide)',
-          '[entity heading](docs/Entities.md#fish--chips)',
-          '[numeric entity heading](docs/Entities.md#cafe)',
-          '[named entity heading](docs/Entities.md#copyright--2026)',
-          '[reference guide][testing-guide]',
-          '[testing-guide]: docs/TESTING.md',
-          '[external](https://example.com/path)',
-          '`[inline example](missing-inline.md)`',
-          '<!-- [temporarily hidden](missing-comment.md) -->',
-          '\\[literal](missing-literal.md)',
-          '',
-          '    [indented example](missing-indented.md)',
-          '```md',
-          '[example only](missing.md)',
-          '```',
-        ].join('\n'),
-      },
-      { path: 'docs/TESTING.md', source: '# Testing\n\n## Details & recovery' },
-      { path: 'docs/My Guide.md', source: '# Guide' },
-      { path: 'docs/My_(Guide).md', source: '# Parenthesized guide' },
-      { path: 'docs/Nested_((Guide)).md', source: '# Nested guide' },
-      { path: 'docs/SETEXT.md', source: 'My heading\n==========' },
-      { path: 'docs/Headings.md', source: '   ## Heading\n\n# [Guide](A_(B).md)' },
-      { path: 'docs/ReferenceHeading.md', source: '# [Reference Guide][ref]\n\n[ref]: A.md' },
-      {
-        path: 'docs/Entities.md',
-        source: '# Fish &amp; Chips\n\n## &#67;afe\n\n## Copyright &copy; 2026',
-      },
-      { path: 'docs/A_(B).md', source: '# Inline destination' },
-      { path: 'docs/A.md', source: '# Reference destination' },
-    ]
-    const trackedPaths = new Set(files.map((file) => file.path))
-
-    expect(validateMarkdownLinks(files, trackedPaths)).toEqual([])
-  })
-
-  test('discovers current tracked and untracked files while excluding ignored and deleted paths', () => {
-    const root = mkdtempSync(resolve(tmpdir(), 'template-check-'))
-    temporaryDirectories.push(root)
-    execFileSync('git', ['init', '--quiet'], { cwd: root })
-    writeFileSync(resolve(root, '.gitignore'), 'ignored.md\n')
-    writeFileSync(resolve(root, 'tracked.md'), '# Tracked\n')
-    writeFileSync(resolve(root, 'deleted.md'), '# Deleted\n')
-    execFileSync('git', ['add', '.gitignore', 'tracked.md', 'deleted.md'], { cwd: root })
-    unlinkSync(resolve(root, 'deleted.md'))
-    writeFileSync(resolve(root, 'untracked.md'), '# Untracked\n')
-    writeFileSync(resolve(root, 'ignored.md'), '# Ignored\n')
-
-    expect([...worktreePaths(root)].sort()).toEqual([
-      '.gitignore',
-      'tracked.md',
-      'untracked.md',
-    ])
-  })
-
-  test('rejects missing targets and traversal outside the repository', () => {
-    const files = [
-      {
-        path: 'docs/TESTING.md',
-        source: [
-          '# Testing',
-          '[missing](MISSING.md)',
-          '[outside](../../private.md)',
-          '[missing local heading](#definitely-missing)',
-          '[missing file heading](GUIDE.md#definitely-missing)',
-          '[indented code is not a heading](CODE.md#code)',
-          '[nested missing](MISSING_((a)).md)',
-          '[outer [inner]](MISSING-NESTED.md)',
-          '- outer',
-          '  - inner',
-          '    - deep',
-          '',
-          '        [real list link](LIST-MISSING.md)',
-          '',
-          '[missing reference][missing-guide]',
-          '',
-          '[missing-guide]: MISSING-GUIDE.md',
-          '```md`oops',
-          '[invalid fence link](INVALID-FENCE.md)',
-        ].join('\n'),
-      },
-      { path: 'docs/GUIDE.md', source: '# Guide' },
-      { path: 'docs/CODE.md', source: '    Code\n---' },
-    ]
-
-    expect(validateMarkdownLinks(files, new Set(files.map((file) => file.path)))).toEqual([
-      'docs/TESTING.md links to missing tracked target "docs/MISSING.md".',
-      'docs/TESTING.md contains a local link outside the repository: "../../private.md".',
-      'docs/TESTING.md links to missing Markdown heading "#definitely-missing" in "docs/TESTING.md".',
-      'docs/TESTING.md links to missing Markdown heading "#definitely-missing" in "docs/GUIDE.md".',
-      'docs/TESTING.md links to missing Markdown heading "#code" in "docs/CODE.md".',
-      'docs/TESTING.md links to missing tracked target "docs/MISSING_((a)).md".',
-      'docs/TESTING.md links to missing tracked target "docs/MISSING-NESTED.md".',
-      'docs/TESTING.md links to missing tracked target "docs/LIST-MISSING.md".',
-      'docs/TESTING.md links to missing tracked target "docs/MISSING-GUIDE.md".',
-      'docs/TESTING.md links to missing tracked target "docs/INVALID-FENCE.md".',
+  test('keeps AGENTS.md within its word budget', () => {
+    const atBudget = `${agents}\n${'word '.repeat(agentInstructionsWordBudget - agents.split(/\s+/).length)}`
+    expect(validateAgentInstructions(atBudget, '@AGENTS.md\n')).toEqual([])
+    expect(validateAgentInstructions(`${atBudget} extra`, '@AGENTS.md\n')).toEqual([
+      `AGENTS.md has ${agentInstructionsWordBudget + 1} words; keep it at most ${agentInstructionsWordBudget}. Move area detail into docs/ or an app README.`,
     ])
   })
 })
 
-function completedChecklist() {
-  const deploymentStart = currentChecklist.indexOf('## 8. Deployment')
-  const completed = `${currentChecklist.slice(0, deploymentStart).replaceAll('_unanswered_', 'n/a')}${currentChecklist.slice(deploymentStart)}`
+describe('CHECKLIST.md capability registry', () => {
+  test('accepts valid states under a Russian or an English header', () => {
+    expect(validateChecklist(checklist({ rows: ['| Push notifications | absent | |'] }), agents)).toEqual([])
+    const english = checklist().replace('| Возможность | Состояние |', '| Capability | State |')
+    expect(validateChecklist(english, agents)).toEqual([])
+  })
 
-  return completed
-    .replace('**Install status:** `not started`', '**Install status:** `completed 2026-08-16`')
-    .replace('- [ ] `website`', '- [x] `website`')
-}
+  test('rejects an invalid state and a duplicate capability', () => {
+    const rows = ['| Push notifications | enabled | |', '| Auth (email + password) | absent | |']
+    expect(validateChecklist(checklist({ rows }), agents)).toEqual([
+      'Capability "Push notifications" has invalid state "enabled".',
+      'Capability ledger contains duplicate capability "Auth (email + password)".',
+    ])
+  })
 
-function withoutBootstrapBlock(source) {
-  return source.replace(
-    /## [^\n]+\n\n<!-- BOOTSTRAP_ONLY_START -->[\s\S]*?<!-- BOOTSTRAP_ONLY_END -->\n\n/,
-    '',
-  )
-}
+  test('reports a missing table; fenced or commented tables do not count', () => {
+    const missing = [
+      'CHECKLIST.md has no capability ledger table with a "Capability | State" or "Возможность | Состояние" header.',
+    ]
+    expect(validateChecklist('# Чеклист установки\n', agents)).toEqual(missing)
+    expect(validateChecklist(`\`\`\`md\n${checklist()}\n\`\`\``, agents)).toEqual(missing)
+    expect(validateChecklist(`<!--\n${checklist()}\n-->`, agents)).toEqual(missing)
+  })
+})
+
+describe('CHECKLIST.md install status', () => {
+  const leftover =
+    'A completed install must remove the BOOTSTRAP_ONLY section and its markers from AGENTS.md.'
+
+  test('rejects bootstrap markers in AGENTS.md after a completed install', () => {
+    const completed = checklist({ status: 'completed 2026-09-25' })
+    expect(validateChecklist(completed, agents)).toEqual([leftover])
+    expect(validateChecklist(completed.replace('Статус установки', 'Install status'), agents)).toEqual([
+      leftover,
+    ])
+  })
+
+  test('accepts a completed install without markers, an unfinished install, and a missing status', () => {
+    expect(validateChecklist(checklist({ status: 'completed 2026-09-25' }), cleanAgents)).toEqual([])
+    expect(validateChecklist(checklist({ status: 'in progress' }), agents)).toEqual([])
+    const noStatus = checklist({ status: 'completed 2026-09-25' }).replace(/^\*\*.*$/m, '')
+    expect(validateChecklist(noStatus, agents)).toEqual([])
+  })
+})

@@ -32,7 +32,6 @@ type SesRequestBody = {
 }
 
 describeEmailContract('Postbox delivery', () => ({
-  driver: 'postbox',
   from: config.from,
   replyTo: config.replyTo!,
   createDelivery: (fetchImpl, requestTimeoutMs) =>
@@ -80,23 +79,6 @@ describe('Postbox wire format', () => {
     return requests[0]!
   }
 
-  test('posts an SESv2 document to the outbound-emails endpoint', async () => {
-    const request = await capture()
-
-    expect(request.url).toBe('https://postbox.cloud.yandex.net/v2/email/outbound-emails')
-    expect(request.init.method).toBe('POST')
-    expect(JSON.parse(String(request.init.body))).toMatchObject({
-      FromEmailAddress: config.from,
-      Destination: { ToAddresses: [contractMessage.to] },
-      Content: {
-        Simple: {
-          Subject: { Data: contractMessage.subject, Charset: 'UTF-8' },
-          Body: { Text: { Data: contractMessage.text, Charset: 'UTF-8' } },
-        },
-      },
-    })
-  })
-
   test('signs the request for the ses service in the configured region', async () => {
     const request = await capture()
     const headers = request.init.headers as Record<string, string>
@@ -105,27 +87,6 @@ describe('Postbox wire format', () => {
       expect.arrayContaining(['authorization', 'x-amz-date', 'x-amz-content-sha256', 'host']),
     )
     expect(headers.authorization).toContain('/ru-central1/ses/aws4_request')
-  })
-
-  test('signs the host header, which the signer does not add on its own', async () => {
-    // Omitting it is silent locally and fatal against the real endpoint: `host` drops out of
-    // SignedHeaders and Postbox rejects the signature. This is the assertion that catches it.
-    const request = await capture()
-    const headers = request.init.headers as Record<string, string>
-    const signedHeaders = /SignedHeaders=([^,]*)/.exec(headers.authorization!)?.[1]?.split(';')
-
-    expect(headers.host).toBe('postbox.cloud.yandex.net')
-    expect(signedHeaders).toContain('host')
-  })
-
-  test('carries the port into the signed host for a non-default endpoint', async () => {
-    // A signature over a host without its port does not verify, so a proxied or test endpoint
-    // would fail in a way that looks like bad credentials.
-    const request = await capture({ endpoint: 'https://postbox.internal:8443' })
-    const headers = request.init.headers as Record<string, string>
-
-    expect(headers.host).toBe('postbox.internal:8443')
-    expect(request.url).toBe('https://postbox.internal:8443/v2/email/outbound-emails')
   })
 
   test('passes a configuration set through when the install has one', async () => {

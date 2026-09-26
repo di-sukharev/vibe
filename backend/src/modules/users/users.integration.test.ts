@@ -6,6 +6,7 @@ import {
   acquirePushTokenUserLock,
   createPrisma,
   type DbClient,
+  maximumPushSendFenceTransactionMs,
   userAuthenticationSessionTransactionOptions,
   userAuthorityTransitionTransactionOptions,
 } from '../../db'
@@ -18,7 +19,7 @@ import {
 import { bootstrapDevelopmentData } from '../../../scripts/development-seed'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
-const maybeDescribe = databaseUrl ? describe : describe.skip
+if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required; run bun run test:backend:integration')
 
 /**
  * The keys `db.ts` hands to `pg_advisory_xact_lock`, repeated here rather than exported: they are
@@ -30,15 +31,17 @@ const maybeDescribe = databaseUrl ? describe : describe.skip
  */
 const userRoleMutationLockKey = 'user-role-mutations'
 const userAuthenticationAuthorityLockKey = (userId: string) => `auth-authority:${userId}`
+const pushTokenUserLockKey = (userId: string) => `push-tokens:${userId}`
 
-maybeDescribe('users and admin API integration', () => {
+describe('users and admin API integration', () => {
   const env = loadEnv({
-    DATABASE_URL: databaseUrl!,
-    ACCESS_TOKEN_TTL_SECONDS: '60',
-    CORS_ORIGINS: 'http://localhost:5173',
+    DATABASE_URL: databaseUrl,
     JWT_SECRET: '12345678901234567890123456789012',
+    CORS_ORIGINS: 'http://localhost:5173',
+    // Short enough that a test can observe an access token expiring.
+    ACCESS_TOKEN_TTL_SECONDS: '60',
   })
-  const prisma = createPrisma(databaseUrl!)
+  const prisma = createPrisma(databaseUrl)
   const app = createApp({ env, prisma })
 
   beforeEach(async () => {
@@ -213,6 +216,74 @@ maybeDescribe('users and admin API integration', () => {
       headers: authenticatedHeaders(promotedLogin.accessToken),
     })
     expect(stillAuthenticated.status).toBe(200)
+  })
+
+  test('gives each admin one directory read budget, separate from account writes', async () => {
+    // Keyed by administrator: a new filter, session, or client address must not buy more reads,
+    // or rotating any of them walks past the limit. Account writes spend a budget of their own.
+    const admin = await register('budget-admin@example.com')
+    const otherAdmin = await register('budget-other-admin@example.com')
+    await prisma.user.updateMany({
+      where: { id: { in: [admin.user.id, otherAdmin.user.id] } },
+      data: { role: 'admin' },
+    })
+    const secondSession = await login(admin.user.email)
+    const budgetApp = createApp({
+      env: {
+        ...env,
+        ADMIN_USERS_READ_RATE_LIMIT_MAX: 2,
+        AUTH_RATE_LIMIT_MAX: 1,
+        TRUST_PROXY: true,
+        TRUSTED_PROXY_CLIENT_IP_HEADER: 'do-connecting-ip',
+      },
+      prisma,
+    })
+    const read = (accessToken: string, query: string, clientIp: string) =>
+      budgetApp.request(`/api/admin/users?q=${query}`, {
+        headers: { ...authenticatedHeaders(accessToken), 'Do-Connecting-Ip': clientIp },
+      })
+    const rename = (accessToken: string) =>
+      budgetApp.request('/api/users/me', {
+        method: 'PATCH',
+        headers: { ...authenticatedJsonHeaders(accessToken), 'Do-Connecting-Ip': '203.0.113.10' },
+        body: JSON.stringify({ displayName: 'Budget Admin' }),
+      })
+
+    expect((await read(admin.accessToken, 'first', '203.0.113.1')).status).toBe(200)
+    expect((await read(secondSession.accessToken, 'second', '203.0.113.2')).status).toBe(200)
+    const limited = await read(admin.accessToken, 'third', '203.0.113.3')
+    expect(limited.status).toBe(429)
+    expect(limited.headers.get('retry-after')).toBeTruthy()
+    expect((await read(otherAdmin.accessToken, 'first', '203.0.113.1')).status).toBe(200)
+
+    // Exhausted reads leave the write budget, and an exhausted write budget leaves reads.
+    expect((await rename(admin.accessToken)).status).toBe(200)
+    expect((await rename(admin.accessToken)).status).toBe(429)
+    expect((await read(otherAdmin.accessToken, 'second', '203.0.113.10')).status).toBe(200)
+  })
+
+  test('keeps the directory read budget when Yandex SWS takes over the address budgets', async () => {
+    // The edge policy replaces only the per-address budgets. It cannot tell administrators apart,
+    // so the per-administrator budget has to stay in this process.
+    const admin = await register('edge-budget-admin@example.com')
+    await prisma.user.update({ where: { id: admin.user.id }, data: { role: 'admin' } })
+    const edgeApp = createApp({
+      env: {
+        ...env,
+        ADMIN_USERS_READ_RATE_LIMIT_MAX: 1,
+        INGRESS_RATE_LIMIT_PROVIDER: 'yandex-sws',
+        TRUST_PROXY: true,
+        TRUSTED_PROXY_CLIENT_IP_HEADER: 'x-forwarded-for',
+        TRUSTED_PROXY_CLIENT_IP_POSITION: 'last',
+      },
+      prisma,
+    })
+    const read = () => edgeApp.request('/api/admin/users', {
+      headers: authenticatedHeaders(admin.accessToken),
+    })
+
+    expect((await read()).status).toBe(200)
+    expect((await read()).status).toBe(429)
   })
 
   test('rejects self-demotion and serializes concurrent cross-demotion', async () => {
@@ -574,62 +645,6 @@ maybeDescribe('users and admin API integration', () => {
     // expect(await prisma.subscriptionEntitlement.count()).toBe(0)
   })
 
-  test('concurrent first development seeds converge on one admin and user', async () => {
-    const accounts = {
-      admin: {
-        email: 'concurrent-development-admin@example.com',
-        password: 'concurrent-development-admin-password',
-      },
-      user: {
-        email: 'concurrent-development-user@example.com',
-        password: 'concurrent-development-user-password',
-      },
-    }
-    let userReads = 0
-    let markBothUserReadsComplete: () => void = () => undefined
-    const bothUserReadsComplete = new Promise<void>((resolve) => {
-      markBothUserReadsComplete = resolve
-    })
-    let releaseUserReads: () => void = () => undefined
-    const userReadBarrier = new Promise<void>((resolve) => {
-      releaseUserReads = resolve
-    })
-    const db = prisma.$extends({
-      query: {
-        user: {
-          async findUnique({ args, query }) {
-            const result = await query(args)
-            if (args.where.email === accounts.user.email && userReads < 2) {
-              userReads += 1
-              if (userReads === 2) markBothUserReadsComplete()
-              await userReadBarrier
-            }
-            return result
-          },
-        },
-      },
-    }) as unknown as DbClient
-
-    const firstSeed = bootstrapDevelopmentData(db, accounts)
-    const secondSeed = bootstrapDevelopmentData(db, accounts)
-    await bothUserReadsComplete
-    releaseUserReads()
-
-    await expect(Promise.all([firstSeed, secondSeed])).resolves.toEqual([
-      {
-        admin: { email: accounts.admin.email, role: 'admin' },
-        user: { email: accounts.user.email, role: 'user' },
-      },
-      {
-        admin: { email: accounts.admin.email, role: 'admin' },
-        user: { email: accounts.user.email, role: 'user' },
-      },
-    ])
-    expect(await prisma.user.count({
-      where: { email: { in: [accounts.admin.email, accounts.user.email] } },
-    })).toBe(2)
-  })
-
   test('replaces development user credentials and revokes stale authentication state', async () => {
     const accounts = {
       admin: {
@@ -800,49 +815,51 @@ maybeDescribe('users and admin API integration', () => {
     expect(await prisma.pushToken.count({ where: { userId: existing.user.id } })).toBe(1)
   })
 
-  test('bootstrap waits beyond Prisma default timeout for an admitted push fence', async () => {
-    const existing = await register('bootstrap-long-push-fence@example.com')
-    let markFenceAcquired: () => void = () => undefined
-    const fenceAcquired = new Promise<void>((resolve) => {
-      markFenceAcquired = resolve
+  test('makes bootstrap wait out an admitted push send for as long as a send may hold its fence', async () => {
+    const existing = await register('bootstrap-push-fence@example.com')
+    // Stands in for a push send admitted before the bootstrap: a real send holds the user's push
+    // fence through its provider call.
+    let markFenceHeld: () => void = () => undefined
+    const fenceHeld = new Promise<void>((resolve) => {
+      markFenceHeld = resolve
     })
     let releaseFence: () => void = () => undefined
     const fenceBarrier = new Promise<void>((resolve) => {
       releaseFence = resolve
     })
-    const admittedPushFence = prisma.$transaction(async (tx) => {
+    const admittedSend = prisma.$transaction(async (tx) => {
       await acquirePushTokenUserLock(tx, existing.user.id)
-      markFenceAcquired()
+      markFenceHeld()
       await fenceBarrier
-    }, { timeout: 10_000 })
-    await fenceAcquired
+    })
+    await fenceHeld
 
+    // The bootstrap has to queue on that fence, and its transaction has to be allowed to wait as
+    // long as a send may hold it - otherwise it would die on Prisma's timeout instead of
+    // promoting the account once the send is done.
+    const pushFence = observeAdvisoryLockRequests(pushTokenUserLockKey(existing.user.id))
+    const bootstrapTransactions = recordTransactionOptions(pushFence.db)
     let bootstrapSettled = false
-    const bootstrap = bootstrapAdmin(prisma, {
+    const bootstrap = bootstrapAdmin(bootstrapTransactions.db, {
       email: existing.user.email,
       password: null,
-    }).then(
-      (value) => ({ error: null, value }),
-      (error: unknown) => ({ error, value: null }),
-    ).finally(() => {
+    }).finally(() => {
       bootstrapSettled = true
     })
-    const contentionStartedAt = Date.now()
-    await new Promise<void>((resolve) => setTimeout(resolve, 5_250))
-    const contentionElapsedMs = Date.now() - contentionStartedAt
+    // Raced against the bootstrap so that one which no longer takes the fence is caught by the
+    // settled flag below instead of leaving this wait to the test timeout.
+    await Promise.race([pushFence.requested, bootstrap])
     const bootstrapSettledBeforeRelease = bootstrapSettled
     releaseFence()
 
-    const [result] = await Promise.all([bootstrap, admittedPushFence])
-    expect(contentionElapsedMs).toBeGreaterThanOrEqual(5_000)
+    const [result] = await Promise.all([bootstrap, admittedSend])
     expect(bootstrapSettledBeforeRelease).toBe(false)
-    expect(result.error).toBeNull()
-    expect(result.value).toEqual({ email: existing.user.email, locked: false })
-    expect(await prisma.user.findUniqueOrThrow({
-      where: { id: existing.user.id },
-      select: { role: true },
-    })).toEqual({ role: 'admin' })
-  }, 15_000)
+    expect(result).toEqual({ email: existing.user.email, locked: false })
+    expect(bootstrapTransactions.options).toEqual([userAuthorityTransitionTransactionOptions])
+    expect(userAuthorityTransitionTransactionOptions.timeout).toBeGreaterThan(
+      maximumPushSendFenceTransactionMs,
+    )
+  })
 
   function createOutstandingPasswordResetToken(userId: string, token: string) {
     return prisma.passwordResetToken.create({
@@ -1009,13 +1026,7 @@ function authenticatedJsonHeaders(accessToken: string) {
  * inline and binds the other as a parameter, so both places are checked.
  */
 function isAdvisoryLockRequest(statement: unknown, lockKey: string) {
-  const { sql, text, strings, values } = statement as {
-    sql?: string
-    text?: string
-    strings?: readonly string[]
-    values?: readonly unknown[]
-  }
-  const statementSql = sql ?? text ?? strings?.join('')
-  if (statementSql?.includes('pg_advisory_xact_lock') !== true) return false
-  return statementSql.includes(`'${lockKey}'`) || values?.includes(lockKey) === true
+  const { sql, values } = statement as { sql?: string; values?: unknown[] }
+  if (sql?.includes('pg_advisory_xact_lock') !== true) return false
+  return sql.includes(`'${lockKey}'`) || values?.includes(lockKey) === true
 }

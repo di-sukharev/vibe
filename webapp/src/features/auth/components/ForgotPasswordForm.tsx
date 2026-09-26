@@ -73,6 +73,7 @@ export function ForgotPasswordForm() {
               aria-invalid={hasErrors(fieldErrors.email)}
               autoComplete="email"
               className="bg-background"
+              data-testid="forgot-password-email"
               id={emailId}
               inputMode="email"
               name={field.name}
@@ -92,7 +93,7 @@ export function ForgotPasswordForm() {
         )} />
 
         {accepted ? (
-          <Alert>
+          <Alert data-testid="forgot-password-accepted">
             <AlertTitle>Check your email</AlertTitle>
             <AlertDescription>
               If an account exists for that address, reset instructions are on the way.
@@ -103,7 +104,7 @@ export function ForgotPasswordForm() {
 
         <Field>
           <form.Subscribe selector={(state) => state.isSubmitting} children={(isSubmitting) => (
-            <Button disabled={isSubmitting} type="submit">
+            <Button data-testid="forgot-password-submit" disabled={isSubmitting} type="submit">
               {isSubmitting ? 'Sending…' : 'Send reset instructions'}
             </Button>
           )} />

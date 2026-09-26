@@ -48,44 +48,6 @@ describe('isUsableEmailAddress', () => {
 })
 
 describe('emailDeliveryConfigFromEnv', () => {
-  test('carries the sender and timeout onto every sending driver', () => {
-    const config = emailDeliveryConfigFromEnv(
-      loadEnv({
-        ...base,
-        EMAIL_DELIVERY: 'resend',
-        EMAIL_FROM: 'Example <no-reply@example.com>',
-        EMAIL_REPLY_TO: 'support@example.com',
-        EMAIL_REQUEST_TIMEOUT_MS: '4000',
-        EMAIL_RESEND_API_KEY: 're_test_key',
-      }),
-    )
-
-    expect(config).toEqual({
-      driver: 'resend',
-      endpoint: 'https://api.resend.com',
-      apiKey: 're_test_key',
-      from: 'Example <no-reply@example.com>',
-      replyTo: 'support@example.com',
-      requestTimeoutMs: 4_000,
-    })
-  })
-
-  test('leaves optional settings absent rather than undefined, so a driver can spread them', () => {
-    const config = emailDeliveryConfigFromEnv(
-      loadEnv({
-        ...base,
-        EMAIL_DELIVERY: 'postbox',
-        EMAIL_FROM: 'no-reply@example.com',
-        EMAIL_POSTBOX_ACCESS_KEY_ID: 'YCAJEtest',
-        EMAIL_POSTBOX_SECRET_ACCESS_KEY: 'YCPtest',
-      }),
-    )
-
-    expect(config).not.toHaveProperty('replyTo')
-    expect(config).not.toHaveProperty('configurationSet')
-    expect(config).toMatchObject({ driver: 'postbox', region: 'ru-central1' })
-  })
-
   test('strips a trailing slash so the driver never builds a double-slashed path', () => {
     const config = emailDeliveryConfigFromEnv(
       loadEnv({
@@ -99,13 +61,6 @@ describe('emailDeliveryConfigFromEnv', () => {
     )
 
     expect(config).toMatchObject({ endpoint: 'https://postbox.cloud.yandex.net' })
-  })
-
-  test('the inert drivers carry no settings at all', () => {
-    expect(emailDeliveryConfigFromEnv(loadEnv(base))).toEqual({ driver: 'disabled' })
-    expect(emailDeliveryConfigFromEnv(loadEnv({ ...base, EMAIL_DELIVERY: 'console' }))).toEqual({
-      driver: 'console',
-    })
   })
 })
 

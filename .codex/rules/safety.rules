@@ -1,0 +1,49 @@
+# Commands that AGENTS.md forbids for agents. The user runs them when needed.
+# Codex matches command prefixes, so a flag placed later (git push origin main --force) is not caught.
+# .claude/settings.json blocks the same commands for Claude Code.
+
+prefix_rule(
+    pattern = ["git", "stash"],
+    decision = "forbidden",
+    justification = "AGENTS.md forbids git stash. Leave the changes in the working tree.",
+    match = ["git stash", "git stash pop"],
+)
+
+prefix_rule(
+    pattern = ["git", "reset", "--hard"],
+    decision = "forbidden",
+    justification = "A hard reset discards uncommitted work. Ask the user to run it.",
+    match = ["git reset --hard HEAD~1"],
+    not_match = ["git reset --soft HEAD~1"],
+)
+
+prefix_rule(
+    pattern = ["git", "clean"],
+    decision = "forbidden",
+    justification = "git clean deletes untracked files, including other people's work. Ask the user to run it.",
+    match = ["git clean -fd"],
+)
+
+prefix_rule(
+    pattern = ["git", ["checkout", "restore"], ["--", "."]],
+    decision = "forbidden",
+    justification = "This discards uncommitted changes. Ask the user to run it.",
+    match = ["git checkout -- src/app.ts", "git restore ."],
+    not_match = ["git checkout main", "git restore --staged src/app.ts"],
+)
+
+prefix_rule(
+    pattern = ["git", "push", ["--force", "-f", "--force-with-lease"]],
+    decision = "forbidden",
+    justification = "A force push rewrites shared history. Ask the user to run it.",
+    match = ["git push --force origin main", "git push -f"],
+    not_match = ["git push origin main"],
+)
+
+prefix_rule(
+    pattern = ["terraform", ["apply", "destroy", "state", "import"]],
+    decision = "forbidden",
+    justification = "Change infrastructure only through scripts/infra.mjs (infra:apply, release, infra:import). See docs/DEPLOYMENT.md.",
+    match = ["terraform apply -auto-approve", "terraform state rm module.media"],
+    not_match = ["terraform fmt -check"],
+)

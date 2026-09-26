@@ -12,19 +12,15 @@ import { getSecondaryAction, resolvePublicWebappUrl } from '../src/lib/landing-a
  * run to do it. What is left is the one branch with a decision in it, plus the environment
  * contract that survives every rewrite: `PUBLIC_WEBAPP_URL` is either unset or a real origin.
  */
-test('an unset or blank PUBLIC_WEBAPP_URL means the site builds without a web app link', () => {
+test('a blank PUBLIC_WEBAPP_URL means no link, an http(s) URL is kept, and anything else fails', () => {
   assert.equal(resolvePublicWebappUrl(undefined), undefined)
   assert.equal(resolvePublicWebappUrl(''), undefined)
   assert.equal(resolvePublicWebappUrl('   '), undefined)
-})
 
-test('an absolute http(s) PUBLIC_WEBAPP_URL is kept as written, minus surrounding whitespace', () => {
   assert.equal(resolvePublicWebappUrl('  https://app.example.com  '), 'https://app.example.com')
   assert.equal(resolvePublicWebappUrl('http://localhost:5173/'), 'http://localhost:5173/')
   assert.equal(resolvePublicWebappUrl('https://example.com/app'), 'https://example.com/app')
-})
 
-test('a PUBLIC_WEBAPP_URL that is not an absolute http(s) URL fails with an error naming it', () => {
   for (const value of ['app.example.com', '/app', 'https://', 'ftp://app.example.com', 'javascript:alert(1)']) {
     assert.throws(
       () => resolvePublicWebappUrl(value),
@@ -37,18 +33,9 @@ test('a PUBLIC_WEBAPP_URL that is not an absolute http(s) URL fails with an erro
   }
 })
 
-test('the secondary action falls back to the local next step until a webapp URL exists', () => {
-  assert.deepEqual(getSecondaryAction(), {
-    href: '#process',
-    label: 'Как начать: 3 шага',
-  })
-  assert.deepEqual(getSecondaryAction('   '), {
-    href: '#process',
-    label: 'Как начать: 3 шага',
-  })
-  assert.deepEqual(getSecondaryAction('  https://app.example.com  '), {
-    href: 'https://app.example.com',
-    label: 'Открыть веб-приложение',
-  })
+test('the secondary action links to the local next step until a webapp URL exists', () => {
+  assert.equal(getSecondaryAction().href, '#process')
+  assert.equal(getSecondaryAction('   ').href, '#process')
+  assert.equal(getSecondaryAction('  https://app.example.com  ').href, 'https://app.example.com')
   assert.throws(() => getSecondaryAction('app.example.com'), /PUBLIC_WEBAPP_URL/)
 })

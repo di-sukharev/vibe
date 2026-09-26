@@ -72,6 +72,7 @@ export function AvatarPanel({ user }: { user: UserDto }) {
               </Button>
               {hasAvatar && (
                 <Button
+                  data-testid="avatar-remove"
                   disabled={busy}
                   onClick={() => {
                     setNotice(null)

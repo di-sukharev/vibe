@@ -1,269 +1,194 @@
-# Мобильное приложение
+# Mobile
 
-Приложение Expo/React Native использует те же API-контракты, что webapp.
+The Expo app lives on the `mobile` branch, not on `master`. It serves ordinary users on iOS, Android, and Expo Web. It uses the same API contracts as `webapp` (`@web-app-demo/contracts`). Administration and the demo admin account belong to `webapp`.
 
-## Состояние приложения
+The branch adds the Expo app, development builds, Maestro E2E, and Expo Push. Social sign-in and App Store and Google Play subscriptions are implemented but switched off.
 
-При первой установке запиши здесь причину, если mobile отложен в корневом README. До начала мобильной разработки убери или обнови это пояснение.
-
-## Экраны
-
-- `/` — регистрация и вход без вкладок.
-- Mobile предназначен для обычного пользователя. Администрирование и демоаккаунт администратора относятся к webapp.
-- После входа открывается `/components` в оболочке нижних вкладок вместе с `/profile`.
-- `/profile` позволяет добавить, заменить и удалить фотографию. Перед загрузкой изображение уменьшается и сохраняется как JPEG.
-- `/details/[id]` — стековый экран вне вкладок с кнопкой назад сверху слева.
-- `/paywall` содержит выключенную подписку. `IapProvider` не подключён; экран сообщает об этом вместо предложения покупки. Включение — в `docs/IAP.md`.
-- После включения работают покупки App Store/Google Play и ввод offer code на iOS. Google Play redemption, подписанные promotional offers, alternative billing и внешние ссылки покупки отложены.
-- Apple/Google sign-in также выключен: кнопки и backend-маршруты не подключены. См. `docs/SOCIAL_AUTH.md`.
-- `src/components/dashboard/ScreenShell.tsx` владеет общим нативным заголовком. Низкоуровневый `Screen` управляет safe area, прокруткой, клавиатурой и возвратом.
-- Телефоны используют нативные нижние вкладки. Широкий Expo Web переключается на общую боковую панель/inset.
-
-## Платежи в разных клиентах
-
-До работы прочитай [WEB_SURFACES.md](../docs/WEB_SURFACES.md). Mobile владеет нативной оплатой отдельно от браузерного checkout. Подписки магазинов включаются через реестр возможностей. По потребности добавляй карты, Apple Pay или Google Pay без перехода через `website`/`webapp`. Сначала проверь текущие правила магазина для продукта, витрины и региона.
-
-## Локальный пользователь
-
-Подготовь backend из корня репозитория:
+## Start from the mobile branch
 
 ```bash
-docker compose --env-file backend/.env up -d postgres
-bun run --cwd backend prisma:deploy
-bun run dev:seed
-
+git fetch origin
+git merge-base --is-ancestor origin/master origin/mobile
+git switch mobile
+bun install --frozen-lockfile
 ```
 
-Seed создаёт демоаккаунты без подписки или premium-доступа. Вход в приложение не зависит от оплаты:
+Stop setup if the ancestry check fails; the template owner must merge `master` into `mobile` first. Never resolve template conflicts inside a product project.
 
-| Email | Пароль | Экран после входа |
+## Branch ownership
+
+- Make shared web, backend, infrastructure, deployment, and contract changes on `master`.
+- Make mobile app changes, and backend or contract changes that only mobile needs, on `mobile`.
+- Mobile payments are native and separate from the browser checkout. Read [WEB_SURFACES.md](../docs/WEB_SURFACES.md#mobile-payments) first, and check the current store rules for the product, storefront, and region.
+
+## Screens
+
+- `/` is registration and sign-in, without tabs.
+- After sign-in, `/components` and `/profile` open in a tab shell. `/components` is the component catalog and the smoke screen after sign-in.
+- `/profile` adds, replaces, and removes the profile photo. Before the upload, the app shrinks the photo and saves it as JPEG.
+- `/details/[id]` is a stack screen outside the tabs, with a back button at the top left.
+- `/paywall` says that subscriptions are off and offers no purchase, because `IapProvider` is not mounted. [IAP.md](../docs/IAP.md) turns subscriptions on. Then the app sells App Store and Google Play subscriptions and redeems App Store offer codes on iOS. The same guide lists the deferred billing features.
+- The Apple and Google sign-in buttons and their backend route are not mounted. [SOCIAL_AUTH.md](../docs/SOCIAL_AUTH.md) turns them on.
+- Native builds show bottom tabs. Expo Web shows them below 960 px and a side navigation rail from 960 px.
+- `ScreenShell` (`src/components/dashboard/ScreenShell.tsx`) owns the shared screen header. The low-level `Screen` handles the safe area, scrolling, the keyboard, and the back button.
+
+## Run locally
+
+Prepare the backend with the root [quick start](../README.md#quick-start). The seed user signs in to the app:
+
+| Email | Password | Screen after sign-in |
 | --- | --- | --- |
 | `user@example.com` | `local-user-password` | `/components` |
 
-Запусти API и Expo в разных терминалах:
+Sign-in and the components screen need no subscription, and the seed grants no premium access. Deployments never create the demo accounts.
+
+Start the API and Expo in separate terminals:
 
 ```bash
 bun run dev:backend
 bun run dev:mobile
 ```
 
-Для физического устройства задай также URL хранилища. Filesystem подписывает ссылки через `PRIVATE_STORAGE_LOCAL_PUBLIC_URL`; по умолчанию это `http://127.0.0.1:<PORT>`. На телефоне такой адрес указывает на сам телефон. Рядом с настройкой `EXPO_PUBLIC_API_URL` клиента задай в backend:
+A physical device also needs a reachable storage address. The filesystem storage driver signs links with `PRIVATE_STORAGE_LOCAL_PUBLIC_URL`, which defaults to `http://127.0.0.1:<PORT>`. On a phone, that address points to the phone itself. Set it in `backend/.env` to the same host as the app's `EXPO_PUBLIC_API_URL`: the computer's LAN address, or `10.0.2.2` for the Android Emulator.
 
 ```bash
-# backend/.env — LAN-адрес компьютера или 10.0.2.2 для Android Emulator
+# backend/.env
 PRIVATE_STORAGE_LOCAL_PUBLIC_URL="http://192.168.1.10:3000"
 ```
 
-iOS Simulator может скрыть эту ошибку, поскольку loopback ведёт на компьютер. Мобильный интерфейс не использует администратора: backend seed создаёт его для webapp. Демопользователь не создаётся при деплое.
+The iOS Simulator can hide this error, because its loopback address reaches the computer.
 
-## Стек
+## Stack
 
-- Expo SDK 57, React Native, TypeScript и Expo Router.
-- TanStack Query/Form и общие Zod-контракты `@web-app-demo/contracts`.
-- Expo SecureStore и Notifications.
-- Expo ImagePicker, ImageManipulator и FileSystem для аватаров.
-- Expo Apple Authentication и React Native Google Sign-In для необязательного социального входа.
-- Expo IAP для подписок App Store/Google Play.
-- Нативные UI-примитивы в стиле ShadCN, `src/components/ui`.
-- Smoke-сценарий Maestro E2E.
+- Expo SDK 57, React Native, TypeScript, and Expo Router.
+- TanStack Query and Form, and Zod from `@web-app-demo/contracts`.
+- Expo SecureStore and Expo Notifications.
+- Expo ImagePicker, ImageManipulator, and FileSystem for the profile photo.
+- Expo Apple Authentication and React Native Google Sign-In for the optional social sign-in.
+- Expo IAP for App Store and Google Play subscriptions.
+- Native shadcn-style UI primitives in `src/components/ui`.
+- Maestro for the E2E smoke flow.
 
-## Команды
+## Commands
 
-```bash
-bun run dev
-bun run android
-bun run ios
-bun run web
-bun run typecheck
-bun run lint
-bun run build
-bun run doctor
-bun run e2e:maestro
-```
+From `mobile`: `bun run dev`, `android`, `ios`, `web`, `typecheck`, `lint`, `test`, `build` (a static web export), `doctor` (Expo Doctor 1.20.0), and `e2e:maestro`. From the root: `bun run dev:mobile`, `build:mobile`, `typecheck:mobile`, `test:mobile`, and `e2e:mobile`. Scripts are in [package.json](package.json); the index is [COMMANDS](../docs/COMMANDS.md).
 
-Из корня: `bun run dev:mobile`, `bun run build:mobile`, `bun run typecheck:mobile`, `bun run e2e:mobile`.
+## Environment
 
-## Окружение
+Copy [.env.example](.env.example) to `mobile/.env`. It holds the API address, the optional Google Sign-In IDs, the store product IDs, and the push switch. Every `EXPO_PUBLIC_*` value goes into the client bundle, so never put a secret there.
 
-Создай `mobile/.env`:
+- `EXPO_PUBLIC_API_URL` is the backend origin, `http://localhost:3000` by default. Use `http://10.0.2.2:3000` on the Android Emulator and `http://<LAN_IP>:3000` on a phone. Prefer the LAN address for Maestro too.
+- Set `EXPO_PUBLIC_E2E=1` only for a Metro session that serves an E2E run.
+- `EXPO_PUBLIC_E2E=1` and `EXPO_PUBLIC_DISABLE_PUSH_NOTIFICATIONS=1` each turn push registration off. Then a simulator or an E2E run never asks for permission and never changes the backend's tokens.
 
-```bash
-EXPO_PUBLIC_API_URL=http://localhost:3000
-EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID=
-EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=
-EXPO_PUBLIC_GOOGLE_IOS_URL_SCHEME=
-EXPO_PUBLIC_IAP_IOS_MONTHLY_PRODUCT_ID=com.example.app.premium.monthly
-EXPO_PUBLIC_IAP_IOS_YEARLY_PRODUCT_ID=com.example.app.premium.yearly
-EXPO_PUBLIC_IAP_ANDROID_PACKAGE_NAME=com.example.app
-EXPO_PUBLIC_IAP_ANDROID_MONTHLY_PRODUCT_ID=com.example.app.premium
-EXPO_PUBLIC_IAP_ANDROID_MONTHLY_BASE_PLAN_ID=monthly
-EXPO_PUBLIC_IAP_ANDROID_YEARLY_PRODUCT_ID=com.example.app.premium
-EXPO_PUBLIC_IAP_ANDROID_YEARLY_BASE_PLAN_ID=yearly
-EXPO_PUBLIC_DISABLE_PUSH_NOTIFICATIONS=0
-```
-
-Для Android Emulator:
-
-```bash
-EXPO_PUBLIC_API_URL=http://10.0.2.2:3000
-```
-
-Для Maestro с dev client предпочитай LAN-адрес. `EXPO_PUBLIC_E2E=1` задавай только для E2E-сессии Metro:
-
-```bash
-EXPO_PUBLIC_API_URL=http://<LAN_IP>:3000
-EXPO_PUBLIC_E2E=1
-```
-
-`EXPO_PUBLIC_E2E=1` и `EXPO_PUBLIC_DISABLE_PUSH_NOTIFICATIONS=1` отключают push-регистрацию: симулятор/E2E не спрашивает разрешение и не меняет токены backend. Все `EXPO_PUBLIC_*` входят в клиентскую сборку. Секреты здесь запрещены.
-
-Настройка Apple/Google — в [SOCIAL_AUTH.md](../docs/SOCIAL_AUTH.md). После изменения Apple capability или Google iOS URL scheme нужна новая development build. Настройка магазинов, backend-ключей, sandbox/internal testing, восстановления и диагностики — в [IAP.md](../docs/IAP.md).
-
-## Expo Push
-
-Основа push включена, но Expo owner/project ID и ключи в шаблоне не заданы. Регистрация выключена на web, при `EXPO_PUBLIC_E2E=1`, `EXPO_PUBLIC_DISABLE_PUSH_NOTIFICATIONS=1` или без EAS `extra.eas.projectId`.
-
-После входа на физическом iOS/Android клиент регистрирует токен через `POST /api/notifications/push-token`. При выходе или истечении сессии он пытается отозвать регистрацию. Уведомления открывают только безопасные внутренние `data.href`.
-
-SecureStore сохраняет непрозрачный UUID установки, отдельный секрет и возрастающее поколение изменений. Backend хранит хеш секрета, принимает только новейшее разрешённое поколение, атомарно переносит владельца токена и оставляет неактивную запись после очистки. Задержанный запрос старого аккаунта не вернёт устройство. Знания Expo-токена недостаточно для удаления.
-
-Старую token-only запись сначала закрепляет текущий авторизованный владелец. После этого установка безопасно меняет аккаунт, сохраняя сведения о незавершённой очистке. Провайдер повторно проверяет регистрацию один раз на область авторизации при запуске приложения. Токен, вытесненный лимитом аккаунта, восстанавливается при следующем открытии.
-
-Настройка проекта:
-
-1. Выбери личный аккаунт или организацию Expo. Задай `expo.owner`, slug, `ios.bundleIdentifier` и `android.package`.
-2. Выполни `bunx eas-cli project:init` для получения `extra.eas.projectId`. Сам шаблон оставь без привязки.
-3. Настрой APNs для iOS и FCM для Android через Expo/EAS. Не коммить `.p8`, `.p12`, `.keystore`, `google-services.json`, `GoogleService-Info.plist` и service-account JSON.
-4. Собери и установи development/production build на физическое устройство. Expo Go, симулятор и web export не доказывают работу push проекта.
-5. Запусти API и `bun run --cwd backend start:worker:notifications` либо расписание `bun run --cwd backend start:cron -- notifications:process`. При Expo Push Security передай `EXPO_PUSH_ACCESS_TOKEN` только исполнителю, который обращается в Expo. API лишь ставит сообщения в очередь.
-6. Временно включи `ENABLE_TEST_PUSH=true`. Войди на устройстве и вызови авторизованный `POST /api/notifications/test-push`. Подтверди отправку и завершение ticket/receipt. Лимит — одно тестовое сообщение на пользователя в минуту. После проверки выключи endpoint.
-
-Продуктовый код вызывает `enqueuePushNotification` со стабильным пользовательским `dedupeKey`, `title`, `body` и необязательным внутренним `data.href`.
+Apple and Google setup is in [SOCIAL_AUTH.md](../docs/SOCIAL_AUTH.md). A change to the Apple capability or the Google iOS URL scheme needs a new development build. Store setup, backend keys, sandbox and internal testing, restore, and diagnostics are in [IAP.md](../docs/IAP.md).
 
 ## Development build
 
-После изменения нативного модуля собери новый dev client. Перезагрузки JavaScript недостаточно: старый клиент может упасть при импорте. Аватар использует `expo-image-picker`, `expo-image-manipulator`, `expo-file-system` и config plugin с `NSPhotoLibraryUsageDescription`. После получения этих изменений пересобери приложение до открытия профиля. После изменения Expo-зависимостей выполни `bun run --cwd mobile doctor`.
+A native module change needs a new development build. A JavaScript reload is not enough: the old client can crash on import. The profile photo, for example, needs `expo-image-picker`, `expo-image-manipulator`, `expo-file-system`, and the image picker config plugin that sets `NSPhotoLibraryUsageDescription`. After you pull such a change, rebuild before you open the profile. After an Expo dependency change, run `bun run --cwd mobile doctor`.
 
-1. Создай аккаунт Expo или войди в него.
-2. Проверь CLI: `bunx eas-cli --version`.
-3. Авторизуйся: `bunx eas-cli login`.
-4. Привяжи проект: `bunx eas-cli project:init`.
-5. Собери приложение:
+Sign up for an Expo account or use an existing one. Then, from `mobile`:
 
 ```bash
+bunx eas-cli --version
+bunx eas-cli login
+bunx eas-cli project:init
 bunx eas-cli build --profile development --platform android
 bunx eas-cli build --profile development --platform ios
 ```
 
-`expo-dev-client` установлен. Каталоги `ios`/`android` генерируются через Expo prebuild/development build и не хранятся в шаблоне.
+Link only a product project with `project:init`; keep the template itself unlinked. `expo-dev-client` is installed. Expo prebuild generates the `ios` and `android` directories, and Git ignores them.
 
-Google Sign-In и покупки/восстановление через `expo-iap` требуют custom development build. Expo Go не подходит. После изменения IAP plugin или нативной настройки пересобери dev client. EAS сам выполняет prebuild; для локального native-проекта выполни `npx expo prebuild --clean` перед сборкой. Реальные покупки проверяй на устройстве или в тестовой сборке магазина с аккаунтом тестировщика.
+Google Sign-In and `expo-iap` purchases and restores need a custom development build; Expo Go cannot run them. Rebuild the development client after a change to the IAP plugin or other native setup. EAS runs prebuild itself; before a local native build, run `bunx expo prebuild --clean`. Test real purchases on a device or in a store test build with a tester account.
+
+## Expo Push
+
+The push code is on, but the template sets no Expo owner, project ID, or keys. Registration stays off on web, on simulators and emulators, with `EXPO_PUBLIC_E2E=1` or `EXPO_PUBLIC_DISABLE_PUSH_NOTIFICATIONS=1`, and without an EAS project ID (`extra.eas.projectId`).
+
+After sign-in on a physical iOS or Android device, the app registers its Expo push token with `POST /api/notifications/push-token`. On sign-out or session expiry, it tries to unregister it. A tapped notification opens only a safe internal path from `data.href`.
+
+Registration is safe against races and stolen tokens:
+
+- SecureStore keeps an opaque installation UUID, a separate installation secret, and a generation number that grows with each change.
+- The backend stores only a hash of the secret and accepts only the newest allowed generation. It moves a token to a new owner atomically and keeps an inactive row after cleanup. A delayed request from an old account cannot take the device back, and knowing the Expo token is not enough to delete it.
+- The current signed-in owner first claims an old token-only row. After that, the installation can switch accounts safely and keeps the record of an unfinished cleanup.
+- The app revalidates the registration once per signed-in account at each launch. A token that the per-account limit pushed out comes back at the next launch.
+
+The server's lock order and the token-only compatibility rules are in [ARCHITECTURE](../docs/ARCHITECTURE.md#push-registrations).
+
+To set up push for a project:
+
+1. Choose a personal Expo account or an organization. In `app.config.js`, set `expo.owner`, `slug`, `ios.bundleIdentifier`, and `android.package`.
+2. Run `bunx eas-cli project:init`, and check that `app.config.js` has the resulting `extra.eas.projectId`. Keep the template itself unlinked.
+3. Set up APNs for iOS and FCM for Android through Expo and EAS. Never commit `.p8`, `.p12`, `.keystore`, `google-services.json`, `GoogleService-Info.plist`, or a service-account JSON.
+4. Build and install a development or production build on a physical device. Expo Go, a simulator, or a web export does not prove that the project's push works.
+5. Run the API and a sender ([BACKGROUND_JOBS](../docs/BACKGROUND_JOBS.md#push-pipeline)). `bun run dev:backend` includes the scheduler, which runs `notifications:process` on its schedule. `bun run --cwd backend start:worker:notifications` sends continuously, and `bun run --cwd backend start:cron -- notifications:process` runs one pass. The API only queues messages. Only the sender calls Expo, so with Expo push security only the sender needs `EXPO_PUSH_ACCESS_TOKEN`.
+6. Set `ENABLE_TEST_PUSH=true` for the check. Sign in on the device and call the authenticated `POST /api/notifications/test-push`. Confirm that the message arrives and that its ticket and receipt complete. The endpoint queues one test message per user per minute. Turn it off after the check.
+
+A product push needs a stable per-user `dedupeKey`, a `title`, a `body`, and an optional internal `data.href`. The module exposes no enqueue call yet. To send one, add a `NotificationService` method that queues through the outbox port, as `sendTestPush` does. Return it from `createNotificationsModule` in `backend/src/modules/notifications/index.ts`, because other modules may import only that index. The port's adapter is `enqueuePushNotification`.
 
 ## Maestro E2E
 
-Auth smoke проверяет регистрацию, авторизованный экран, восстановление сессии и выход в установленной development build. Используй `postgres_test`, не БД разработки.
+The Maestro auth smoke flow registers a user, checks the signed-in screen, restarts the app to check the restored session, and signs out. It runs in an installed Expo development build; Expo Go is not enough. Run it against the `postgres_test` database, never the development one. [TESTING](../docs/TESTING.md#mobile-e2e) has the requirements, the commands, and the known pitfalls.
 
-Создай `backend/.env` из `backend/.env.example`. При своём порте согласуй `POSTGRES_TEST_PORT` и `TEST_DATABASE_URL`. Запусти БД и API в отдельном терминале:
-
-```bash
-docker compose version
-docker info
-docker compose --env-file backend/.env up -d postgres_test
-export TEST_DATABASE_URL="postgresql://superuser:superpassword@localhost:54330/web_app_demo_test?schema=public"
-export LAN_IP=<your-machine-lan-ip>
-export BACKEND_PORT=3000
-export METRO_PORT=8081
-DATABASE_URL="$TEST_DATABASE_URL" bun run --cwd backend prisma:deploy
-PORT="$BACKEND_PORT" DATABASE_URL="$TEST_DATABASE_URL" JWT_SECRET="mobile-e2e-secret-at-least-thirty-two-characters" CORS_ORIGINS="http://$LAN_IP:$METRO_PORT,http://localhost:$METRO_PORT" COOKIE_SECURE=false bun run --cwd backend start:raw
-```
-
-Запусти Metro в другом терминале:
+After a change to Maestro, its launch options, or mobile E2E behavior, run the audit. The runner also runs it at the start of each run.
 
 ```bash
-export LAN_IP=<your-machine-lan-ip>
-export BACKEND_PORT=3000
-export METRO_PORT=8081
-EXPO_PUBLIC_E2E=1 EXPO_PUBLIC_API_URL="http://$LAN_IP:$BACKEND_PORT" bunx expo start --dev-client --host lan --port "$METRO_PORT"
+bun run --cwd mobile e2e:maestro:audit
 ```
 
-Установи Maestro и выполни сценарий:
+Before Maestro starts, the runner checks `EXPO_PUBLIC_E2E=1`, the API health URL, and Metro. It builds the dev-client scheme `exp+<slug>` from the app config and targets the app ID `com.webappdemo.mobile`. After you change the bundle identifier or package, set `MAESTRO_APP_ID`.
 
-```bash
-bun run e2e:maestro:setup
-export PATH="$HOME/.maestro/bin:$PATH"
-EXPO_PUBLIC_E2E=1 MAESTRO_DEV_SERVER_URL=http://<LAN_IP>:8081 E2E_API_HEALTH_URL=http://<LAN_IP>:3000/health bun run e2e:maestro
-```
+## Code rules
 
-После изменения сценариев или параметров запуска выполни аудит:
+Uploads:
 
-```bash
-bun run e2e:maestro:audit
-```
+- No Maestro flow covers the profile photo, because the system picker is outside the app's view hierarchy. Unit tests put the picker behind a port and cover the upload protocol, success on `412`, normalization, and errors.
+- Backend integration tests cover ownership, account isolation, and a retry after an interrupted transfer. The webapp E2E journey covers upload, reload, replacement, and removal on the filesystem driver, and on local S3 through `bun run e2e:webapp:s3`. No automated test covers the whole native path: check `expo-file-system`, the system picker, and the LAN `PRIVATE_STORAGE_LOCAL_PUBLIC_URL` on a device.
+- `src/platform/uploads` owns the shared upload protocol, and `src/features/avatar` owns the endpoint, the picker, and the UI. [STORAGE](../docs/STORAGE.md#mobile-transfer) has the transfer rules, including the native and web file access pair.
 
-Backend должен быть доступен по `EXPO_PUBLIC_API_URL` сборки Metro, сам Metro — по `MAESTRO_DEV_SERVER_URL`. После сброса и перезапуска исполнитель открывает `exp+mobile://expo-development-client/?url=<metro-url>`, чтобы попасть в приложение. При смене slug задай `MAESTRO_DEV_CLIENT_SCHEME=exp+<slug>`.
+Auth:
 
-Селекторы: `src/constants/testIds.ts`. Сценарий: `.maestro/flows/auth-smoke.yaml`. Исполнитель: `scripts/e2e/run-maestro.mjs`. Полная инструкция — [TESTING.md](../docs/TESTING.md).
+- Use TanStack Query for server data, TanStack Form for forms, and the shared Zod schemas.
+- Native auth uses `/api/auth/token/*`. The refresh token lives in `expo-secure-store`; the access token lives only in memory.
+- Sign-out first writes a non-secret pending marker, then clears the local access token and query cache. A successful revocation, or finally stale credentials, deletes the refresh token and then the marker. A temporary error keeps both. At launch, the app finishes a pending sign-out before any refresh and reuses the saved push cleanup data. The server call has a 2-second timeout. A failure shows a retry, and the UI stays signed out.
+- Expo Web keeps the same marker protocol, but its refresh token stays only in the HttpOnly cookie. Every cookie change needs an exclusive Web Lock; without Web Locks, the client refuses before the request. A successful register, login, or logout raises the browser session epoch inside the lock. `storage` and `BroadcastChannel` events tell the other tabs. Before a request retry, refresh compares the epoch and the `{ userId, sessionId }` of the access tokens. On timeout, sign-out aborts the request and releases the lock. The native transport does not use this browser coordinator.
 
-## Правила реализации
+Layout:
 
-Для фотографии нет Maestro-сценария: системный picker находится вне иерархии приложения. Unit-тесты с picker за портом проверяют протокол, успех при `412`, нормализацию и ошибки.
+- Product code lives in `src/features/auth`, `avatar`, `billing`, and `notifications`. Routes use features only through their public `index.ts`.
+- `src/composition` creates the APIs and gives each provider only its own interface.
+- `src/platform/api` owns fetch, the auth retry, the base URL, and errors, without endpoint knowledge. Each feature's API owns its paths and schemas.
+- After a boundary change, run `bun run architecture:check`.
 
-Web E2E проверяет передачу, сохранение после перезагрузки, замену, удаление и повтор прерванной загрузки на filesystem/S3. Владение и изоляция аккаунтов проверяются backend integration. Нативный путь целиком не проверен автоматически: проверь на устройстве `expo-file-system`, системный picker и LAN-настройку `PRIVATE_STORAGE_LOCAL_PUBLIC_URL`.
+UI:
 
-`src/platform/uploads` владеет общим протоколом, `src/features/avatar` — endpoint, picker и UI. `UploadFileAccess` объединяет измерение и отправку байтов. `AppProviders` выбирает `nativeFileAccess`/`webFileAccess` через `Platform.OS`. Пара нужна для совпадения реального размера с билетом; смешение reader/sender даёт `403`. На web `expo-file-system` — заглушка, хотя picker/manipulator работают.
+- `src/components/ui` implements shadcn components natively, under the same names as the `webapp` registry. Use native style props, controlled or uncontrolled values, and touch behavior instead of DOM and Radix `className` or `asChild`.
+- Color, radius, spacing, text, and interaction tokens are in `src/components/ui/theme-tokens.ts` and `src/components/ui/theme.ts`.
+- `src/components/dashboard` owns `ScreenShell`, `SiteHeader`, cards, navigation, rows, and the loading, empty, and error states. Auth and billing components take data, states, and callbacks, never `style` or `className`. Routes only place components.
+- Render visible text through `Typography` (`src/components/ui/typography.tsx`). It owns `h1`–`h6`, body, caption, label, button, link, and code. Never import React Native `Text` into screens or primitives, and do not use the old text wrappers.
 
-Используй TanStack Query для серверных данных, TanStack Form для форм и общие Zod-схемы. Нативный auth использует `/api/auth/token/*`, refresh в `expo-secure-store`, access только в памяти. Logout сначала записывает несекретный pending-маркер, затем очищает локальный access/query. Успешный отзыв или окончательно устаревшие права удаляют refresh, затем маркер. Временная ошибка сохраняет оба. Bootstrap обрабатывает маркер до refresh и ограниченно повторяет отзыв с сохранёнными данными очистки push. Интерфейс остаётся анонимным.
+## Template owner: sync and publish
 
-Expo Web сохраняет тот же протокол маркера, но refresh остаётся только в HttpOnly-cookie. Изменения cookies требуют исключительной Web Lock; без поддержки клиент отказывает до запроса. Успешные register/login/logout увеличивают browser epoch внутри блокировки. События storage/BroadcastChannel уведомляют другие вкладки. До повтора запроса refresh сверяет epoch и `{ userId, sessionId }` из access-токенов. По таймауту logout отменяет запрос и освобождает блокировку. Нативный транспорт не использует браузерный координатор.
-
-Продуктовый код находится в `src/features/auth`, `src/features/avatar`, `src/features/billing`, `src/features/notifications`. `src/composition` создаёт API и передаёт провайдеру только его интерфейс. `src/platform/api` управляет fetch, повторами auth, base URL и ошибками без знания endpoint. Пути и схемы принадлежат API функции. Маршруты используют только публичные index. После изменения границ выполни `bun run architecture:check`, после Expo-зависимостей — `bun run doctor` с закреплённым Expo Doctor 1.20.0.
-
-`src/components/ui` повторяет имена локального Web ShadCN registry нативными реализациями. Используй native style props, controlled/uncontrolled значения и touch-поведение вместо DOM/Radix `className`/`asChild`. Защищённый `/components` — локальный каталог и smoke-экран после входа.
-
-Токены цвета, радиуса, расстояний, текста и взаимодействия находятся в `src/components/ui/theme-tokens.ts` и `src/components/ui/theme.ts`. `src/components/dashboard` владеет `ScreenShell`, `SiteHeader`, карточками, навигацией, строками и loading/empty/error состояниями. Auth/billing принимают данные, состояния и callbacks без `style`/`className`. Маршруты только размещают компоненты.
-
-Видимый текст выводи через `src/components/ui/typography.tsx`. `Typography` владеет `h1`–`h6`, body, caption, label, button, link и code. Не импортируй React Native `Text` напрямую в экраны/примитивы и не используй старые обёртки текста.
-
-## Синхронизация мобильной ветки
-
-Владелец шаблона сливает `master` в `mobile`. Сохрани мобильный код и состояния `available` для payments, push и social. До push проверь чистый коммит:
+Merge `master` into `mobile`, align docs and the capability registry, then check and publish both branches. Keep the mobile code and the `available` state of the payments, push, and social capabilities. `bun run mobile:template:check` ([scripts/check-mobile-template.mjs](../scripts/check-mobile-template.mjs)) is the release gate:
 
 ```bash
 git fetch origin
 bun install --frozen-lockfile
-bun run mobile:template:check
+bun run mobile:template:check                 # before publishing a clean candidate
+bun run mobile:template:check -- --published  # after the push
 ```
 
-После push проверь опубликованную ветку:
+The default mode accepts a clean commit ahead of `origin/mobile`; `--published` requires `HEAD` to equal it. Both modes require a clean tree on `mobile` that contains the current `origin/master`, and exactly the payments, push, and social capabilities in state `available`. The check then runs `bun run check` on the synchronized project and the Maestro rule audit. If it fails, do not publish.
 
-```bash
-git fetch origin
-bun run mobile:template:check -- --published
-```
+After setup, capability states become `included` or `removed`, and this template check no longer applies. Use the project's own recorded checks for releases, such as local tests, types, and store sandboxes.
 
-Обычный режим допускает чистый коммит впереди `origin/mobile`. `--published` требует равенства `HEAD` и удалённой ветки. Оба режима требуют актуальный `origin/master` в истории mobile, рабочие файлы mobile/IAP, общие контракты, согласованные правила агентов и ровно три указанные возможности `available`.
+## Official docs
 
-Проверка запускает `bun run check`: шаблон, архитектуру, аудит зависимостей, типы, lint, тесты с backend integration и контракты сборки. Затем выполняет аудит Maestro. Если команды нет или она упала, останови установку/публикацию шаблона. Исправление синхронизации принадлежит владельцу шаблона, не новому продуктовому проекту.
+The app pins Expo SDK 57; read the docs for that version.
 
-После установки возможности могут стать `included`/`removed`. Этот контроль шаблона больше не подходит. Следуй записанным проверкам активных функций: локальные тесты, типы, песочницы магазинов и релиз.
-
-## Официальная документация
-
-Конвенции проекта описаны выше. Поведение платформ проверяй по официальным источникам:
-
-- [Expo docs](https://docs.expo.dev/)
-- [Expo SDK 57 docs](https://docs.expo.dev/versions/latest/)
-- [Expo Router docs](https://docs.expo.dev/router/introduction/)
-- [Expo SecureStore docs](https://docs.expo.dev/versions/latest/sdk/securestore/)
-- [Expo AppleAuthentication docs](https://docs.expo.dev/versions/latest/sdk/apple-authentication/)
+- Expo: [docs](https://docs.expo.dev/), [SDK reference](https://docs.expo.dev/versions/latest/), [Router](https://docs.expo.dev/router/introduction/), [SecureStore](https://docs.expo.dev/versions/latest/sdk/securestore/), [AppleAuthentication](https://docs.expo.dev/versions/latest/sdk/apple-authentication/), [Notifications](https://docs.expo.dev/versions/latest/sdk/notifications/)
+- Expo Push: [setup](https://docs.expo.dev/push-notifications/push-notifications-setup/), [sending API](https://docs.expo.dev/push-notifications/sending-notifications/)
+- EAS: [docs](https://docs.expo.dev/eas/), [Build](https://docs.expo.dev/build/introduction/)
 - [React Native Google Sign-In Expo setup](https://react-native-google-signin.github.io/docs/setting-up/expo)
-- [Expo Notifications docs](https://docs.expo.dev/versions/latest/sdk/notifications/)
-- [Expo Push Notifications setup](https://docs.expo.dev/push-notifications/push-notifications-setup/)
-- [Expo Push Notifications sending API](https://docs.expo.dev/push-notifications/sending-notifications/)
-- [Expo EAS docs](https://docs.expo.dev/eas/)
-- [EAS Build docs](https://docs.expo.dev/build/introduction/)
-- [React Native docs](https://reactnative.dev/docs/getting-started)
-- [TanStack Query React docs](https://tanstack.com/query/latest/docs/framework/react/overview)
-- [TanStack Form React docs](https://tanstack.com/form/latest/docs/framework/react/quick-start)
-- [Zod docs](https://zod.dev/)
-- [Maestro docs](https://docs.maestro.dev/)
+- [React Native](https://reactnative.dev/docs/getting-started), [TanStack Query](https://tanstack.com/query/latest/docs/framework/react/overview), [TanStack Form](https://tanstack.com/form/latest/docs/framework/react/quick-start), [Zod](https://zod.dev/), [Maestro](https://docs.maestro.dev/)

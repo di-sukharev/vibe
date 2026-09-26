@@ -30,21 +30,15 @@ function ticket(contentLength: number): UploadTicket {
 }
 
 describe('resolveAvatarContentType', () => {
-  test('uses the type the browser reported when it is one we accept', () => {
+  test('uses an accepted browser type, falls back to the extension, and refuses the rest', () => {
     expect(resolveAvatarContentType(file('a.png', 'image/png', 10))).toBe('image/png')
     expect(resolveAvatarContentType(file('a.jpg', 'IMAGE/JPEG', 10))).toBe('image/jpeg')
-  })
-
-  test('falls back to the extension when the browser reports nothing useful', () => {
     // Safari and some Android pickers send an empty type, or `image/heif` for a HEIC photo.
     expect(resolveAvatarContentType(file('photo.HEIC', '', 10))).toBe('image/heic')
     expect(resolveAvatarContentType(file('photo.heif', '', 10))).toBe('image/heif')
     expect(resolveAvatarContentType(file('photo.jpeg', 'application/octet-stream', 10))).toBe(
       'image/jpeg',
     )
-  })
-
-  test('refuses anything it cannot name confidently', () => {
     expect(resolveAvatarContentType(file('a.svg', 'image/svg+xml', 10))).toBeNull()
     expect(resolveAvatarContentType(file('a.gif', 'image/gif', 10))).toBeNull()
     expect(resolveAvatarContentType(file('resume', '', 10))).toBeNull()
@@ -52,15 +46,12 @@ describe('resolveAvatarContentType', () => {
 })
 
 describe('describeAvatarFile', () => {
-  test('accepts a supported image inside the size bounds', () => {
+  test('accepts a supported image inside the size bounds and rejects anything else', () => {
     expect(describeAvatarFile(file('a.png', 'image/png', 2048))).toEqual({
       ok: true,
       contentType: 'image/png',
       byteSize: 2048,
     })
-  })
-
-  test('rejects unsupported types and out-of-range sizes before any request is made', () => {
     expect(describeAvatarFile(file('a.svg', 'image/svg+xml', 2048)).ok).toBe(false)
     expect(describeAvatarFile(file('a.png', 'image/png', 1)).ok).toBe(false)
     expect(describeAvatarFile(file('a.png', 'image/png', AVATAR_MAX_BYTES + 1)).ok).toBe(false)
@@ -94,22 +85,19 @@ describe('uploadAvatarObject', () => {
     await expect(uploadAvatarObject(ticket(2048), file('a.png', 'image/png', 2048))).resolves.toBeUndefined()
   })
 
-  test('reports a refused transfer', async () => {
+  test('reports a refused or unreachable transfer as a transfer failure', async () => {
     globalThis.fetch = mock(async () => new Response(null, { status: 403 })) as unknown as typeof fetch
-
     await expect(uploadAvatarObject(ticket(2048), file('a.png', 'image/png', 2048))).rejects.toMatchObject(
       { reason: 'transfer-failed' },
     )
-  })
 
-  test('reports a network failure without letting it surface as a raw fetch error', async () => {
+    // A network failure must not surface as a raw fetch error.
     globalThis.fetch = mock(async () => {
       throw new TypeError('Failed to fetch')
     }) as unknown as typeof fetch
-
-    await expect(uploadAvatarObject(ticket(2048), file('a.png', 'image/png', 2048))).rejects.toBeInstanceOf(
-      AvatarUploadError,
-    )
+    const networkFailure = uploadAvatarObject(ticket(2048), file('a.png', 'image/png', 2048))
+    await expect(networkFailure).rejects.toBeInstanceOf(AvatarUploadError)
+    await expect(networkFailure).rejects.toMatchObject({ reason: 'transfer-failed' })
   })
 
   test('refuses to send a file whose size no longer matches the signed ticket', async () => {

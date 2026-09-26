@@ -1,130 +1,75 @@
-# Электронная почта
+# Email
 
-Эта инструкция нужна для уведомлений аккаунта, сброса пароля, чеков и дайджестов.
+Transactional email is off by default. Password reset is the reference: `backend/src/email`, `backend/src/modules/auth/infrastructure/password-reset-notifier.ts`, and `backend/src/outbox/handlers.ts`.
 
-Транзакционная почта встроена в шаблон, но отключена по умолчанию. Пример — сброс пароля: запрос сохраняет задачу, фоновый процесс забирает её, провайдер отправляет письмо. До нового типа писем изучи `backend/src/email`, `backend/src/modules/auth/infrastructure/password-reset-notifier.ts` и `backend/src/outbox/handlers.ts`.
+## Drivers
 
-## Четыре драйвера и один порт
+Product code uses `backend/src/email/port.ts`. `EMAIL_DELIVERY` selects the driver:
 
-Код использует общий порт `backend/src/email/port.ts` без зависимости от провайдера.
+- `disabled`, the schema default: sends and queues nothing. Password reset creates no token and no task.
+- `console`: prints each message to the log. Production refuses it.
+- `resend`: needs a verified domain and an API key.
+- `postbox`: Yandex Cloud Postbox, with a verified sender and a static access key.
 
-| `EMAIL_DELIVERY` | Действие | Требования |
-| --- | --- | --- |
-| `disabled` (по умолчанию) | Не отправляет и не ставит в очередь | Нет |
-| `console` | Печатает письмо в лог | Нет; запрещён в production |
-| `postbox` | Отправляет через Yandex Cloud Postbox | Подтверждённый отправитель и статический ключ |
-| `resend` | Отправляет через Resend | Подтверждённый домен и API-ключ |
+## Local development
 
-Для смены драйвера меняй настройку, не код. При `disabled` функция `requestPasswordReset` сразу завершает работу: токены и строки очереди не создаются.
+`backend/.env.example` sets `EMAIL_DELIVERY="console"`.
 
-`backend/src/email/email-contract.ts` проверяет оба реальных драйвера через подставной транспорт. Он воспроизводит ошибки и правила повторов, которые нельзя вызвать по требованию у реального провайдера. Live-тесты отдельно доказывают, что endpoint принимает подписанный запрос. Нужны оба вида проверок.
+1. Run `bun run dev` to start the API and the scheduler.
+2. Request a password reset in the webapp.
+3. After the next drain pass, find the message in the terminal between `--- email (EMAIL_DELIVERY=console) ---` and `--- end email ---`.
 
-## Опрос перед реализацией
+To drain at once, run `bun run --cwd backend start:cron -- outbox:drain`.
 
-Продуктовые вопросы и ответы хранятся в [CHECKLIST.md](../CHECKLIST.md), в разделе возможностей первой версии. Задай их до реализации. Не дублируй опрос здесь.
+## Configuration
 
-## Локальная разработка
+`backend/.env.example` lists the variables. `backend/src/env.ts` refuses these at startup:
 
-Дополнительная установка не нужна. В `backend/.env.example` задано `EMAIL_DELIVERY="console"`.
+- Missing credentials for the selected provider, or credentials for an unselected provider.
+- A provider driver without `EMAIL_FROM` or `WEBAPP_ORIGIN`, which builds the links.
+- With a provider driver, an `EMAIL_FROM` or `EMAIL_REPLY_TO` other than `addr@example.com` or `Display Name <addr@example.com>`. Commas, line breaks, and extra angle brackets are refused.
 
-1. Запусти `bun run dev`: API и scheduler.
-2. Запроси сброс пароля в webapp.
-3. В течение минуты найди письмо в том же терминале между метками `--- email (EMAIL_DELIVERY=console) ---`. После него появится `Job outbox:drain completed.`.
-4. Открой ссылку и заверши сброс.
+## Choose a provider
 
-Drain запускается раз в минуту. Для немедленного прохода выполни `bun run --cwd backend start:cron -- outbox:drain`. Scheduler берёт advisory lock БД на каждом тике. Если БД недоступна, он пишет ошибку раз в минуту, но не завершает процесс.
+Follow the hosting in [CHECKLIST](../CHECKLIST.md). Use Postbox for Yandex Cloud or a data-residency requirement, and Resend otherwise. Terraform supports `postbox` on Yandex Cloud and `resend` on DigitalOcean. Both services are for transactional mail, not marketing.
 
-## Настройка
+## Delivery contract
 
-```bash
-EMAIL_DELIVERY=disabled                    # или console, postbox, resend
-EMAIL_FROM=                                # "addr@example.com" или "Display Name <addr@example.com>"
-EMAIL_REPLY_TO=                            # необязательно
-EMAIL_REQUEST_TIMEOUT_MS=10000
+A reset request commits a `task_outbox` row, and `outbox:drain` sends the message later. With a provider configured, a drain must run ([BACKGROUND_JOBS](BACKGROUND_JOBS.md)).
 
-EMAIL_POSTBOX_ACCESS_KEY_ID=               # оба ключа обязательны для postbox
-EMAIL_POSTBOX_SECRET_ACCESS_KEY=
-EMAIL_POSTBOX_ENDPOINT=https://postbox.cloud.yandex.net
-EMAIL_POSTBOX_REGION=ru-central1
-EMAIL_POSTBOX_CONFIGURATION_SET=           # необязательно
+Delivery is at least once. A crash between provider acceptance and the recorded result sends it again. A repeated reset email carries a new link.
 
-EMAIL_RESEND_API_KEY=                      # обязательно для resend
-EMAIL_RESEND_ENDPOINT=https://api.resend.com
-```
+- Transient, retried: network errors, timeouts, aborts, `401`, `403`, `404`, `408`, `429`, `5xx`, and a `2xx` without a message ID or with an unreadable body.
+- Permanent: any other non-`2xx`, such as a rejected recipient. The task ends at once, and the reset token is invalidated.
 
-`backend/src/env.ts` проверяет конфигурацию до запуска:
+`401` and `403` are transient on purpose. A rotated key or an unverified domain returns them until the operator fixes it. As permanent errors, they would invalidate every reset requested during a key rotation.
 
-- Группа выбранного провайдера задаётся целиком. Ключи другого провайдера вызывают ошибку. Общие `EMAIL_FROM`, `EMAIL_REPLY_TO` и `EMAIL_REQUEST_TIMEOUT_MS` допустимы при любом драйвере и без отправки не действуют.
-- `EMAIL_FROM` должен быть реальным адресом в одном из двух форматов выше. Запятая, перенос строки или вторая пара угловых скобок запрещены. Это защищает от внедрения заголовков.
-- Для реального провайдера явно задай `WEBAPP_ORIGIN`. Без него используется `CORS_ORIGINS[0]`, который у фонового процесса может не совпадать с приложением. Ссылка в письме окажется неверной.
-- Production запрещает `console`: такой драйвер создавал бы токены без реальной доставки. `disabled` разрешён для продукта без почты.
+Errors carry only the provider, HTTP status, and provider error code. Provider text can name the recipient, and `task_outbox.last_error` outlives the payload.
 
-## Выбор провайдера
+## Proving it works
 
-Следуй хостингу из [CHECKLIST.md](../CHECKLIST.md), не проводи отдельный выбор:
-
-- **Yandex Cloud или требования к размещению данных — Postbox.** Terraform создаёт отдельный ключ отправителя в Lockbox. Не используй ключ хранилища. Драйвер вызывает Amazon SESv2 API и подписывает AWS SigV4 для сервиса `ses`. SMTP требует другого ключа и дополнительной зависимости, поэтому шаблон его не использует. Перед запуском проверь и при необходимости повысь квоты. См. [YANDEX_CLOUD.md](YANDEX_CLOUD.md).
-- **Остальные случаи — Resend.** Нужны bearer-токен, JSON POST и подтверждённый домен.
-
-Оба сервиса предназначены для транзакционных писем, не для маркетинговых рассылок.
-
-## Контракт доставки
-
-Запрос сброса фиксирует строку `task_outbox`. Отправка происходит позже в `outbox:drain`. Задача переживает сбой провайдера или релиз во время запроса.
-
-При подключённом провайдере обязательно запускай drain. Очередь принимает только объём одного прохода: `TASK_OUTBOX_BATCH_LIMIT` × 5, по умолчанию 250. Это ограничивает поток анонимных запросов. Без drain первые запросы сохраняются, остальные получают общий ответ и отбрасываются без следа. См. разделы о запуске drain и анонимных задачах в [BACKGROUND_JOBS.md](BACKGROUND_JOBS.md).
-
-Доставка допускает повтор. Если процесс умер после приёма письма провайдером, но до отметки выполнения, задача запустится снова. Для сброса это новое письмо, а первая ссылка уже недействительна. Новые типы задач должны безопасно переносить повтор.
-
-| Событие | Тип | Действие |
-| --- | --- | --- |
-| Сеть, таймаут, отмена вызывающей стороной | `transient` | Повтор с растущей задержкой, начиная с двух минут |
-| `408`, `429`, `5xx` | `transient` | Повтор |
-| `401`, `403`, `404`: отозванный ключ, неподтверждённый домен, неверный endpoint | `transient` | Повтор |
-| Другой non-2xx: отклонённый получатель или неверный запрос | `permanent` | Немедленное завершение |
-| `2xx` без ID сообщения или с неразбираемым телом | `transient` | Повтор |
-
-Ошибки доступа считаются временными намеренно. Постоянная ошибка сразу аннулирует токен. Если считать замену API-ключа постоянной ошибкой, все запросы сброса за это время потеряются. Вместо этого возможны четыре лишние попытки за полчаса.
-
-Не включай текст провайдера в ошибки: он может содержать адрес получателя. Исключения сохраняются в `task_outbox.last_error` дольше payload. Разрешены только провайдер, HTTP-статус и машинный код. `email-contract.ts` проверяет это на реальных форматах ответов.
-
-## Проверка работы
-
-Unit-тесты не требуют аккаунта. Live-тесты требуют настройки; `bun run --cwd backend test:live` завершится ошибкой, если её нет.
+The unit contract in `backend/src/email/email-contract.ts` covers the error rules without an account. Live tests prove that the real endpoint accepts the request. `bun run --cwd backend test:live` runs each configured suite. It fails when a suite is half configured or none is:
 
 ```bash
-# Resend
 export EMAIL_FROM="Example <no-reply@yourdomain.com>"
 export EMAIL_LIVE_TEST_TO="you@yourdomain.com"
-export EMAIL_RESEND_API_KEY="re_..."
-bun run --cwd backend test:live
-
-# Postbox
-export EMAIL_FROM="Example <no-reply@yourdomain.com>"
-export EMAIL_LIVE_TEST_TO="you@yourdomain.com"
-export EMAIL_POSTBOX_ACCESS_KEY_ID="YCAJE..."
-export EMAIL_POSTBOX_SECRET_ACCESS_KEY="YCP..."
+export EMAIL_RESEND_API_KEY="re_..."            # Resend suite
+export EMAIL_POSTBOX_ACCESS_KEY_ID="..."        # Postbox suite: both keys
+export EMAIL_POSTBOX_SECRET_ACCESS_KEY="..."
 bun run --cwd backend test:live
 ```
 
-Каждый запуск отправляет одно реальное письмо на `EMAIL_LIVE_TEST_TO`. Затем он проверяет постоянный отказ с синтаксически неверным адресом. API отклоняет его до отправки, поэтому bounce не влияет на репутацию домена.
+Each suite sends one real message to `EMAIL_LIVE_TEST_TO`. Then it checks that a malformed recipient, which the API rejects before sending, is a permanent error. Only the Postbox run proves the SigV4 signature. Finally, test a password reset with a real mailbox.
 
-Только live-проверка Postbox доказывает правильность SigV4. Неверный регион, сервис или отсутствие `host` проявляются на реальном endpoint.
+## Provider setup
 
-После тестов выполни сброс пароля через приложение и настоящий почтовый ящик. Тесты помогают найти ошибки, но не заменяют проверку всего пути.
+- Resend: verify the sending domain and create an API key. For DigitalOcean, see [DIGITALOCEAN](DIGITALOCEAN.md).
+- Postbox: verify the sender and check the quotas before launch. On Yandex Cloud, Terraform keeps the sender key in Lockbox. See [YANDEX_CLOUD](YANDEX_CLOUD.md). Never reuse the storage key. The driver calls the SESv2 API with SigV4, not SMTP.
 
-## Безопасность и приватность
+## Security and privacy
 
-- Токен находится во фрагменте URL. Браузер не отправляет его серверу, поэтому он не попадает в access-логи и referrer.
-- Ответ и постановка задачи одинаковы для существующего и отсутствующего аккаунта. Время ответа не должно раскрывать наличие аккаунта.
-- `task_outbox` временно хранит введённый адрес, даже если аккаунта нет. При завершении задачи payload очищается и ставится `redacted_at`, обычно в течение минуты. Остаётся dedupe-ключ на основе хеша. `TASK_OUTBOX_RETENTION_DAYS` затем удаляет остаток строки.
-- DigitalOcean передаёт ключи как secret-переменные, Yandex — из Lockbox. Не храни их в репозитории. Замена вступает в силу с новой ревизией или запуском процесса.
-- Письмо имеет только одного получателя `to`. Нет cc, bcc и пакетной отправки: общий список не может раскрыть письмо другому адресату.
-
-## Официальная документация
-
-- [Отправка через Postbox](https://yandex.cloud/en/docs/postbox/operations/send-email)
-- [Доступ к API Postbox](https://yandex.cloud/en/docs/postbox/api-ref/authentication)
-- [Квоты Postbox](https://yandex.cloud/en/docs/postbox/concepts/limits)
-- [Отправка через Resend](https://resend.com/docs/api-reference/emails/send-email)
-- [Ошибки Resend](https://resend.com/docs/api-reference/errors)
+- The reset token is in the URL fragment. The browser never sends a fragment with the page request, so the token stays out of access logs and referrers.
+- The response and its timing do not reveal whether the account exists.
+- `task_outbox` keeps the submitted address only until the task finishes. The hashed dedupe key stays until retention deletes the row.
+- Keep provider keys out of the repository. A new key takes effect in a new revision or process.
+- Each message has one `to` recipient, with no cc, bcc, or batch sending.

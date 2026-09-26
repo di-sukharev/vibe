@@ -79,6 +79,7 @@ describe('the runtime sends what the driver built', () => {
     )
     expect(JSON.parse(request.body)).toMatchObject({
       Destination: { ToAddresses: ['user@example.com'] },
+      Content: { Simple: { Subject: { Charset: 'UTF-8' }, Body: { Text: { Charset: 'UTF-8' } } } },
     })
   })
 
@@ -100,6 +101,7 @@ describe('the runtime sends what the driver built', () => {
     const request = received[0]!
     expect({ method: request.method, path: request.path }).toEqual({ method: 'POST', path: '/emails' })
     expect(request.headers.authorization).toBe('Bearer test-api-key')
+    expect(request.headers['content-type']).toBe('application/json')
     expect(JSON.parse(request.body)).toMatchObject({ to: 'user@example.com', text: 'link' })
   })
 })

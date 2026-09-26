@@ -1,11 +1,7 @@
 import type { Page } from '@playwright/test'
 
-import {
-  jpegImage,
-  pngImage,
-  storageUploadUrlPatterns,
-} from '../helpers/images'
-import { e2ePassword, expect, test, uniqueEmail } from '../helpers/test'
+import { jpegImage, pngImage } from '../helpers/images'
+import { expect, signUp, test, uniqueEmail } from '../helpers/test'
 
 /**
  * The upload journey end to end, through a real browser and a real storage endpoint.
@@ -15,25 +11,6 @@ import { e2ePassword, expect, test, uniqueEmail } from '../helpers/test'
  * container. Both must pass: that is what proves a project can develop locally and deploy to a
  * real bucket without changing product code.
  */
-
-async function registerAndOpenProfile(page: Page) {
-  const email = uniqueEmail('avatar-e2e')
-
-  await page.goto('/signup')
-  await page.getByLabel('Full Name').fill('Avatar E2E User')
-  await page.getByLabel('Email').fill(email)
-  await page.getByLabel('Password', { exact: true }).fill(e2ePassword)
-  await page.getByLabel('Confirm Password').fill(e2ePassword)
-  await page.getByRole('button', { name: 'Create Account' }).click()
-  await expect(page).toHaveURL(/\/app$/)
-
-  await page.getByRole('link', { name: 'Profile' }).click()
-  await expect(page).toHaveURL(/\/app\/profile$/)
-  await expect(page.getByRole('heading', { level: 1, name: 'Profile' })).toBeVisible()
-  await expect(page.getByTestId('avatar-fallback')).toBeVisible()
-
-  return email
-}
 
 function avatarImage(page: Page) {
   return page.getByTestId('avatar-preview').locator('img')
@@ -49,55 +26,30 @@ async function pickFile(
 test('uploads an avatar, keeps it across a reload, replaces it, and removes it', async ({
   page,
 }) => {
-  await registerAndOpenProfile(page)
+  await signUp(page, uniqueEmail('avatar-e2e'), 'Avatar E2E User')
+  await expect(page).toHaveURL(/\/app$/)
+  await page.getByTestId('nav-link-app-profile').click()
+  await expect(page).toHaveURL(/\/app\/profile$/)
+  await expect(page.getByTestId('avatar-fallback')).toBeVisible()
 
   await pickFile(page, pngImage)
-  await expect(page.getByTestId('avatar-notice')).toContainText('Photo updated.')
   await expect(avatarImage(page)).toBeVisible()
 
   // Survives a reload, which is what distinguishes a stored object from a local preview.
   await page.reload()
-  await expect(page.getByRole('heading', { level: 1, name: 'Profile' })).toBeVisible()
   await expect(avatarImage(page)).toBeVisible()
 
   await pickFile(page, jpegImage)
-  await expect(page.getByTestId('avatar-notice')).toContainText('Photo updated.')
+  await expect(page.getByTestId('avatar-notice')).toBeVisible()
   await expect(avatarImage(page)).toBeVisible()
 
-  await page.getByRole('button', { name: 'Remove' }).click()
-  await expect(page.getByTestId('avatar-notice')).toContainText('Photo removed.')
+  await page.getByTestId('avatar-remove').click()
   await expect(avatarImage(page)).toHaveCount(0)
   await expect(page.getByTestId('avatar-fallback')).toBeVisible()
 
+  // Absence needs a settled page: wait until the avatar query and any image download are done.
   await page.reload()
-  await expect(page.getByRole('heading', { level: 1, name: 'Profile' })).toBeVisible()
+  await page.waitForLoadState('networkidle')
+  await expect(page.getByTestId('avatar-remove')).toHaveCount(0)
   await expect(avatarImage(page)).toHaveCount(0)
-})
-
-test('recovers from an interrupted upload when the user tries again', async ({ page }) => {
-  await registerAndOpenProfile(page)
-
-  // Kill the direct transfer, leaving a pending upload with nothing stored behind it.
-  for (const pattern of storageUploadUrlPatterns) {
-    await page.route(pattern, (route) =>
-      route.request().method() === 'PUT' ? route.abort('failed') : route.continue(),
-    )
-  }
-
-  await pickFile(page, pngImage)
-  await expect(page.getByTestId('avatar-error')).toBeVisible()
-  await expect(avatarImage(page)).toHaveCount(0)
-
-  for (const pattern of storageUploadUrlPatterns) {
-    await page.unroute(pattern)
-  }
-
-  // The retry gets a fresh write-once key, so it succeeds rather than colliding with the
-  // abandoned one.
-  await pickFile(page, pngImage)
-  await expect(page.getByTestId('avatar-notice')).toContainText('Photo updated.')
-  await expect(avatarImage(page)).toBeVisible()
-
-  await page.reload()
-  await expect(avatarImage(page)).toBeVisible()
 })

@@ -49,6 +49,7 @@ export function LoginForm({ returnTo }: { returnTo?: string }) {
   return (
     <form
       className="flex flex-col gap-6"
+      data-testid="login-form"
       onSubmit={(event) => {
         event.preventDefault()
         void form.handleSubmit()
@@ -74,6 +75,7 @@ export function LoginForm({ returnTo }: { returnTo?: string }) {
                 aria-invalid={hasErrors(fieldErrors.email)}
                 autoComplete="email"
                 className="bg-background"
+                data-testid="login-email"
                 id={emailId}
                 inputMode="email"
                 name={field.name}
@@ -99,7 +101,11 @@ export function LoginForm({ returnTo }: { returnTo?: string }) {
               <div className="flex items-center">
                 <FieldLabel htmlFor={passwordId}>Password</FieldLabel>
                 <Typography asChild variant="bodySm">
-                  <Link className="ml-auto underline-offset-4 hover:underline" to="/forgot-password">
+                  <Link
+                    className="ml-auto underline-offset-4 hover:underline"
+                    data-testid="forgot-password-link"
+                    to="/forgot-password"
+                  >
                     Forgot your password?
                   </Link>
                 </Typography>
@@ -109,6 +115,7 @@ export function LoginForm({ returnTo }: { returnTo?: string }) {
                 aria-invalid={hasErrors(fieldErrors.password)}
                 autoComplete="current-password"
                 className="bg-background"
+                data-testid="login-password"
                 id={passwordId}
                 name={field.name}
                 onBlur={field.handleBlur}
@@ -130,7 +137,7 @@ export function LoginForm({ returnTo }: { returnTo?: string }) {
           <form.Subscribe
             selector={(state) => state.isSubmitting}
             children={(isSubmitting) => (
-              <Button disabled={isSubmitting} type="submit">
+              <Button data-testid="login-submit" disabled={isSubmitting} type="submit">
                 {isSubmitting ? 'Signing in…' : 'Login'}
               </Button>
             )}
@@ -139,7 +146,7 @@ export function LoginForm({ returnTo }: { returnTo?: string }) {
 
         <FieldDescription className="text-center">
           Don&apos;t have an account?{' '}
-          <Link search={{ returnTo }} to="/signup">
+          <Link data-testid="signup-link" search={{ returnTo }} to="/signup">
             Sign up
           </Link>
         </FieldDescription>

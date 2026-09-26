@@ -1,45 +1,22 @@
-# Контракты
+# Contracts
 
-Этот пакет задаёт общие данные запросов, DTO и ошибки API. Backend, web и mobile импортируют его схемы. Не описывай те же запросы и ответы повторно в приложениях.
+`@web-app-demo/contracts` holds the shared Zod schemas and inferred TypeScript types for API requests, responses, and errors. The backend, `webapp`, and `mobile` import them. Never redefine these shapes in an app. The contracts-first workflow, including which consumers to check after a change, is in [ARCHITECTURE](../../docs/ARCHITECTURE.md).
 
-## Стек
+## Rules
 
-TypeScript и Zod.
+- Keep only validation, normalization, and shared types here, not business logic.
+- Import only Zod and other contract files. `bun run architecture:check` rejects backend, client, framework, and provider imports.
+- Put each schema and its inferred type in its domain file, such as `src/users.ts`, and re-export the file from `src/index.ts`.
+- Pin the scheme of every URL field, from user input or storage. `z.url()` alone accepts `javascript:` and `data:`. Require `https:` unless the product needs another scheme. Example: `httpUrlSchema` in `src/uploads.ts` also allows `http:` for local signed URLs.
+- Test each schema in the matching `src/*.test.ts`.
 
-## Команды
+## Commands
 
-Из корня репозитория:
-
-```bash
-bun run --cwd packages/contracts typecheck
-```
-
-Из `packages/contracts`:
+From the root:
 
 ```bash
-bun run typecheck
-bun run build
+bun run test:contracts                       # the package's test script: bun test src
+bun run --cwd packages/contracts typecheck   # tsc --noEmit; build does the same
 ```
 
-## Правила работы
-
-Сначала измени контракт здесь, затем маршруты backend и формы клиентов. Экспортируй схемы и выведенные TypeScript-типы из `src/index.ts`.
-
-При изменении схемы проверь всех потребителей:
-
-- Backend: валидацию transport/application и сериализацию.
-- Web и mobile: API-адаптеры функций, разбор формы и состояние интерфейса.
-- Нужные unit-, integration- и E2E-проверки по [инструкции](../../docs/TESTING.md).
-
-Храни здесь только валидацию, нормализацию данных и общие типы. Бизнес-логика выполнения сюда не входит.
-
-Для публичных URL файлов, изображений и видео явно проверяй схему протокола. Одной `.url()` недостаточно. Требуй `https:`, если продукт не обосновывает другой протокол. Это правило относится и к данным пользователя, и к URL из БД.
-
-## Официальная документация
-
-Правила пакета описаны выше. Поведение библиотек проверяй по актуальной документации:
-
-- [Zod](https://zod.dev/)
-- [TypeScript](https://www.typescriptlang.org/docs/)
-- [Hono](https://hono.dev/docs)
-- [TanStack Form для React](https://tanstack.com/form/latest/docs/framework/react/quick-start)
+Apps import `src/index.ts` directly, so the package has no build output.

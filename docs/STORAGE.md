@@ -1,200 +1,117 @@
-# Файлы и медиа
+# Files and media
 
-Эта инструкция нужна для загрузок, изображений, медиа, создаваемых файлов и скачивания.
+Private storage for uploads and downloads. The user avatar is the reference implementation, and both clients can replace and delete it: `webapp/src/features/avatar`, `mobile/src/features/avatar`, `mobile/src/platform/uploads`, `backend/src/modules/uploads`, and `backend/src/storage`. Ask the file questions in [CHECKLIST](../CHECKLIST.md) before you build.
 
-Приватное хранилище уже включено. Пример — один аватар пользователя, который можно заменить и удалить в обоих клиентах. До нового вида загрузок изучи `webapp/src/features/avatar`, `mobile/src/features/avatar`, `mobile/src/platform/uploads`, `backend/src/modules/uploads` и `backend/src/storage`.
+## Two drivers, one contract
 
-## Два драйвера и один контракт
+Product code uses `backend/src/storage/port.ts`. `PRIVATE_STORAGE_DRIVER` selects the driver:
 
-Код обращается к общему порту `backend/src/storage/port.ts`.
+- `filesystem`, the default: the local disk, with URLs that the backend signs and serves. URLs expire, unsigned requests get `403`, and a key accepts one write.
+- `s3`: any S3-compatible endpoint.
 
-| `PRIVATE_STORAGE_DRIVER` | Хранилище | Требования |
+`backend/src/storage/storage-contract.ts` tests both drivers: the disk in unit tests and S3 in the live run.
+
+## Local development
+
+`bun run dev` writes to `backend/.storage` through the filesystem driver. Git ignores that directory.
+
+For S3 behavior or CORS, use the local container. `bun run storage:local:start` starts it, creates the bucket, applies CORS, and prints the env block. `storage:local:stop` keeps the volume. `bun run dev:backend:s3`, `test:storage:s3`, and `e2e:webapp:s3` start the container, then run the backend, the storage contract, or the avatar journey against it.
+
+The container runs SeaweedFS `weed mini` from `docker-compose.yml` on `127.0.0.1` with fixed demo keys. Its port derives from the checkout path, and `PRIVATE_STORAGE_S3_PORT` overrides it. Local versioning is off, because SeaweedFS then breaks conditional writes.
+
+## Configuration
+
+`backend/.env.example` lists the variables. `backend/src/env.ts` refuses these at startup:
+
+- `filesystem` in production, because a container disk does not survive a deploy.
+- A non-loopback endpoint without `PRIVATE_STORAGE_ALLOW_REMOTE_ENDPOINT=true`, in production too.
+- A production endpoint that is loopback or not HTTPS.
+- An incomplete set of the five S3 variables, or any of them with `filesystem`.
+- A loopback endpoint without `PRIVATE_STORAGE_FORCE_PATH_STYLE=true`.
+
+Local URLs are signed with a key derived from `JWT_SECRET`. Rotating it invalidates them.
+
+## S3-compatible providers
+
+Providers differ in endpoint, region, and path style:
+
+- DigitalOcean Spaces: `https://<region>.digitaloceanspaces.com`, with the bucket in the host name.
+- Yandex Object Storage: `https://storage.yandexcloud.net`, region `ru-central1`.
+- MinIO and self-hosted gateways: `PRIVATE_STORAGE_FORCE_PATH_STYLE=true`.
+
+Before you choose a provider, PUT one key twice with `aws s3api put-object --if-none-match '*'` on a versioned bucket, as in production. The second PUT must return `412`. Otherwise a repeated PUT replaces the object. Repository tests cannot check this.
+
+The bucket is always private. Do not use object ACLs.
+
+## Upload contract
+
+The browser requests a ticket for a content type and exact size. The backend creates a key, signs a `PUT`, and saves a `pending` row. The browser uploads with the ticket headers unchanged. Finalize checks the stored object and publishes it.
+
+- The signature covers the size, `Content-Type`, and `If-None-Match: *`.
+- A key accepts one write. A second PUT gets `412`, which the client treats as success.
+- Each attempt gets a new ticket and key. The old pending upload is removed.
+- Finalize checks presence, size, stored type, and the leading bytes of JPEG, PNG, or HEIC/HEIF. A mismatch deletes the object.
+- Keys are `<namespace>/<yyyy>/<mm>/<uuid>`. PostgreSQL maps records to keys.
+- Reads use short-lived signed URLs.
+
+### Mobile transfer
+
+`mobile` follows the same contract. Only the byte transfer differs, in `mobile/src/platform/uploads`. `transfer.ts` is a pure protocol: it checks that the file size still matches the ticket, calls the sender, and reads the answer, where `412` means success. It knows nothing about avatars, endpoints, or images, so reuse it for other files.
+
+`UploadFileAccess` pairs measuring with sending. A size read another way may not match the signed ticket, and storage then answers `403`. `mobile/src/composition/upload-file-access.ts` picks the pair by `Platform.OS`:
+
+| Platform | Size | Transfer |
 | --- | --- | --- |
-| `filesystem` (по умолчанию) | Локальный диск; backend выдаёт подписанные URL | Без облака и Docker |
-| `s3` | Любой S3-совместимый endpoint | Ключи или локальный контейнер ниже |
+| iOS and Android, `native-file-access.ts` | `File.size` from `expo-file-system` | `File.upload`, streamed from disk |
+| Web, `web-file-access.ts` | The blob behind the `blob:` URL | `fetch` with the blob as the body |
 
-Для смены драйвера меняй настройки, не код. Filesystem — полноценная реализация: URL имеют срок действия, чтение без подписи возвращает `403`, каждый ключ допускает одну запись.
+On web, `expo-file-system` is a stub: its `File` has no size, and its upload returns status `0`. The picker and manipulator do work there, hence the separate web reader. The web `PUT` mirrors `webapp/src/features/avatar/upload.ts`, including `credentials: 'omit'`: the ticket carries the authority, and cookies only break the preflight.
 
-Общий `backend/src/storage/storage-contract.ts` выполняется для диска в unit-тестах и настоящего S3 в live-тестах. Расхождение драйверов должно ломать один из прогонов.
+## Deletion and recovery
 
-## Опрос перед реализацией
+Replaced and removed objects are deleted after the response. A failed delete orphans the object, because its row is gone and `uploads:pending:cleanup` covers only unfinished uploads. Deleting a user also orphans the avatar file. Accept this only for small avatars. For other files, or before you add account deletion, delete files explicitly, keep keys longer than their records, and reconcile the bucket.
 
-Вопросы и ответы о файлах хранятся в [CHECKLIST.md](../CHECKLIST.md), в разделе файлов, изображений и медиа. Задай вопросы до реализации. Не дублируй опрос здесь.
+Terraform versions the media bucket on both clouds. Noncurrent versions expire after 30 days, and incomplete multipart uploads after 7. DigitalOcean does not guarantee this expiry; see [DIGITALOCEAN](DIGITALOCEAN.md). This window is the only undo for media: an operator can remove a delete marker or copy an old version back. On Yandex Cloud, see [YANDEX_CLOUD](YANDEX_CLOUD.md) first. Reconciliation must skip delete markers.
 
-## Локальная разработка
-
-`bun run dev` использует filesystem и пишет в игнорируемый Git каталог `backend/.storage`. Дополнительный процесс хранилища не нужен.
-
-Для проверки подписей, поведения S3 и CORS запусти локальный сервер:
-
-```bash
-bun run storage:local:start   # контейнер, бакет, CORS и вывод env
-bun run storage:local:status  # состояние контейнера и доступность бакета
-bun run storage:local:env     # повторный вывод PRIVATE_STORAGE_*
-bun run storage:local:stop    # остановка с сохранением тома и объектов
-```
-
-`storage:local:stop` останавливает только один контейнер. Он не использует `docker compose down`, который затронул бы БД, а с `--volumes` — и загруженные файлы.
-
-Приложение и проверки с этим сервером:
-
-```bash
-bun run dev:backend:s3     # backend с локальным S3
-bun run test:storage:s3    # live-контракт хранилища
-bun run e2e:webapp:s3      # браузерный сценарий аватара с S3
-```
-
-Контейнер SeaweedFS `weed mini` закреплён в `docker-compose.yml`. Он доступен только на `127.0.0.1` и использует заведомо демонстрационные ключи. Порт вычисляется по пути репозитория; переопределение — `PRIVATE_STORAGE_S3_PORT`.
-
-Версии объектов и object locking локально отключены: с ними SeaweedFS неверно обрабатывает условную запись, нужную для однократного ключа. Production-бакеты версионируются. Поведение `412` в таком бакете доказывает только ручная проверка провайдера ниже.
-
-## Настройка
-
-```bash
-PRIVATE_STORAGE_DRIVER=filesystem          # или s3
-PRIVATE_STORAGE_LOCAL_ROOT=.storage        # только filesystem
-PRIVATE_STORAGE_LOCAL_PUBLIC_URL=          # по умолчанию http://127.0.0.1:${PORT}
-
-PRIVATE_STORAGE_REGION=                    # эти пять значений задаются вместе для s3
-PRIVATE_STORAGE_BUCKET=
-PRIVATE_STORAGE_ENDPOINT=
-PRIVATE_STORAGE_ACCESS_KEY_ID=
-PRIVATE_STORAGE_SECRET_ACCESS_KEY=
-
-PRIVATE_STORAGE_FORCE_PATH_STYLE=false     # true для локальных и большинства собственных endpoint
-PRIVATE_STORAGE_ALLOW_REMOTE_ENDPOINT=false
-PRIVATE_STORAGE_UPLOAD_MAX_BYTES=5242880
-PRIVATE_STORAGE_UPLOAD_URL_TTL_SECONDS=900
-PRIVATE_STORAGE_DOWNLOAD_URL_TTL_SECONDS=300
-```
-
-`backend/src/env.ts` проверяет настройки до запуска:
-
-- Production запрещает filesystem: диск контейнера не сохраняется при релизе.
-- Для нелокального endpoint нужен явный `PRIVATE_STORAGE_ALLOW_REMOTE_ENDPOINT=true`. Это не даёт случайному `.env` направить разработку в реальный бакет. Terraform обоих провайдеров задаёт флаг явно.
-- Production требует HTTPS и нелокальный endpoint.
-- Все пять S3-переменных задаются вместе. Любая из них при filesystem вызывает ошибку.
-- Локальный endpoint требует path-style: он не разрешает `<bucket>.<host>`.
-
-## S3-совместимые провайдеры
-
-DigitalOcean Spaces, Yandex Object Storage, MinIO, Cloudflare R2 и AWS S3 используют пять переменных выше. Различаются endpoint, регион и path-style.
-
-До выбора провайдера проверь условную запись. При существующем ключе `If-None-Match: *` должен вернуть `412`. Не все S3-совместимые серверы поддерживают это; шаблон проверяет только локальный SeaweedFS.
-
-Без поддержки загрузка работает, а каждый новый билет получает UUID-ключ. Но повторный PUT заменяет данные вместо отказа. Проверь свой бакет: дважды выполни PUT одного ключа с `If-None-Match: *`, например через `aws s3api put-object --if-none-match '*'`. Второй запрос должен вернуть `412`.
-
-`bun run test:storage:s3` всегда проверяет локальный контейнер, независимо от внешних переменных. `bun run --cwd backend test:live` также использует контракт локального контейнера с его origin и path-style. Проверка реального бакета может упасть по этим причинам и не ответить на вопрос об условной записи.
-
-- DigitalOcean Spaces: `https://<region>.digitaloceanspaces.com`, адресация бакета через поддомен.
-- Yandex: `https://storage.yandexcloud.net`; см. [YANDEX_CLOUD.md](YANDEX_CLOUD.md).
-- MinIO и собственные шлюзы: `PRIVATE_STORAGE_FORCE_PATH_STYLE=true`.
-
-Бакет всегда приватный. Объектные ACL не используются: доступ задаёт бакет. У ряда провайдеров ACL объектов недоступны или не рекомендуются.
-
-## Контракт загрузки
-
-1. Браузер запрашивает билет у backend с типом содержимого и точным размером.
-2. Backend создаёт ключ, подписывает `PUT` и сохраняет строку `pending`.
-3. Браузер отправляет файл прямо в хранилище с заголовками билета без изменений.
-4. Браузер запрашивает завершение.
-5. Backend проверяет сохранённый объект и публикует его.
-
-Правила:
-
-- Подпись охватывает размер, тип и `If-None-Match: *`. SigV4 по умолчанию не подписывает `content-type`; драйвер делает это явно.
-- Ключ допускает одну запись. Повторный `PUT` возвращает `412` и не заменяет уже используемый объект.
-- Новая попытка загрузки получает новый билет и ключ. Старый pending-объект помечается брошенным и очищается. Повторное использование незавершённого ключа могло бы постоянно возвращать `412`.
-- Клиент считает `412` успехом: объект уже сохранён предыдущей попыткой. Завершение всё равно проверяет его содержимое.
-- Finalize проверяет наличие, размер, тип и начальные байты JPEG, PNG или HEIC/HEIF. Заявленного MIME недостаточно. Неверный объект удаляется и отклоняется.
-- Backend создаёт ключ вида `<namespace>/<yyyy>/<mm>/<uuid>`. Не помещай туда email, имя или ID записи. Владение хранит PostgreSQL.
-- Чтение использует короткую подпись. Публичного URL и CDN base URL нет. Без подписи оба драйвера возвращают `403`.
-- Необязательный checksum SDK отключён через `requestChecksumCalculation: 'WHEN_REQUIRED'`. При создании URL тела ещё нет; иначе SDK подписал бы checksum пустого файла.
-
-Удаление идемпотентно. Старые объекты удаляются после ответа, вне транзакции. Ошибка хранилища не отменяет уже сохранённую в БД загрузку.
-
-У этого решения есть предел. `uploads:pending:cleanup` из [BACKGROUND_JOBS.md](BACKGROUND_JOBS.md) удаляет только незавершённые загрузки: их строка и ключ ещё известны. При замене или удалении строка исчезает в транзакции, а удаление объекта выполняется по возможности. Если оно не прошло, ключ больше нигде не записан.
-
-Удаление пользователя также оставляет объект: каскад `users` удаляет строку аватара, но не файл. Для одного малого аватара это принятый предел шаблона. Для больших/регулируемых файлов или функции удаления аккаунта сохраняй ключ дольше записи и добавь сверку бакета.
-
-В обоих облаках Terraform включает версии и удаляет неактуальные версии через 30 дней: `infra/digitalocean/production/foundation.tf` и `infra/yandex/production/storage.tf`. Удаление оставляет маркер. Оператор может восстановить файл в течение 30 дней: убрать маркер или скопировать старую версию поверх ключа.
-
-На Yandex сначала настрой роль и политику из [YANDEX_CLOUD.md](YANDEX_CLOUD.md): исходная media-политика не даёт никому доступ к версиям. Через 30 дней байты исчезают навсегда, а нулевой маркер остаётся. Сверка должна пропускать маркеры.
-
-Бакет восстанавливает содержимое, но не владельца. Для строки БД нужна отдельная резервная копия. Текущие объекты не истекают, поэтому потерянные файлы остаются до сверки. Даже удалённая pending-загрузка ещё занимает место старой версии 30 дней.
-
-Yandex не даёт runtime-ключу `s3:DeleteObjectVersion`, поэтому он не сокращает окно восстановления. Для ключа Spaces Read/Write/Delete такая гарантия не документирована. Считай окно защитой от удалений приложения, не от ключа аккаунта; не передавай такой ключ приложению.
-
-### Передача файла из mobile
-
-Пять шагов загрузки общие. Отличается передача байтов в `mobile/src/platform/uploads`. Чистый протокол `transfer.ts` проверяет совпадение размера с билетом, вызывает отправителя и разбирает ответ. `412` означает успех. Протокол не знает об аватарах, endpoint и изображениях; повторно используй его для других файлов.
-
-| Платформа | Измерение размера | Передача |
-| --- | --- | --- |
-| iOS/Android, `native-file-access.ts` | `File.size` из `expo-file-system` | `File.upload`, поток с диска |
-| Web, `web-file-access.ts` | Blob по `blob:` URL | `fetch` с blob в теле |
-
-`UploadFileAccess` объединяет измерение и отправку. `AppProviders` выбирает пару через `Platform.OS`. Разные способы чтения могут дать размер, который не совпадёт с подписанным билетом; хранилище вернёт `403`.
-
-`expo export --platform web` поддерживается, но `expo-file-system` в браузере — заглушка: размера нет, upload возвращает статус `0`. Picker и manipulator работают, поэтому нужен отдельный web-reader. Web `PUT` повторяет `webapp/src/features/avatar/upload.ts`, включая `credentials: 'omit'`: права уже находятся в билете, cookies лишь ломают preflight.
+The window restores bytes, not ownership, so back up the database separately. Never give the application an account-level access key, which can delete versions. The Yandex Cloud runtime key cannot delete versions; DigitalOcean does not document whether its scoped `readwrite` key can.
 
 ## CORS
 
-CORS действует в браузере, включая Expo Web. Добавь его origin в разрешённые. Нативные iOS/Android не используют CORS.
+`browserUploadAllowedHeaders` in `backend/src/storage/config.ts` is the source list. The API adds `Authorization`, and `scripts/storage-local.mjs` applies the list to the local bucket. A bucket never needs `Authorization`, because a signed URL carries its own authority. Terraform sets the production rule: the webapp origin; `GET`, `PUT`, and `HEAD`; `Content-Type` and `If-None-Match`; and the exposed `ETag`. Keep both in sync.
 
-Источник разрешённых заголовков — `browserUploadAllowedHeaders` в `backend/src/storage/config.ts`. API добавляет к нему `Authorization` через `apiCorsAllowedHeaders`. `scripts/storage-local.mjs` передаёт исходный список в `PutBucketCors`.
+CORS applies in every browser, including Expo Web. A deployed Expo Web app needs its origin in the bucket rule too. Native iOS and Android apps do not use CORS.
 
-Подписанный URL сам даёт доступ, поэтому бакету не нужен `Authorization`. В production разреши нужные web-origin, методы `GET`/`PUT`/`HEAD`, заголовки `Content-Type` и `If-None-Match`, а также чтение `ETag`.
+## Showing a private file
 
-## Показ приватного файла
+Download the file with a CORS `fetch` and show an object URL. Never put a signed URL in `<img src>`. The API sends `Cross-Origin-Resource-Policy: same-origin`, which blocks a no-cors image with the filesystem driver.
 
-Webapp получает аватар через `fetch` и показывает object URL, а не подписанный URL в `<img src>`. `secureHeaders()` задаёт API `Cross-Origin-Resource-Policy: same-origin`. Прямой no-cors запрос картинки с другого origin сломал бы filesystem, но не S3.
+In `mobile`, always build the image source with `avatarImageSource`. It joins the signed URL, a cache key, and a web-only header:
 
-CORS-fetch одинаков для обоих драйверов и не помещает временный ключ доступа в DOM.
+- iOS and Android: `expo-image` loads the signed URL directly, because CORP is a browser rule.
+- Expo Web: the source adds `Accept`, so `expo-image` loads it with a CORS `fetch` and shows an object URL. This works with both drivers. `Accept` needs no preflight, and the default `CORS_ORIGINS` already lists the local Expo Web origins.
+- Each read signs a new URL. `avatarCacheKey` builds the cache key from `updatedAt` and `byteSize`, so a replaced photo never reuses the old entry. The native cache keeps the image across new URLs. Web ignores `cacheKey` and keeps the object URL until the component unmounts.
 
-В iOS/Android `expo-image` читает подписанный URL напрямую: CORP — правило браузера. В Expo Web функция `avatarImageSource` добавляет `Accept`. Источник с заголовками заставляет библиотеку выполнить CORS-fetch и показать object URL. Это работает и с filesystem, и с S3. `Accept` разрешён без preflight; origin Expo Web уже входит в стандартный `CORS_ORIGINS`.
+A failed read means the app does not know whether a photo exists. The provider exposes that state and a reload, so it never offers a wrong action. An expired URL after a successful read only affects display: initials appear, and the actions stay correct. Nothing reloads the image by itself. If a product needs that, refetch when the app returns to the foreground. A retry on the image's own error can loop while storage fails.
 
-Каждое чтение аватара даёт новую подпись. `avatarCacheKey` строит ключ кэша из `updatedAt` и `byteSize`, поэтому замена фотографии не использует старую запись. Нативный кэш сохраняет картинку между разными подписанными URL. Web игнорирует `cacheKey` и держит object URL до удаления компонента. Всегда используй `avatarImageSource`: он объединяет URL, ключ и заголовок.
+`cachePolicy="memory-disk"` keeps the private photo in the app sandbox after sign-out. Another account's cache key never matches, and the OS evicts the cache when space runs low. If the product must erase local data, for example on shared devices, call `Image.clearDiskCache()` at sign-out.
 
-Ошибка чтения означает, что неизвестно даже наличие фотографии. Провайдер раскрывает это состояние и повторную загрузку, чтобы не предлагать неверные действия. Истечение подписи после успешного чтения затрагивает только показ: появятся инициалы, а действия останутся верными. Автовосстановление картинки здесь не реализовано. Если оно нужно, обновляй данные при возврате приложения на передний план. Повтор по ошибке самого изображения может зациклиться при сбое хранилища.
+## Public files and CDN
 
-`cachePolicy="memory-disk"` сохраняет приватную фотографию в sandbox приложения после выхода. Ключ другого аккаунта не совпадает; ОС освобождает кэш при нехватке места. Если продукт требует удаления локальных данных, например на общих устройствах, вызывай `Image.clearDiskCache()` при logout.
+The template has no public files. For public immutable files, add a separate public bucket, a `publicUrlForKey` next to the driver, and a CDN. Never mix public and private files in one bucket.
 
-## Публичные файлы и CDN
+## Images
 
-В шаблоне нет публичных ACL, CDN base URL и генератора публичных ссылок. Все файлы приватны и доступны по короткой подписи.
+The backend stores the bytes it receives, and `webapp` uploads originals. Browsers need a conversion step to show HEIC.
 
-Для публичных неизменяемых файлов добавь отдельный публичный бакет, `publicUrlForKey` рядом с драйвером и CDN. Не ослабляй приватный путь и не смешивай оба вида файлов в одном бакете.
+`mobile` normalizes a photo before it requests a ticket: `expo-image-manipulator` scales the long edge to 512 px and saves a JPEG. This keeps phone photos under the 5 MB limit and lets browsers show iPhone photos. On web, the manipulator decodes through a canvas, and Chrome or Firefox may fail on HEIC. Then no upload starts, and the app asks for another photo; a phone can convert the same file. Normalizing never replaces the finalize check. `webapp` may still send HEIC, so keep the backend HEIC path.
 
-## Изображения и оптимизация
+Create variants in the backend or a worker under stable keys, such as `images/<entity>/<id>/<variant>.webp`. For transforms by URL, put `imgproxy` in front of the bucket. Use Cloudinary or ImageKit only when the user chooses them.
 
-Backend хранит полученные байты без преобразований. Webapp отправляет исходный файл. HEIC принимается, но для показа в браузере нужен этап конвертации.
+## Security and privacy
 
-Mobile до запроса билета уменьшает длинную сторону до 512px и сохраняет JPEG через `expo-image-manipulator`. Picker/manipulator доступны на всех платформах Expo. Но web использует canvas: HEIC в Chrome/Firefox может не декодироваться. Тогда загрузка не начинается, и интерфейс предлагает другую фотографию. Телефон может преобразовать тот же файл.
-
-Нормализация помогает уложиться в лимит 5 МБ и показать снимок iPhone в web. Она не заменяет проверку: finalize читает реальные начальные байты. HEIC-путь backend остаётся нужен webapp, хотя mobile отправляет JPEG.
-
-При необходимости создавай варианты в backend/worker под стабильными ключами, например `images/<entity>/<id>/<variant>.webp`. Добавляй `sharp` только для реальной реализации. Для преобразований по URL можно использовать `imgproxy` перед бакетом. Cloudinary/ImageKit допустимы только по явному выбору пользователя.
-
-## Безопасность и приватность
-
-- Не коммить ключи. Фиксированные локальные ключи — демонстрационные и доступны только через loopback.
-- Ограничь ключ бакетом приложения.
-- Yandex-политики привязаны к точным ключам. Публикатор синхронизирует только два статических бакета, без удаления бакетов и версий. Runtime читает/пишет/удаляет только обычные media-объекты.
-- Статические бакеты разрешают анонимное чтение объектов, но не список. Это также допускает HTTP от Cloud CDN к website-origin; пользовательские домены переводят на HTTPS.
-- Отдельный IaC-аккаунт меняет настройки только трёх бакетов приложения. Ему запрещены `s3:DeleteBucket`, `s3:PutBucketVersioning` и удаление версий. Он не передаётся приложению. Пределы этого Deny описаны в `docs/YANDEX_CLOUD.md`.
-- До выдачи URL проверяй тип, размер, владельца и права. До публикации проверяй сохранённый объект.
-- Создавай ключи на сервере. Не доверяй пути клиента.
-- Не помещай email, имена, ID клиентов и другие персональные данные в имена бакетов, ключи, metadata и tags.
-- При удалении владельца удаляй объекты. Каскад `user_avatars` удаляет только строки; текущий потерянный объект не исчезнет по правилу версий. Перед добавлением удаления аккаунта реализуй удаление файлов и учти пределы контракта выше.
-
-## Официальная документация
-
-- [SeaweedFS weed mini](https://github.com/seaweedfs/seaweedfs/wiki/Quick-Start-with-weed-mini)
-- [SeaweedFS S3 API](https://github.com/seaweedfs/seaweedfs/wiki/Amazon-S3-API)
-- [Условные запросы S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-requests.html)
-- [Подписанные URL в AWS SDK](https://docs.aws.amazon.com/sdk-for-javascript/v3/developer-guide/s3-example-creating-buckets.html)
-- [Совместимость Spaces с S3](https://docs.digitalocean.com/products/spaces/reference/s3-compatibility/)
-- [CORS в Spaces](https://docs.digitalocean.com/products/spaces/how-to/configure-cors/)
-- [Yandex Object Storage](https://yandex.cloud/en/docs/storage/)
-- [MinIO](https://min.io/docs/minio/linux/index.html)
+- Never commit access keys. The fixed local keys are loopback-only demo values.
+- Scope each access key to the application's bucket. Yandex Cloud policies: [YANDEX_CLOUD](YANDEX_CLOUD.md).
+- Before you issue a URL, check type, size, owner, and permissions.
+- Create object keys on the server. Never trust a client path.
+- Keep personal data out of bucket names, keys, metadata, and tags.
+- Parse every stored or returned URL and allow only `http:` and `https:`. `z.url()` accepts `javascript:` and `data:`. See `httpUrlSchema` in `packages/contracts/src/uploads.ts`.

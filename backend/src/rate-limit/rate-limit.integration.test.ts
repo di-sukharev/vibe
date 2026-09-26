@@ -8,7 +8,7 @@ import type { BackendRuntime } from '../runtime'
 import { createDatabaseRateLimitStore } from './database-store'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
-const maybeDescribe = databaseUrl ? describe : describe.skip
+if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required; run bun run test:backend:integration')
 
 /**
  * The database store exists for one reason: several backend processes that never see each other
@@ -16,10 +16,10 @@ const maybeDescribe = databaseUrl ? describe : describe.skip
  * conflict target, the window alignment and the timestamp round-trip are all PostgreSQL behaviour,
  * so every test here runs two clients against the real thing.
  */
-maybeDescribe('database rate-limit store', () => {
+describe('database rate-limit store', () => {
   const clients: DbClient[] = []
   const newClient = () => {
-    const client = createPrisma(databaseUrl!)
+    const client = createPrisma(databaseUrl)
     clients.push(client)
     return client
   }
@@ -82,9 +82,9 @@ maybeDescribe('database rate-limit store', () => {
   })
 })
 
-maybeDescribe('auth rate limits across backend processes', () => {
+describe('auth rate limits across backend processes', () => {
   const env = loadEnv({
-    DATABASE_URL: databaseUrl!,
+    DATABASE_URL: databaseUrl,
     JWT_SECRET: '12345678901234567890123456789012',
     CORS_ORIGINS: 'http://localhost:5173',
     AUTH_RATE_LIMIT_MAX: '2',
@@ -95,8 +95,8 @@ maybeDescribe('auth rate limits across backend processes', () => {
     TRUST_PROXY: 'true',
     TRUSTED_PROXY_CLIENT_IP_HEADER: 'x-forwarded-for',
   })
-  const prisma = createPrisma(databaseUrl!)
-  const peerPrisma = createPrisma(databaseUrl!)
+  const prisma = createPrisma(databaseUrl)
+  const peerPrisma = createPrisma(databaseUrl)
   // Two apps over two connections: the closest a test gets to two serverless container instances
   // that share nothing but the database.
   const apps = [createApp({ env, prisma }), createApp({ env, prisma: peerPrisma })] as const
