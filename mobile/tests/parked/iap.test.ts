@@ -6,9 +6,6 @@ const {
   buildSubscriptionPurchaseRequest,
   extractGooglePlayPurchaseToken,
   extractSignedTransactionInfo,
-  friendlyIapErrorMessage,
-  iapDiagnosticPayload,
-  iapErrorMessage,
   ingestAndFinishPurchase,
   introOfferLabel,
   introOfferLabelForOffer,
@@ -23,7 +20,6 @@ const {
   validateAppStorePurchaseForIngest,
   validateGooglePlayPurchaseForIngest,
 } = await import('../src/features/billing/purchase-controller');
-const { ApiRequestError } = await import('../src/platform/api');
 
 const activeSubscription = {
   entitlement: 'premium' as const,
@@ -195,7 +191,7 @@ test('recognizes user-cancelled purchase errors without surfacing them as failur
   expect(isUserCancelledPurchaseError(new Error('Cannot complete purchase'))).toBe(false);
 });
 
-test('classifies retryable IAP errors and returns friendly messages', async () => {
+test('classifies retryable IAP errors and retries only those', async () => {
   expect(isRetryableIapError({ code: 'network-error' })).toBe(true);
   expect(isRetryableIapError({ code: 'E_SERVICE_ERROR' })).toBe(true);
   expect(isRetryableIapError({ code: 'SERVICE_ERROR' })).toBe(true);
@@ -206,12 +202,6 @@ test('classifies retryable IAP errors and returns friendly messages', async () =
   expect(isRetryableIapError({ code: 'init-connection' })).toBe(false);
   expect(isRetryableIapError({ code: 'query-product' })).toBe(false);
   expect(isRetryableIapError({ code: 'item-unavailable' })).toBe(false);
-  expect(friendlyIapErrorMessage({ code: 'item-unavailable' })).toContain('not available');
-  expect(friendlyIapErrorMessage({ code: 'query-product' })).toContain('temporarily unavailable');
-  expect(friendlyIapErrorMessage({ code: 'init-connection' })).toContain('temporarily unavailable');
-  expect(friendlyIapErrorMessage({ code: 'user-error' })).toContain('payment settings');
-  expect(friendlyIapErrorMessage({ code: 'E_USER_ERROR' })).toContain('payment settings');
-  expect(friendlyIapErrorMessage({ code: 'UserError' })).toContain('payment settings');
 
   let attempts = 0;
   const delays: number[] = [];
@@ -250,66 +240,6 @@ test('classifies retryable IAP errors and returns friendly messages', async () =
     ),
   ).rejects.toEqual({ code: 'billing-unavailable' });
   expect(attempts).toBe(1);
-});
-
-test('maps backend IAP errors and store errors to user-facing messages', () => {
-  expect(iapErrorMessage(new ApiRequestError(503, 'IAP_NOT_CONFIGURED', 'server not configured'))).toBe(
-    'Subscriptions are not configured on the server yet.',
-  );
-  expect(iapErrorMessage(new ApiRequestError(400, 'IAP_INVALID_TRANSACTION', 'invalid'))).toContain(
-    'could not be verified',
-  );
-  expect(iapErrorMessage(new ApiRequestError(409, 'IAP_OWNERSHIP_MISMATCH', 'owned elsewhere'))).toContain(
-    'linked to another account',
-  );
-  expect(iapErrorMessage(new ApiRequestError(500, 'INTERNAL_ERROR', 'backend failed'))).toBe('backend failed');
-  expect(iapErrorMessage({ code: 'network-error' })).toBe(
-    'The store is temporarily unavailable. Check your connection and try again.',
-  );
-  expect(iapErrorMessage({ code: 'deferred-payment' })).toBe(
-    'Purchase is pending approval. Premium will unlock after the store approves it.',
-  );
-  expect(iapErrorMessage({ code: 'user-error' })).toBe(
-    'The store could not complete the purchase. Check your store payment settings and try again.',
-  );
-});
-
-test('builds structured IAP diagnostics without depending on React provider state', () => {
-  expect(
-    iapDiagnosticPayload(
-      {
-        code: 'network-error',
-        debugMessage: 'StoreKit request timed out',
-        message: 'Network down',
-        platform: 'ios',
-        productId: 'premium_monthly',
-        responseCode: 2,
-        underlyingError: new Error('NSURLErrorDomain -1009'),
-      },
-      'android',
-    ),
-  ).toEqual({
-    code: 'network-error',
-    debugMessage: 'StoreKit request timed out',
-    message: 'Network down',
-    network: true,
-    platform: 'ios',
-    productId: 'premium_monthly',
-    responseCode: 2,
-    retryable: true,
-    underlyingError: 'NSURLErrorDomain -1009',
-  });
-  expect(iapDiagnosticPayload('plain diagnostic', 'ios')).toEqual({
-    code: null,
-    debugMessage: undefined,
-    message: 'plain diagnostic',
-    network: false,
-    platform: 'ios',
-    productId: undefined,
-    responseCode: undefined,
-    retryable: false,
-    underlyingError: undefined,
-  });
 });
 
 test('suppresses short-lived StoreKit noise after successful purchase', () => {

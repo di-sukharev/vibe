@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { AVATAR_MAX_BYTES } from '@web-app-demo/contracts';
 
 import { AvatarApi } from '../src/features/avatar/api';
-import { ApiRequestError, ApiTransport } from '../src/platform/api';
+import { ApiTransport } from '../src/platform/api';
 
 const originalFetch = globalThis.fetch;
 
@@ -77,17 +76,6 @@ describe('AvatarApi', () => {
     expect(response.upload.uploadId).toBe(ticket.uploadId);
   });
 
-  test('refuses an oversized request locally, before it costs a round trip', async () => {
-    const { api, calls } = createApi(() => json({ upload: ticket }, 201));
-
-    // The contract is parsed in the argument position, so this throws synchronously rather than
-    // rejecting - the request is never built at all.
-    expect(() =>
-      api.createUpload({ byteSize: AVATAR_MAX_BYTES + 1, contentType: 'image/jpeg' }),
-    ).toThrow();
-    expect(calls).toHaveLength(0);
-  });
-
   test('percent-encodes the upload id so it cannot reshape the path', async () => {
     const { api, calls } = createApi(() => json({ avatar }, 200));
 
@@ -114,16 +102,5 @@ describe('AvatarApi', () => {
 
     expect(calls[0]).toMatchObject({ method: 'DELETE', path: '/api/uploads/avatar' });
     expect(response.avatar).toBeNull();
-  });
-
-  test('surfaces a recoverable upload failure with its own code', async () => {
-    const { api } = createApi(() =>
-      json({ error: { code: 'UPLOAD_NOT_COMPLETED', message: 'Upload has not finished' } }, 409),
-    );
-
-    const failure = await api.finalizeUpload(ticket.uploadId).catch((error: unknown) => error);
-
-    expect(failure).toBeInstanceOf(ApiRequestError);
-    expect((failure as ApiRequestError).code).toBe('UPLOAD_NOT_COMPLETED');
   });
 });

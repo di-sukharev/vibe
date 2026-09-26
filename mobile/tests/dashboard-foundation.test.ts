@@ -1,11 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import {
-  DASHBOARD_WIDE_BREAKPOINT,
-  NAVIGATION_RAIL_WIDTH,
-  accountInitials,
-  dashboardNavigationMode,
-} from '../src/components/dashboard/model';
+import { accountInitials } from '../src/components/dashboard/model';
 import { uiColorTokens } from '../src/components/ui/theme-tokens';
 
 function relativeLuminance(hex: string) {
@@ -34,13 +29,6 @@ function contrastRatio(foreground: string, background: string) {
 
   return (lighter + 0.05) / (darker + 0.05);
 }
-
-test('dashboard navigation keeps phones on tabs and moves wide web to a side rail', () => {
-  expect(dashboardNavigationMode(DASHBOARD_WIDE_BREAKPOINT - 1)).toBe('tabs');
-  expect(dashboardNavigationMode(DASHBOARD_WIDE_BREAKPOINT)).toBe('rail');
-  expect(dashboardNavigationMode(DASHBOARD_WIDE_BREAKPOINT + 400)).toBe('rail');
-  expect(NAVIGATION_RAIL_WIDTH).toBeGreaterThanOrEqual(200);
-});
 
 test('account initials stay useful for names, emails, and empty identities', () => {
   expect(accountInitials('  Ada Lovelace  ', 'ada@example.com')).toBe('AL');

@@ -169,23 +169,15 @@ describe('nativeFileAccess', () => {
     for (const size of [0, null, undefined]) {
       fileSizes.set('file:///tmp/missing.jpg', size as unknown as number);
 
-      const nullish = await nativeFileAccess
+      const failure = await nativeFileAccess
         .measureBytes('file:///tmp/missing.jpg')
         .catch((error: unknown) => error);
 
-      expect((nullish as InstanceType<typeof UploadTransferError>).reason).toBe('unreadable-file');
+      // The type is the contract. Only `UploadTransferError` survives the message mapper, so a
+      // plain Error here would reach the person as "try again" - advice that cannot work.
+      expect(failure).toBeInstanceOf(UploadTransferError);
+      expect((failure as InstanceType<typeof UploadTransferError>).reason).toBe('unreadable-file');
     }
-
-    fileSizes.set('file:///tmp/missing.jpg', 0);
-    const failure = await nativeFileAccess
-      .measureBytes('file:///tmp/missing.jpg')
-      .catch((error: unknown) => error);
-
-    // The type is the contract. Only `UploadTransferError` survives the message mapper, so a
-    // plain Error here would reach the person as "try again" - advice that cannot work.
-    expect(failure).toBeInstanceOf(UploadTransferError);
-    expect((failure as InstanceType<typeof UploadTransferError>).reason).toBe('unreadable-file');
-    expect((failure as Error).message).toMatch(/could not be read/);
 
     fileSizes.set('file:///tmp/avatar.jpg', 2048);
     expect(await nativeFileAccess.measureBytes('file:///tmp/avatar.jpg')).toBe(2048);

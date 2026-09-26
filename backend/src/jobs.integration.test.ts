@@ -2,6 +2,7 @@ import { afterAll, beforeEach, describe, expect, spyOn, test } from 'bun:test'
 
 import { createPrisma } from './db'
 import { loadEnv } from './env'
+import { PushDeliveryStatus, PushNotificationOutboxStatus } from './generated/prisma/enums'
 import { runBackgroundJob } from './jobs'
 import type { BackendRuntime } from './runtime'
 
@@ -160,5 +161,51 @@ describe('cleanup jobs against a real database', () => {
     expect(sessions.map(({ refreshTokenHash }) => refreshTokenHash)).toEqual(['live', 'recently-expired'])
     const tokens = await prisma.passwordResetToken.findMany({ select: { tokenHash: true } })
     expect(tokens.map(({ tokenHash }) => tokenHash)).toEqual(['live'])
+  })
+
+  test('maintenance:process runs the auth cleanup and redacts finished push notifications', async () => {
+    // The schedule runs these steps only through this job. Each step has its own tests; this one
+    // proves the job still calls both.
+    const now = new Date()
+    const day = (offset: number) => new Date(now.getTime() + offset * 24 * 60 * 60 * 1000)
+    const user = await prisma.user.create({ data: { email: 'maintenance@example.com' } })
+    await prisma.authSession.createMany({
+      data: [
+        { createdAt: day(-1), expiresAt: day(20), refreshTokenHash: 'live', userId: user.id },
+        { expiresAt: day(-8), refreshTokenHash: 'expired', userId: user.id },
+      ],
+    })
+    const sent = await prisma.pushNotificationOutbox.create({
+      data: {
+        body: 'Sensitive body',
+        data: { href: '/details/maintenance' },
+        dedupeKey: 'maintenance-sent',
+        processedAt: day(-1),
+        status: PushNotificationOutboxStatus.sent,
+        title: 'Sensitive title',
+        userId: user.id,
+        deliveries: {
+          create: {
+            expoPushToken: 'ExponentPushToken[maintenance]',
+            status: PushDeliveryStatus.delivered,
+            userId: user.id,
+          },
+        },
+      },
+    })
+    const log = spyOn(console, 'log').mockImplementation(() => {})
+
+    try {
+      await runBackgroundJob('maintenance:process', { env, prisma } as BackendRuntime, now)
+    } finally {
+      log.mockRestore()
+    }
+
+    const sessions = await prisma.authSession.findMany({ select: { refreshTokenHash: true } })
+    expect(sessions.map(({ refreshTokenHash }) => refreshTokenHash)).toEqual(['live'])
+    expect(await prisma.pushNotificationOutbox.findUniqueOrThrow({ where: { id: sent.id } }))
+      .toMatchObject({ body: '', data: null, title: '' })
+    expect(await prisma.pushDelivery.findFirstOrThrow({ where: { outboxId: sent.id } }))
+      .toMatchObject({ expoPushToken: null })
   })
 })

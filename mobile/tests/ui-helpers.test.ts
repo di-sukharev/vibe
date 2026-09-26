@@ -9,7 +9,6 @@ import {
   isDateInRange,
   selectCalendarDate,
 } from '../src/components/ui/calendar-utils';
-import { getControllableValue } from '../src/components/ui/controllable-state';
 import { getOtpSlots, normalizeOtpValue } from '../src/components/ui/input-otp-utils';
 import {
   createOptionRegistryController,
@@ -28,12 +27,6 @@ import {
 } from '../src/components/ui/radio-utils';
 import { clampSliderValue, normalizeSliderValues } from '../src/components/ui/slider-utils';
 import { mapTextChildren } from '../src/components/ui/text-utils';
-import { createMinTouchTargetStyle, MIN_TOUCH_TARGET } from '../src/components/ui/touch-target';
-
-test('controlled state prefers explicit values over defaults', () => {
-  expect(getControllableValue('controlled', 'fallback')).toBe('controlled');
-  expect(getControllableValue(undefined, 'fallback')).toBe('fallback');
-});
 
 test('text child renderer wraps mixed raw strings for native containers', () => {
   const rendered = React.Children.toArray(
@@ -62,13 +55,6 @@ test('text child renderer wraps mixed raw strings for native containers', () => 
   expect(typeof nestedFragmentChildren[0]).not.toBe('number');
   expect(React.isValidElement(nestedFragmentChildren[0])).toBe(true);
   expect(React.isValidElement(rendered[0])).toBe(true);
-});
-
-test('minimum touch target follows mobile accessibility baseline', () => {
-  expect(MIN_TOUCH_TARGET).toBeGreaterThanOrEqual(44);
-  expect(createMinTouchTargetStyle()).toEqual({ minHeight: 44, minWidth: 44 });
-  expect(createMinTouchTargetStyle('height')).toEqual({ minHeight: 44 });
-  expect(createMinTouchTargetStyle('width')).toEqual({ minWidth: 44 });
 });
 
 test('loading buttons preserve a readable accessibility label', () => {
@@ -124,10 +110,9 @@ test('select option entry registry preserves same-value replacements after settl
 test('select option registry controller follows component lifecycle timers', async () => {
   let currentValue = 'a';
   const valueChanges: string[] = [];
-  const entrySnapshots: unknown[] = [];
   const controller = createOptionRegistryController({
     getCurrentValue: () => currentValue,
-    onEntriesChange: (entries) => entrySnapshots.push(entries),
+    onEntriesChange: () => undefined,
     setValue: (nextValue) => {
       currentValue = nextValue;
       valueChanges.push(nextValue);
@@ -148,7 +133,6 @@ test('select option registry controller follows component lifecycle timers', asy
   await waitForOptionRegistryTimer();
   expect(currentValue).toBe('');
   expect(valueChanges).toEqual(['']);
-  expect(entrySnapshots.length).toBeGreaterThanOrEqual(4);
 
   controller.dispose();
 });

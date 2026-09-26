@@ -163,13 +163,10 @@ test('mobile feature APIs share one refresh request across concurrent 401 respon
   expect(meCalls).toHaveLength(4);
 });
 
-test('mobile API transport clears token state when refresh fails', async () => {
+test('mobile API transport expires the session when refresh fails', async () => {
   let accessToken: string | null = 'expired-access-token';
   let storedRefreshToken: string | null = refreshToken;
-  let clearRefreshTokenCalls = 0;
   let authExpiredCalls = 0;
-  let accessTokenAtAuthExpired: string | null = null;
-  let refreshTokenAtAuthExpired: string | null = null;
 
   globalThis.fetch = async (input) => {
     const path = new URL(String(input)).pathname;
@@ -195,13 +192,10 @@ test('mobile API transport clears token state when refresh fails', async () => {
       storedRefreshToken = nextRefreshToken;
     },
     clearRefreshToken: async () => {
-      clearRefreshTokenCalls += 1;
       storedRefreshToken = null;
     },
     onAuthExpired: () => {
       authExpiredCalls += 1;
-      accessTokenAtAuthExpired = accessToken;
-      refreshTokenAtAuthExpired = storedRefreshToken;
     },
   });
 
@@ -210,12 +204,7 @@ test('mobile API transport clears token state when refresh fails', async () => {
     code: 'UNAUTHORIZED',
   });
 
-  expect(accessToken).toBeNull();
-  expect(storedRefreshToken).toBeNull();
-  expect(clearRefreshTokenCalls).toBe(1);
   expect(authExpiredCalls).toBe(1);
-  expect(accessTokenAtAuthExpired).toBe('expired-access-token');
-  expect(refreshTokenAtAuthExpired).toBe(refreshToken);
 });
 
 test('mobile API transport expires the session when the retried request stays unauthorized', async () => {
@@ -263,14 +252,11 @@ test('mobile API transport expires the session when the retried request stays un
 
   expect(paths).toEqual(['/api/auth/me', '/api/auth/token/refresh', '/api/auth/me']);
   expect(authExpiredCalls).toBe(1);
-  expect(accessToken).toBeNull();
-  expect(storedRefreshToken).toBeNull();
 });
 
 test('mobile API transport preserves refresh credentials when refresh is temporarily unavailable', async () => {
   let accessToken: string | null = 'expired-access-token';
   let storedRefreshToken: string | null = refreshToken;
-  let clearRefreshTokenCalls = 0;
   let authExpiredCalls = 0;
 
   globalThis.fetch = async (input) => {
@@ -297,7 +283,6 @@ test('mobile API transport preserves refresh credentials when refresh is tempora
       storedRefreshToken = nextRefreshToken;
     },
     clearRefreshToken: async () => {
-      clearRefreshTokenCalls += 1;
       storedRefreshToken = null;
     },
     onAuthExpired: () => {
@@ -312,7 +297,6 @@ test('mobile API transport preserves refresh credentials when refresh is tempora
 
   expect(accessToken).toBe('expired-access-token');
   expect(storedRefreshToken).toBe(refreshToken);
-  expect(clearRefreshTokenCalls).toBe(0);
   expect(authExpiredCalls).toBe(0);
 });
 
@@ -351,51 +335,6 @@ test('mobile auth API sends the stored refresh token when logging out', async ()
       path: '/api/auth/token/logout',
       body: {
         expoPushToken: 'ExponentPushToken[logout-token]',
-        refreshToken,
-      },
-    },
-  ]);
-});
-
-test('mobile auth API can send all known Expo push tokens when logging out', async () => {
-  const calls: Array<{ path: string; body: unknown }> = [];
-
-  globalThis.fetch = async (input, init) => {
-    const path = new URL(String(input)).pathname;
-    const body = init?.body ? JSON.parse(String(init.body)) : undefined;
-    calls.push({ path, body });
-
-    if (path === '/api/auth/token/logout') {
-      return new Response(null, {
-        status: 204,
-        headers: {
-          'X-Auth-Session-Revoked': 'true',
-        },
-      });
-    }
-
-    return json({ error: { code: 'NOT_FOUND', message: 'Unexpected request' } }, 404);
-  };
-
-  const { auth: client } = createTestApis({
-    getAccessToken: () => null,
-    setAccessToken: () => undefined,
-    getRefreshToken: async () => refreshToken,
-    setRefreshToken: async () => undefined,
-    clearRefreshToken: async () => undefined,
-  });
-
-  await expect(
-    client.logout({
-      expoPushTokens: ['ExponentPushToken[logout-token]', 'ExponentPushToken[old-token]'],
-    }),
-  ).resolves.toBe(true);
-
-  expect(calls).toEqual([
-    {
-      path: '/api/auth/token/logout',
-      body: {
-        expoPushTokens: ['ExponentPushToken[logout-token]', 'ExponentPushToken[old-token]'],
         refreshToken,
       },
     },

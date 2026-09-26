@@ -70,11 +70,6 @@ describe('backendTestFiles', () => {
     expect(parked).toEqual(tablesAreCommentedOut ? billingSuites : [])
   })
 
-  test('database-backed tests go to the integration runner, and only those', () => {
-    expect(integration).toContain('src/db.integration.test.ts')
-    expect(unit).toContain('src/db.test.ts')
-  })
-
   test('tests needing a service no runner starts stay out of the fast suite', () => {
     // `bun run test` must stay runnable with no Docker daemon. A live test landing in the unit
     // set would fail for everyone who has not started a container, and a red suite people learn

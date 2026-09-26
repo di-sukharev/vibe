@@ -14,7 +14,7 @@ import { SignJWT } from 'jose'
 import { expect, mock, test } from 'bun:test'
 
 import type { BillingDbClient } from './infrastructure/prisma-billing-types'
-import { loadEnv, type AppEnv } from '../../env'
+import { loadEnv } from '../../env'
 import { SubscriptionState } from './infrastructure/prisma-billing-types'
 import { handleError } from '../../http/errors'
 import { BillingService } from './application/billing-service'
@@ -91,86 +91,14 @@ test('offer-code redemption route rejects expired redemption tokens before entit
   expect(entitlementUpsert).not.toHaveBeenCalled()
 })
 
-test('Google Play transaction route verifies purchases through the Google verifier', async () => {
-  const acknowledgeSubscription = mock(async () => undefined)
-  const entitlementUpsert = mock(async () => ({
-    platform: 'android',
-    state: SubscriptionState.active,
-    productId: 'premium',
-    originalTransactionId: null,
-    transactionId: 'GPA.1234-5678-9012-34567',
-    expiresAt: new Date('2099-07-01T00:00:00.000Z'),
-    willAutoRenew: true,
-    updatedAt: new Date('2026-06-01T00:00:00.000Z'),
-  }))
-  const googleUpsert = mock(async () => ({ id: 'google-row-1' }))
-  const app = createTestIapApp(
-    createFakeGoogleDb({ entitlementUpsert, googleUpsert }),
-    {
-      env: {
-        ...env,
-        GOOGLE_PLAY_PRODUCT_IDS: ['premium'],
-        GOOGLE_PLAY_BASE_PLAN_IDS: ['monthly'],
-      },
-      googleVerifier: {
-        acknowledgeSubscription,
-        async getSubscriptionPurchase() {
-          return {
-            acknowledgementState: 'ACKNOWLEDGEMENT_STATE_PENDING',
-            externalAccountIdentifiers: {
-              obfuscatedExternalAccountId: userId,
-            },
-            latestOrderId: 'GPA.1234-5678-9012-34567',
-            lineItems: [
-              {
-                autoRenewingPlan: { autoRenewEnabled: true },
-                expiryTime: '2099-07-01T00:00:00.000Z',
-                offerDetails: { basePlanId: 'monthly' },
-                productId: 'premium',
-              },
-            ],
-            subscriptionState: 'SUBSCRIPTION_STATE_ACTIVE',
-          }
-        },
-      },
-    },
-  )
-
-  const response = await postJson(app, '/api/iap/google-play/transactions', userId, {
-    basePlanId: 'monthly',
-    productId: 'premium',
-    purchaseToken: 'purchase-token',
-  })
-  const body = await response.json()
-
-  expect(response.status).toBe(200)
-  expect(body.subscription).toMatchObject({
-    isActive: true,
-    platform: 'android',
-    transactionId: 'GPA.1234-5678-9012-34567',
-  })
-  expect(acknowledgeSubscription).toHaveBeenCalledWith({
-    productId: 'premium',
-    purchaseToken: 'purchase-token',
-  })
-  expect(googleUpsert).toHaveBeenCalled()
-  expect(entitlementUpsert).toHaveBeenCalled()
-})
-
-function createTestIapApp(
-  db: BillingDbClient,
-  options: {
-    env?: AppEnv
-    googleVerifier?: GooglePlaySubscriptionVerifier
-  } = {},
-) {
+function createTestIapApp(db: BillingDbClient) {
   const app = new OpenAPIHono()
   const service = new BillingService(
     createBillingDependencies({
       appStoreVerifier: fakeOfferCodeVerifier(),
       db,
-      env: options.env ?? env,
-      googlePlayVerifier: options.googleVerifier ?? fakeGooglePlayVerifier(),
+      env,
+      googlePlayVerifier: fakeGooglePlayVerifier(),
     }),
   )
   app.route(
@@ -182,29 +110,6 @@ function createTestIapApp(
   )
   app.onError(handleError)
   return app
-}
-
-function createFakeGoogleDb({
-  entitlementUpsert,
-  googleUpsert,
-}: {
-  entitlementUpsert: ReturnType<typeof mock>
-  googleUpsert: ReturnType<typeof mock>
-}) {
-  const db = {
-    googlePlaySubscriptionPurchase: {
-      findFirst: mock(async () => null),
-      findMany: mock(async () => []),
-      upsert: googleUpsert,
-    },
-    subscriptionEntitlement: {
-      findUnique: mock(async () => null),
-      upsert: entitlementUpsert,
-    },
-    $executeRaw: mock(async () => 1),
-    $transaction: async (callback: (tx: unknown) => unknown) => callback(db),
-  }
-  return db as unknown as BillingDbClient
 }
 
 function createFakeDb({

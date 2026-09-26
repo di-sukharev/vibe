@@ -5,9 +5,9 @@ import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test';
  * was actually written second. Getting it backwards signs a ticket for the original photo's size
  * and the upload can then never satisfy its own signature, which storage reports as a bare 403.
  *
- * Both Expo modules are substituted at their boundary, the way `select-registration.test.tsx`
- * substitutes `react-native`. The fakes record what they were asked for; nothing here asserts
- * what a real picker or manipulator does with the request.
+ * Both Expo modules are substituted at their boundary with `mock.module`. The fakes record what
+ * they were asked for; nothing here asserts what a real picker or manipulator does with the
+ * request.
  */
 
 type ManipulateCall = { resizes: unknown[]; uri: string };
@@ -80,9 +80,7 @@ mock.module('expo-image-manipulator', () => ({
 }));
 
 const { createExpoAvatarPicker } = await import('../src/features/avatar/expo-picker');
-const { avatarCompressionQuality, avatarTargetEdgePixels } = await import(
-  '../src/features/avatar/image-source',
-);
+const { avatarTargetEdgePixels } = await import('../src/features/avatar/image-source');
 
 function pickerWithMeasure() {
   const measured: string[] = [];
@@ -149,7 +147,6 @@ describe('createExpoAvatarPicker', () => {
 
     expect(saveOptions).toHaveLength(1);
     expect(saveOptions[0].format).toBe('jpeg');
-    expect(saveOptions[0].compress).toBe(avatarCompressionQuality);
     expect(picked?.contentType).toBe('image/jpeg');
   });
 

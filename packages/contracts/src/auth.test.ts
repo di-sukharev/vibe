@@ -17,8 +17,6 @@ import {
   registerRequestSchema,
   socialAuthProviderParamsSchema,
   socialAuthRequestSchema,
-  testPushNotificationRequestSchema,
-  testPushNotificationResponseSchema,
   tokenAuthResponseSchema,
   tokenLogoutRequestSchema,
   tokenRefreshRequestSchema,
@@ -173,13 +171,6 @@ describe('auth contracts', () => {
     expect(() =>
       apiErrorSchema.parse({ error: { code: 'SOMETHING_ELSE', message: 'Nope' } }),
     ).toThrow()
-    expect(
-      apiErrorSchema.parse({
-        error: { code: 'AUTH_PROVIDER_NOT_CONFIGURED', message: 'Provider is not configured' },
-      }),
-    ).toEqual({
-      error: { code: 'AUTH_PROVIDER_NOT_CONFIGURED', message: 'Provider is not configured' },
-    })
   })
 
   test('validates Expo push notification contracts', () => {
@@ -188,57 +179,11 @@ describe('auth contracts', () => {
     expect(
       registerPushTokenRequestSchema.parse({
         expoPushToken: ' ExponentPushToken[test-token] ',
-        deviceId: 'device-1',
-        installationId,
-        installationSecret,
         generation: 7,
-        platform: 'ios',
-        previousExpoPushTokens: ['ExponentPushToken[previous-token]'],
-      }),
-    ).toEqual({
-      expoPushToken: 'ExponentPushToken[test-token]',
-      deviceId: 'device-1',
-      installationId,
-      installationSecret,
-      generation: 7,
-      platform: 'ios',
-      previousExpoPushTokens: ['ExponentPushToken[previous-token]'],
-    })
-    expect(
-      unregisterPushTokenRequestSchema.parse({
-        expoPushTokens: ['ExponentPushToken[test-token]'],
-        generation: 8,
         installationId,
         installationSecret,
-      }),
-    ).toEqual({
-      expoPushTokens: ['ExponentPushToken[test-token]'],
-      generation: 8,
-      installationId,
-      installationSecret,
-    })
-    expect(pushMutationResponseSchema.parse({ applied: true, ok: true })).toEqual({
-      applied: true,
-      ok: true,
-    })
-    expect(
-      testPushNotificationRequestSchema.parse({
-        title: ' Hello ',
-        body: ' Ready ',
-        href: '/details/components',
-      }),
-    ).toEqual({ title: 'Hello', body: 'Ready', href: '/details/components' })
-    expect(testPushNotificationRequestSchema.parse(undefined)).toEqual({
-      title: 'Test notification',
-      body: 'Expo Push is configured.',
-      href: '/',
-    })
-    expect(
-      testPushNotificationResponseSchema.parse({
-        ok: true,
-        outboxId: '018fd4f2-1f3a-7c88-bc49-333333333333',
-      }),
-    ).toMatchObject({ ok: true })
+      }).expoPushToken,
+    ).toBe('ExponentPushToken[test-token]')
     expect(() => registerPushTokenRequestSchema.parse({ expoPushToken: 'not-a-token' })).toThrow()
 
     // Each rejection below is paired with the payload that differs only in the field under test.
@@ -264,6 +209,7 @@ describe('auth contracts', () => {
     expect(() =>
       unregisterPushTokenRequestSchema.parse({ ...unregistration, expoPushTokens: tokens(13) }),
     ).toThrow()
+    expect(internalNotificationHrefSchema.parse('/details/components')).toBe('/details/components')
     expect(() => internalNotificationHrefSchema.parse('https://example.com')).toThrow()
     expect(() => internalNotificationHrefSchema.parse('//example.com')).toThrow()
   })

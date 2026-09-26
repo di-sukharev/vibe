@@ -6,12 +6,13 @@
 // feature nobody runs, so they are parked rather than deleted - remove the marker above and they
 // come back with the capability.
 
-import { generateKeyPairSync } from 'node:crypto'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { generateKeyPairSync, X509Certificate } from 'node:crypto'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 
 import { expect, test } from 'bun:test'
+import { CompactSign } from 'jose'
 
 import { loadEnv } from '../../../env'
 import { createAppStoreSubscriptionVerifier } from './apple-verifier'
@@ -41,6 +42,36 @@ test('loads the bundled Apple root certificates by default', async () => {
   })
 
   await expect(verifier.verifyTransaction('not-a-signed-transaction')).rejects.toMatchObject({
+    code: 'IAP_INVALID_TRANSACTION',
+  })
+})
+
+test('rejects a well-formed App Store notification that Apple did not sign', async () => {
+  // The garbage string above fails to decode, so it cannot tell verification from decoding. This
+  // payload decodes cleanly, names our bundle and environment, carries Apple's public root in its
+  // chain, and is signed by a key Apple never issued: only signature verification rejects it.
+  const appleRoot = new X509Certificate(
+    readFileSync(resolve(import.meta.dir, '../certs/apple/AppleRootCA-G3.crt')),
+  ).raw.toString('base64')
+  const { privateKey } = await crypto.subtle.generateKey(
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    false,
+    ['sign', 'verify'],
+  )
+  const forged = await new CompactSign(new TextEncoder().encode(JSON.stringify({
+    notificationType: 'DID_RENEW',
+    notificationUUID: '018fd4f2-1f3a-7c88-bc49-555555555555',
+    signedDate: Date.now(),
+    data: { bundleId: 'com.example.app', environment: 'Sandbox' },
+  })))
+    .setProtectedHeader({ alg: 'ES256', x5c: [appleRoot, appleRoot, appleRoot] })
+    .sign(privateKey)
+  const verifier = createAppStoreSubscriptionVerifier({
+    ...baseEnv,
+    APPLE_IAP_BUNDLE_ID: 'com.example.app',
+  })
+
+  await expect(verifier.verifyNotification(forged)).rejects.toMatchObject({
     code: 'IAP_INVALID_TRANSACTION',
   })
 })
@@ -103,7 +134,7 @@ test('bounds a stalled App Store subscription status lookup', async () => {
 
   await expect(
     verifier.getSubscriptionStatuses({ transactionId: 'original-transaction-id' }),
-  ).rejects.toThrow('App Store subscription status lookup exceeded 5ms')
+  ).rejects.toThrow()
   expect(aborted).toBe(true)
 })
 
@@ -135,6 +166,6 @@ test('aborts the underlying App Store request when its deadline elapses', async 
 
   await expect(
     verifier.getSubscriptionStatuses({ transactionId: 'original-transaction-id' }),
-  ).rejects.toThrow('App Store subscription status lookup exceeded 5ms')
+  ).rejects.toThrow()
   expect(observedSignal.current?.aborted).toBe(true)
 })

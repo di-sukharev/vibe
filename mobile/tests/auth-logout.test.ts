@@ -148,6 +148,8 @@ test('logoutWithPushCleanup includes a registration still in flight after the bo
 });
 
 test('logoutWithPushCleanup preserves push cleanup evidence when refresh logout lacks authority', async () => {
+  // Two known tokens, only one of them stored: every token the server may still hold has to
+  // stay queued for cleanup, not just the one this device last saved.
   const calls: unknown[] = [];
   let storedCleared = false;
   let pendingCleared = false;
@@ -168,46 +170,6 @@ test('logoutWithPushCleanup preserves push cleanup evidence when refresh logout 
       storedCleared = true;
     },
     drainPushRegistrations: async () => undefined,
-    getKnownExpoPushTokens: async () => ['ExponentPushToken[current-token]'],
-    getStoredExpoPushToken: async () => 'ExponentPushToken[current-token]',
-    getStoredRefreshToken: async () => 'r'.repeat(32),
-    sessionGeneration: 0,
-    setPendingExpoPushTokenCleanup: async () => {
-      calls.push(['set-pending']);
-    },
-  });
-
-  expect(calls).toEqual([
-    [
-      'logout',
-      {
-        expoPushToken: 'ExponentPushToken[current-token]',
-        expoPushTokens: ['ExponentPushToken[current-token]'],
-        refreshToken: 'r'.repeat(32),
-      },
-    ],
-    ['set-pending'],
-  ]);
-  expect(storedCleared).toBe(true);
-  expect(pendingCleared).toBe(false);
-});
-
-test('logoutWithPushCleanup preserves pending cleanup when access unregister and refresh logout lack authority', async () => {
-  const pendingTokens: string[] = [];
-  let storedCleared = false;
-  let pendingCleared = false;
-
-  await logoutWithPushCleanup({
-    ...durableLogoutIntentNoop,
-    authApi: preparedAuthApi(async () => false),
-    clearLocalSession: async () => undefined,
-    clearPendingExpoPushTokenCleanup: async () => {
-      pendingCleared = true;
-    },
-    clearStoredExpoPushToken: async () => {
-      storedCleared = true;
-    },
-    drainPushRegistrations: async () => undefined,
     getKnownExpoPushTokens: async () => [
       'ExponentPushToken[current-token]',
       'ExponentPushToken[pending-token]',
@@ -216,13 +178,21 @@ test('logoutWithPushCleanup preserves pending cleanup when access unregister and
     getStoredRefreshToken: async () => 'r'.repeat(32),
     sessionGeneration: 0,
     setPendingExpoPushTokenCleanup: async (token) => {
-      pendingTokens.push(token);
+      calls.push(['set-pending', token]);
     },
   });
 
-  expect(pendingTokens).toEqual([
-    'ExponentPushToken[current-token]',
-    'ExponentPushToken[pending-token]',
+  expect(calls).toEqual([
+    [
+      'logout',
+      {
+        expoPushToken: 'ExponentPushToken[current-token]',
+        expoPushTokens: ['ExponentPushToken[current-token]', 'ExponentPushToken[pending-token]'],
+        refreshToken: 'r'.repeat(32),
+      },
+    ],
+    ['set-pending', 'ExponentPushToken[current-token]'],
+    ['set-pending', 'ExponentPushToken[pending-token]'],
   ]);
   expect(storedCleared).toBe(true);
   expect(pendingCleared).toBe(false);
@@ -291,45 +261,6 @@ test('logoutWithPushCleanup clears local push state and preserves cleanup eviden
     },
   })).resolves.toEqual({ sessionRevoked: false, status: 'retryable' });
 
-  expect(storedCleared).toBe(true);
-  expect(pendingTokens).toEqual(['ExponentPushToken[current-token]']);
-});
-
-test('logoutWithPushCleanup stops waiting when server logout never settles', async () => {
-  let localCleared = false;
-  let storedCleared = false;
-  const pendingTokens: string[] = [];
-
-  const result = await Promise.race([
-    logoutWithPushCleanup({
-      ...durableLogoutIntentNoop,
-      authApi: preparedAuthApi(
-        async () => new Promise<boolean>(() => undefined),
-      ),
-      clearLocalSession: async () => {
-        localCleared = true;
-      },
-      clearPendingExpoPushTokenCleanup: async () => undefined,
-      clearStoredExpoPushToken: async () => {
-        storedCleared = true;
-      },
-      drainPushRegistrations: async () => undefined,
-      getKnownExpoPushTokens: async () => ['ExponentPushToken[current-token]'],
-      getStoredExpoPushToken: async () => 'ExponentPushToken[current-token]',
-      getStoredRefreshToken: async () => 'r'.repeat(32),
-      sessionGeneration: 0,
-      serverLogoutTimeoutMs: 5,
-      setPendingExpoPushTokenCleanup: async (token) => {
-        pendingTokens.push(token);
-      },
-    }),
-    new Promise<'still-waiting'>((resolve) => {
-      setTimeout(() => resolve('still-waiting'), 50);
-    }),
-  ]);
-
-  expect(result).toEqual({ sessionRevoked: false, status: 'retryable' });
-  expect(localCleared).toBe(true);
   expect(storedCleared).toBe(true);
   expect(pendingTokens).toEqual(['ExponentPushToken[current-token]']);
 });

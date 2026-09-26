@@ -6,9 +6,8 @@
 // feature nobody runs, so they are parked rather than deleted - remove the marker above and they
 // come back with the capability.
 
-import { expect, mock, test } from 'bun:test'
+import { expect, test } from 'bun:test'
 
-import { BillingFailure } from '../domain/errors'
 import { BillingService } from './billing-service'
 import type { BillingServiceDependencies } from './ports'
 
@@ -150,97 +149,6 @@ test('skips a Google Play purchase already claimed by another reconciler', async
   })
   expect(verifiedTokens).toEqual(['active-token', 'grace-token'])
 })
-
-test('returns duplicate only for an already processed App Store webhook', async () => {
-  const verifyNotification = mock(async () => {
-    throw new Error('unexpected notification verification')
-  })
-  const service = new BillingService(
-    dependencies({
-      claimAppStoreWebhook: mock(async () => ({ status: 'processed' })),
-      verifyNotification,
-    }),
-  )
-
-  await expect(service.processAppStoreWebhook('signed-webhook')).resolves.toEqual({
-    duplicate: true,
-    subscription: null,
-  })
-  expect(verifyNotification).not.toHaveBeenCalled()
-})
-
-test('rejects a concurrently processed App Store webhook so Apple retries it', async () => {
-  const verifyNotification = mock(async () => {
-    throw new Error('unexpected notification verification')
-  })
-  const service = new BillingService(
-    dependencies({
-      claimAppStoreWebhook: mock(async () => ({ status: 'in_progress' })),
-      verifyNotification,
-    }),
-  )
-
-  await expect(service.processAppStoreWebhook('signed-webhook')).rejects.toMatchObject({
-    code: 'IAP_WEBHOOK_IN_PROGRESS',
-  })
-  expect(verifyNotification).not.toHaveBeenCalled()
-})
-
-function dependencies(input: {
-  claimAppStoreWebhook: ReturnType<typeof mock>
-  verifyNotification: ReturnType<typeof mock>
-}) {
-  return {
-    appStore: {
-      describeNotification: () => {
-        throw new Error('unexpected notification description')
-      },
-      getSubscriptionStatuses: async () => [],
-      verifyNotification: input.verifyNotification,
-      verifyRenewalInfo: async () => {
-        throw new Error('unexpected renewal verification')
-      },
-      verifyTransaction: async () => {
-        throw new Error('unexpected transaction verification')
-      },
-    },
-    googlePlay: {
-      verifyPurchase: async () => {
-        throw new Error('unexpected Google Play verification')
-      },
-    },
-    offerCodeTokens: {
-      create: async () => '',
-      verify: async () => {
-        throw new BillingFailure('IAP_INVALID_TRANSACTION', 'unexpected offer token')
-      },
-    },
-    repository: {
-      applyAppStoreTransaction: async () => {
-        throw new Error('unexpected transaction apply')
-      },
-      applyGooglePlayPurchase: async () => {
-        throw new Error('unexpected Google Play apply')
-      },
-      claimAppStoreWebhook: input.claimAppStoreWebhook,
-      claimVerifiedAppStoreWebhook: async () => {
-        throw new Error('unexpected verified webhook claim')
-      },
-      findGooglePlayPurchases: async () => [],
-      getAppStoreEnvironment: async () => 'Sandbox',
-      getSubscription: async () => {
-        throw new Error('unexpected subscription read')
-      },
-      markAppStoreWebhookProcessed: async () => {
-        throw new Error('unexpected processed marker')
-      },
-      releaseAppStoreWebhookClaim: async () => {
-        throw new Error('unexpected webhook release')
-      },
-      resolveAppStoreWebhookUserId: async () => null,
-    },
-  } as unknown as BillingServiceDependencies
-}
 
 function googleBatchDependencies(input: {
   applyGooglePlayPurchase: BillingServiceDependencies['repository']['applyGooglePlayPurchase']

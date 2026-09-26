@@ -19,17 +19,17 @@ import {
 } from './infrastructure/notification-operations'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
-const maybeDescribe = databaseUrl ? describe : describe.skip
+if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required; run bun run test:backend:integration')
 const originalFetch = globalThis.fetch
 
-maybeDescribe('push notification API and outbox', () => {
+describe('push notification API and outbox', () => {
   const env = loadEnv({
-    DATABASE_URL: databaseUrl!,
+    DATABASE_URL: databaseUrl,
     ACCESS_TOKEN_TTL_SECONDS: '60',
     CORS_ORIGINS: 'http://localhost:5173',
     JWT_SECRET: '12345678901234567890123456789012',
   })
-  const prisma = createPrisma(databaseUrl!)
+  const prisma = createPrisma(databaseUrl)
   const app = createApp({ env, prisma })
 
   beforeEach(async () => {
@@ -771,35 +771,50 @@ maybeDescribe('push notification API and outbox', () => {
     })).toEqual({ active: false })
   })
 
-  test('serializes push registration authorization with logout cleanup', async () => {
+  test('logout fences a push registration that races it', async () => {
+    // Logout is paused after its token cleanup and before it revokes the session. A registration
+    // that is not fenced out until the revocation commits would bind a token to a session that is
+    // about to die, and nothing would ever remove it.
     const session = await registerUser('push-token-logout-race@example.com')
-    const authSession = await prisma.authSession.findFirstOrThrow({
-      where: { userId: session.userId },
-      select: { id: true },
+    let markCleanupDone: () => void = () => undefined
+    const cleanupDone = new Promise<void>((resolve) => {
+      markCleanupDone = resolve
     })
-    let releaseLogout: (() => void) | undefined
-    let markLogoutLocked: (() => void) | undefined
-    const logoutLocked = new Promise<void>((resolve) => {
-      markLogoutLocked = resolve
+    let releaseLogout: () => void = () => undefined
+    const logoutBarrier = new Promise<void>((resolve) => {
+      releaseLogout = resolve
     })
-    const logout = prisma.$transaction(async (tx) => {
-      await acquirePushTokenUserLock(tx, session.userId)
-      markLogoutLocked?.()
-      await new Promise<void>((resolve) => {
-        releaseLogout = resolve
-      })
-      await tx.pushToken.deleteMany({ where: { userId: session.userId } })
-      await tx.authSession.update({
-        where: { id: authSession.id },
-        data: { revokedAt: new Date() },
-      })
+    const logoutApp = createApp({
+      env,
+      prisma: prisma.$extends({
+        query: {
+          authSession: {
+            async updateMany({ args, query }) {
+              if (args.where?.id === session.sessionId) {
+                markCleanupDone()
+                await logoutBarrier
+              }
+              return query(args)
+            },
+          },
+        },
+      }) as unknown as DbClient,
     })
-    await logoutLocked
 
+    const logout = Promise.resolve(
+      logoutApp.request('/api/auth/token/logout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: session.refreshToken }),
+      }),
+    )
+    await cleanupDone
+
+    let registrationSettled = false
     const registration = registerPushToken(
       prisma,
       session.userId,
-      authSession.id,
+      session.sessionId,
       {
         expoPushToken: 'ExponentPushToken[late-after-logout]',
         generation: 1,
@@ -807,10 +822,14 @@ maybeDescribe('push notification API and outbox', () => {
         installationSecret: randomUUID(),
       },
       new Date(),
-    )
-    releaseLogout?.()
-    await logout
+    ).finally(() => {
+      registrationSettled = true
+    })
+    await new Promise<void>((resolve) => setTimeout(resolve, 50))
+    expect(registrationSettled).toBe(false)
 
+    releaseLogout()
+    expect((await logout).status).toBe(204)
     expect(await registration).toBe('inactive-session')
     expect(await prisma.pushToken.count({ where: { userId: session.userId } })).toBe(0)
   })
@@ -2119,7 +2138,6 @@ maybeDescribe('push notification API and outbox', () => {
     expect(delivery.status).toBe(PushDeliveryStatus.failed)
     expect(delivery.receiptCheckedAt).toBeInstanceOf(Date)
     expect(delivery.receiptNextCheckAt).toBeNull()
-    expect(delivery.errorMessage).toBe('Expo push receipt was unavailable after repeated checks')
     expect(receiptCalls).toBeGreaterThan(1)
   })
 

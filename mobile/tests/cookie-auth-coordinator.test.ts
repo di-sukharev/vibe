@@ -308,11 +308,13 @@ test('authenticated cookie requests can enter the coordinator only for their nes
   expect(calls).toEqual(['/api/auth/me', '/api/auth/refresh', '/api/auth/me']);
 });
 
-test('browser auth coordinator uses one named exclusive Web Lock when available', async () => {
+test('browser auth coordinator runs every mutation inside one exclusive Web Lock', async () => {
   const events: string[] = [];
+  const lockNames: string[] = [];
   const coordinator = createBrowserAuthCoordinator(() => ({
     request: async (name, options, mutation) => {
-      events.push(`lock:${name}:${options.mode}`);
+      lockNames.push(name);
+      events.push(`lock:${options.mode}`);
       const result = await mutation();
       events.push('lock:released');
       return result;
@@ -323,12 +325,12 @@ test('browser auth coordinator uses one named exclusive Web Lock when available'
     events.push('mutation');
     return 'done';
   })).resolves.toBe('done');
+  await coordinator(async () => undefined);
 
-  expect(events).toEqual([
-    'lock:web_app_demo:auth-cookie-mutation:exclusive',
-    'mutation',
-    'lock:released',
-  ]);
+  expect(events.slice(0, 3)).toEqual(['lock:exclusive', 'mutation', 'lock:released']);
+  // Tabs only exclude each other if every mutation asks for the same lock.
+  expect(lockNames).toHaveLength(2);
+  expect(new Set(lockNames).size).toBe(1);
 });
 
 test('browser auth coordinator fails closed in a browser without Web Locks', async () => {

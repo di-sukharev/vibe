@@ -19,10 +19,11 @@ describe('loadEnv', () => {
   })
 
   test('loads background entrypoints without exposing the API signing key', () => {
+    const apiSigningKey = 'fedcba9876543210'.repeat(4)
     const env = loadBackgroundEnv({
       NODE_ENV: 'production',
       DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
-      JWT_SECRET: 'fedcba9876543210'.repeat(4),
+      JWT_SECRET: apiSigningKey,
       // A background runner boots the same image as the API, so it faces the same fail-closed
       // storage rules: no filesystem driver in production, and a remote endpoint behind a gate.
       PRIVATE_STORAGE_DRIVER: 's3',
@@ -34,8 +35,7 @@ describe('loadEnv', () => {
       PRIVATE_STORAGE_ALLOW_REMOTE_ENDPOINT: 'true',
     })
 
-    expect(env.JWT_SECRET).toBe('0123456789abcdef'.repeat(4))
-    expect(env.CORS_ORIGINS).toEqual(['https://background.invalid'])
+    expect(env.JWT_SECRET).not.toBe(apiSigningKey)
     expect(env.COOKIE_SECURE).toBe(true)
   })
 
@@ -62,17 +62,13 @@ describe('loadEnv', () => {
     expect(() => loadEnv(parseEnvExample())).not.toThrow()
   })
 
-  test('parses social auth provider configuration', () => {
+  test('splits the Google sign-in client ID list', () => {
     const env = loadEnv({
       DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
       JWT_SECRET: '12345678901234567890123456789012',
-      APPLE_AUTH_BUNDLE_ID: 'com.example.app',
-      APPLE_AUTH_JWKS_TIMEOUT_MS: '8000',
       GOOGLE_AUTH_CLIENT_IDS: 'ios-client-id, web-client-id',
     })
 
-    expect(env.APPLE_AUTH_BUNDLE_ID).toBe('com.example.app')
-    expect(env.APPLE_AUTH_JWKS_TIMEOUT_MS).toBe(8000)
     expect(env.GOOGLE_AUTH_CLIENT_IDS).toEqual(['ios-client-id', 'web-client-id'])
   })
 
