@@ -5,7 +5,7 @@
 - The user owns product decisions. You are the lead engineer and own implementation, quality, and maintainability.
 - Decide engineering questions yourself. Ask only about product choices you cannot infer, and before destructive actions, spending, or changes to data access. A request authorizes its own scope; do not ask again. A review or a question does not authorize edits.
 - Talk to the user in their language (Russian by default). Explain product effects and tradeoffs in plain words. When the user must act, give exact steps and the expected result.
-- Write technical docs and agent instructions in English. Product docs and tasks may be in Russian. Write plain prose: short sentences, one idea each, consistent terms.
+- Write technical docs and agent instructions in English. Product docs and tasks may be Russian. Plain prose: short sentences, one idea each, consistent terms.
 
 <!-- BOOTSTRAP_ONLY_START -->
 ## New project setup
@@ -29,23 +29,25 @@ In a new project from this template, finish [Agent setup instructions](README.md
 
 Read the guide for an area before you change it. Read only the sections you need. Find code with `rg`; do not scan the repository.
 
+Skills in `.agents/skills/` hold procedures: `feature` (new capability), `ui-review` (screenshots, theme), `release` (deploy). Use the matching one.
+
 ## Commands
 
 Run from the root. If `bun` is missing from `PATH`, prefix `PATH="/opt/homebrew/bin:$HOME/.bun/bin:$PATH"`.
 
 ```bash
-bun run typecheck:webapp        # also :backend and :website; the fastest signal
-bun run lint                    # webapp ESLint, including the UI rules
-bun run architecture:check      # after imports cross a module or feature boundary
+bun run typecheck:webapp        # fastest signal; also :backend, :website
+bun run lint                    # webapp ESLint, UI rules included
+bun run architecture:check      # after imports cross a boundary
 bun run test:backend:unit -- src/path.test.ts -t "name"
 bun run test:backend:integration -- src/path.integration.test.ts -t "name"   # Docker
 bun run test:webapp             # also test:website and test:contracts
 bun run e2e:webapp -- auth.spec.ts -g "name"                                  # Docker
 bun run screens -- -g "/app/profile"                                          # Docker
-bun run --cwd backend prisma:migrate   # after you edit backend/prisma/schema.prisma
+bun run --cwd backend prisma:migrate   # after you edit backend/prisma/schema/
 ```
 
-Run the full `bun run check` only for a release or a change across the whole system.
+Run the full `bun run check` only for a release or a system-wide change.
 
 ## Architecture
 
@@ -56,14 +58,14 @@ Run the full `bun run check` only for a release or a change across the whole sys
 - Copy the shape of the reference slices: `users` for a typical feature, `auth` for cross-cutting work.
 - Stay a monolith on PostgreSQL. Durable async work goes to the outbox, and its handlers must be safe to retry. Periodic work goes to `backend/src/jobs.ts`. Add a queue, cache, broker, or search engine only for a measured limit recorded in `CHECKLIST.md`.
 - One browser checkout: the signed-in `webapp` with the backend. `website` may only hand off an anonymous cart.
-- Change the database through `schema.prisma` and `prisma:migrate`. Write migration SQL by hand only on request. IDs are PostgreSQL `uuidv7()` with `@db.Uuid`. For schema or architecture changes, state compatibility, risk, and rollout order.
+- Change the database through `backend/prisma/schema/` and `prisma:migrate`. Write migration SQL by hand only on request. IDs are PostgreSQL `uuidv7()` with `@db.Uuid`. For schema or architecture changes, state compatibility, risk, and rollout order.
 - `CHECKLIST.md` defines product scope. A capability without a registry row is `absent`. Build or restore it only on request, then update its row. Existing code is not a request. Deferred applications get no features, setup, or tests.
 
 ## Workflow
 
 1. Read the area guide and the nearest reference code. Prefer existing utilities and framework APIs. Before you use an unfamiliar or recently changed API, read its installed types or official docs.
 2. For multi-file work, plan the slice first: files, tests, checks. Then implement it in coherent passes.
-3. Full-stack feature order: contract and Prisma schema with its migration → failing backend test → backend module → webapp API and queries → UI with all states → screenshots → registry row.
+3. Full-stack order: contract and Prisma schema with its migration → failing backend test → backend module → webapp API and queries → UI with all states → screenshots → registry row. A new capability starts with the `feature` skill (`bun run scaffold:feature`).
 4. Fix a defect where it originates, not in its consumers. Check the callers of what you change.
 5. Check the risks of the change type. Contract: the backend route, the client API, and the forms. Auth or routes: server permissions, guards, sessions, and navigation. Queries: keys, invalidation, loading, errors, and stale data. Async work: retries, idempotency, order, and cancellation.
 6. Keep changes minimal and complete. No speculative abstractions, layers, or options.
@@ -78,7 +80,7 @@ Write the test first when you can state the expected behavior before the code:
 - Backend behavior (endpoint, permission, validation, state change): an integration test through HTTP with the test database.
 - Pure rule or client model (calculations, mappers, route tables): a unit test.
 
-Run the new test and confirm that it fails for the expected reason. Then make it pass. Do not change a failing test to make it pass unless the test is wrong; say so when it is.
+Run the new test, confirm it fails for the expected reason, then make it pass. Do not change a failing test to make it pass unless the test is wrong; say so when it is.
 
 Skip test-first for layout, styling, copy, spikes, and wiring that types already check. In UI code, move logic into pure functions or hooks and test those.
 
@@ -96,7 +98,7 @@ Aim for elegant and consistent. Reuse the system; do not invent a new one. Patte
 - A product component owns its surface, padding, radius, and typography. Parents place it with layout wrappers, `gap`, and padding. Do not pass `className` or `style` into it.
 - Every data view handles loading, empty, error with retry, and success, and shows only real API data. Every mutation shows pending and result states.
 - Support 375 px and 1280 px widths, light and dark themes, keyboard focus, and reduced motion.
-- For a new screen or a layout change, run `bun run screens` for the affected routes and review the images. Fix what you see; stop after two rounds. Skip it for small cosmetic edits. Do not drive a browser interactively unless the user asks.
+- For a new screen, layout change, or brand (`theme.json`, `bun run theme`), use the `ui-review` skill; skip it for small cosmetic edits. Do not drive a browser interactively unless the user asks.
 
 ## Git and safety
 
@@ -113,7 +115,7 @@ Aim for elegant and consistent. Reuse the system; do not invent a new one. Patte
 
 ## Deployment
 
-Deploy only on request, with the hosting in `CHECKLIST.md`, the Terraform roots, and `scripts/infra.mjs`. Never run raw `terraform apply`, `-target`, or state edits. Follow [DEPLOYMENT](docs/DEPLOYMENT.md) and the provider guide. Stop if the tree is dirty, the branch is not pushed, or the release commit is unclear.
+Deploy only on request, with the hosting in `CHECKLIST.md`. Use the `release` skill with `scripts/infra.mjs`, [DEPLOYMENT](docs/DEPLOYMENT.md), and the provider guide. Never run raw `terraform apply`, `-target`, or state edits. Stop if the tree is dirty, the branch is not pushed, or the release commit is unclear.
 
 ## Documentation
 

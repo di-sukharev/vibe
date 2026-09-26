@@ -1,10 +1,11 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 // Repository drift checks: Markdown links and anchors, the CLAUDE.md import of AGENTS.md,
-// the CHECKLIST.md capability registry, and bootstrap cleanup after a completed install.
+// the CHECKLIST.md capability registry, bootstrap cleanup after a completed install, and the
+// `.agents/skills` / `.claude/skills` Agent Skills.
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const capabilityStates = new Set(['included', 'available', 'absent', 'removed'])
@@ -135,6 +136,161 @@ export function validateMarkdownLinks(files, trackedPaths) {
   return errors
 }
 
+// Agent Skills: SKILL.md frontmatter (Codex's canonical `.agents/skills`, symlinked from
+// `.claude/skills` for Claude Code). Keep the checks small; this repo hand-parses only the two
+// spec keys it uses, `name` and `description`, as flat single-line `key: value` frontmatter.
+const skillNamePattern = /^[a-z0-9]+(-[a-z0-9]+)*$/
+const skillNameLimit = 64
+const skillDescriptionLimit = 1024 // The Agent Skills spec limit.
+const skillLineLimit = 500
+// A folded (`>`) or literal (`|`) block-scalar header, with optional chomping and indentation
+// indicators in either order. The flat parser below would read only this header as the value.
+const yamlBlockScalarPattern = /^[>|](?:[+-]?\d?|\d[+-]?)$/
+
+export function validateSkill(dirName, source) {
+  const errors = []
+  const label = `.agents/skills/${dirName}/SKILL.md`
+  const frontmatter = skillFrontmatter(source)
+  if (!frontmatter) {
+    errors.push(`${label} must start with YAML frontmatter ("---" ... "---").`)
+    return errors
+  }
+
+  const { fields, invalidLines, yaml } = frontmatter
+  const { name, description } = fields
+  if (name === undefined) {
+    errors.push(`${label} frontmatter must set "name".`)
+  } else {
+    if (name !== dirName) {
+      errors.push(`${label} frontmatter "name" ("${name}") must equal its directory name "${dirName}".`)
+    }
+    if (!skillNamePattern.test(name)) {
+      errors.push(`${label} frontmatter "name" must match ${skillNamePattern.source}; found "${name}".`)
+    }
+    if (name.length > skillNameLimit) {
+      errors.push(`${label} frontmatter "name" has ${name.length} characters; keep it at most ${skillNameLimit}.`)
+    }
+  }
+
+  if (!description) {
+    errors.push(`${label} frontmatter "description" must not be empty.`)
+  } else if (yamlBlockScalarPattern.test(description)) {
+    errors.push(
+      `${label} frontmatter "description" is a YAML block scalar ("${description}"); write it on one line so its length can be checked.`,
+    )
+  } else if (description.length > skillDescriptionLimit) {
+    errors.push(
+      `${label} frontmatter "description" has ${description.length} characters; keep it at most ${skillDescriptionLimit}, the Agent Skills spec limit.`,
+    )
+  }
+  // A block scalar's continuation lines are already reported through the error above.
+  if (invalidLines.length > 0 && !yamlBlockScalarPattern.test(description ?? '')) {
+    const shown = invalidLines[0].length > 60 ? `${invalidLines[0].slice(0, 60)}…` : invalidLines[0]
+    errors.push(
+      `${label} frontmatter line "${shown}" is not a single-line "key: value"; keep every value, the description included, on one line.`,
+    )
+  } else if (invalidLines.length === 0 && !yamlBlockScalarPattern.test(description ?? '')) {
+    // Skill loaders parse YAML: an unquoted ": " breaks the block, and an unquoted " #" cuts the
+    // value short. Either way the loader would not see the value checked above.
+    const changed = ['name', 'description'].filter((key) => fields[key] && yaml.parsed?.[key] !== fields[key])
+    if (yaml.error || changed.length > 0) {
+      errors.push(
+        `${label} frontmatter is not the same YAML: ${yaml.error ?? `"${changed.join('", "')}" parses differently`}. Quote the value, for example description: "Use when: ...".`,
+      )
+    }
+  }
+
+  const lineCount = source.replace(/\r?\n$/, '').split(/\r?\n/).length
+  if (lineCount > skillLineLimit) {
+    errors.push(`${label} has ${lineCount} lines; keep it at most ${skillLineLimit}.`)
+  }
+  return errors
+}
+
+// A flat `key: value` frontmatter block. No folded, block-scalar, or wrapped values: every
+// SKILL.md this repo writes keeps `name` and `description` on one line each. Any other non-blank
+// line (an indented continuation, a bare key) is returned in `invalidLines`, because this parser
+// would otherwise drop it and measure only the first line of a wrapped value.
+const skillFrontmatterLinePattern = /^[A-Za-z0-9_-]+:\s/
+
+function skillFrontmatter(source) {
+  const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/)
+  if (!match) return undefined
+
+  const fields = {}
+  const invalidLines = []
+  for (const line of match[1].split(/\r?\n/)) {
+    if (line.trim() === '') continue
+    if (!skillFrontmatterLinePattern.test(line)) {
+      invalidLines.push(line)
+      continue
+    }
+    const separator = line.indexOf(':')
+    const key = line.slice(0, separator)
+    let value = line.slice(separator + 1).trim()
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1)
+    }
+    fields[key] = value
+  }
+  let yaml
+  try {
+    yaml = { parsed: Bun.YAML.parse(match[1]) }
+  } catch (error) {
+    yaml = { error: error.message }
+  }
+  return { fields, invalidLines, yaml }
+}
+
+// `.claude/skills` must be a symlink to `.agents/skills`, Codex's canonical location, so the two
+// tools read identical files instead of a copy that can drift. The link text itself must be the
+// relative `../.agents/skills`: an absolute target resolves here but breaks in every other clone.
+const skillsSymlinkTarget = '../.agents/skills'
+export function validateSkillsSymlink(root = repositoryRoot) {
+  const linkPath = path.join(root, '.claude', 'skills')
+  let stats
+  try {
+    stats = lstatSync(linkPath)
+  } catch {
+    return ['.claude/skills must exist as a symlink to .agents/skills.']
+  }
+  if (!stats.isSymbolicLink()) {
+    return ['.claude/skills must be a symlink to .agents/skills, not a real file or directory.']
+  }
+
+  const target = readlinkSync(linkPath)
+  if (target !== skillsSymlinkTarget) {
+    return [`.claude/skills must be the relative symlink "${skillsSymlinkTarget}"; it points to "${target}".`]
+  }
+  return []
+}
+
+// Every directory under `.agents/skills` must have a SKILL.md; one that does not is reported
+// directly and left out of the returned files.
+export function readSkillFiles(root = repositoryRoot) {
+  const skillsRoot = path.join(root, '.agents', 'skills')
+  let entries
+  try {
+    entries = readdirSync(skillsRoot, { withFileTypes: true })
+  } catch {
+    return { errors: [], files: [] }
+  }
+
+  const errors = []
+  const files = []
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    const relativePath = path.posix.join('.agents', 'skills', entry.name, 'SKILL.md')
+    const absolutePath = path.join(skillsRoot, entry.name, 'SKILL.md')
+    if (!existsSync(absolutePath)) {
+      errors.push(`.agents/skills/${entry.name} must have a SKILL.md.`)
+      continue
+    }
+    files.push({ dirName: entry.name, path: relativePath, source: readFileSync(absolutePath, 'utf8') })
+  }
+  return { errors, files }
+}
+
 // Tracked and untracked files that exist on disk; ignored and deleted files are excluded.
 export function worktreePaths(root = repositoryRoot) {
   const args = ['ls-files', '--cached', '--others', '--exclude-standard', '-z']
@@ -237,11 +393,15 @@ function validateRepository() {
     .filter((filePath) => filePath.toLowerCase().endsWith('.md'))
     .map((filePath) => ({ path: filePath, source: read(filePath) }))
   const agents = read('AGENTS.md')
+  const { errors: skillErrors, files: skillFiles } = readSkillFiles()
 
   return [
     ...validateChecklist(read('CHECKLIST.md'), agents),
     ...validateAgentInstructions(agents, read('CLAUDE.md')),
     ...validateMarkdownLinks(markdownFiles, paths),
+    ...validateSkillsSymlink(),
+    ...skillErrors,
+    ...skillFiles.flatMap((file) => validateSkill(file.dirName, file.source)),
   ]
 }
 
