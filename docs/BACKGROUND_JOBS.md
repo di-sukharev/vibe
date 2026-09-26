@@ -34,7 +34,7 @@ Each run holds a PostgreSQL advisory lock for its job, so parallel schedulers ar
 
 1. Add an entry to `backgroundJobs`. Keep imports in `jobs.ts` type-only. Use `runtime` or `await import()` in the job body.
 2. Test it like `backend/src/jobs.integration.test.ts`.
-3. To schedule it, add an entry to `job-schedules.json` with a unique `key`, which names the Yandex container and timer. Give `expression` and `yandexExpression` the same UTC schedule, because nothing compares them. `lockTimeoutMs` must exceed `yandexExecutionTimeoutSeconds` × 1000. Update the timer count and timeouts in `infra/yandex/runtime/tests/runtime.tftest.hcl`. The next Yandex `release` adds a container and a timer.
+3. To schedule it, add an entry to `job-schedules.json` with a unique `key`, which names the Yandex container and timer. Give `expression` and `yandexExpression` the same UTC schedule, because nothing compares them. `lockTimeoutMs` must exceed `yandexExecutionTimeoutSeconds` × 1000. Update the timer count and timeouts in `infra/yandex/runtime/tests/runtime.tftest.hcl`. The next Yandex `release` adds a container and a timer. A scoped extra variable reaches that container only when its targets name the key or `jobs` ([DEPLOYMENT](DEPLOYMENT.md#extra-runtime-variables)).
 
 ## Outbox
 

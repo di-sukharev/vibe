@@ -32,8 +32,6 @@ All processes share the Prisma schema, the `backend/Dockerfile` image, and `src/
 
 Cron, the scheduler, and the worker use `createBackgroundRuntime`. It replaces `JWT_SECRET` with a placeholder, so the background runtime never carries the token-signing key.
 
-Cron, the scheduler, and the worker use `createBackgroundRuntime`. It replaces `JWT_SECRET` with a placeholder, so the background runtime never carries the token-signing key.
-
 ## Environment
 
 `backend/.env.example` documents each variable. `src/env.ts` rejects invalid combinations at startup. Non-obvious choices:

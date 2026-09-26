@@ -23,7 +23,7 @@ Code comments that mention `docs/IAP.md` mark each spot: `rg -n 'docs/IAP.md'`.
 8. Decide what premium unlocks. The template gates nothing. In the app, `useSubscriptionIap()?.subscription?.isActive` is a UX check only. An API that serves premium data must check the entitlement on the server, and the billing module exports no entitlement reader yet.
 9. Run `bun run typecheck`, `bun run test`, and `bun run architecture:check`. Set the `Payments / subscriptions` row in [CHECKLIST](../CHECKLIST.md) to `included`.
 
-`maintenance:process` already runs every 15 minutes from `backend/src/job-schedules.json`. After step 4 it also reconciles Google Play when `GOOGLE_PLAY_PACKAGE_NAME` is set. To run `billing:google-play:reconcile` on its own schedule, see [BACKGROUND_JOBS](BACKGROUND_JOBS.md).
+`maintenance:process` already runs every 15 minutes from `backend/src/job-schedules.json`. After step 4 it also reconciles Google Play when `GOOGLE_PLAY_PACKAGE_NAME` is set. To run `billing:google-play:reconcile` on its own schedule, see [BACKGROUND_JOBS](BACKGROUND_JOBS.md). Then add its job key to the targets of all four `GOOGLE_PLAY_*` variables in `extra_env_components`, or its container gets no Google Play credentials ([DEPLOYMENT](DEPLOYMENT.md#extra-runtime-variables)).
 
 ## If Subscriptions Are Not Wanted
 
