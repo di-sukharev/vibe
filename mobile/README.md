@@ -73,6 +73,8 @@ The iOS Simulator can hide this error, because its loopback address reaches the 
 
 From `mobile`: `bun run dev`, `android`, `ios`, `web`, `typecheck`, `lint`, `test`, `build` (a static web export), `doctor` (Expo Doctor 1.20.0), and `e2e:maestro`. From the root: `bun run dev:mobile`, `build:mobile`, `typecheck:mobile`, `test:mobile`, and `e2e:mobile`. Scripts are in [package.json](package.json); the index is [COMMANDS](../docs/COMMANDS.md).
 
+`doctor`'s duplicate-dependencies check fails under Bun's isolated linker because of a real peer cycle (`expo` ↔ `@expo/cli` ↔ `expo-router`); this is expected and not a bug to chase. Native autolinking and the `metro.config.js` singleton resolver still keep exactly one copy per platform — verify with `bunx expo-modules-autolinking resolve --platform ios|android`.
+
 ## Environment
 
 Copy [.env.example](.env.example) to `mobile/.env`. It holds the API address, the optional Google Sign-In IDs, the store product IDs, and the push switch. Every `EXPO_PUBLIC_*` value goes into the client bundle, so never put a secret there.
