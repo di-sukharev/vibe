@@ -1,4 +1,4 @@
-import { createBackendRuntime, type BackendRuntime } from './runtime'
+import { createBackgroundRuntime, type BackendRuntime } from './runtime'
 import { backgroundJobNames, isBackgroundJobName } from './jobs'
 import {
   runLockedBackgroundJob,
@@ -33,7 +33,7 @@ export async function runOneShotJob(
  */
 export async function handleProviderJobInvocation(
   jobName: string,
-  createRuntime: () => BackendRuntime = createBackendRuntime,
+  createRuntime: () => BackendRuntime = createBackgroundRuntime,
   entries: ScheduleEntry[] = schedules,
 ) {
   let runtime: BackendRuntime | undefined
@@ -69,7 +69,7 @@ export async function handleProviderJobInvocation(
 export async function handleProviderJobRequest(
   request: Request,
   jobName: string,
-  createRuntime: () => BackendRuntime = createBackendRuntime,
+  createRuntime: () => BackendRuntime = createBackgroundRuntime,
   entries: ScheduleEntry[] = schedules,
 ) {
   if (new URL(request.url).pathname !== '/') {
@@ -108,7 +108,7 @@ export async function main(argv: string[] = Bun.argv.slice(2)) {
     )
   }
 
-  const runtime = createBackendRuntime()
+  const runtime = createBackgroundRuntime()
 
   try {
     await runOneShotJob(runtime, jobName)

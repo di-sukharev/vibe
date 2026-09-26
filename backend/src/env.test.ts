@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { loadEnv } from './env'
+import { loadBackgroundEnv, loadEnv } from './env'
 
 describe('loadEnv', () => {
   test('splits a comma-separated origin list, trimming the spaces people leave in .env', () => {
@@ -14,6 +14,64 @@ describe('loadEnv', () => {
     })
 
     expect(env.CORS_ORIGINS).toEqual(['http://localhost:5173', 'http://localhost:8081'])
+  })
+
+  test('loads background entrypoints without exposing the API signing key', () => {
+    const apiSigningKey = 'fedcba9876543210'.repeat(4)
+    const env = loadBackgroundEnv({
+      NODE_ENV: 'production',
+      DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
+      JWT_SECRET: apiSigningKey,
+      // A background runner boots the same image as the API, so it faces the same fail-closed
+      // storage rules: no filesystem driver in production, and a remote endpoint behind a gate.
+      PRIVATE_STORAGE_DRIVER: 's3',
+      PRIVATE_STORAGE_REGION: 'nyc3',
+      PRIVATE_STORAGE_BUCKET: 'uploads',
+      PRIVATE_STORAGE_ENDPOINT: 'https://storage.example.com',
+      PRIVATE_STORAGE_ACCESS_KEY_ID: 'access-key',
+      PRIVATE_STORAGE_SECRET_ACCESS_KEY: 'secret-key',
+      PRIVATE_STORAGE_ALLOW_REMOTE_ENDPOINT: 'true',
+    })
+
+    expect(env.JWT_SECRET).not.toBe(apiSigningKey)
+    expect(env.COOKIE_SECURE).toBe(true)
+  })
+
+  test('starts a background runner without JWT_SECRET while the API still requires it', () => {
+    // Terraform hands JWT_SECRET only to the API; the scheduler worker and the job containers
+    // boot this image without it.
+    const withoutSigningKey = {
+      NODE_ENV: 'production',
+      DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
+      COOKIE_SECURE: 'true',
+      PRIVATE_STORAGE_DRIVER: 's3',
+      PRIVATE_STORAGE_REGION: 'nyc3',
+      PRIVATE_STORAGE_BUCKET: 'uploads',
+      PRIVATE_STORAGE_ENDPOINT: 'https://storage.example.com',
+      PRIVATE_STORAGE_ACCESS_KEY_ID: 'access-key',
+      PRIVATE_STORAGE_SECRET_ACCESS_KEY: 'secret-key',
+      PRIVATE_STORAGE_ALLOW_REMOTE_ENDPOINT: 'true',
+    }
+
+    expect(() => loadBackgroundEnv(withoutSigningKey)).not.toThrow()
+    expect(() => loadEnv(withoutSigningKey)).toThrow('JWT_SECRET')
+  })
+
+  test('a background runner in development accepts the local origin .env.example ships', () => {
+    // COOKIE_SECURE is forced only in production. Forcing it everywhere would make the HTTPS rule
+    // on WEBAPP_ORIGIN refuse http://localhost:5173, and the scheduler `bun run dev` now starts
+    // would die at boot while the API next to it kept running.
+    const env = loadBackgroundEnv({
+      DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
+      JWT_SECRET: '12345678901234567890123456789012',
+      WEBAPP_ORIGIN: 'http://localhost:5173',
+      EMAIL_DELIVERY: 'console',
+    })
+
+    expect({ origin: env.WEBAPP_ORIGIN, secure: env.COOKIE_SECURE }).toEqual({
+      origin: 'http://localhost:5173',
+      secure: false,
+    })
   })
 
   test('rejects known weak JWT secrets in production-like runtimes', () => {

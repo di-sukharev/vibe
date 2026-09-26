@@ -91,3 +91,128 @@ run "firewall_tightens_after_api_deployment" {
     error_message = "After promotion PostgreSQL must trust the exact API app instead of the whole VPC CIDR."
   }
 }
+
+run "unscoped_extra_env_reaches_every_component" {
+  command = plan
+
+  variables {
+    extra_runtime_env        = { FEATURE_FLAG = "on" }
+    extra_runtime_secret_env = { EXTERNAL_API_KEY = "external-secret" }
+  }
+
+  assert {
+    condition = alltrue([
+      for component in ["api", "scheduler"] :
+      output.runtime_inputs.component_environments[component]["FEATURE_FLAG"] == "on" &&
+      output.runtime_inputs.component_environments[component]["NODE_ENV"] == "production" &&
+      contains(keys(output.runtime_inputs.component_secret_environments[component]), "EXTERNAL_API_KEY") &&
+      contains(keys(output.runtime_inputs.component_secret_environments[component]), "PRIVATE_STORAGE_SECRET_ACCESS_KEY")
+    ])
+    error_message = "Without extra_env_components, every extra variable must reach the API and the scheduler as before."
+  }
+
+  assert {
+    condition = (
+      output.runtime_inputs.component_environments["api"] == output.runtime_inputs.component_environments["scheduler"] &&
+      setsubtract(
+        keys(output.runtime_inputs.component_secret_environments["api"]),
+        keys(output.runtime_inputs.component_secret_environments["scheduler"]),
+      ) == toset(["JWT_SECRET"])
+    )
+    error_message = "Unscoped variables must reach both components; the JWT secret is the only built-in difference."
+  }
+}
+
+run "jwt_secret_reaches_only_the_api" {
+  command = plan
+
+  assert {
+    condition = (
+      contains(keys(output.runtime_inputs.component_secret_environments["api"]), "JWT_SECRET") &&
+      !contains(keys(output.runtime_inputs.component_secret_environments["scheduler"]), "JWT_SECRET")
+    )
+    error_message = "Only the API signs tokens: the scheduler worker must not receive JWT_SECRET."
+  }
+}
+
+run "scoped_extra_env_reaches_only_its_targets" {
+  command = plan
+
+  variables {
+    extra_runtime_env = {
+      APPLE_IAP_BUNDLE_ID      = "com.example.app"
+      GOOGLE_PLAY_PACKAGE_NAME = "com.example.app"
+    }
+    extra_runtime_secret_env = {
+      APPLE_IAP_PRIVATE_KEY_BASE64            = "apple-secret"
+      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64 = "google-secret"
+    }
+    extra_env_components = {
+      APPLE_IAP_BUNDLE_ID                     = ["api"]
+      APPLE_IAP_PRIVATE_KEY_BASE64            = ["api"]
+      GOOGLE_PLAY_PACKAGE_NAME                = ["api", "outbox"]
+      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64 = ["api", "outbox"]
+    }
+  }
+
+  assert {
+    condition = (
+      contains(keys(output.runtime_inputs.component_environments["api"]), "APPLE_IAP_BUNDLE_ID") &&
+      contains(keys(output.runtime_inputs.component_secret_environments["api"]), "APPLE_IAP_PRIVATE_KEY_BASE64") &&
+      !contains(keys(output.runtime_inputs.component_environments["scheduler"]), "APPLE_IAP_BUNDLE_ID") &&
+      !contains(keys(output.runtime_inputs.component_secret_environments["scheduler"]), "APPLE_IAP_PRIVATE_KEY_BASE64")
+    )
+    error_message = "A variable scoped to the API must not reach the scheduler worker."
+  }
+
+  assert {
+    condition = alltrue([
+      for component in ["api", "scheduler"] :
+      contains(keys(output.runtime_inputs.component_environments[component]), "GOOGLE_PLAY_PACKAGE_NAME") &&
+      contains(keys(output.runtime_inputs.component_secret_environments[component]), "GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64")
+    ])
+    error_message = "A variable scoped to a job must reach the scheduler worker, which runs every job."
+  }
+}
+
+run "extra_env_components_rejects_unknown_targets" {
+  command = plan
+
+  variables {
+    extra_runtime_env    = { FEATURE_FLAG = "on" }
+    extra_env_components = { FEATURE_FLAG = ["scheduler"] }
+  }
+
+  expect_failures = [var.extra_env_components]
+}
+
+run "extra_env_components_rejects_unknown_variables" {
+  command = plan
+
+  variables {
+    extra_env_components = { MISSING_VARIABLE = ["api"] }
+  }
+
+  expect_failures = [var.extra_env_components]
+}
+
+run "extra_env_components_rejects_empty_targets" {
+  command = plan
+
+  variables {
+    extra_runtime_env    = { FEATURE_FLAG = "on" }
+    extra_env_components = { FEATURE_FLAG = [] }
+  }
+
+  expect_failures = [var.extra_env_components]
+}
+
+run "extra_env_rejects_builtin_names" {
+  command = plan
+
+  variables {
+    extra_runtime_secret_env = { JWT_SECRET = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }
+  }
+
+  expect_failures = [output.runtime_inputs]
+}

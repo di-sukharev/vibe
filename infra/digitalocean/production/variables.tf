@@ -128,16 +128,54 @@ variable "email_from" {
 }
 
 variable "extra_runtime_env" {
-  description = "Non-secret provider/product settings shared by API and scheduler."
+  description = "Non-secret provider/product settings for the API and scheduler; extra_env_components can scope each one."
   type        = map(string)
   default     = {}
 }
 
 variable "extra_runtime_secret_env" {
-  description = "Additional App Platform SECRET variables, such as EMAIL_RESEND_API_KEY. Never commit them in tfvars."
+  description = "Additional App Platform SECRET variables, such as EMAIL_RESEND_API_KEY; extra_env_components can scope each one. Never commit them in tfvars."
   type        = map(string)
   default     = {}
   sensitive   = true
+
+  validation {
+    condition     = length(setintersection(nonsensitive(keys(var.extra_runtime_secret_env)), keys(var.extra_runtime_env))) == 0
+    error_message = "A variable belongs in either extra_runtime_env or extra_runtime_secret_env, not both."
+  }
+}
+
+variable "extra_env_components" {
+  description = "Runtime components that receive an extra variable, keyed by its name: api, jobs, or a job key from backend/src/job-schedules.json. Any job target reaches the one scheduler worker. An unlisted variable reaches every component."
+  type        = map(set(string))
+  default     = {}
+
+  validation {
+    condition = alltrue([
+      for name in keys(var.extra_env_components) :
+      contains(concat(keys(var.extra_runtime_env), nonsensitive(keys(var.extra_runtime_secret_env))), name)
+    ])
+    error_message = "Every extra_env_components key must name a variable in extra_runtime_env or extra_runtime_secret_env."
+  }
+
+  validation {
+    condition     = alltrue([for targets in values(var.extra_env_components) : length(targets) > 0])
+    error_message = "Every extra_env_components entry needs at least one target; remove a variable from the extra maps instead."
+  }
+
+  validation {
+    condition = alltrue(flatten([
+      for targets in values(var.extra_env_components) : [
+        for target in targets : contains(local.runtime_env_targets, target)
+      ]
+    ]))
+    error_message = "extra_env_components targets must be api, jobs, or a job key from backend/src/job-schedules.json."
+  }
+
+  validation {
+    condition     = !contains(keys(var.extra_env_components), "EMAIL_RESEND_API_KEY")
+    error_message = "EMAIL_RESEND_API_KEY must reach every component: each one validates it together with EMAIL_DELIVERY."
+  }
 }
 
 variable "trusted_api_app_id" {

@@ -44,6 +44,7 @@ export TF_VAR_jwt_secret="$(openssl rand -hex 32)"
 - With DigitalOcean DNS, set `dns_zone`. Otherwise keep `null` and create the App Platform records at your DNS provider.
 - For Resend, set `email_delivery = "resend"` and `email_from`, and export `TF_VAR_extra_runtime_secret_env='{"EMAIL_RESEND_API_KEY":"<secret>"}'`.
 - Keep the JWT secret and any Resend key in a secret manager. Export the same values for every plan and apply.
+- Other extra variables go in `extra_runtime_env` or `TF_VAR_extra_runtime_secret_env`. Scope them with `extra_env_components` ([DEPLOYMENT](DEPLOYMENT.md#extra-runtime-variables)).
 
 ## Commands
 

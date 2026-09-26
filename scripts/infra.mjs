@@ -1856,8 +1856,8 @@ function writeManagedRootInputs(context, rootName, releaseInputs) {
 
 /**
  * Cross-state inputs carry production secrets: the DigitalOcean runtime root receives
- * `jwt_secret`, the media bucket key, and every `extra_runtime_secret_env` value, and even a
- * read-only `infra:plan` writes them. Terraform needs them only while a command runs, so they live
+ * `component_secret_environments` - `JWT_SECRET` for the API, the media bucket key, and the
+ * `extra_runtime_secret_env` values - and even a read-only `infra:plan` writes them. Terraform needs them only while a command runs, so they live
  * for that window and are removed when it ends - including when it fails. Nothing is lost by
  * removing them: every terraform invocation on a managed root writes them again from foundation
  * state first. Yandex needs none of this, because its foundation hands out Lockbox references.

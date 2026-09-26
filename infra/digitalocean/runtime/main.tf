@@ -1,41 +1,6 @@
 locals {
-  name_prefix   = "${var.project_slug}-prod"
-  api_origin    = "https://${var.api_domain}"
-  webapp_origin = "https://${var.webapp_domain}"
-
-  runtime_general_env = merge(var.extra_runtime_env, {
-    NODE_ENV                                   = "production"
-    PORT                                       = "8080"
-    CORS_ORIGINS                               = local.webapp_origin
-    WEBAPP_ORIGIN                              = local.webapp_origin
-    ACCESS_TOKEN_TTL_SECONDS                   = "900"
-    REFRESH_TOKEN_TTL_DAYS                     = "30"
-    REFRESH_REUSE_GRACE_SECONDS                = "10"
-    SESSION_ABSOLUTE_TTL_DAYS                  = "90"
-    SESSION_RETENTION_DAYS                     = "7"
-    AUTH_BODY_LIMIT_BYTES                      = "65536"
-    AUTH_RATE_LIMIT_MAX                        = "60"
-    AUTH_RATE_LIMIT_WINDOW_SECONDS             = "60"
-    ADMIN_USERS_READ_RATE_LIMIT_MAX            = "120"
-    ADMIN_USERS_READ_RATE_LIMIT_WINDOW_SECONDS = "60"
-    SHUTDOWN_GRACE_SECONDS                     = "20"
-    TRUST_PROXY                                = "true"
-    TRUSTED_PROXY_CLIENT_IP_HEADER             = "do-connecting-ip"
-    COOKIE_SECURE                              = "true"
-    PRIVATE_STORAGE_DRIVER                     = "s3"
-    PRIVATE_STORAGE_ALLOW_REMOTE_ENDPOINT      = "true"
-    PRIVATE_STORAGE_REGION                     = var.spaces_region
-    PRIVATE_STORAGE_BUCKET                     = var.media_bucket_name
-    PRIVATE_STORAGE_ENDPOINT                   = "https://${var.spaces_region}.digitaloceanspaces.com"
-    EMAIL_DELIVERY                             = var.email_delivery
-    EMAIL_FROM                                 = var.email_from == null ? "" : var.email_from
-  })
-
-  runtime_secret_env = merge(var.extra_runtime_secret_env, {
-    JWT_SECRET                        = var.jwt_secret
-    PRIVATE_STORAGE_ACCESS_KEY_ID     = var.media_access_key_id
-    PRIVATE_STORAGE_SECRET_ACCESS_KEY = var.media_secret_access_key
-  })
+  name_prefix = "${var.project_slug}-prod"
+  api_origin  = "https://${var.api_domain}"
 }
 
 resource "digitalocean_app" "api" {
@@ -117,7 +82,7 @@ resource "digitalocean_app" "api" {
       }
 
       dynamic "env" {
-        for_each = local.runtime_general_env
+        for_each = var.component_environments["api"]
         content {
           key   = env.key
           value = env.value
@@ -127,7 +92,7 @@ resource "digitalocean_app" "api" {
       }
 
       dynamic "env" {
-        for_each = local.runtime_secret_env
+        for_each = var.component_secret_environments["api"]
         content {
           key   = env.key
           value = env.value
@@ -188,7 +153,7 @@ resource "digitalocean_app" "api" {
       }
 
       dynamic "env" {
-        for_each = local.runtime_general_env
+        for_each = var.component_environments["scheduler"]
         content {
           key   = env.key
           value = env.value
@@ -198,7 +163,7 @@ resource "digitalocean_app" "api" {
       }
 
       dynamic "env" {
-        for_each = local.runtime_secret_env
+        for_each = var.component_secret_environments["scheduler"]
         content {
           key   = env.key
           value = env.value

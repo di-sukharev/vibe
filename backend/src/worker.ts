@@ -1,6 +1,17 @@
 import { defaultJobLockTimeoutMs, isJobLockExpiry, runWithJobLock } from './db'
-import { createBackendRuntime, type BackendRuntime } from './runtime'
+import { createBackgroundRuntime, type BackendRuntime } from './runtime'
 import { runBackgroundJob, type BackgroundJobName } from './jobs'
+
+type WorkerSignal = 'SIGINT' | 'SIGTERM'
+type WorkerSignalSource = {
+  off(signal: WorkerSignal, listener: () => void): unknown
+  once(signal: WorkerSignal, listener: () => void): unknown
+}
+
+// Bun 1.4 adds a memoryPressure overload to Process that hides the inherited Node signal
+// overload during structural assignment. Narrow only at this boundary; the worker itself keeps a
+// small injectable contract that its shutdown behavior can test without a real process signal.
+const processWorkerSignals = process as unknown as WorkerSignalSource
 
 export type WorkerLoop = {
   job: BackgroundJobName
@@ -119,7 +130,7 @@ function reportIterationFailure(loop: WorkerLoop, error: unknown) {
   console.error(`Worker job ${loop.job} failed.`, error)
 }
 
-export async function runWorker(runtime: BackendRuntime) {
+export async function runWorker(runtime: BackendRuntime, options: { signal?: AbortSignal } = {}) {
   if (workerLoops.length === 0) {
     console.log(
       'Worker started with no loops. Add entries to `workerLoops` in src/worker.ts; see docs/BACKGROUND_JOBS.md.',
@@ -128,28 +139,44 @@ export async function runWorker(runtime: BackendRuntime) {
   }
 
   const handle = startWorkerLoops(runtime)
+  const stopOnAbort = () => handle.stop()
+  options.signal?.addEventListener('abort', stopOnAbort, { once: true })
 
-  const stop = (signal: string) => {
-    console.log(`Worker received ${signal}; finishing the current iteration.`)
-    handle.stop()
+  try {
+    await handle.stopped
+  } finally {
+    options.signal?.removeEventListener('abort', stopOnAbort)
   }
-
-  process.on('SIGINT', () => stop('SIGINT'))
-  process.on('SIGTERM', () => stop('SIGTERM'))
-
-  await handle.stopped
 }
 
 export async function main() {
-  const runtime = createBackendRuntime()
+  const runtime = createBackgroundRuntime()
+  const shutdown = listenForWorkerShutdown()
 
   try {
-    await runWorker(runtime)
+    await runWorker(runtime, { signal: shutdown.signal })
   } finally {
+    shutdown.dispose()
     await runtime.close()
   }
 }
 
 if (import.meta.main) {
   await main()
+}
+
+export function listenForWorkerShutdown(source: WorkerSignalSource = processWorkerSignals) {
+  const controller = new AbortController()
+  const abort = () => controller.abort()
+
+  source.once('SIGINT', abort)
+  source.once('SIGTERM', abort)
+
+  return {
+    signal: controller.signal,
+    dispose() {
+      source.off('SIGINT', abort)
+      source.off('SIGTERM', abort)
+    },
+  }
 }

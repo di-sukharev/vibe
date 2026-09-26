@@ -1,5 +1,12 @@
 locals {
-  runtime_environment = merge(var.extra_runtime_env, {
+  job_keys = [
+    for schedule in jsondecode(file("${path.module}/../../../backend/src/job-schedules.json")) :
+    schedule.key
+  ]
+  runtime_components  = concat(["api"], local.job_keys)
+  runtime_env_targets = concat(["api", "jobs"], local.job_keys)
+
+  builtin_runtime_environment = {
     NODE_ENV                                   = "production"
     CORS_ORIGINS                               = local.webapp_origin
     WEBAPP_ORIGIN                              = local.webapp_origin
@@ -27,5 +34,24 @@ locals {
     EMAIL_DELIVERY                             = var.email_delivery
     EMAIL_FROM                                 = var.email_from == null ? "" : var.email_from
     EMAIL_POSTBOX_REGION                       = "ru-central1"
-  })
+  }
+
+  # An extra variable reaches every component unless extra_env_components scopes it. Each job runs
+  # in its own container, so a job target reaches only that job.
+  extra_env_receivers = {
+    for name, targets in var.extra_env_components : name => toset([
+      for component in local.runtime_components : component
+      if contains(targets, component) || (component != "api" && contains(targets, "jobs"))
+    ])
+  }
+
+  component_environments = {
+    for component in local.runtime_components : component => merge(
+      {
+        for name, value in var.extra_runtime_env : name => value
+        if contains(lookup(local.extra_env_receivers, name, toset(local.runtime_components)), component)
+      },
+      local.builtin_runtime_environment,
+    )
+  }
 }

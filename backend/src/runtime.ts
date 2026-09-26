@@ -3,7 +3,7 @@ import 'dotenv/config'
 import { createBackgroundTasks, type BackgroundTasks } from './background-tasks'
 import { createPrisma, type DbClient } from './db'
 import { createEmailDelivery, type EmailDelivery } from './email'
-import { loadEnv, type AppEnv } from './env'
+import { loadBackgroundEnv, loadEnv, type AppEnv } from './env'
 import { createPrivateStorage, type PrivateStorageRuntime } from './storage'
 
 export type BackendRuntime = {
@@ -38,7 +38,21 @@ export async function closeBackendRuntime(
 }
 
 export function createBackendRuntime(source: Record<string, string | undefined> = Bun.env): BackendRuntime {
-  const env = loadEnv(source)
+  return createRuntime(loadEnv(source))
+}
+
+/**
+ * For `cron.ts`, `scheduler.ts`, and `worker.ts`: a background runner never serves a browser, so
+ * the env checks that only make sense for one - `WEBAPP_ORIGIN` must be HTTPS - must not block it
+ * from starting against the same `.env` the API uses.
+ */
+export function createBackgroundRuntime(
+  source: Record<string, string | undefined> = Bun.env,
+): BackendRuntime {
+  return createRuntime(loadBackgroundEnv(source))
+}
+
+function createRuntime(env: AppEnv): BackendRuntime {
   const prisma = createPrisma(env.DATABASE_URL)
   const backgroundTasks = createBackgroundTasks()
   const emailDelivery = createEmailDelivery(env)

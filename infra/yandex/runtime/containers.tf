@@ -26,11 +26,11 @@ resource "yandex_serverless_container" "api" {
 
   image {
     url         = "cr.yandex/${var.registry_id}/${var.backend_image_name}@${var.runtime_image_digest}"
-    environment = var.runtime_environment
+    environment = lookup(var.component_environments, "api", {})
   }
 
   dynamic "secrets" {
-    for_each = var.runtime_secret_bindings
+    for_each = lookup(var.component_secret_bindings, "api", {})
     content {
       environment_variable = secrets.key
       id                   = secrets.value.secret_id
@@ -47,6 +47,16 @@ resource "yandex_serverless_container" "api" {
   metadata_options {
     gce_http_endpoint    = 2
     aws_v1_http_endpoint = 2
+  }
+
+  lifecycle {
+    precondition {
+      condition = (
+        contains(keys(var.component_environments), "api") &&
+        contains(keys(var.component_secret_bindings), "api")
+      )
+      error_message = "The foundation outputs have no api environment; run infra:apply to refresh the foundation outputs."
+    }
   }
 }
 
@@ -69,11 +79,11 @@ resource "yandex_serverless_container" "jobs" {
     url         = "cr.yandex/${var.registry_id}/${var.backend_image_name}@${var.runtime_image_digest}"
     command     = ["bun"]
     args        = ["src/cron.ts", "--http", each.value.job]
-    environment = var.runtime_environment
+    environment = lookup(var.component_environments, each.key, {})
   }
 
   dynamic "secrets" {
-    for_each = var.runtime_secret_bindings
+    for_each = lookup(var.component_secret_bindings, each.key, {})
     content {
       environment_variable = secrets.key
       id                   = secrets.value.secret_id
@@ -90,6 +100,16 @@ resource "yandex_serverless_container" "jobs" {
   metadata_options {
     gce_http_endpoint    = 2
     aws_v1_http_endpoint = 2
+  }
+
+  lifecycle {
+    precondition {
+      condition = (
+        contains(keys(var.component_environments), each.key) &&
+        contains(keys(var.component_secret_bindings), each.key)
+      )
+      error_message = "The foundation outputs have no environment for this job after a job-schedules.json change; run infra:apply to refresh the foundation outputs."
+    }
   }
 }
 

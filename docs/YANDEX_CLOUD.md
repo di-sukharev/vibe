@@ -33,6 +33,7 @@ export TF_VAR_jwt_secret="$(openssl rand -hex 32)"
 - Set `dns_zone_domain` to the exact zone apex. The three domains must be its subdomains, not the apex, because the records are CNAMEs.
 - Terraform DNS: also set the Yandex Cloud DNS `dns_zone_id`. External DNS: keep `dns_zone_id = null`, and after the first release create the `required_dns_records` from `bun run infra:output -- yandex`.
 - Postbox: set `email_delivery = "postbox"` and a verified sender in `email_from`. Terraform writes the sender key straight to Lockbox.
+- Other extra variables go in `extra_runtime_env`, and their secrets in Lockbox through `extra_secret_bindings`. Keep each extra secret in its own Lockbox secret: the runtime can read every key and version of a granted secret. Scope them with `extra_env_components` ([DEPLOYMENT](DEPLOYMENT.md#extra-runtime-variables)).
 
 ## Commands
 
@@ -48,7 +49,7 @@ Static sync runs after the runtime switch. If it fails, the new backend serves t
 ## Storage access and IAM
 
 - Policies grant by exact access key. The static publisher only syncs the static buckets and cannot delete buckets or versions. The runtime media key only reads, writes, and deletes ordinary media objects.
-- The runtime reads only its bound Lockbox secrets, including `extra_secret_bindings`; never grant it folder-wide access. The migration reads only the owner URL and the optional seed.
+- The runtime reads only its bound Lockbox secrets, including `extra_secret_bindings`; never grant it folder-wide access. The API and all job containers share this runtime identity. The migration reads only the owner URL and the optional seed.
 - The first `infra:apply` gives the storage (IaC) account folder-level `storage.admin` only until the three app buckets exist. Rerun an interrupted apply to remove it.
 - The IaC account has `s3:*` on bucket ARNs, not objects. A Deny blocks `s3:DeleteBucket` and `s3:PutBucketVersioning`, and nothing allows version deletion. Yandex enforces the versioning Deny, so Terraform cannot suspend versioning. Routine applies never hit it: versioning is set at creation, and the provider sends `PutBucketVersioning` only when that block changes. Keep `s3:*` on the bucket ARN: a narrower list protects nothing and can break refresh.
 - The delete Deny is only extra defense. Yandex checks bucket deletion and policy changes through IAM: `storage.admin` for S3 calls, `storage.configurer` in the console; `storage.editor` can delete a bucket. The IaC key has bucket-level `storage.admin` and can lift the Deny, as can folder-level `storage.admin`, so treat the key as operator access. The real limits are `force_destroy = false`, media `prevent_destroy`, and the destroy guard.

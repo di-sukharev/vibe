@@ -1,7 +1,7 @@
 import { expect, spyOn, test } from 'bun:test'
 
 import type { BackendRuntime } from './runtime'
-import { startWorkerLoops } from './worker'
+import { listenForWorkerShutdown, startWorkerLoops } from './worker'
 
 test('stopping wakes every sleeping loop, not just the last one', async () => {
   // A single shared waker used to leave the other loops asleep, so SIGTERM hung for a full
@@ -86,4 +86,21 @@ test('stopping during a running iteration does not wait out the interval that fo
   } finally {
     log.mockRestore()
   }
+})
+
+test('SIGTERM aborts the worker, and dispose releases both signal listeners', () => {
+  // `main` hands this signal to the worker loop; a lingering listener would leak across restarts.
+  const listeners = new Map<string, () => void>()
+  const removed: string[] = []
+  const shutdown = listenForWorkerShutdown({
+    once: (signal, listener) => void listeners.set(signal, listener),
+    off: (signal) => void removed.push(signal),
+  })
+
+  expect(shutdown.signal.aborted).toBe(false)
+  listeners.get('SIGTERM')?.()
+  expect(shutdown.signal.aborted).toBe(true)
+
+  shutdown.dispose()
+  expect(removed.sort()).toEqual(['SIGINT', 'SIGTERM'])
 })

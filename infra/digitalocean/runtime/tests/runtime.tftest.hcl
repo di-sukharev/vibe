@@ -13,18 +13,17 @@ variables {
   database_user            = "example_product_app"
   database_admin_user      = "doadmin"
   backend_image_repository = "backend"
-  spaces_region            = "fra1"
-  media_bucket_name        = "example-product-media"
-  media_access_key_id      = "media-key"
-  media_secret_access_key  = "media-secret"
-  jwt_secret               = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-  email_delivery           = "disabled"
-  email_from               = null
-  extra_runtime_env        = {}
-  extra_runtime_secret_env = {}
-  api_instance_size        = "apps-s-1vcpu-1gb"
-  worker_instance_size     = "apps-s-1vcpu-1gb"
-  runtime_image_digest     = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  component_environments = {
+    api       = { NODE_ENV = "production" }
+    scheduler = { NODE_ENV = "production" }
+  }
+  component_secret_environments = {
+    api       = { JWT_SECRET = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+    scheduler = { PRIVATE_STORAGE_SECRET_ACCESS_KEY = "media-secret" }
+  }
+  api_instance_size    = "apps-s-1vcpu-1gb"
+  worker_instance_size = "apps-s-1vcpu-1gb"
+  runtime_image_digest = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 }
 
 run "migration_gates_runtime" {
@@ -128,5 +127,63 @@ run "scheduler_alerts_reach_someone" {
       length(digitalocean_app.api.spec[0].worker[0].alert[2].destinations) == 0
     )
     error_message = "No alert may carry a destinations block: App Platform delivers to the team's default email without one, and provider 2.99.1 never reads destinations back into state, so a configured list would plan a change on every run and a removed one would never restore the default. Route alerts in the console instead."
+  }
+}
+
+run "components_receive_exactly_their_environment" {
+  command = plan
+
+  variables {
+    component_environments = {
+      api       = { NODE_ENV = "production", APPLE_IAP_BUNDLE_ID = "com.example.app" }
+      scheduler = { NODE_ENV = "production" }
+    }
+    component_secret_environments = {
+      api       = { APPLE_IAP_PRIVATE_KEY_BASE64 = "api-only-secret" }
+      scheduler = {}
+    }
+  }
+
+  assert {
+    condition = (
+      toset([for env in digitalocean_app.api.spec[0].service[0].env : env.key if env.type == "GENERAL"]) ==
+      toset(keys(var.component_environments["api"])) &&
+      toset([for env in digitalocean_app.api.spec[0].worker[0].env : env.key if env.type == "GENERAL"]) ==
+      toset(keys(var.component_environments["scheduler"]))
+    )
+    error_message = "The API and the scheduler must each receive exactly the GENERAL variables the foundation composed for them."
+  }
+
+  assert {
+    condition = (
+      toset([for env in digitalocean_app.api.spec[0].service[0].env : env.key if env.type == "SECRET"]) ==
+      toset(["DATABASE_URL", "APPLE_IAP_PRIVATE_KEY_BASE64"]) &&
+      toset([for env in digitalocean_app.api.spec[0].worker[0].env : env.key if env.type == "SECRET"]) ==
+      toset(["DATABASE_URL"])
+    )
+    error_message = "A secret scoped to the API must not reach the scheduler worker."
+  }
+}
+
+run "component_environments_need_every_component" {
+  command = plan
+
+  variables {
+    component_environments = { api = {} }
+  }
+
+  expect_failures = [var.component_environments]
+}
+
+run "scheduler_renders_without_jwt_secret" {
+  command = plan
+
+  assert {
+    condition = (
+      contains([for env in digitalocean_app.api.spec[0].service[0].env : env.key], "JWT_SECRET") &&
+      !contains([for env in digitalocean_app.api.spec[0].worker[0].env : env.key], "JWT_SECRET") &&
+      !contains([for env in digitalocean_app.api.spec[0].job[0].env : env.key], "JWT_SECRET")
+    )
+    error_message = "Only the API service may carry JWT_SECRET; the scheduler worker and the migration job must not."
   }
 }

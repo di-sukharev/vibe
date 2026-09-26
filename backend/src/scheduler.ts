@@ -2,7 +2,7 @@ import { Cron } from 'croner'
 
 import { defaultJobLockTimeoutMs, isJobLockExpiry, runWithJobLock } from './db'
 import scheduleDefinitions from './job-schedules.json' with { type: 'json' }
-import { createBackendRuntime, type BackendRuntime } from './runtime'
+import { createBackgroundRuntime, type BackendRuntime } from './runtime'
 import {
   isBackgroundJobName,
   runBackgroundJob,
@@ -123,7 +123,7 @@ export async function runScheduledJob(
 }
 
 export async function main() {
-  const runtime = createBackendRuntime()
+  const runtime = createBackgroundRuntime()
   const { jobs, stop: stopSchedules } = startSchedules(runtime)
 
   if (jobs.length === 0) {

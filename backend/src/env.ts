@@ -124,6 +124,27 @@ export function loadEnv(source: Record<string, string | undefined>) {
   return envSchema.parse(source)
 }
 
+const backgroundNonSigningJwtPlaceholder = '0123456789abcdef'.repeat(4)
+
+/**
+ * For `cron.ts`, `scheduler.ts`, and `worker.ts`. A background runner serves no browser, so it
+ * needs neither a real `CORS_ORIGINS` allowlist nor the JWT signing secret; overriding both here
+ * means neither has to be handed to a process that has no use for them.
+ */
+export function loadBackgroundEnv(source: Record<string, string | undefined>) {
+  return loadEnv({
+    ...source,
+    CORS_ORIGINS: 'https://background.invalid',
+    // Forced only where it is a real statement about the deployment. In production the API's
+    // fail-closed checks must apply to a runner booting the same image; in development forcing it
+    // would mean asserting things about a process that serves no browser at all - and one of
+    // those, the HTTPS rule on WEBAPP_ORIGIN, would then refuse the `http://localhost:5173` that
+    // `.env.example` ships, so `bun run dev` could not start its scheduler.
+    ...(source.NODE_ENV === 'production' ? { COOKIE_SECURE: 'true' } : {}),
+    JWT_SECRET: backgroundNonSigningJwtPlaceholder,
+  })
+}
+
 function validateWebappOrigin(env: z.infer<typeof envSchema>, ctx: z.RefinementCtx) {
   if (!env.WEBAPP_ORIGIN) return
 

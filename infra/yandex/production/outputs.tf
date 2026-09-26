@@ -81,36 +81,50 @@ output "migration_inputs" {
 output "runtime_inputs" {
   description = "Cross-state inputs written only to the ignored runtime root by scripts/infra.mjs."
   sensitive   = true
+
+  precondition {
+    condition     = length(setintersection(local.job_keys, ["api", "jobs"])) == 0
+    error_message = "A job key in backend/src/job-schedules.json must not be api or jobs: extra_env_components uses those names as targets."
+  }
+
+  precondition {
+    condition = length(setintersection(
+      concat(keys(var.extra_runtime_env), keys(var.extra_secret_bindings)),
+      concat(keys(local.builtin_runtime_environment), keys(local.builtin_secret_bindings)),
+    )) == 0
+    error_message = "extra_runtime_env and extra_secret_bindings must not repeat a variable that Terraform already sets for the runtime."
+  }
+
   value = {
-    cloud_id                 = var.cloud_id
-    folder_id                = var.folder_id
-    primary_zone             = var.primary_zone
-    project_slug             = var.project_slug
-    network_id               = yandex_vpc_network.production.id
-    registry_id              = yandex_container_registry.production.id
-    backend_image_name       = var.backend_image_name
-    runtime_service_account  = yandex_iam_service_account.runtime.id
-    gateway_service_account  = yandex_iam_service_account.gateway.id
-    trigger_service_account  = yandex_iam_service_account.trigger.id
-    logging_group_id         = yandex_logging_group.production.id
-    runtime_environment      = local.runtime_environment
-    runtime_secret_bindings  = local.runtime_secret_bindings
-    database_credential_slot = var.database_active_slot
-    api_memory_mb            = var.api_memory_mb
-    task_memory_mb           = var.task_memory_mb
-    api_domain               = var.api_domain
-    api_certificate_id       = var.api_certificate_id
-    webapp_domain            = var.webapp_domain
-    webapp_certificate_id    = var.webapp_certificate_id
-    website_domain           = var.website_domain
-    website_certificate_id   = var.website_certificate_id
-    dns_zone_id              = var.dns_zone_id
-    dns_zone_domain          = var.dns_zone_domain
-    enable_cdn               = var.enable_cdn
-    route_static_through_cdn = var.route_static_through_cdn
-    webapp_website_endpoint  = yandex_storage_bucket.webapp.website_endpoint
-    webapp_website_domain    = yandex_storage_bucket.webapp.website_domain
-    website_website_endpoint = yandex_storage_bucket.website.website_endpoint
-    website_website_domain   = yandex_storage_bucket.website.website_domain
+    cloud_id                  = var.cloud_id
+    folder_id                 = var.folder_id
+    primary_zone              = var.primary_zone
+    project_slug              = var.project_slug
+    network_id                = yandex_vpc_network.production.id
+    registry_id               = yandex_container_registry.production.id
+    backend_image_name        = var.backend_image_name
+    runtime_service_account   = yandex_iam_service_account.runtime.id
+    gateway_service_account   = yandex_iam_service_account.gateway.id
+    trigger_service_account   = yandex_iam_service_account.trigger.id
+    logging_group_id          = yandex_logging_group.production.id
+    component_environments    = local.component_environments
+    component_secret_bindings = local.component_secret_bindings
+    database_credential_slot  = var.database_active_slot
+    api_memory_mb             = var.api_memory_mb
+    task_memory_mb            = var.task_memory_mb
+    api_domain                = var.api_domain
+    api_certificate_id        = var.api_certificate_id
+    webapp_domain             = var.webapp_domain
+    webapp_certificate_id     = var.webapp_certificate_id
+    website_domain            = var.website_domain
+    website_certificate_id    = var.website_certificate_id
+    dns_zone_id               = var.dns_zone_id
+    dns_zone_domain           = var.dns_zone_domain
+    enable_cdn                = var.enable_cdn
+    route_static_through_cdn  = var.route_static_through_cdn
+    webapp_website_endpoint   = yandex_storage_bucket.webapp.website_endpoint
+    webapp_website_domain     = yandex_storage_bucket.webapp.website_domain
+    website_website_endpoint  = yandex_storage_bucket.website.website_endpoint
+    website_website_domain    = yandex_storage_bucket.website.website_domain
   }
 }

@@ -13,29 +13,31 @@ variable "database_name" { type = string }
 variable "database_user" { type = string }
 variable "database_admin_user" { type = string }
 variable "backend_image_repository" { type = string }
-variable "spaces_region" { type = string }
-variable "media_bucket_name" { type = string }
-variable "media_access_key_id" {
-  type      = string
-  sensitive = true
+variable "component_environments" {
+  description = "GENERAL runtime variables per App Platform component, composed by the foundation."
+  type        = map(map(string))
+  # Empty only when the foundation outputs predate this shape; the validation then asks for
+  # infra:apply instead of Terraform stopping on a missing variable.
+  default = {}
+
+  validation {
+    condition     = alltrue([for component in ["api", "scheduler"] : contains(keys(var.component_environments), component)])
+    error_message = "component_environments needs api and scheduler entries; run infra:apply to refresh the foundation outputs."
+  }
 }
-variable "media_secret_access_key" {
-  type      = string
-  sensitive = true
-}
-variable "jwt_secret" {
-  type      = string
-  sensitive = true
-}
-variable "email_delivery" { type = string }
-variable "email_from" {
-  type     = string
-  nullable = true
-}
-variable "extra_runtime_env" { type = map(string) }
-variable "extra_runtime_secret_env" {
-  type      = map(string)
-  sensitive = true
+variable "component_secret_environments" {
+  description = "SECRET runtime variables per App Platform component, composed by the foundation."
+  type        = map(map(string))
+  default     = {}
+  sensitive   = true
+
+  validation {
+    condition = alltrue([
+      for component in ["api", "scheduler"] :
+      contains(nonsensitive(keys(var.component_secret_environments)), component)
+    ])
+    error_message = "component_secret_environments needs api and scheduler entries; run infra:apply to refresh the foundation outputs."
+  }
 }
 variable "api_instance_size" { type = string }
 variable "worker_instance_size" { type = string }

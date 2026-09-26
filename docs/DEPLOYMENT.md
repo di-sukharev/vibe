@@ -79,11 +79,41 @@ Every plan refuses a deletion or replacement without an exact `--allow-destroy=<
 
 To rotate a protected key or slot, add the new one and apply only that. Release and verify, then remove the old one in a separate reviewed foundation change. A direct replacement would cut access before the API and jobs switch. Never weaken the protection list for one apply.
 
+### After a template update
+
+`infra:plan` plans the foundation, then plans each existing release root from the foundation outputs saved in state. After a template update that changes those outputs, the foundation plan shows only output changes, and the release-root plan stops with `run infra:apply to refresh the foundation outputs`. Nothing has changed yet. Review the foundation plan, then:
+
+1. Run `bun run infra:apply -- <provider>`. It applies only the foundation root.
+2. Run `bun run infra:plan -- <provider>` again and review the release roots.
+3. Release as usual. `release` refuses while the foundation plan has changes.
+
+The update to per-component secrets works this way. Its release removes `JWT_SECRET` from the scheduler worker and the job containers in place.
+
 ## Secrets and state
 
 - State contains secrets. Treat the state bucket and its key as production access, not build artifacts.
 - Pass secrets only through `TF_VAR_*`. Never put secret fields in `terraform.tfvars`, even empty ones: tfvars values override the environment.
 - The runtime gets secrets through provider secret fields or Lockbox, never through the image.
+- Only the API receives `JWT_SECRET`; the scheduler worker, the job containers, and the migration run without it.
+
+### Extra runtime variables
+
+`extra_runtime_env` holds extra non-secret settings. Extra secrets go in `extra_runtime_secret_env` on DigitalOcean and in `extra_secret_bindings` on Yandex Cloud. By default, each extra variable reaches the API and every job. To narrow one, add it to `extra_env_components` in the production `terraform.tfvars`. Map the variable name to `api`, `jobs`, or job keys from `backend/src/job-schedules.json`:
+
+```hcl
+extra_env_components = {
+  STORE_BUNDLE_ID  = ["api"]
+  STORE_API_SECRET = ["api"]
+}
+```
+
+- Give every variable of one env group the same targets as its secret. The backend refuses a partial group at startup.
+- Keep a variable that every component validates on all components, for example `EMAIL_RESEND_API_KEY` with `EMAIL_DELIVERY`.
+- DigitalOcean runs every job in one scheduler worker, so any job target reaches that worker. Yandex Cloud gives each job its own container.
+- Every plan rejects an unknown name or target, an empty target list, and an extra variable that repeats a built-in one. It also rejects a job key named `api` or `jobs`, because those are target names.
+- Yandex Cloud grants each extra Lockbox secret to the one runtime service account that every container uses. Scoping controls which containers bind the secret, not who may read it.
+
+To scope a variable on an existing install, add the entry and run `infra:apply`: only the foundation outputs change. Then run `release`, which updates the API and job runners in place. Old revisions and deployment history keep the value, so rotate a secret that must stop being exposed.
 
 ## Existing manually created infrastructure
 
@@ -120,6 +150,7 @@ After each migration, `db:deploy` also revokes `PUBLIC` rights on the public sch
 ## Rollback and recovery
 
 - Roll back with a new commit, usually a revert, and a normal release. Never point a service at a mutable tag.
+- To roll back across the per-component secrets update, revert it and release. Never deploy an older image instead: it requires `JWT_SECRET` in the scheduler worker and the job containers, which no longer receive it.
 - Migrations only go forward. Use expand/contract changes so the previous version still works.
 - With external DNS, the first release can fail at the URL checks. Create the records from the provider guide, wait for propagation, and rerun the release instead of recreating resources.
 - After a failed apply, fix the owning configuration and plan again.
