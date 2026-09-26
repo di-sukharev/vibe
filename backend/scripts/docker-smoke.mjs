@@ -232,7 +232,8 @@ try {
   )
   spawnSync(
     'docker',
-    ['volume', 'rm', '--force', `${composeProjectName}_${postgresTestDataVolume}`],
+    ['volume', 'rm', '--force', `${smokeComposeProjectName}_${postgresTestDataVolume}`],
     { cwd: repositoryRoot, env: dockerEnv, stdio: 'ignore' },
   )
+  spawnSync('docker', ['network', 'rm', networkName], { stdio: 'ignore' })
 }
