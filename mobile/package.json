@@ -55,6 +55,7 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
+    "@react-native/metro-config": "0.86.2",
     "@types/react": "~19.2.18",
     "eslint": "9.39.2",
     "eslint-config-expo": "~57.0.1",

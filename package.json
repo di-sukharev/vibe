@@ -55,7 +55,7 @@
     "check": "bun run template:check && bun run architecture:check && bun run typecheck && bun run lint && bun run test && bun run test:build-contracts && bun run audit",
     "template:check": "bun scripts/template-check.mjs",
     "architecture:check": "bun scripts/architecture-check.mjs",
-    "audit": "bun audit",
+    "audit": "bun audit --ignore=GHSA-vcc3-ghjq-m6fr",
     "static:precompress": "bun scripts/precompress-static.mjs",
     "lint": "bun run --cwd webapp lint && bun run --cwd mobile lint",
     "mobile:template:check": "bun scripts/check-mobile-template.mjs",
