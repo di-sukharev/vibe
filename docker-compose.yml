@@ -18,7 +18,8 @@ services:
 
   postgres_test:
     image: postgres:18-alpine
-    restart: unless-stopped
+    # Test runners start and remove this service; it must not come back after a Docker restart.
+    restart: "no"
     environment:
       POSTGRES_DB: web_app_demo_test
       POSTGRES_USER: superuser

@@ -51,8 +51,6 @@ export const liveSuites = [
  * would make configuring one provider look like a half-configured attempt at the other - and
  * refusing to run at all unless the operator holds accounts with both. Only the provider
  * credentials say "run this suite"; the shared settings are then required, not interpreted.
- *
- * Exported so `test-live.test.mjs` can drive it without spawning anything.
  */
 export function selectLiveSuites(env, suites = liveSuites) {
   const selected = []

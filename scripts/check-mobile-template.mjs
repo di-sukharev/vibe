@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { validateCapabilityContract } from './template-check.mjs'
+import { capabilityRows } from './template-check.mjs'
 
 const repositoryRoot = resolve(fileURLToPath(new URL('..', import.meta.url)))
 
@@ -30,16 +30,33 @@ function mobileReleaseErrors({ branch, status, head, originMobile, masterIsAnces
   return errors
 }
 
-const mobileCapabilityContract = {
-  'Payments / subscriptions': 'available',
-  'Push notifications': 'available',
-  'Social sign-in (Apple / Google)': 'available',
-}
+// The mobile line ships exactly these capabilities as `available`; no other row may be `available`.
+const mobileAvailableCapabilities = [
+  'Payments / subscriptions',
+  'Push notifications',
+  'Social sign-in (Apple / Google)',
+]
 
 export function validateMobileCapabilityContract(source) {
-  return validateCapabilityContract(source, mobileCapabilityContract, {
-    exclusiveState: 'available',
-  })
+  const rows = capabilityRows(source) ?? []
+  const states = new Map(rows.map(({ name, state }) => [name, state]))
+  const errors = []
+
+  for (const capability of mobileAvailableCapabilities) {
+    const state = states.get(capability)
+    if (state === undefined) {
+      errors.push(`Capability ledger is missing required capability "${capability}".`)
+    } else if (state !== 'available') {
+      errors.push(`Capability "${capability}" must be "available" for this template, found "${state}".`)
+    }
+  }
+  for (const { name, state } of rows) {
+    if (state === 'available' && !mobileAvailableCapabilities.includes(name)) {
+      errors.push(`Capability "${name}" must not be "available" for this template.`)
+    }
+  }
+
+  return errors
 }
 
 const mobileValidationCommands = [
