@@ -91,7 +91,7 @@ export function AuthPasswordField({
           keyboardType={fieldProps.keyboardType}
           onBlur={fieldProps.onBlur}
           onChangeText={fieldProps.onChangeText}
-          secureTextEntry={presentation.secureTextEntry}
+          secureTextEntry={!isVisible}
           style={styles.passwordInput}
           testID={fieldProps.testID}
           value={fieldProps.value}

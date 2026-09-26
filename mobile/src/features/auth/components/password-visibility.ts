@@ -5,13 +5,17 @@ export type PasswordVisibilitySymbolName = Extract<SymbolViewProps['name'], obje
 export type PasswordVisibilityPresentation = {
   accessibilityValueText: 'hidden' | 'visible';
   actionLabel: string;
-  secureTextEntry: boolean;
   symbolName: PasswordVisibilitySymbolName;
 };
 
 /**
- * Derives the password field's visible/hidden presentation (action label, accessibility value,
- * `secureTextEntry`, and the platform icon name) from the single `isVisible` flag it depends on.
+ * Derives the password field's non-security presentation (action label, accessibility value, and
+ * the platform icon name) from the single `isVisible` flag it depends on.
+ *
+ * `secureTextEntry` stays out of this function and inline at the call site: the Maestro policy
+ * audit (`scripts/e2e/maestro-policy-audit.mjs`) statically checks for the literal
+ * `secureTextEntry={!isVisible}` in the component source, so that guarantee must stay visible
+ * there instead of arriving through a spread.
  */
 export function getPasswordVisibilityPresentation(
   isVisible: boolean,
@@ -19,7 +23,6 @@ export function getPasswordVisibilityPresentation(
   return {
     accessibilityValueText: isVisible ? 'visible' : 'hidden',
     actionLabel: isVisible ? 'Hide password' : 'Show password',
-    secureTextEntry: !isVisible,
     symbolName: {
       android: isVisible ? 'visibility_off' : 'visibility',
       ios: isVisible ? 'eye.slash' : 'eye',
