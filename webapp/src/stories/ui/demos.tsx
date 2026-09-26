@@ -8,13 +8,11 @@ import {
 import { toast } from 'sonner'
 
 import * as AccordionUi from '@/components/ui/accordion'
-import * as AttachmentUi from '@/components/ui/attachment'
 import * as AlertDialogUi from '@/components/ui/alert-dialog'
 import * as AlertUi from '@/components/ui/alert'
 import * as AspectRatioUi from '@/components/ui/aspect-ratio'
 import * as AvatarUi from '@/components/ui/avatar'
 import * as BadgeUi from '@/components/ui/badge'
-import * as BubbleUi from '@/components/ui/bubble'
 import * as BreadcrumbUi from '@/components/ui/breadcrumb'
 import * as ButtonGroupUi from '@/components/ui/button-group'
 import * as ButtonUi from '@/components/ui/button'
@@ -41,9 +39,6 @@ import * as ItemUi from '@/components/ui/item'
 import * as KbdUi from '@/components/ui/kbd'
 import * as LabelUi from '@/components/ui/label'
 import * as MenubarUi from '@/components/ui/menubar'
-import * as MarkerUi from '@/components/ui/marker'
-import * as MessageScrollerUi from '@/components/ui/message-scroller'
-import * as MessageUi from '@/components/ui/message'
 import * as NativeSelectUi from '@/components/ui/native-select'
 import * as NavigationMenuUi from '@/components/ui/navigation-menu'
 import * as PaginationUi from '@/components/ui/pagination'
@@ -595,95 +590,13 @@ function TooltipDemo({ defaultOpen = false }: { defaultOpen?: boolean }) {
   return <DemoSurface><TooltipUi.Tooltip defaultOpen={defaultOpen}><TooltipUi.TooltipTrigger asChild><ButtonUi.Button variant="outline">Hover or focus</ButtonUi.Button></TooltipUi.TooltipTrigger><TooltipUi.TooltipContent>Keyboard shortcut: ⌘K</TooltipUi.TooltipContent></TooltipUi.Tooltip></DemoSurface>
 }
 
-function AttachmentDemo() {
-  return (
-    <DemoSurface>
-      <AttachmentUi.AttachmentGroup>
-        <AttachmentUi.Attachment>
-          <AttachmentUi.AttachmentMedia>PDF</AttachmentUi.AttachmentMedia>
-          <AttachmentUi.AttachmentContent><AttachmentUi.AttachmentTitle>product-brief.pdf</AttachmentUi.AttachmentTitle><AttachmentUi.AttachmentDescription>1.8 MB · ready</AttachmentUi.AttachmentDescription></AttachmentUi.AttachmentContent>
-          <AttachmentUi.AttachmentActions><AttachmentUi.AttachmentAction aria-label="Remove attachment">×</AttachmentUi.AttachmentAction></AttachmentUi.AttachmentActions>
-        </AttachmentUi.Attachment>
-        <AttachmentUi.Attachment state="uploading">
-          <AttachmentUi.AttachmentMedia><SpinnerUi.Spinner /></AttachmentUi.AttachmentMedia>
-          <AttachmentUi.AttachmentContent><AttachmentUi.AttachmentTitle>research.png</AttachmentUi.AttachmentTitle><AttachmentUi.AttachmentDescription>Uploading…</AttachmentUi.AttachmentDescription></AttachmentUi.AttachmentContent>
-        </AttachmentUi.Attachment>
-        <AttachmentUi.Attachment state="error">
-          <AttachmentUi.AttachmentMedia>!</AttachmentUi.AttachmentMedia>
-          <AttachmentUi.AttachmentContent><AttachmentUi.AttachmentTitle>archive.zip</AttachmentUi.AttachmentTitle><AttachmentUi.AttachmentDescription>Upload failed</AttachmentUi.AttachmentDescription></AttachmentUi.AttachmentContent>
-        </AttachmentUi.Attachment>
-      </AttachmentUi.AttachmentGroup>
-    </DemoSurface>
-  )
-}
-
-function BubbleDemo() {
-  return (
-    <DemoSurface>
-      <BubbleUi.BubbleGroup>
-        <BubbleUi.Bubble variant="muted"><BubbleUi.BubbleContent>How should this component behave on mobile?</BubbleUi.BubbleContent></BubbleUi.Bubble>
-        <BubbleUi.Bubble align="end"><BubbleUi.BubbleContent>Keep the controls reachable and let long text wrap.</BubbleUi.BubbleContent><BubbleUi.BubbleReactions>👍 3</BubbleUi.BubbleReactions></BubbleUi.Bubble>
-        <BubbleUi.Bubble variant="destructive"><BubbleUi.BubbleContent>The message could not be sent.</BubbleUi.BubbleContent></BubbleUi.Bubble>
-      </BubbleUi.BubbleGroup>
-    </DemoSurface>
-  )
-}
-
-function MarkerDemo() {
-  return (
-    <DemoSurface>
-      <div className="grid gap-5">
-        <MarkerUi.Marker><MarkerUi.MarkerIcon>●</MarkerUi.MarkerIcon><MarkerUi.MarkerContent>Today</MarkerUi.MarkerContent></MarkerUi.Marker>
-        <MarkerUi.Marker variant="separator"><MarkerUi.MarkerContent>3 unread messages</MarkerUi.MarkerContent></MarkerUi.Marker>
-        <MarkerUi.Marker variant="border"><MarkerUi.MarkerContent>Latest activity</MarkerUi.MarkerContent></MarkerUi.Marker>
-      </div>
-    </DemoSurface>
-  )
-}
-
-function MessageDemo() {
-  return (
-    <DemoSurface>
-      <MessageUi.MessageGroup>
-        <MessageUi.Message>
-          <MessageUi.MessageAvatar>AI</MessageUi.MessageAvatar>
-          <MessageUi.MessageContent><MessageUi.MessageHeader>Assistant · now</MessageUi.MessageHeader><BubbleUi.Bubble variant="muted"><BubbleUi.BubbleContent>I prepared the component inventory.</BubbleUi.BubbleContent></BubbleUi.Bubble><MessageUi.MessageFooter>Delivered</MessageUi.MessageFooter></MessageUi.MessageContent>
-        </MessageUi.Message>
-        <MessageUi.Message align="end">
-          <MessageUi.MessageAvatar>DS</MessageUi.MessageAvatar>
-          <MessageUi.MessageContent><BubbleUi.Bubble align="end"><BubbleUi.BubbleContent>Show me the responsive states too.</BubbleUi.BubbleContent></BubbleUi.Bubble><MessageUi.MessageFooter>Read</MessageUi.MessageFooter></MessageUi.MessageContent>
-        </MessageUi.Message>
-      </MessageUi.MessageGroup>
-    </DemoSurface>
-  )
-}
-
-function MessageScrollerDemo() {
-  return (
-    <DemoSurface>
-      <MessageScrollerUi.MessageScrollerProvider>
-        <MessageScrollerUi.MessageScroller className="h-72 rounded-xl border">
-          <MessageScrollerUi.MessageScrollerViewport>
-            <MessageScrollerUi.MessageScrollerContent className="p-4">
-              {Array.from({ length: 10 }, (_, index) => <MessageScrollerUi.MessageScrollerItem key={index} scrollAnchor={index === 9}><BubbleUi.Bubble align={index % 2 ? 'end' : 'start'} variant={index % 2 ? 'default' : 'muted'}><BubbleUi.BubbleContent>Conversation message {index + 1}</BubbleUi.BubbleContent></BubbleUi.Bubble></MessageScrollerUi.MessageScrollerItem>)}
-            </MessageScrollerUi.MessageScrollerContent>
-          </MessageScrollerUi.MessageScrollerViewport>
-          <MessageScrollerUi.MessageScrollerButton />
-        </MessageScrollerUi.MessageScroller>
-      </MessageScrollerUi.MessageScrollerProvider>
-    </DemoSurface>
-  )
-}
-
 export const uiDemos = {
   accordion: AccordionDemo,
-  attachment: AttachmentDemo,
   alert: AlertDemo,
   'alert-dialog': AlertDialogDemo,
   'aspect-ratio': AspectRatioDemo,
   avatar: AvatarDemo,
   badge: BadgeDemo,
-  bubble: BubbleDemo,
   breadcrumb: BreadcrumbDemo,
   button: ButtonDemo,
   'button-group': ButtonGroupDemo,
@@ -710,9 +623,6 @@ export const uiDemos = {
   kbd: KbdDemo,
   label: LabelDemo,
   menubar: MenubarDemo,
-  marker: MarkerDemo,
-  message: MessageDemo,
-  'message-scroller': MessageScrollerDemo,
   'native-select': NativeSelectDemo,
   'navigation-menu': NavigationMenuDemo,
   pagination: PaginationDemo,

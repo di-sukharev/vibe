@@ -763,7 +763,7 @@ function createTestApis(options: {
   auth = new AuthApi(transport, {
     ...options,
     browserAuthCoordinator: authTransport === 'cookie'
-      ? createBrowserAuthCoordinator(() => undefined, () => false)
+      ? createBrowserAuthCoordinator(() => undefined)
       : undefined,
     getAccessToken: options.getAccessToken,
     getGeneration: () => generation,

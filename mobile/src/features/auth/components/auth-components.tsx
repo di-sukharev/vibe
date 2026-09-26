@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Field, FieldError, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { useUiTheme } from '@/components/ui/theme';
+import { getPasswordVisibilityPresentation } from './password-visibility';
 export { AuthModeTabs } from './auth-mode-tabs';
 export type { AuthMode } from './auth-mode-tabs';
 
@@ -76,7 +77,7 @@ export function AuthPasswordField({
   onToggleVisibility: () => void;
 }) {
   const theme = useUiTheme();
-  const actionLabel = isVisible ? 'Hide password' : 'Show password';
+  const presentation = getPasswordVisibilityPresentation(isVisible);
 
   return (
     <Field>
@@ -90,25 +91,21 @@ export function AuthPasswordField({
           keyboardType={fieldProps.keyboardType}
           onBlur={fieldProps.onBlur}
           onChangeText={fieldProps.onChangeText}
-          secureTextEntry={!isVisible}
+          secureTextEntry={presentation.secureTextEntry}
           style={styles.passwordInput}
           testID={fieldProps.testID}
           value={fieldProps.value}
         />
         <Button
-          accessibilityLabel={actionLabel}
-          accessibilityValue={{ text: isVisible ? 'visible' : 'hidden' }}
+          accessibilityLabel={presentation.actionLabel}
+          accessibilityValue={{ text: presentation.accessibilityValueText }}
           onPress={onToggleVisibility}
           size="icon"
           style={styles.passwordVisibilityButton}
           testID={visibilityButtonTestID}
           variant="ghost">
           <SymbolView
-            name={{
-              ios: isVisible ? 'eye.slash' : 'eye',
-              android: isVisible ? 'visibility_off' : 'visibility',
-              web: isVisible ? 'visibility_off' : 'visibility',
-            }}
+            name={presentation.symbolName}
             size={20}
             tintColor={theme.colors.mutedForeground}
           />

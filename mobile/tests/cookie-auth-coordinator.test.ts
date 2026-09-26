@@ -333,17 +333,36 @@ test('browser auth coordinator runs every mutation inside one exclusive Web Lock
   expect(new Set(lockNames).size).toBe(1);
 });
 
-test('browser auth coordinator fails closed in a browser without Web Locks', async () => {
-  let mutationRan = false;
-  const coordinator = createBrowserAuthCoordinator(
-    () => undefined,
-    () => true,
-  );
+test('browser auth coordinator serializes mutations within the tab when Web Locks are unavailable', async () => {
+  const events: string[] = [];
+  // Expo Web on an insecure origin or an old browser has no `navigator.locks`; the coordinator
+  // then serializes mutations within this tab instead of refusing them.
+  const coordinator = createBrowserAuthCoordinator(() => undefined);
 
-  await expect(coordinator(async () => {
-    mutationRan = true;
-  })).rejects.toMatchObject({ code: 'AUTH_BROWSER_LOCK_UNAVAILABLE' });
-  expect(mutationRan).toBe(false);
+  let releaseFirst!: () => void;
+  const firstCanFinish = new Promise<void>((resolve) => {
+    releaseFirst = resolve;
+  });
+
+  const first = coordinator(async () => {
+    events.push('first:start');
+    await firstCanFinish;
+    events.push('first:end');
+    throw new Error('first mutation failed');
+  });
+  const second = coordinator(async () => {
+    events.push('second:start');
+    return 'second:done';
+  });
+
+  await nextTask();
+  // The second mutation waits behind the first; nothing has run out of order.
+  expect(events).toEqual(['first:start']);
+  releaseFirst();
+
+  await expect(first).rejects.toThrow('first mutation failed');
+  await expect(second).resolves.toBe('second:done');
+  expect(events).toEqual(['first:start', 'first:end', 'second:start']);
 });
 
 test('browser session coordinator accepts remote events and advances its monotonic epoch', async () => {
@@ -717,10 +736,7 @@ function createTestBrowserSessionCoordinator(): TestBrowserSessionCoordinator {
 }
 
 function createTestBrowserAuthCoordinator() {
-  return createBrowserAuthCoordinator(
-    () => undefined,
-    () => false,
-  );
+  return createBrowserAuthCoordinator(() => undefined);
 }
 
 function authResponse(principal: string) {
