@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -9,26 +9,27 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 const workspaceScope = JSON.parse(
   readFileSync(path.join(repositoryRoot, 'packages/contracts/package.json'), 'utf8'),
 ).name.split('/')[0]
+// Every client the workspace could have, kept only for the ones actually checked out. The
+// `mobile` app lives on its own branch: on this one its directory is absent, `clientNames` drops
+// it, and every client-scoped rule below simply has nothing to check there.
+const clientNames = ['webapp', 'website', 'mobile'].filter((name) =>
+  existsSync(path.join(repositoryRoot, name, 'src')),
+)
 const workspaceAliasPattern = new RegExp(
-  `^${workspaceScope.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/(backend|contracts|webapp|website|mobile)(?:/(.*))?$`,
+  `^${workspaceScope.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/(backend|contracts|${clientNames.join('|')})(?:/(.*))?$`,
 )
 const sourceRoots = [
   'backend/src',
   'packages/contracts/src',
-  'webapp/src',
-  'website/src',
-  'mobile/src',
+  ...clientNames.map((name) => `${name}/src`),
 ]
 const sourceExtension = /\.(?:[cm]?[jt]sx?)$/
-const importPattern = /(?:^|\n)\s*(?:import|export)\s+(?:type\s+)?(?:[\s\S]*?\s+from\s+)?['"]([^'"]+)['"]/g
+// The clause before `from` cannot cross a quote, so a side-effect import (`import 'x'`) is not
+// swallowed into the next statement's `from '...'`.
+const importPattern = /(?:^|\n)\s*(?:import|export)\s+(?:type\s+)?(?:[^'"]*?\s+from\s+)?['"]([^'"]+)['"]/g
 const runtimeModulePattern = /\b(?:import|require)\s*\(\s*['"]([^'"]+)['"]\s*\)/g
-/**
- * Packages that belong to a delivery mechanism, not to business rules. Application layers and the
- * shared contracts both refuse them, for the same reason and with the same list.
- */
-const frameworkPackages = ['@prisma/', 'hono', '@aws-sdk/', 'expo-', 'react', 'react-native', 'jose']
-const applicationForbiddenPackages = frameworkPackages
-const contractForbiddenPackages = frameworkPackages
+const innerLayerAllowedPackages = [`${workspaceScope}/contracts`, 'zod']
+const contractAllowedPackages = ['zod']
 const transportForbiddenPackages = ['@prisma/', '@aws-sdk/', 'jose', 'pg']
 
 export function checkArchitectureSources(files) {
@@ -58,6 +59,8 @@ export function checkArchitectureSources(files) {
       checkContracts(normalizedPath, imported.specifier, report)
     }
   }
+
+  checkClientFeatureCycles(files, violations)
 
   return violations.sort((left, right) =>
     left.path.localeCompare(right.path) || left.line - right.line || left.rule.localeCompare(right.rule),
@@ -91,54 +94,134 @@ async function main() {
 
 function checkBackendLayers(filePath, specifier, report) {
   const layer = filePath.match(
-    /^backend\/src\/modules\/[^/]+\/(domain|application|transport|infrastructure)\//,
+    /^backend\/src\/modules\/[^/]+\/(domain|application|infrastructure|transport)\//,
   )?.[1]
   if (!layer) return
 
-  const forbiddenPackage = applicationForbiddenPackages.find((name) => packageMatches(specifier, name))
-  const importsPrisma = specifier.includes('generated/prisma') || packageMatches(specifier, '@prisma/')
   const target = resolveRepositoryImport(filePath, specifier)
-  const targetLayer = target?.match(/^backend\/src\/modules\/[^/]+\/(domain|application|transport|infrastructure)(?:\/|$)/)?.[1]
+  const targetLayer = target?.match(
+    /^backend\/src\/modules\/[^/]+\/(domain|application|infrastructure|transport)(?:\/|$)/,
+  )?.[1]
+  const forbiddenPackage =
+    isPackageImport(specifier) &&
+    !packageAllowed(specifier, innerLayerAllowedPackages, filePath)
+  const importsPrisma =
+    specifier.includes('generated/prisma') ||
+    packageMatches(specifier, '@prisma/') ||
+    target?.startsWith('backend/src/generated/prisma')
+  // Backend code outside the modules is runtime: env, db, HTTP, storage and email adapters. Inner
+  // layers reach it only through a `port` file, which holds types and no provider code.
+  const importsBackendRuntime =
+    target?.startsWith('backend/src/') &&
+    !target.startsWith('backend/src/modules/') &&
+    !target.endsWith('/port')
 
-  if ((layer === 'domain' || layer === 'application') && (forbiddenPackage || importsPrisma)) {
+  if (
+    (layer === 'domain' || layer === 'application') &&
+    (forbiddenPackage || importsPrisma || importsBackendRuntime)
+  ) {
     report(
       `backend-${layer}-dependencies`,
       `${layer} must not import framework, persistence, environment, or provider SDK code (${specifier}).`,
     )
   }
 
-  if (
-    (layer === 'domain' || layer === 'application') &&
-    (specifier.includes('/env') || specifier.endsWith('/env'))
-  ) {
+  const invalidInnerTarget =
+    (layer === 'domain' && targetLayer && targetLayer !== 'domain') ||
+    (layer === 'application' &&
+      (targetLayer === 'infrastructure' || targetLayer === 'transport'))
+
+  if (invalidInnerTarget && !importsBackendRuntime) {
     report(
       `backend-${layer}-dependencies`,
-      `${layer} must depend on feature types and ports, not environment or infrastructure (${specifier}).`,
+      `${layer} must depend on domain types and application ports, not outer layers (${specifier}).`,
     )
   }
 
   if (
     layer === 'transport' &&
-    (importsPrisma || transportForbiddenPackages.some((name) => packageMatches(specifier, name)))
+    (
+      importsPrisma ||
+      target === 'backend/src/db' ||
+      targetLayer === 'infrastructure' ||
+      transportForbiddenPackages.some((name) => packageMatches(specifier, name))
+    )
   ) {
     report(
       'backend-transport-dependencies',
-      `transport must not import persistence or provider SDK code (${specifier}).`,
+      `transport must not import persistence, module infrastructure, or provider SDK code (${specifier}).`,
     )
   }
 
-  const invalidTargetLayer =
-    (layer === 'domain' && targetLayer && targetLayer !== 'domain') ||
-    (layer === 'application' && (targetLayer === 'transport' || targetLayer === 'infrastructure')) ||
-    (layer === 'transport' && targetLayer === 'infrastructure') ||
-    (layer === 'infrastructure' && targetLayer === 'transport')
-
-  if (invalidTargetLayer) {
+  if (
+    layer === 'infrastructure' &&
+    (target?.startsWith('backend/src/http/') || targetLayer === 'transport')
+  ) {
     report(
-      `backend-${layer}-dependencies`,
-      `${layer} must not depend on outer backend layer ${targetLayer} (${specifier}).`,
+      'backend-infrastructure-dependencies',
+      `infrastructure must not depend on HTTP transport code (${specifier}).`,
     )
   }
+}
+
+function checkClientFeatureCycles(files, violations) {
+  for (const client of clientNames) {
+    const edges = []
+    const graph = new Map()
+
+    for (const file of files) {
+      const normalizedPath = normalizePath(file.path)
+      const sourceFeature = normalizedPath.match(
+        new RegExp(`^${client}/src/features/([^/]+)/`),
+      )?.[1]
+      if (!sourceFeature) continue
+
+      for (const imported of staticImports(file.source)) {
+        const target = resolveRepositoryImport(normalizedPath, imported.specifier)
+        const targetFeature = target?.match(
+          new RegExp(`^${client}/src/features/([^/]+)(?:/|$)`),
+        )?.[1]
+        if (!targetFeature || targetFeature === sourceFeature) continue
+
+        const edge = {
+          source: sourceFeature,
+          target: targetFeature,
+          path: normalizedPath,
+          line: imported.line,
+          specifier: imported.specifier,
+        }
+        edges.push(edge)
+        const targets = graph.get(sourceFeature) ?? new Set()
+        targets.add(targetFeature)
+        graph.set(sourceFeature, targets)
+      }
+    }
+
+    for (const edge of edges) {
+      if (!hasGraphPath(graph, edge.target, edge.source)) continue
+      violations.push({
+        path: edge.path,
+        line: edge.line,
+        rule: 'client-feature-cycle',
+        message: `feature dependency ${edge.source} -> ${edge.target} creates a cycle (${edge.specifier}). Move collaboration into composition or an owning port.`,
+      })
+    }
+  }
+}
+
+function hasGraphPath(graph, start, target) {
+  const pending = [start]
+  const visited = new Set()
+
+  while (pending.length > 0) {
+    const current = pending.pop()
+    if (!current || visited.has(current)) continue
+    if (current === target) return true
+    visited.add(current)
+    pending.push(...(graph.get(current) ?? []))
+  }
+
+  return false
 }
 
 /**
@@ -163,7 +246,7 @@ function checkBackendModuleBoundary(filePath, specifier, report) {
   const match = target?.match(/^backend\/src\/modules\/([^/]+)(?:\/(.*))?$/)
   if (!match || match[1] === sourceModule) return
 
-  if (match[2] && match[2] !== 'index' && match[2] !== 'index.ts') {
+  if (match[2]) {
     const boundaryMessage = sourceModule
       ? `module ${sourceModule} must import module ${match[1]}`
       : `code outside module ${match[1]} must import it`
@@ -175,7 +258,7 @@ function checkBackendModuleBoundary(filePath, specifier, report) {
 }
 
 function checkClientBoundary(filePath, specifier, report) {
-  const client = filePath.match(/^(webapp|website|mobile)\/src\//)?.[1]
+  const client = filePath.match(new RegExp(`^(${clientNames.join('|')})/src/`))?.[1]
   if (!client) return
 
   const target = resolveRepositoryImport(filePath, specifier)
@@ -183,7 +266,7 @@ function checkClientBoundary(filePath, specifier, report) {
 
   const sourceFeature = filePath.match(new RegExp(`^${client}/src/features/([^/]+)/`))?.[1]
   const targetFeature = target.match(new RegExp(`^${client}/src/features/([^/]+)(?:/(.*))?$`))
-  if (targetFeature && targetFeature[2] && targetFeature[2] !== 'index' && targetFeature[2] !== 'index.ts') {
+  if (targetFeature?.[2]) {
     const crossesPublicBoundary = !sourceFeature || targetFeature[1] !== sourceFeature
     if (crossesPublicBoundary) {
       report(
@@ -209,7 +292,9 @@ function checkContracts(filePath, specifier, report) {
 
   const target = resolveRepositoryImport(filePath, specifier)
   const forbiddenTarget = target && /^(backend|webapp|website|mobile)\//.test(target)
-  const forbiddenPackage = contractForbiddenPackages.some((name) => packageMatches(specifier, name))
+  const forbiddenPackage =
+    isPackageImport(specifier) &&
+    !packageAllowed(specifier, contractAllowedPackages, filePath)
   if (forbiddenTarget || forbiddenPackage) {
     report(
       'contracts-dependency-direction',
@@ -218,7 +303,18 @@ function checkContracts(filePath, specifier, report) {
   }
 }
 
+/**
+ * Returns the imported module as an extensionless repository path, with any trailing `/index`
+ * dropped, so `../env`, `../env.js`, and `../env.ts` all resolve to `backend/src/env` and every
+ * rule below compares one spelling. Bundler resolution maps `.js` onto `.ts`, so all of them
+ * compile.
+ */
 function resolveRepositoryImport(importer, specifier) {
+  const target = resolveRepositoryPath(importer, specifier)
+  return target?.replace(/\.[cm]?[jt]sx?$/, '').replace(/\/index$/, '') ?? null
+}
+
+function resolveRepositoryPath(importer, specifier) {
   if (specifier.startsWith('.')) {
     return normalizePath(path.normalize(path.join(path.dirname(importer), specifier)))
   }
@@ -277,6 +373,15 @@ function normalizePath(filePath) {
 function packageMatches(specifier, packagePrefix) {
   if (packagePrefix.endsWith('/')) return specifier.startsWith(packagePrefix)
   return specifier === packagePrefix || specifier.startsWith(`${packagePrefix}/`)
+}
+
+function isPackageImport(specifier) {
+  return !specifier.startsWith('.') && !specifier.startsWith('@/')
+}
+
+function packageAllowed(specifier, allowedPackages, filePath) {
+  if (/\.test\.[cm]?[jt]sx?$/.test(filePath) && specifier === 'bun:test') return true
+  return allowedPackages.some((allowed) => packageMatches(specifier, allowed))
 }
 
 if (import.meta.main) await main()

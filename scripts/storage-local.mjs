@@ -1,5 +1,7 @@
 #!/usr/bin/env bun
 import { spawnSync } from 'node:child_process'
+import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
 
 import {
   browserUploadAllowedHeaders,
@@ -57,6 +59,11 @@ function printUsage() {
 const port = defaultPrivateStorageS3Port
 const endpoint = localPrivateStorageEndpoint(port)
 const composeArgs = ['compose', '-p', composeProjectName]
+const backendRequire = createRequire(new URL('../backend/package.json', import.meta.url))
+
+function loadS3Sdk() {
+  return import(pathToFileURL(backendRequire.resolve('@aws-sdk/client-s3')).href)
+}
 
 function run(command, args, { spawn = spawnSync, env = composeEnv() } = {}) {
   const result = spawn(command, args, { cwd: repositoryRoot, env, stdio: 'inherit' })
@@ -67,7 +74,7 @@ function run(command, args, { spawn = spawnSync, env = composeEnv() } = {}) {
 }
 
 function createLiveS3Client() {
-  return import('@aws-sdk/client-s3').then(({ S3Client }) => ({
+  return loadS3Sdk().then(({ S3Client }) => ({
     client: new S3Client({
       endpoint,
       region: 'us-east-1',
@@ -82,7 +89,7 @@ function createLiveS3Client() {
 }
 
 async function bucketIsReachable(createS3Client) {
-  const { HeadBucketCommand } = await import('@aws-sdk/client-s3')
+  const { HeadBucketCommand } = await loadS3Sdk()
   const { client } = await createS3Client()
 
   try {
@@ -132,7 +139,7 @@ function corsOrigins({ anyOrigin = false } = {}) {
 }
 
 async function applyBucketCors({ createS3Client, anyOrigin = false }) {
-  const { CreateBucketCommand, PutBucketCorsCommand } = await import('@aws-sdk/client-s3')
+  const { CreateBucketCommand, PutBucketCorsCommand } = await loadS3Sdk()
   const { client } = await createS3Client()
 
   try {

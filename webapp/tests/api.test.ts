@@ -2,6 +2,7 @@ import { afterEach, expect, test } from 'bun:test'
 
 import { AuthApi } from '../src/features/auth/api'
 import { bootstrapAuthSession } from '../src/features/auth/bootstrap'
+import { createBrowserAuthCoordinator } from '../src/features/auth/browser-auth-coordinator'
 import { publishBrowserSessionState } from '../src/features/auth/session-coordinator'
 import { ApiRequestError } from '../src/platform/api'
 
@@ -9,6 +10,36 @@ const originalFetch = globalThis.fetch
 
 afterEach(() => {
   globalThis.fetch = originalFetch
+})
+
+test('a browser without Web Locks still serializes cookie auth mutations within the tab', async () => {
+  // Web Locks exist only in secure contexts, so plain http on a LAN address has none. The lock is a
+  // cross-tab optimization; the server enforces rotation and reuse rules, so sign-in must still work.
+  const coordinator = createBrowserAuthCoordinator(() => undefined)
+  const events: string[] = []
+  let releaseFirst = () => {}
+  const firstGate = new Promise<void>((resolve) => {
+    releaseFirst = resolve
+  })
+
+  const first = coordinator(async () => {
+    events.push('first:start')
+    await firstGate
+    events.push('first:end')
+    throw new Error('first failed')
+  })
+  const second = coordinator(async () => {
+    events.push('second:start')
+    return 'second'
+  })
+
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  expect(events).toEqual(['first:start'])
+  releaseFirst()
+
+  await expect(first).rejects.toThrow('first failed')
+  await expect(second).resolves.toBe('second')
+  expect(events).toEqual(['first:start', 'first:end', 'second:start'])
 })
 
 test('AuthApi refreshes and retries authenticated requests with the new access token', async () => {

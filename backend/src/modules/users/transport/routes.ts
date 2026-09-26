@@ -13,6 +13,7 @@ import { createRoute, OpenAPIHono } from '@hono/zod-openapi'
 import type { MiddlewareHandler } from 'hono'
 
 import { validationErrorHook } from '../../../http/errors'
+import { ingressErrorResponses, rateLimitErrorResponses } from '../../../http/openapi'
 import type { AuthHttpEnv } from '../../auth'
 import type { UsersService } from '../application/users-service'
 import { executeUsers } from './errors'
@@ -39,14 +40,13 @@ const updateProfileRoute = createRoute({
     },
   },
   responses: {
+    ...ingressErrorResponses,
     200: {
       content: { 'application/json': { schema: updateProfileResponseSchema } },
       description: 'Updated current user profile',
     },
     400: { content: errorContent, description: 'Invalid payload' },
     401: { content: errorContent, description: 'Authentication required' },
-    413: { content: errorContent, description: 'Request body is too large' },
-    429: { content: errorContent, description: 'Too many requests' },
   },
 })
 
@@ -72,6 +72,7 @@ const listUsersRoute = createRoute({
     query: adminUsersQuerySchema,
   },
   responses: {
+    ...rateLimitErrorResponses,
     200: {
       content: { 'application/json': { schema: adminUsersResponseSchema } },
       description: 'Paginated users',
@@ -79,7 +80,6 @@ const listUsersRoute = createRoute({
     400: { content: errorContent, description: 'Invalid query' },
     401: { content: errorContent, description: 'Authentication required' },
     403: { content: errorContent, description: 'Administrator access required' },
-    429: { content: errorContent, description: 'Too many requests' },
   },
 })
 
@@ -98,6 +98,7 @@ const updateRoleRoute = createRoute({
     },
   },
   responses: {
+    ...ingressErrorResponses,
     200: {
       content: { 'application/json': { schema: updateUserRoleResponseSchema } },
       description: 'Updated user role',
@@ -107,8 +108,6 @@ const updateRoleRoute = createRoute({
     403: { content: errorContent, description: 'Administrator access required' },
     404: { content: errorContent, description: 'User not found' },
     409: { content: errorContent, description: 'Role update conflict' },
-    413: { content: errorContent, description: 'Request body is too large' },
-    429: { content: errorContent, description: 'Too many requests' },
   },
 })
 

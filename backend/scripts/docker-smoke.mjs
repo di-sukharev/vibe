@@ -4,7 +4,6 @@ import {
   assertTestDatabaseUrl,
   composeEnv,
   composeProjectName,
-  defaultPostgresTestPort,
   defaultTestDatabaseUrl,
   postgresPortFromDatabaseUrl,
   postgresTestDataVolume,
@@ -18,10 +17,15 @@ const containerName =
   process.env.BACKEND_DOCKER_SMOKE_CONTAINER ??
   `vibecoding-template-backend-smoke-${repositoryHash}-${process.pid}`
 const hostPort = process.env.BACKEND_DOCKER_SMOKE_PORT ?? String(await findOpenPort())
-const networkName = `${composeProjectName}_default`
-const composeArgs = ['compose', '-p', composeProjectName]
+const smokeComposeProjectName = `${composeProjectName}-backend-smoke-${process.pid}`
+const networkName = `${smokeComposeProjectName}_default`
+const composeArgs = ['compose', '-p', smokeComposeProjectName]
+const postgresHostPort =
+  process.env.BACKEND_DOCKER_SMOKE_POSTGRES_PORT ??
+  String(await findOpenPort(new Set([Number(hostPort)])))
 const databaseUrlForHost =
-  process.env.TEST_DATABASE_URL ?? defaultTestDatabaseUrl(defaultPostgresTestPort)
+  process.env.BACKEND_DOCKER_SMOKE_HOST_DATABASE_URL ??
+  defaultTestDatabaseUrl(postgresHostPort)
 const databaseUrlForContainer =
   process.env.BACKEND_DOCKER_SMOKE_DATABASE_URL ??
   'postgresql://superuser:superpassword@postgres_test:5432/web_app_demo_test?schema=public'
@@ -30,6 +34,7 @@ assertTestDatabaseUrl(databaseUrlForContainer, {
   allowEnvName: 'BACKEND_DOCKER_SMOKE_ALLOW_NON_TEST_DATABASE',
 })
 const dockerEnv = composeEnv({
+  COMPOSE_PROJECT_NAME: smokeComposeProjectName,
   POSTGRES_TEST_PORT: postgresPortFromDatabaseUrl(databaseUrlForHost),
 })
 
@@ -45,7 +50,7 @@ function run(command, args, options = {}) {
   }
 }
 
-function findOpenPort() {
+function findOpenPort(excludedPorts = new Set()) {
   return new Promise((resolve, reject) => {
     const server = createServer()
 
@@ -54,6 +59,10 @@ function findOpenPort() {
       const address = server.address()
       server.close(() => {
         if (address && typeof address === 'object') {
+          if (excludedPorts.has(address.port)) {
+            findOpenPort(excludedPorts).then(resolve, reject)
+            return
+          }
           resolve(address.port)
           return
         }
@@ -157,6 +166,39 @@ async function smokeAuthApi() {
   process.stdout.write('Backend Docker DB-backed auth smoke passed\n')
 }
 
+/**
+ * Removes only this run's resources: its backend container, and its per-PID Compose project's
+ * database container, volume, and network. `down --volumes` is avoided on purpose: it cannot be
+ * scoped to a service, and the optional local storage volume must survive a smoke run.
+ */
+let cleanedUp = false
+
+function cleanUp() {
+  if (cleanedUp) return
+  cleanedUp = true
+  spawnSync('docker', ['rm', '-f', containerName], { stdio: 'ignore' })
+  spawnSync(
+    'docker',
+    [...composeArgs, 'rm', '--stop', '--force', '--volumes', postgresTestService],
+    { cwd: repositoryRoot, env: dockerEnv, stdio: 'inherit' },
+  )
+  spawnSync(
+    'docker',
+    ['volume', 'rm', '--force', `${smokeComposeProjectName}_${postgresTestDataVolume}`],
+    { cwd: repositoryRoot, env: dockerEnv, stdio: 'ignore' },
+  )
+  spawnSync('docker', ['network', 'rm', networkName], { stdio: 'ignore' })
+}
+
+// The resource names carry this run's PID, so no later run can find what an interrupted one
+// leaves behind. Ctrl+C or a kill must clean up here, before the process exits.
+for (const [signal, exitCode] of [['SIGINT', 130], ['SIGTERM', 143]]) {
+  process.once(signal, () => {
+    cleanUp()
+    process.exit(exitCode)
+  })
+}
+
 try {
   run('docker', [...composeArgs, 'up', '-d', 'postgres_test'], { env: dockerEnv })
   await waitForComposePostgres()
@@ -213,17 +255,5 @@ try {
   await waitForHealth()
   await smokeAuthApi()
 } finally {
-  spawnSync('docker', ['rm', '-f', containerName], { stdio: 'ignore' })
-  // Only the database this smoke test started. `down --volumes` cannot be scoped to a service,
-  // so it would also delete the optional local storage volume and the uploads inside it.
-  spawnSync(
-    'docker',
-    [...composeArgs, 'rm', '--stop', '--force', '--volumes', postgresTestService],
-    { cwd: repositoryRoot, env: dockerEnv, stdio: 'inherit' },
-  )
-  spawnSync(
-    'docker',
-    ['volume', 'rm', '--force', `${composeProjectName}_${postgresTestDataVolume}`],
-    { cwd: repositoryRoot, env: dockerEnv, stdio: 'ignore' },
-  )
+  cleanUp()
 }
