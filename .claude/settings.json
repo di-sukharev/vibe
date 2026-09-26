@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(git stash *)",
+      "Bash(git reset --hard *)",
+      "Bash(git clean *)",
+      "Bash(git checkout -- *)",
+      "Bash(git checkout .)",
+      "Bash(git restore .)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git push * --force*)",
+      "Bash(git push * -f*)",
+      "Bash(terraform apply *)",
+      "Bash(terraform destroy *)",
+      "Bash(terraform state *)",
+      "Bash(terraform import *)",
+      "Bash(terraform -chdir=* apply*)",
+      "Bash(terraform -chdir=* destroy*)",
+      "Bash(terraform -chdir=* state *)",
+      "Bash(terraform -chdir=* import *)"
+    ]
+  }
+}
