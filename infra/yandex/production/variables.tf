@@ -263,6 +263,11 @@ variable "extra_runtime_env" {
   description = "Non-secret provider/product settings for the API and job containers; extra_env_components can scope each one."
   type        = map(string)
   default     = {}
+
+  validation {
+    condition     = trimspace(lookup(var.extra_runtime_env, "INGRESS_RATE_LIMIT_PROVIDER", "")) != "yandex-sws"
+    error_message = "INGRESS_RATE_LIMIT_PROVIDER = \"yandex-sws\" was removed: the API always enforces its per-address write limits, and the backend refuses to start with it. Delete INGRESS_RATE_LIMIT_PROVIDER from extra_runtime_env (docs/YANDEX_CLOUD.md#removed-smart-web-security-mode)."
+  }
 }
 
 variable "extra_secret_bindings" {

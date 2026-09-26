@@ -102,37 +102,6 @@ test('account mutations share bounded write-rate protection', async () => {
   expect(limited.headers.get('retry-after')).toBeTruthy()
 })
 
-test('Yandex SWS ingress delegates IP request limits while retaining body limits', async () => {
-  // With `yandex-sws`, Smart Web Security at the edge replaces the per-address budgets. Nothing
-  // replaces the body limits, so handing one to the edge must not drop the other.
-  const app = createApp({
-    env: {
-      ...env,
-      AUTH_BODY_LIMIT_BYTES: 32,
-      AUTH_RATE_LIMIT_MAX: 1,
-      INGRESS_RATE_LIMIT_PROVIDER: 'yandex-sws',
-      TRUST_PROXY: true,
-      TRUSTED_PROXY_CLIENT_IP_HEADER: 'x-forwarded-for',
-      TRUSTED_PROXY_CLIENT_IP_POSITION: 'last',
-    },
-    prisma: {} as DbClient,
-  })
-  const request = (method: string, path: string, body: unknown) => app.request(path, {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-
-  // Two requests per budget of one: a local limiter would answer the second with 429. With
-  // billing switched on (docs/IAP.md), `/api/iap` and `/api/webhooks` belong in this loop too.
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    expect((await request('POST', '/api/auth/register', {})).status).toBe(400)
-    expect((await request('PATCH', '/api/users/me', {})).status).toBe(401)
-  }
-  expect((await request('PATCH', '/api/users/me', { displayName: 'x'.repeat(64) })).status)
-    .toBe(413)
-})
-
 test('responses carry the secure headers', async () => {
   const { app } = createHealthTestApp({ databaseAvailable: true })
 

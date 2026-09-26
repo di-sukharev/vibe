@@ -353,29 +353,21 @@ describe('loadEnv', () => {
     ).not.toThrow()
   })
 
-  test('requires the documented trusted proxy contract for Yandex SWS ingress', () => {
-    const baseEnv = {
+  test('refuses the removed Yandex SWS ingress mode instead of silently changing limits', () => {
+    // An old install may still pass the setting that once switched the per-address limits off.
+    // The limits are always on now, so the process names the setting rather than ignoring it.
+    const yandexProxyEnv = {
       DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
       JWT_SECRET: '12345678901234567890123456789012',
-      INGRESS_RATE_LIMIT_PROVIDER: 'yandex-sws',
       TRUST_PROXY: 'true',
       TRUSTED_PROXY_CLIENT_IP_HEADER: 'x-forwarded-for',
       TRUSTED_PROXY_CLIENT_IP_POSITION: 'last',
     }
 
-    expect(loadEnv(baseEnv).INGRESS_RATE_LIMIT_PROVIDER).toBe('yandex-sws')
-    expect(() => loadEnv({ ...baseEnv, INGRESS_RATE_LIMIT_PROVIDER: 'unsupported' }))
+    expect(() => loadEnv({ ...yandexProxyEnv, INGRESS_RATE_LIMIT_PROVIDER: 'yandex-sws' }))
       .toThrow('INGRESS_RATE_LIMIT_PROVIDER')
-    expect(() => loadEnv({ ...baseEnv, TRUST_PROXY: 'false' }))
-      .toThrow('INGRESS_RATE_LIMIT_PROVIDER')
-    expect(() => loadEnv({
-      ...baseEnv,
-      TRUSTED_PROXY_CLIENT_IP_HEADER: 'do-connecting-ip',
-    })).toThrow('INGRESS_RATE_LIMIT_PROVIDER')
-    expect(() => loadEnv({
-      ...baseEnv,
-      TRUSTED_PROXY_CLIENT_IP_POSITION: 'first',
-    })).toThrow('INGRESS_RATE_LIMIT_PROVIDER')
+    expect(() => loadEnv({ ...yandexProxyEnv, INGRESS_RATE_LIMIT_PROVIDER: 'local' }))
+      .not.toThrow()
   })
 })
 

@@ -10,6 +10,7 @@ import { createRoute, OpenAPIHono } from '@hono/zod-openapi'
 import type { Context } from 'hono'
 
 import { AppError, errorResponse } from '../../../http/errors'
+import { ingressErrorResponses } from '../../../http/openapi'
 import type { AuthenticatedPrincipal } from '../../auth'
 import type { NotificationService } from '../application/notification-service'
 
@@ -42,6 +43,7 @@ const registerPushTokenRoute = createRoute({
     },
   },
   responses: {
+    ...ingressErrorResponses,
     200: {
       content: mutationResponseContent,
       description: 'Registered Expo push token for the current user',
@@ -78,6 +80,7 @@ const unregisterPushTokenRoute = createRoute({
     },
   },
   responses: {
+    ...ingressErrorResponses,
     200: {
       content: mutationResponseContent,
       description: 'Unregistered one or all Expo push tokens for the current user',
@@ -110,6 +113,7 @@ const testPushRoute = createRoute({
     },
   },
   responses: {
+    ...ingressErrorResponses,
     200: {
       content: {
         'application/json': {
@@ -135,8 +139,8 @@ const testPushRoute = createRoute({
       description: 'Test push endpoint is disabled',
     },
     429: {
-      content: errorResponseContent,
-      description: 'Test push quota exceeded',
+      ...ingressErrorResponses[429],
+      description: 'Too many requests from this address, or the per-user test push quota is spent',
     },
   },
 })

@@ -90,6 +90,18 @@ Only a separate operator identity can restore a media version: the IaC and runti
 - Timers retry a failed call 3 times, 30 seconds apart. The HTTP job contract is in [BACKGROUND_JOBS](BACKGROUND_JOBS.md).
 - The API trusts the last `X-Forwarded-For` hop from Yandex ingress. Never expose the container through an untrusted proxy chain.
 
+## Removed Smart Web Security mode
+
+Earlier `mobile` versions accepted `INGRESS_RATE_LIMIT_PROVIDER=yandex-sws` in `extra_runtime_env`. It turned off the API's per-address write limits and relied on a Smart Web Security profile that no Terraform root created. The API now always enforces those limits and counts them in PostgreSQL (`RATE_LIMIT_STORE=database`). The Terraform gateway spec never attached a security profile, so the edge does not change.
+
+With the old value in `terraform.tfvars`, `infra:plan` and `infra:apply` stop at an `extra_runtime_env` validation error before any change, and `release` refuses. The backend also refuses to start with it. To upgrade:
+
+1. Delete `INGRESS_RATE_LIMIT_PROVIDER` from `extra_runtime_env`, and from `extra_env_components` if it is listed there.
+2. Run `bun run infra:apply -- yandex`. It changes only the foundation outputs; the plan must show no destroy.
+3. Run `bun run infra:plan -- yandex`, review the release roots, and release as usual. The new API revision enforces the limits from its first request.
+
+A security profile you created by hand is outside Terraform: nothing updates or deletes it. Delete it in the console when you no longer need it.
+
 ## Alerts
 
 The pinned provider cannot create Monitoring alerts or channels. After the first release, create these by hand once per folder; recreate them if the folder or containers are recreated. Get the job container IDs (`<project_slug>-prod-<key>`, with the `key` from `job-schedules.json`) from `yc serverless container list --folder-id <folder_id>`. References: [alerts](https://yandex.cloud/en/docs/monitoring/concepts/alerting/alert), [Serverless Containers metrics](https://yandex.cloud/en/docs/monitoring/metrics-ref/serverless-containers-ref).

@@ -15,7 +15,7 @@ Both clouds use Managed PostgreSQL 18, a container registry, and private version
 
 The start profile (one database node, one DigitalOcean API instance) is cheap, not highly available. Scale up before the load grows.
 
-`RATE_LIMIT_STORE` sets where auth and admin rate limits count. DigitalOcean runs one API process with the default `memory`. Yandex containers scale out (`concurrency` limits requests per instance, not the instance count), so Terraform sets `database`. Self-hosting with several API processes also needs `database`.
+`RATE_LIMIT_STORE` sets where the per-address and admin rate limits count. DigitalOcean runs one API process with the default `memory`. Yandex containers scale out (`concurrency` limits requests per instance, not the instance count), so Terraform sets `database`. Self-hosting with several API processes also needs `database`.
 
 ## Release order
 

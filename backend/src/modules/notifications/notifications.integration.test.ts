@@ -873,6 +873,56 @@ describe('push notification API and outbox', () => {
     })).toBe(0)
   })
 
+  test('notification writes carry an ingress body limit and their own per-address budget', async () => {
+    // Production settings: a trusted proxy header and counters in PostgreSQL. The limits run
+    // before authentication, so an anonymous flood never reaches the session lookup.
+    await prisma.rateLimitBucket.deleteMany({ where: { policy: 'notifications' } })
+    await prisma.rateLimitBucket.deleteMany({
+      where: { key: '198.51.100.40', policy: { in: ['account', 'auth'] } },
+    })
+    const limitedApp = createApp({
+      env: {
+        ...env,
+        AUTH_BODY_LIMIT_BYTES: 1024,
+        AUTH_RATE_LIMIT_MAX: 2,
+        RATE_LIMIT_STORE: 'database',
+        TRUST_PROXY: true,
+        TRUSTED_PROXY_CLIENT_IP_HEADER: 'x-forwarded-for',
+      },
+      prisma,
+    })
+    const post = (path: string, body: unknown, clientIp = '198.51.100.40') =>
+      limitedApp.request(`/api/notifications${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': clientIp },
+        body: JSON.stringify(body),
+      })
+
+    expect((await post('/push-token', { deviceId: 'x'.repeat(2048) })).status).toBe(413)
+
+    const registration = { expoPushToken: 'ExponentPushToken[ingress-budget]' }
+    expect((await post('/push-token', registration)).status).toBe(401)
+    expect((await post('/push-token/unregister', {})).status).toBe(401)
+    const limited = await post('/test-push', {})
+    expect(limited.status).toBe(429)
+    expect(Number(limited.headers.get('retry-after'))).toBeGreaterThan(0)
+    expect((await post('/push-token', registration, '198.51.100.41')).status).toBe(401)
+    expect(await prisma.rateLimitBucket.count({ where: { policy: 'notifications' } })).toBeGreaterThan(0)
+
+    // The spent notifications budget leaves the account and sign-in budgets of the same address.
+    const sameAddress = { 'Content-Type': 'application/json', 'X-Forwarded-For': '198.51.100.40' }
+    expect((await limitedApp.request('/api/users/me', {
+      method: 'PATCH',
+      headers: sameAddress,
+      body: JSON.stringify({}),
+    })).status).toBe(401)
+    expect((await limitedApp.request('/api/auth/token/login', {
+      method: 'POST',
+      headers: sameAddress,
+      body: JSON.stringify({}),
+    })).status).toBe(400)
+  })
+
   test('keeps test push disabled by default and durably limits enabled requests', async () => {
     const disabled = await app.request('/api/notifications/test-push', {
       method: 'POST',

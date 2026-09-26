@@ -262,30 +262,6 @@ describe('users and admin API integration', () => {
     expect((await read(otherAdmin.accessToken, 'second', '203.0.113.10')).status).toBe(200)
   })
 
-  test('keeps the directory read budget when Yandex SWS takes over the address budgets', async () => {
-    // The edge policy replaces only the per-address budgets. It cannot tell administrators apart,
-    // so the per-administrator budget has to stay in this process.
-    const admin = await register('edge-budget-admin@example.com')
-    await prisma.user.update({ where: { id: admin.user.id }, data: { role: 'admin' } })
-    const edgeApp = createApp({
-      env: {
-        ...env,
-        ADMIN_USERS_READ_RATE_LIMIT_MAX: 1,
-        INGRESS_RATE_LIMIT_PROVIDER: 'yandex-sws',
-        TRUST_PROXY: true,
-        TRUSTED_PROXY_CLIENT_IP_HEADER: 'x-forwarded-for',
-        TRUSTED_PROXY_CLIENT_IP_POSITION: 'last',
-      },
-      prisma,
-    })
-    const read = () => edgeApp.request('/api/admin/users', {
-      headers: authenticatedHeaders(admin.accessToken),
-    })
-
-    expect((await read()).status).toBe(200)
-    expect((await read()).status).toBe(429)
-  })
-
   test('rejects self-demotion and serializes concurrent cross-demotion', async () => {
     const first = await register('first-admin@example.com')
     const second = await register('second-admin@example.com')

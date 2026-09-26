@@ -124,12 +124,10 @@ export function createApp({
       maxAge: 600,
     }),
   )
-  // Signing in and managing an account are two budgets of the same size, keyed by client address.
-  // INGRESS_RATE_LIMIT_PROVIDER says whether this process limits at all; RATE_LIMIT_STORE says
-  // where each budget counts when it does.
+  // Signing in, managing an account, and registering a device for push are three budgets of the
+  // same size, keyed by client address. RATE_LIMIT_STORE says where each one counts.
   const publicWriteSecurity = {
     bodyLimitBytes: env.AUTH_BODY_LIMIT_BYTES,
-    rateLimitEnabled: env.INGRESS_RATE_LIMIT_PROVIDER === 'local',
     rateLimitMax: env.AUTH_RATE_LIMIT_MAX,
     rateLimitWindowSeconds: env.AUTH_RATE_LIMIT_WINDOW_SECONDS,
     trustProxy: env.TRUST_PROXY,
@@ -150,6 +148,14 @@ export function createApp({
     app.use('/api/admin/*', middleware)
     app.use('/api/uploads/*', middleware)
     // scaffold:security
+  }
+  // A separate budget, so a phone that re-registers its push token on every launch never spends
+  // the account budget behind a shared carrier address, and the reverse.
+  for (const middleware of createIngressSecurity({
+    ...publicWriteSecurity,
+    store: rateLimitStore('notifications'),
+  })) {
+    app.use('/api/notifications/*', middleware)
   }
   // Ingress budget for the subscription routes, uncomment together with them. Without a `store`
   // they count in process memory whatever RATE_LIMIT_STORE says; add their policies to

@@ -15,7 +15,7 @@ Code comments that mention `docs/IAP.md` mark each spot: `rg -n 'docs/IAP.md'`.
 5. Bring the tests back:
    - Remove the `@parked-test` line from every suite under `backend/src/modules/billing/`.
    - Move the suites in `mobile/tests/parked/` up to `mobile/tests/`, and delete the directory.
-   - In `backend/src/app.test.ts`, restore the four body-limit and rate tests for `/api/iap` and `/api/webhooks` from `git show 13e67da -- backend/src/app.test.ts`, and add both prefixes to the Yandex SWS loop.
+   - In `backend/src/app.test.ts`, restore the four body-limit and rate tests for `/api/iap` and `/api/webhooks` from `git show 13e67da -- backend/src/app.test.ts`. Put them next to the account-mutation ingress tests, where the comment about the App Store webhook suite stands.
    - `backend/src/jobs.test.ts` keeps no billing case. Test the Google Play job with the real-database job tests in `backend/src/jobs.integration.test.ts`.
    - In `backend/src/modules/users/users.integration.test.ts`, uncomment the check that the demo seed grants no entitlement.
 6. In `mobile/src/composition/AppProviders.tsx`, uncomment the `IapProvider` import, and wrap the tree in `<IapProvider api={apis.billing}>` where its comment says. In `mobile/src/app/(tabs)/profile.tsx`, uncomment the billing import, the `useSubscriptionIap()` line, and the `SubscriptionSummary` block.

@@ -635,3 +635,13 @@ run "extra_env_rejects_builtin_names" {
 
   expect_failures = [output.runtime_inputs]
 }
+
+run "extra_env_rejects_the_removed_sws_ingress_mode" {
+  command = plan
+
+  variables {
+    extra_runtime_env = { INGRESS_RATE_LIMIT_PROVIDER = "yandex-sws" }
+  }
+
+  expect_failures = [var.extra_runtime_env]
+}

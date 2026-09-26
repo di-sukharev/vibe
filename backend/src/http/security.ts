@@ -9,7 +9,6 @@ import { errorResponse } from './errors'
 
 type IngressSecurityOptions = {
   bodyLimitBytes: number
-  rateLimitEnabled: boolean
   rateLimitMax: number
   rateLimitWindowSeconds: number
   /** Builds the counter store for the budget. Defaults to a process-local one; see rate-limit/port.ts. */
@@ -32,16 +31,13 @@ type FixedWindowRateLimitOptions<E extends Env> = {
 }
 
 export function createIngressSecurity(options: IngressSecurityOptions): MiddlewareHandler[] {
-  const middleware: MiddlewareHandler[] = [
+  return [
     bodyLimit({
       maxSize: options.bodyLimitBytes,
       onError: (c) => c.json(errorResponse('PAYLOAD_TOO_LARGE', 'Request body is too large'), 413),
     }),
+    createIngressRateLimit(options),
   ]
-  if (options.rateLimitEnabled) {
-    middleware.push(createIngressRateLimit(options))
-  }
-  return middleware
 }
 
 function createIngressRateLimit(options: IngressSecurityOptions): MiddlewareHandler {
