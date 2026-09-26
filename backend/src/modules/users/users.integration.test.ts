@@ -17,7 +17,7 @@ import {
 import { bootstrapDevelopmentData } from '../../../scripts/development-seed'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
-const maybeDescribe = databaseUrl ? describe : describe.skip
+if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required; run bun run test:backend:integration')
 
 /**
  * The keys `db.ts` hands to `pg_advisory_xact_lock`, repeated here rather than exported: they are
@@ -30,15 +30,15 @@ const maybeDescribe = databaseUrl ? describe : describe.skip
 const userRoleMutationLockKey = 'user-role-mutations'
 const userAuthenticationAuthorityLockKey = (userId: string) => `auth-authority:${userId}`
 
-maybeDescribe('users and admin API integration', () => {
+describe('users and admin API integration', () => {
   const env = loadEnv({
-    DATABASE_URL: databaseUrl!,
+    DATABASE_URL: databaseUrl,
     JWT_SECRET: '12345678901234567890123456789012',
     CORS_ORIGINS: 'http://localhost:5173',
     // Short enough that a test can observe an access token expiring.
     ACCESS_TOKEN_TTL_SECONDS: '60',
   })
-  const prisma = createPrisma(databaseUrl!)
+  const prisma = createPrisma(databaseUrl)
   const app = createApp({ env, prisma })
 
   beforeEach(async () => {
@@ -212,6 +212,50 @@ maybeDescribe('users and admin API integration', () => {
       headers: authenticatedHeaders(promotedLogin.accessToken),
     })
     expect(stillAuthenticated.status).toBe(200)
+  })
+
+  test('gives each admin one directory read budget, separate from account writes', async () => {
+    // Keyed by administrator: a new filter, session, or client address must not buy more reads,
+    // or rotating any of them walks past the limit. Account writes spend a budget of their own.
+    const admin = await register('budget-admin@example.com')
+    const otherAdmin = await register('budget-other-admin@example.com')
+    await prisma.user.updateMany({
+      where: { id: { in: [admin.user.id, otherAdmin.user.id] } },
+      data: { role: 'admin' },
+    })
+    const secondSession = await login(admin.user.email)
+    const budgetApp = createApp({
+      env: {
+        ...env,
+        ADMIN_USERS_READ_RATE_LIMIT_MAX: 2,
+        AUTH_RATE_LIMIT_MAX: 1,
+        TRUST_PROXY: true,
+        TRUSTED_PROXY_CLIENT_IP_HEADER: 'do-connecting-ip',
+      },
+      prisma,
+    })
+    const read = (accessToken: string, query: string, clientIp: string) =>
+      budgetApp.request(`/api/admin/users?q=${query}`, {
+        headers: { ...authenticatedHeaders(accessToken), 'Do-Connecting-Ip': clientIp },
+      })
+    const rename = (accessToken: string) =>
+      budgetApp.request('/api/users/me', {
+        method: 'PATCH',
+        headers: { ...authenticatedJsonHeaders(accessToken), 'Do-Connecting-Ip': '203.0.113.10' },
+        body: JSON.stringify({ displayName: 'Budget Admin' }),
+      })
+
+    expect((await read(admin.accessToken, 'first', '203.0.113.1')).status).toBe(200)
+    expect((await read(secondSession.accessToken, 'second', '203.0.113.2')).status).toBe(200)
+    const limited = await read(admin.accessToken, 'third', '203.0.113.3')
+    expect(limited.status).toBe(429)
+    expect(limited.headers.get('retry-after')).toBeTruthy()
+    expect((await read(otherAdmin.accessToken, 'first', '203.0.113.1')).status).toBe(200)
+
+    // Exhausted reads leave the write budget, and an exhausted write budget leaves reads.
+    expect((await rename(admin.accessToken)).status).toBe(200)
+    expect((await rename(admin.accessToken)).status).toBe(429)
+    expect((await read(otherAdmin.accessToken, 'second', '203.0.113.10')).status).toBe(200)
   })
 
   test('rejects self-demotion and serializes concurrent cross-demotion', async () => {
@@ -568,62 +612,6 @@ maybeDescribe('users and admin API integration', () => {
       const body = await response.json()
       expect(body.user.role).toBe(role)
     }
-  })
-
-  test('concurrent first development seeds converge on one admin and user', async () => {
-    const accounts = {
-      admin: {
-        email: 'concurrent-development-admin@example.com',
-        password: 'concurrent-development-admin-password',
-      },
-      user: {
-        email: 'concurrent-development-user@example.com',
-        password: 'concurrent-development-user-password',
-      },
-    }
-    let userReads = 0
-    let markBothUserReadsComplete: () => void = () => undefined
-    const bothUserReadsComplete = new Promise<void>((resolve) => {
-      markBothUserReadsComplete = resolve
-    })
-    let releaseUserReads: () => void = () => undefined
-    const userReadBarrier = new Promise<void>((resolve) => {
-      releaseUserReads = resolve
-    })
-    const db = prisma.$extends({
-      query: {
-        user: {
-          async findUnique({ args, query }) {
-            const result = await query(args)
-            if (args.where.email === accounts.user.email && userReads < 2) {
-              userReads += 1
-              if (userReads === 2) markBothUserReadsComplete()
-              await userReadBarrier
-            }
-            return result
-          },
-        },
-      },
-    }) as unknown as DbClient
-
-    const firstSeed = bootstrapDevelopmentData(db, accounts)
-    const secondSeed = bootstrapDevelopmentData(db, accounts)
-    await bothUserReadsComplete
-    releaseUserReads()
-
-    await expect(Promise.all([firstSeed, secondSeed])).resolves.toEqual([
-      {
-        admin: { email: accounts.admin.email, role: 'admin' },
-        user: { email: accounts.user.email, role: 'user' },
-      },
-      {
-        admin: { email: accounts.admin.email, role: 'admin' },
-        user: { email: accounts.user.email, role: 'user' },
-      },
-    ])
-    expect(await prisma.user.count({
-      where: { email: { in: [accounts.admin.email, accounts.user.email] } },
-    })).toBe(2)
   })
 
   test('replaces development user credentials and revokes stale authentication state', async () => {

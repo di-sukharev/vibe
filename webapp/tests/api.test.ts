@@ -14,360 +14,159 @@ afterEach(() => {
 test('AuthApi refreshes and retries authenticated requests with the new access token', async () => {
   const expiredAccessToken = accessTokenFor('user_1', 'expired')
   const freshAccessToken = accessTokenFor('user_1', 'fresh')
-  let accessToken: string | null = expiredAccessToken
-  const calls: Array<{ path: string; authorization: string | null }> = []
-
-  globalThis.fetch = async (input, init) => {
-    const url = String(input)
-    const path = new URL(url).pathname
-    const headers = new Headers(init?.headers)
-    calls.push({ path, authorization: headers.get('Authorization') })
-
-    const meCallCount = calls.filter((call) => call.path === '/api/auth/me').length
-
-    if (path === '/api/auth/me' && meCallCount === 1) {
-      return json({ error: { code: 'UNAUTHORIZED', message: 'Expired access token' } }, 401)
-    }
-
-    if (path === '/api/auth/refresh') {
-      return json({ accessToken: freshAccessToken }, 200)
-    }
-
-    if (path === '/api/auth/me') {
-      return json(
-        {
-          user: {
-            id: 'user_1',
-            email: 'user@example.com',
-            displayName: null,
-            role: 'user',
-            createdAt: '2026-05-11T00:00:00.000Z',
-          },
-        },
-        200,
-      )
-    }
-
-    return json({ error: { code: 'NOT_FOUND', message: 'Unexpected request' } }, 404)
-  }
-
-  const client = new AuthApi({
-    getAccessToken: () => accessToken,
-    setAccessToken: (nextAccessToken) => {
-      accessToken = nextAccessToken
-    },
+  const requests = fakeBackend(({ path }) => {
+    if (path === '/api/auth/refresh') return json({ accessToken: freshAccessToken }, 200)
+    if (path !== '/api/auth/me') return unexpectedRequest()
+    return requests.filter((request) => request.path === '/api/auth/me').length === 1
+      ? expiredAccessTokenError()
+      : currentUser()
   })
+  const { client } = authClient(expiredAccessToken)
 
   const response = await client.me()
-  const meCalls = calls.filter((call) => call.path === '/api/auth/me')
+  const meRequests = requests.filter((request) => request.path === '/api/auth/me')
 
   expect(response.user.email).toBe('user@example.com')
-  expect(meCalls).toHaveLength(2)
-  expect(meCalls[0]?.authorization).toBe(`Bearer ${expiredAccessToken}`)
-  expect(meCalls[1]?.authorization).toBe(`Bearer ${freshAccessToken}`)
+  expect(meRequests.map((request) => request.authorization)).toEqual([
+    `Bearer ${expiredAccessToken}`,
+    `Bearer ${freshAccessToken}`,
+  ])
 })
 
 test('AuthApi shares one refresh across concurrent unauthorized requests', async () => {
   const expiredAccessToken = accessTokenFor('user_1', 'expired')
   const freshAccessToken = accessTokenFor('user_1', 'fresh')
-  let accessToken: string | null = expiredAccessToken
-  const calls: Array<{ path: string; authorization: string | null; credentials: RequestCredentials | undefined }> = []
-
-  globalThis.fetch = async (input, init) => {
-    const url = String(input)
-    const path = new URL(url).pathname
-    const headers = new Headers(init?.headers)
-    const authorization = headers.get('Authorization')
-    calls.push({ path, authorization, credentials: init?.credentials })
-
+  const requests = fakeBackend(async ({ path, authorization }) => {
     if (path === '/api/auth/refresh') {
       await new Promise((resolve) => setTimeout(resolve, 0))
       return json({ accessToken: freshAccessToken }, 200)
     }
-
-    if (path === '/api/auth/me' && authorization === `Bearer ${freshAccessToken}`) {
-      return json(
-        {
-          user: {
-            id: 'user_1',
-            email: 'user@example.com',
-            displayName: null,
-            role: 'user',
-            createdAt: '2026-05-11T00:00:00.000Z',
-          },
-        },
-        200,
-      )
-    }
-
-    if (path === '/api/auth/me') {
-      return json({ error: { code: 'UNAUTHORIZED', message: 'Expired access token' } }, 401)
-    }
-
-    return json({ error: { code: 'NOT_FOUND', message: 'Unexpected request' } }, 404)
-  }
-
-  const client = new AuthApi({
-    getAccessToken: () => accessToken,
-    setAccessToken: (nextAccessToken) => {
-      accessToken = nextAccessToken
-    },
+    if (path !== '/api/auth/me') return unexpectedRequest()
+    return authorization === `Bearer ${freshAccessToken}` ? currentUser() : expiredAccessTokenError()
   })
+  const { client } = authClient(expiredAccessToken)
 
   const [first, second] = await Promise.all([client.me(), client.me()])
-  const refreshCalls = calls.filter((call) => call.path === '/api/auth/refresh')
-  const meCalls = calls.filter((call) => call.path === '/api/auth/me')
+  const meRequests = requests.filter((request) => request.path === '/api/auth/me')
 
   expect(first.user.email).toBe('user@example.com')
   expect(second.user.email).toBe('user@example.com')
-  expect(refreshCalls).toHaveLength(1)
-  expect(meCalls).toHaveLength(4)
-  expect(meCalls.filter((call) => call.authorization === `Bearer ${expiredAccessToken}`)).toHaveLength(2)
-  expect(meCalls.filter((call) => call.authorization === `Bearer ${freshAccessToken}`)).toHaveLength(2)
-  expect(calls.every((call) => call.credentials === 'include')).toBe(true)
+  expect(requests.filter((request) => request.path === '/api/auth/refresh')).toHaveLength(1)
+  expect(meRequests).toHaveLength(4)
+  expect(meRequests.filter((request) => request.authorization === `Bearer ${expiredAccessToken}`)).toHaveLength(2)
+  expect(meRequests.filter((request) => request.authorization === `Bearer ${freshAccessToken}`)).toHaveLength(2)
+  expect(requests.every((request) => request.init?.credentials === 'include')).toBe(true)
 })
 
 test('AuthApi clears only local session state when refresh is unauthorized', async () => {
-  let accessToken: string | null = 'expired-access-token'
-  let authExpiredCalls = 0
-  const calls: Array<{ path: string; authorization: string | null }> = []
-
-  globalThis.fetch = async (input, init) => {
-    const url = String(input)
-    const path = new URL(url).pathname
-    const headers = new Headers(init?.headers)
-    calls.push({ path, authorization: headers.get('Authorization') })
-
-    if (path === '/api/auth/me') {
-      return json({ error: { code: 'UNAUTHORIZED', message: 'Expired access token' } }, 401)
-    }
-
-    if (path === '/api/auth/refresh') {
-      return json({ error: { code: 'UNAUTHORIZED', message: 'Invalid refresh token' } }, 401)
-    }
-
-    return json({ error: { code: 'NOT_FOUND', message: 'Unexpected request' } }, 404)
-  }
-
-  const client = new AuthApi({
-    getAccessToken: () => accessToken,
-    setAccessToken: (nextAccessToken) => {
-      accessToken = nextAccessToken
-    },
-    onAuthExpired: () => {
-      authExpiredCalls += 1
-    },
+  const requests = fakeBackend(({ path }) => {
+    if (path === '/api/auth/me') return expiredAccessTokenError()
+    if (path === '/api/auth/refresh') return apiError(401, 'UNAUTHORIZED', 'Invalid refresh token')
+    return unexpectedRequest()
   })
+  const { client, session } = authClient('expired-access-token')
 
   await expect(client.me()).rejects.toMatchObject({
     status: 401,
     code: 'UNAUTHORIZED',
   })
 
-  expect(accessToken).toBeNull()
-  expect(authExpiredCalls).toBe(1)
-  expect(calls.map((call) => call.path)).toEqual([
+  expect(session.accessToken).toBeNull()
+  expect(session.authExpiredCalls).toBe(1)
+  expect(paths(requests)).toEqual([
     '/api/auth/me',
     '/api/auth/refresh',
   ])
 })
 
 test('AuthApi preserves the session when refresh fails transiently', async () => {
-  let accessToken: string | null = 'expired-access-token'
-  let authExpiredCalls = 0
-
-  globalThis.fetch = async (input) => {
-    const path = new URL(String(input)).pathname
-
-    if (path === '/api/auth/me') {
-      return json({ error: { code: 'UNAUTHORIZED', message: 'Expired access token' } }, 401)
-    }
-
-    if (path === '/api/auth/refresh') {
-      return json({ error: { code: 'UNAVAILABLE', message: 'Try again later' } }, 503)
-    }
-
-    return json({ error: { code: 'NOT_FOUND', message: 'Unexpected request' } }, 404)
-  }
-
-  const client = new AuthApi({
-    getAccessToken: () => accessToken,
-    setAccessToken: (nextAccessToken) => {
-      accessToken = nextAccessToken
-    },
-    onAuthExpired: () => {
-      authExpiredCalls += 1
-    },
+  fakeBackend(({ path }) => {
+    if (path === '/api/auth/me') return expiredAccessTokenError()
+    if (path === '/api/auth/refresh') return apiError(503, 'UNAVAILABLE', 'Try again later')
+    return unexpectedRequest()
   })
+  const { client, session } = authClient('expired-access-token')
 
   await expect(client.me()).rejects.toMatchObject({ status: 503 })
-  expect(accessToken).toBe('expired-access-token')
-  expect(authExpiredCalls).toBe(0)
+  expect(session.accessToken).toBe('expired-access-token')
+  expect(session.authExpiredCalls).toBe(0)
 })
 
 test('AuthApi never refreshes an old request after another session epoch wins', async () => {
-  let accessToken: string | null = 'account-a-access-token'
-  let authExpiredCalls = 0
-  const calls: string[] = []
   publishBrowserSessionState('authenticated')
-
-  const client = new AuthApi({
-    getAccessToken: () => accessToken,
-    setAccessToken: (nextAccessToken) => {
-      accessToken = nextAccessToken
-    },
-    onAuthExpired: () => {
-      authExpiredCalls += 1
-    },
-  })
+  const { client, session } = authClient('account-a-access-token')
 
   publishBrowserSessionState('authenticated')
-  globalThis.fetch = async (input) => {
-    const path = new URL(String(input)).pathname
-    calls.push(path)
-    return json({ error: { code: 'UNAUTHORIZED', message: 'Expired access token' } }, 401)
-  }
+  const requests = fakeBackend(() => expiredAccessTokenError())
 
   await expect(client.me()).rejects.toMatchObject({ status: 401 })
-  expect(calls).toEqual(['/api/auth/me'])
-  expect(accessToken).toBe('account-a-access-token')
-  expect(authExpiredCalls).toBe(0)
+  expect(paths(requests)).toEqual(['/api/auth/me'])
+  expect(session.accessToken).toBe('account-a-access-token')
+  expect(session.authExpiredCalls).toBe(0)
 })
 
 test('a late refresh 401 cannot clear a newer browser session epoch', async () => {
-  let accessToken: string | null = 'account-a-access-token'
-  let authExpiredCalls = 0
-  let releaseRefresh!: () => void
-  const refreshCanFinish = new Promise<void>((resolve) => {
-    releaseRefresh = resolve
-  })
-  const calls: string[] = []
+  const refresh = deferred()
   publishBrowserSessionState('authenticated')
 
-  globalThis.fetch = async (input) => {
-    const path = new URL(String(input)).pathname
-    calls.push(path)
+  const requests = fakeBackend(async ({ path }) => {
     if (path === '/api/auth/refresh') {
-      await refreshCanFinish
-      return json({ error: { code: 'UNAUTHORIZED', message: 'Old refresh failed' } }, 401)
+      await refresh.promise
+      return apiError(401, 'UNAUTHORIZED', 'Old refresh failed')
     }
-    return json({ error: { code: 'UNAUTHORIZED', message: 'Expired access token' } }, 401)
-  }
-
-  const client = new AuthApi({
-    getAccessToken: () => accessToken,
-    setAccessToken: (nextAccessToken) => {
-      accessToken = nextAccessToken
-    },
-    onAuthExpired: () => {
-      authExpiredCalls += 1
-    },
+    return expiredAccessTokenError()
   })
+  const { client, session } = authClient('account-a-access-token')
   const request = client.me()
-  await waitForEvent(calls, '/api/auth/refresh')
+  await waitForRequest(requests, '/api/auth/refresh')
   publishBrowserSessionState('authenticated')
-  releaseRefresh()
+  refresh.resolve()
 
   await expect(request).rejects.toMatchObject({ status: 401 })
-  expect(accessToken).toBe('account-a-access-token')
-  expect(authExpiredCalls).toBe(0)
+  expect(session.accessToken).toBe('account-a-access-token')
+  expect(session.authExpiredCalls).toBe(0)
 })
 
 test('AuthApi discards a successful response from an older browser session epoch', async () => {
-  const accessToken = accessTokenFor('account-a', 'current')
-  let releaseRequest!: () => void
-  const requestCanFinish = new Promise<void>((resolve) => {
-    releaseRequest = resolve
-  })
-  const calls: string[] = []
+  const response = deferred()
   publishBrowserSessionState('authenticated')
 
-  globalThis.fetch = async (input) => {
-    const path = new URL(String(input)).pathname
-    calls.push(path)
-    await requestCanFinish
-    return json(
-      {
-        user: {
-          id: 'account-a',
-          email: 'account-a@example.com',
-          displayName: null,
-          role: 'user',
-          createdAt: '2026-05-11T00:00:00.000Z',
-        },
-      },
-      200,
-    )
-  }
-
-  const client = new AuthApi({
-    getAccessToken: () => accessToken,
-    setAccessToken: () => undefined,
+  const requests = fakeBackend(async () => {
+    await response.promise
+    return currentUser('account-a', 'account-a@example.com')
   })
+  const { client } = authClient(accessTokenFor('account-a', 'current'))
   const request = client.me()
-  await waitForEvent(calls, '/api/auth/me')
+  await waitForRequest(requests, '/api/auth/me')
   publishBrowserSessionState('authenticated')
-  releaseRequest()
+  response.resolve()
 
   await expect(request).rejects.toThrow('Browser auth session changed')
 })
 
 test('AuthApi never retries an authenticated request as a different principal', async () => {
-  const accountAAccessToken = accessTokenFor('account-a', 'expired')
-  const accountBAccessToken = accessTokenFor('account-b', 'fresh')
-  let accessToken: string | null = accountAAccessToken
-  let authExpiredCalls = 0
-  const calls: string[] = []
   publishBrowserSessionState('authenticated')
 
-  globalThis.fetch = async (input) => {
-    const path = new URL(String(input)).pathname
-    calls.push(path)
-    if (path === '/api/auth/refresh') {
-      return json({ accessToken: accountBAccessToken }, 200)
-    }
-    return json({ error: { code: 'UNAUTHORIZED', message: 'Expired access token' } }, 401)
-  }
-
-  const client = new AuthApi({
-    getAccessToken: () => accessToken,
-    setAccessToken: (nextAccessToken) => {
-      accessToken = nextAccessToken
-    },
-    onAuthExpired: () => {
-      authExpiredCalls += 1
-    },
-  })
+  const requests = fakeBackend(({ path }) =>
+    path === '/api/auth/refresh'
+      ? json({ accessToken: accessTokenFor('account-b', 'fresh') }, 200)
+      : expiredAccessTokenError(),
+  )
+  const { client, session } = authClient(accessTokenFor('account-a', 'expired'))
 
   await expect(client.me()).rejects.toMatchObject({ status: 401 })
-  expect(calls).toEqual(['/api/auth/me', '/api/auth/refresh'])
-  expect(accessToken).toBeNull()
-  expect(authExpiredCalls).toBe(1)
+  expect(paths(requests)).toEqual(['/api/auth/me', '/api/auth/refresh'])
+  expect(session.accessToken).toBeNull()
+  expect(session.authExpiredCalls).toBe(1)
 })
 
 test('AuthApi preserves backend error status, code, and message', async () => {
-  globalThis.fetch = async (input) => {
-    const path = new URL(String(input)).pathname
-
-    if (path === '/api/auth/register') {
-      return json(
-        {
-          error: {
-            code: 'CONFLICT',
-            message: 'User with this email already exists',
-          },
-        },
-        409,
-      )
-    }
-
-    return json({ error: { code: 'NOT_FOUND', message: 'Unexpected request' } }, 404)
-  }
-
-  const client = new AuthApi({
-    getAccessToken: () => null,
-    setAccessToken: () => undefined,
-  })
+  fakeBackend(({ path }) =>
+    path === '/api/auth/register'
+      ? apiError(409, 'CONFLICT', 'User with this email already exists')
+      : unexpectedRequest(),
+  )
+  const { client } = authClient(null)
 
   await expect(
     client.register({
@@ -382,30 +181,12 @@ test('AuthApi preserves backend error status, code, and message', async () => {
 })
 
 test('AuthApi submits password reset requests and clears session state after confirmation', async () => {
-  const calls: Array<{ path: string; body: unknown }> = []
-  let accessToken: string | null = 'existing-access-token'
-
-  globalThis.fetch = async (input, init) => {
-    const path = new URL(String(input)).pathname
-    calls.push({
-      path,
-      body: init?.body ? JSON.parse(String(init.body)) : undefined,
-    })
-    if (path === '/api/auth/password-reset/request') {
-      return json({ accepted: true }, 202)
-    }
-    if (path === '/api/auth/password-reset/confirm') {
-      return new Response(null, { status: 204 })
-    }
-    return json({ error: { code: 'NOT_FOUND', message: 'Unexpected request' } }, 404)
-  }
-
-  const client = new AuthApi({
-    getAccessToken: () => accessToken,
-    setAccessToken: (nextAccessToken) => {
-      accessToken = nextAccessToken
-    },
+  const requests = fakeBackend(({ path }) => {
+    if (path === '/api/auth/password-reset/request') return json({ accepted: true }, 202)
+    if (path === '/api/auth/password-reset/confirm') return new Response(null, { status: 204 })
+    return unexpectedRequest()
   })
+  const { client, session } = authClient('existing-access-token')
 
   await expect(
     client.requestPasswordReset({ email: ' USER@Example.COM ' }),
@@ -416,7 +197,12 @@ test('AuthApi submits password reset requests and clears session state after con
       password: 'new-password-123',
     }),
   ).resolves.toMatchObject({ data: undefined, sessionEpoch: expect.any(String) })
-  expect(calls).toEqual([
+  expect(
+    requests.map(({ init, path }) => ({
+      path,
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    })),
+  ).toEqual([
     {
       path: '/api/auth/password-reset/request',
       body: { email: 'user@example.com' },
@@ -426,45 +212,24 @@ test('AuthApi submits password reset requests and clears session state after con
       body: { token: 't'.repeat(43), password: 'new-password-123' },
     },
   ])
-  expect(accessToken).toBeNull()
+  expect(session.accessToken).toBeNull()
 })
 
 test('AuthApi clearSession does not revoke a possibly newer shared browser cookie', async () => {
-  let accessToken: string | null = 'stale-access-token'
-  let authExpiredCalls = 0
-  const calls: Array<{ path: string; method: string | undefined }> = []
-
-  globalThis.fetch = async (input, init) => {
-    const path = new URL(String(input)).pathname
-    calls.push({ path, method: init?.method })
-
-    return json({ error: { code: 'NOT_FOUND', message: 'Unexpected request' } }, 404)
-  }
-
-  const client = new AuthApi({
-    getAccessToken: () => accessToken,
-    setAccessToken: (nextAccessToken) => {
-      accessToken = nextAccessToken
-    },
-    onAuthExpired: () => {
-      authExpiredCalls += 1
-    },
-  })
+  const requests = fakeBackend(() => unexpectedRequest())
+  const { client, session } = authClient('stale-access-token')
 
   await client.clearSession()
 
-  expect(accessToken).toBeNull()
-  expect(authExpiredCalls).toBe(1)
-  expect(calls).toEqual([])
+  expect(session.accessToken).toBeNull()
+  expect(session.authExpiredCalls).toBe(1)
+  expect(requests).toEqual([])
 })
 
 test('bootstrapAuthSession clears local state only for an unauthorized refresh', async () => {
   const events: string[] = []
   let completed = false
-  let finishCleanup!: () => void
-  const cleanupFinished = new Promise<void>((resolve) => {
-    finishCleanup = resolve
-  })
+  const cleanup = deferred()
 
   const bootstrap = bootstrapAuthSession({
     api: {
@@ -474,7 +239,7 @@ test('bootstrapAuthSession clears local state only for an unauthorized refresh',
       },
       clearSession: async () => {
         events.push('cleanup:start')
-        await cleanupFinished
+        await cleanup.promise
         events.push('cleanup:done')
       },
     },
@@ -486,12 +251,12 @@ test('bootstrapAuthSession clears local state only for an unauthorized refresh',
     completed = true
   })
 
-  await waitForEvent(events, 'cleanup:start')
+  await waitFor(() => events.includes('cleanup:start'), 'cleanup:start')
 
   expect(completed).toBe(false)
   expect(events).toEqual(['refresh', 'cleanup:start'])
 
-  finishCleanup()
+  cleanup.resolve()
   await bootstrap
 
   expect(completed).toBe(true)
@@ -520,107 +285,139 @@ test('bootstrapAuthSession surfaces transient refresh failures without clearing 
 })
 
 test('AuthApi surfaces an aborted request as its AbortError, never as an expired session', async () => {
-  let accessToken: string | null = 'active-access-token'
-  let authExpiredCalls = 0
-  const calls: string[] = []
   const controller = new AbortController()
-
-  globalThis.fetch = async (input, init) => {
-    const path = new URL(String(input)).pathname
-    calls.push(path)
-    if (path === '/api/auth/me') {
-      // A 401 whose error body is still streaming when the caller aborts: the browser errors the
-      // body with the abort reason, so the JSON payload never fully arrives.
-      return new Response(bodyThatErrorsOnAbort(init?.signal), { status: 401 })
-    }
-    return json({ error: { code: 'NOT_FOUND', message: 'Unexpected request' } }, 404)
-  }
-
-  const client = new AuthApi({
-    getAccessToken: () => accessToken,
-    setAccessToken: (nextAccessToken) => {
-      accessToken = nextAccessToken
-    },
-    onAuthExpired: () => {
-      authExpiredCalls += 1
-    },
-  })
+  const requests = fakeBackend(({ init, path }) =>
+    // A 401 whose error body is still streaming when the caller aborts: the browser errors the
+    // body with the abort reason, so the JSON payload never fully arrives.
+    path === '/api/auth/me'
+      ? new Response(bodyThatErrorsOnAbort(init?.signal), { status: 401 })
+      : unexpectedRequest(),
+  )
+  const { client, session } = authClient('active-access-token')
   const request = client.me({ signal: controller.signal })
-  await waitForEvent(calls, '/api/auth/me')
+  await waitForRequest(requests, '/api/auth/me')
   controller.abort()
 
   const error = await rejectionOf(request)
   expect(error).toBeInstanceOf(DOMException)
   expect((error as DOMException).name).toBe('AbortError')
-  expect(calls).toEqual(['/api/auth/me'])
-  expect(accessToken).toBe('active-access-token')
-  expect(authExpiredCalls).toBe(0)
+  expect(paths(requests)).toEqual(['/api/auth/me'])
+  expect(session.accessToken).toBe('active-access-token')
+  expect(session.authExpiredCalls).toBe(0)
 })
 
 test('one caller aborting its request does not cancel the refresh other callers share', async () => {
   const expiredAccessToken = accessTokenFor('user_1', 'expired')
   const freshAccessToken = accessTokenFor('user_1', 'fresh')
-  let accessToken: string | null = expiredAccessToken
-  let authExpiredCalls = 0
-  let releaseRefresh!: () => void
-  const refreshCanFinish = new Promise<void>((resolve) => {
-    releaseRefresh = resolve
-  })
-  const calls: string[] = []
+  const refresh = deferred()
   const controller = new AbortController()
 
-  globalThis.fetch = async (input, init) => {
+  const requests = fakeBackend(async ({ authorization, init, path }) => {
     // Like the browser, refuse to start a request whose signal is already aborted.
     init?.signal?.throwIfAborted()
-    const path = new URL(String(input)).pathname
-    calls.push(path)
 
     if (path === '/api/auth/refresh') {
       // Also like the browser: had the caller's signal leaked into this request, the abort below
       // would fail the refresh for everyone waiting on it.
-      await Promise.race([refreshCanFinish, untilAborted(init?.signal)])
+      await Promise.race([refresh.promise, untilAborted(init?.signal)])
       return json({ accessToken: freshAccessToken }, 200)
     }
-    if (new Headers(init?.headers).get('Authorization') === `Bearer ${freshAccessToken}`) {
-      return json(
-        {
-          user: {
-            id: 'user_1',
-            email: 'user@example.com',
-            displayName: null,
-            role: 'user',
-            createdAt: '2026-05-11T00:00:00.000Z',
-          },
-        },
-        200,
-      )
-    }
-    return json({ error: { code: 'UNAUTHORIZED', message: 'Expired access token' } }, 401)
-  }
-
-  const client = new AuthApi({
-    getAccessToken: () => accessToken,
-    setAccessToken: (nextAccessToken) => {
-      accessToken = nextAccessToken
-    },
-    onAuthExpired: () => {
-      authExpiredCalls += 1
-    },
+    return authorization === `Bearer ${freshAccessToken}` ? currentUser() : expiredAccessTokenError()
   })
+  const { client, session } = authClient(expiredAccessToken)
   const abortedRequest = client.me({ signal: controller.signal })
   const keptRequest = client.me()
-  await waitForEvent(calls, '/api/auth/refresh')
+  await waitForRequest(requests, '/api/auth/refresh')
   controller.abort()
-  releaseRefresh()
+  refresh.resolve()
 
   const error = await rejectionOf(abortedRequest)
   expect(error).toBeInstanceOf(DOMException)
   expect((error as DOMException).name).toBe('AbortError')
   await expect(keptRequest).resolves.toMatchObject({ user: { email: 'user@example.com' } })
-  expect(calls.filter((call) => call === '/api/auth/refresh')).toHaveLength(1)
-  expect(accessToken).toBe(freshAccessToken)
-  expect(authExpiredCalls).toBe(0)
+  expect(requests.filter((request) => request.path === '/api/auth/refresh')).toHaveLength(1)
+  expect(session.accessToken).toBe(freshAccessToken)
+  expect(session.authExpiredCalls).toBe(0)
 })
+
+type FakeRequest = {
+  path: string
+  authorization: string | null
+  init: RequestInit | undefined
+}
+
+/** Replaces `fetch` with `respond` and returns the live list of requests it received. */
+function fakeBackend(respond: (request: FakeRequest) => Response | Promise<Response>) {
+  const requests: FakeRequest[] = []
+
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = {
+      path: new URL(String(input)).pathname,
+      authorization: new Headers(init?.headers).get('Authorization'),
+      init,
+    }
+    requests.push(request)
+    return respond(request)
+  }) as typeof fetch
+
+  return requests
+}
+
+function paths(requests: FakeRequest[]) {
+  return requests.map((request) => request.path)
+}
+
+/** An AuthApi whose access token and expiry notifications are observable through `session`. */
+function authClient(initialAccessToken: string | null) {
+  const session = { accessToken: initialAccessToken, authExpiredCalls: 0 }
+  const client = new AuthApi({
+    getAccessToken: () => session.accessToken,
+    setAccessToken: (nextAccessToken) => {
+      session.accessToken = nextAccessToken
+    },
+    onAuthExpired: () => {
+      session.authExpiredCalls += 1
+    },
+  })
+
+  return { client, session }
+}
+
+function currentUser(id = 'user_1', email = 'user@example.com') {
+  return json(
+    {
+      user: {
+        id,
+        email,
+        displayName: null,
+        role: 'user',
+        createdAt: '2026-05-11T00:00:00.000Z',
+      },
+    },
+    200,
+  )
+}
+
+function expiredAccessTokenError() {
+  return apiError(401, 'UNAUTHORIZED', 'Expired access token')
+}
+
+function unexpectedRequest() {
+  return apiError(404, 'NOT_FOUND', 'Unexpected request')
+}
+
+function apiError(status: number, code: string, message: string) {
+  return json({ error: { code, message } }, status)
+}
+
+function deferred() {
+  let resolve!: () => void
+  const promise = new Promise<void>((done) => {
+    resolve = done
+  })
+
+  return { promise, resolve }
+}
 
 async function rejectionOf(promise: Promise<unknown>): Promise<unknown> {
   try {
@@ -645,13 +442,17 @@ function bodyThatErrorsOnAbort(signal: AbortSignal | null | undefined) {
   })
 }
 
-async function waitForEvent(events: string[], event: string) {
+function waitForRequest(requests: FakeRequest[], path: string) {
+  return waitFor(() => requests.some((request) => request.path === path), path)
+}
+
+async function waitFor(condition: () => boolean, description: string) {
   for (let attempt = 0; attempt < 10; attempt += 1) {
-    if (events.includes(event)) return
+    if (condition()) return
     await new Promise((resolve) => setTimeout(resolve, 0))
   }
 
-  throw new Error(`Timed out waiting for event: ${event}`)
+  throw new Error(`Timed out waiting for: ${description}`)
 }
 
 function json(body: unknown, status: number) {

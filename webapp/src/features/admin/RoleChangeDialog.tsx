@@ -52,7 +52,7 @@ export function RoleChangeDialog({
         )}
         <AlertDialogFooter>
           <AlertDialogCancel disabled={isPending}>Cancel</AlertDialogCancel>
-          <Button disabled={isPending} onClick={onConfirm}>
+          <Button data-testid="role-change-confirm" disabled={isPending} onClick={onConfirm}>
             {isPending ? 'Changing…' : 'Change role'}
           </Button>
         </AlertDialogFooter>

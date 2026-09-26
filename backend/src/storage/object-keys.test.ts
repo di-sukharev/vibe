@@ -4,28 +4,14 @@ import { StorageError } from './errors'
 import { assertSafeObjectKey, createStorageObjectKey } from './object-keys'
 
 describe('createStorageObjectKey', () => {
-  test('builds a dated key with no room for user data in it', () => {
+  test('builds a dated key with no room for user data in it, padding the month to sort', () => {
     const key = createStorageObjectKey({
       namespace: 'avatars',
       id: '019c0000-0000-7000-8000-000000000001',
-      now: new Date('2026-08-09T12:00:00.000Z'),
+      now: new Date('2026-01-05T12:00:00.000Z'),
     })
 
-    expect(key).toBe('avatars/2026/08/019c0000-0000-7000-8000-000000000001')
-  })
-
-  test('pads the month so keys sort lexicographically', () => {
-    expect(
-      createStorageObjectKey({ namespace: 'avatars', id: 'x', now: new Date('2026-01-05T00:00:00Z') }),
-    ).toBe('avatars/2026/01/x')
-  })
-
-  test('generates a random id when the caller has none', () => {
-    const first = createStorageObjectKey({ namespace: 'avatars' })
-    const second = createStorageObjectKey({ namespace: 'avatars' })
-
-    expect(first).not.toBe(second)
-    expect(first.startsWith('avatars/')).toBe(true)
+    expect(key).toBe('avatars/2026/01/019c0000-0000-7000-8000-000000000001')
   })
 
   test('refuses a namespace that could smuggle a path or user data into the key', () => {
@@ -44,7 +30,9 @@ describe('assertSafeObjectKey', () => {
     expect(assertSafeObjectKey('  avatars/2026/08/abc  ')).toBe('avatars/2026/08/abc')
   })
 
-  test('rejects traversal, absolute, empty, and control-character keys', () => {
+  test('rejects traversal, absolute, empty, and control-character keys as invalid keys', () => {
+    // The kind matters to callers: `invalid_key` means a backend-generated key was malformed,
+    // which is a bug to keep loud rather than a client error.
     for (const key of [
       '',
       '   ',
@@ -58,17 +46,9 @@ describe('assertSafeObjectKey', () => {
       'avatars/a\u001Fb',
       'a'.repeat(1025),
     ]) {
-      expect(() => assertSafeObjectKey(key)).toThrow(StorageError)
-    }
-  })
-
-  test('reports an invalid key as a storage failure, not an HTTP status', () => {
-    try {
-      assertSafeObjectKey('../escape')
-      throw new Error('expected a StorageError')
-    } catch (error) {
-      expect(error).toBeInstanceOf(StorageError)
-      expect((error as StorageError).kind).toBe('invalid_key')
+      expect(() => assertSafeObjectKey(key)).toThrow(
+        expect.objectContaining({ kind: 'invalid_key', name: 'StorageError' }),
+      )
     }
   })
 })

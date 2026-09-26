@@ -46,6 +46,7 @@ export function ProfilePanel({ user }: { user: UserDto }) {
                 aria-describedby={errorId(displayNameErrors, displayNameErrorId)}
                 aria-invalid={displayNameInvalid}
                 autoComplete="name"
+                data-testid="profile-display-name"
                 disabled={mutation.isPending}
                 id="profile-display-name"
                 onChange={(event) => {
@@ -91,6 +92,7 @@ export function ProfilePanel({ user }: { user: UserDto }) {
 
           <div>
             <Button
+              data-testid="profile-save"
               disabled={mutation.isPending || validation.errors !== null}
               type="submit"
             >

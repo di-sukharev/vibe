@@ -13,16 +13,16 @@ import { FilesystemPrivateStorage } from '../../storage/filesystem-storage'
 import { pngFixture } from '../../storage/storage-contract'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
-const maybeDescribe = databaseUrl ? describe : describe.skip
+if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required; run bun run test:backend:integration')
 
 const jpegFixture = Buffer.concat([
   Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
   Buffer.alloc(pngFixture.byteLength - 4, 0x20),
 ])
 
-maybeDescribe('avatar upload API integration', () => {
+describe('avatar upload API integration', () => {
   const env = loadEnv({
-    DATABASE_URL: databaseUrl!,
+    DATABASE_URL: databaseUrl,
     JWT_SECRET: '12345678901234567890123456789012',
     CORS_ORIGINS: 'http://localhost:5173',
     ACCESS_TOKEN_TTL_SECONDS: '60',
@@ -30,7 +30,7 @@ maybeDescribe('avatar upload API integration', () => {
     AUTH_RATE_LIMIT_MAX: '200',
   })
 
-  const prisma = createPrisma(databaseUrl!)
+  const prisma = createPrisma(databaseUrl)
   let root: string
   let storage: FilesystemPrivateStorage
   let app: ReturnType<typeof createApp>
@@ -165,6 +165,23 @@ maybeDescribe('avatar upload API integration', () => {
     expect((await finalize(session.accessToken, ticket.uploadId)).status).toBe(200)
   })
 
+  test('refuses an upload whose window has closed and clears it away', async () => {
+    const session = await register('expired@example.com')
+    const ticket = await requestTicket(session.accessToken, pngFixture, 'image/png')
+    expect((await transfer(ticket, pngFixture)).status).toBe(200)
+    const { objectKey } = await prisma.userAvatar.update({
+      where: { id: ticket.uploadId },
+      data: { expiresAt: new Date(Date.now() - 1_000) },
+    })
+
+    const finalized = await finalize(session.accessToken, ticket.uploadId)
+
+    expect(finalized.status).toBe(410)
+    expect((await finalized.json()).error.code).toBe('UPLOAD_EXPIRED')
+    expect(await prisma.userAvatar.count({ where: { id: ticket.uploadId } })).toBe(0)
+    await waitForDeletion(objectKey)
+  })
+
   test('recovers from an interrupted transfer by issuing a new write-once key', async () => {
     const session = await register('recovery@example.com')
 
@@ -185,10 +202,26 @@ maybeDescribe('avatar upload API integration', () => {
   test('rejects bytes that are not the declared image', async () => {
     const session = await register('mismatch@example.com')
     const ticket = await requestTicket(session.accessToken, pngFixture, 'image/png')
+    const { objectKey } = await prisma.userAvatar.findUniqueOrThrow({ where: { id: ticket.uploadId } })
 
     expect((await transfer(ticket, jpegFixture)).status).toBe(200)
 
     const finalized = await finalize(session.accessToken, ticket.uploadId)
+    expect(finalized.status).toBe(409)
+    expect((await finalized.json()).error.code).toBe('UPLOAD_REJECTED')
+    await waitForDeletion(objectKey)
+  })
+
+  test('rejects stored bytes whose size does not match the declared size', async () => {
+    // The storage endpoint already refuses a body of the wrong length, so the object is written
+    // directly: finalize must check what was stored rather than trust the signed transfer.
+    const session = await register('truncated@example.com')
+    const ticket = await requestTicket(session.accessToken, pngFixture, 'image/png')
+    const { objectKey } = await prisma.userAvatar.findUniqueOrThrow({ where: { id: ticket.uploadId } })
+    await storage.putObjectOnce(objectKey, new Uint8Array(pngFixture.subarray(0, 20)), 'image/png')
+
+    const finalized = await finalize(session.accessToken, ticket.uploadId)
+
     expect(finalized.status).toBe(409)
     expect((await finalized.json()).error.code).toBe('UPLOAD_REJECTED')
   })

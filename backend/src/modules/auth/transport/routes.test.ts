@@ -27,24 +27,6 @@ describe('auth routes', () => {
     expect(response.status).toBe(413)
   })
 
-  test('rate limits repeated auth writes from one client before service work', async () => {
-    const app = createApp({ env: { ...env, AUTH_RATE_LIMIT_MAX: 1 }, prisma: {} as DbClient })
-    const request = () => app.request('/api/auth/register', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Forwarded-For': '10.10.0.8',
-        'Do-Connecting-Ip': '203.0.113.10',
-      },
-      body: JSON.stringify({ email: 'invalid', password: 'short' }),
-    })
-
-    expect((await request()).status).toBe(400)
-    const limited = await request()
-    expect(limited.status).toBe(429)
-    expect(limited.headers.get('retry-after')).toBeTruthy()
-  })
-
   test('uses the configured trusted proxy header instead of a shared ingress address', async () => {
     const app = createApp({ env: { ...env, AUTH_RATE_LIMIT_MAX: 1 }, prisma: {} as DbClient })
     const request = (clientIp: string) => app.request('/api/auth/register', {

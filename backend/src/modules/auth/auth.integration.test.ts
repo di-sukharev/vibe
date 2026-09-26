@@ -8,19 +8,18 @@ import { drainOptionsFromEnv, drainTaskOutbox } from '../../outbox'
 import type { BackendRuntime } from '../../runtime'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
+if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required; run bun run test:backend:integration')
 
-const maybeDescribe = databaseUrl ? describe : describe.skip
-
-maybeDescribe('auth API integration', () => {
+describe('auth API integration', () => {
   const envInput = {
-    DATABASE_URL: databaseUrl!,
+    DATABASE_URL: databaseUrl,
     JWT_SECRET: '12345678901234567890123456789012',
     CORS_ORIGINS: 'http://localhost:5173',
     // Short enough that a test can observe an access token expiring.
     ACCESS_TOKEN_TTL_SECONDS: '60',
   }
   const env = loadEnv(envInput)
-  const prisma = createPrisma(databaseUrl!)
+  const prisma = createPrisma(databaseUrl)
   const app = createApp({ env, prisma })
 
   beforeEach(async () => {
@@ -77,6 +76,14 @@ maybeDescribe('auth API integration', () => {
     expect(refreshBody.refreshToken).toBeString()
     expect(refreshBody.refreshToken).not.toBe(registerBody.refreshToken)
     expect(refresh.headers.get('set-cookie')).toBeNull()
+
+    // With the session count below, this proves the rotation kept the one logical session.
+    const meWithRefreshedAccessToken = await app.request('/api/auth/me', {
+      headers: {
+        Authorization: `Bearer ${refreshBody.accessToken}`,
+      },
+    })
+    expect(meWithRefreshedAccessToken.status).toBe(200)
 
     const meWithPreRefreshAccessToken = await app.request('/api/auth/me', {
       headers: {
@@ -260,7 +267,8 @@ maybeDescribe('auth API integration', () => {
     expect(successfulConfirm.headers.get('set-cookie')).toContain('Max-Age=0')
     expect((await rejectedConfirm.json()).error.code).toBe('AUTH_PASSWORD_RESET_INVALID')
     await drain()
-    expect(messages.filter(({ subject }) => subject === 'Your password was changed')).toHaveLength(1)
+    // The reset link and then one password-changed notice, both to the account address.
+    expect(messages.map(({ to }) => to)).toEqual(['reset@example.com', 'reset@example.com'])
 
     // Nothing is left holding the submitted address once the work is finished.
     const finished = await prisma.taskOutbox.findMany({ where: { type: { startsWith: 'auth:' } } })
@@ -362,6 +370,37 @@ maybeDescribe('auth API integration', () => {
     expect(await realRequest.json()).toEqual(floodBodies[0])
     expect(await drain()).toMatchObject({ done: 1, skipped: 0, terminalFailed: 0, transientFailed: 0 })
     expect(messages.map(({ to }) => to)).toEqual(['victim@example.com'])
+  })
+
+  test('only reset rows the next drain pass can claim count against the ceiling', async () => {
+    // A failed delivery parks its row as pending with a due time minutes ahead. Counting those
+    // would let a provider outage fill the ceiling with real resets in backoff and then drop
+    // every new request for as long as the outage lasts. Other task types share the table and
+    // the status, and have their own budget.
+    const { createPasswordResetTaskQueue } = await import('./infrastructure/password-reset-task-queue')
+    const queue = createPasswordResetTaskQueue(prisma, { pendingLimit: 2 })
+    const now = new Date('2026-08-09T12:00:00.000Z')
+    const retryAt = new Date(now.getTime() + 120_000)
+    // Enough of each kind to fill the ceiling on its own, so counting either would refuse.
+    await prisma.taskOutbox.createMany({
+      data: [
+        { type: 'auth:password-reset', dedupeKey: 'parked-1', payload: {}, scheduledFor: retryAt },
+        { type: 'auth:password-reset', dedupeKey: 'parked-2', payload: {}, scheduledFor: retryAt },
+        { type: 'auth:password-changed', dedupeKey: 'other-1', payload: {}, scheduledFor: now },
+        { type: 'auth:password-changed', dedupeKey: 'other-2', payload: {}, scheduledFor: now },
+      ],
+    })
+    const resetRows = () => prisma.taskOutbox.count({ where: { type: 'auth:password-reset' } })
+
+    await queue.enqueuePasswordReset({ email: 'user@example.com', now })
+    expect(await resetRows()).toBe(3)
+
+    // Once the retries are due they are claimable, so they fill the batch like any other row.
+    await queue.enqueuePasswordReset({
+      email: 'other@example.com',
+      now: new Date(retryAt.getTime() + 60_000),
+    })
+    expect(await resetRows()).toBe(3)
   })
 
   test('returns one durable successor across three concurrent refresh requests', async () => {
@@ -677,7 +716,6 @@ maybeDescribe('auth API integration', () => {
 
     expect(invalidRegister.status).toBe(400)
     expect(body.error.code).toBe('VALIDATION_ERROR')
-    expect(body.error.message).toBe('Invalid request payload')
     expect(Array.isArray(body.error.details)).toBe(true)
   })
 

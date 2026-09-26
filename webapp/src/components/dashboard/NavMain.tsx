@@ -26,7 +26,7 @@ export function NavMain({
   items: ReadonlyArray<DashboardNavigationItem>
 }) {
   return (
-    <nav aria-label="Primary navigation">
+    <nav aria-label="Primary navigation" data-testid="primary-navigation">
       <SidebarGroup>
         <SidebarGroupLabel>Workspace</SidebarGroupLabel>
         <SidebarGroupContent>
@@ -38,7 +38,7 @@ export function NavMain({
                   isActive={item.isActive}
                   tooltip={item.label}
                 >
-                  <DashboardLink to={item.to}>
+                  <DashboardLink data-testid={`nav-link${item.to.replaceAll('/', '-')}`} to={item.to}>
                     <HugeiconsIcon icon={item.icon} strokeWidth={2} />
                     <Typography asChild variant="control">
                       <span>{item.label}</span>

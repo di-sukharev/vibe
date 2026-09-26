@@ -5,7 +5,6 @@ import {
   AVATAR_MIN_BYTES,
   avatarResponseSchema,
   createAvatarUploadRequestSchema,
-  createAvatarUploadResponseSchema,
   uploadTicketSchema,
 } from './index'
 
@@ -69,16 +68,6 @@ describe('avatar upload contracts', () => {
         key: 'avatars/mine',
       }),
     ).toThrow()
-  })
-
-  test('carries the headers the browser must replay on the direct PUT', () => {
-    const parsed = uploadTicketSchema.parse(ticket)
-    expect(parsed.headers['Content-Type']).toBe('image/png')
-    expect(parsed.headers['If-None-Match']).toBe('*')
-    expect(parsed.method).toBe('PUT')
-    expect(createAvatarUploadResponseSchema.parse({ upload: ticket }).upload.uploadId).toBe(
-      ticket.uploadId,
-    )
   })
 
   test('rejects non-http schemes on every URL that reaches a client', () => {

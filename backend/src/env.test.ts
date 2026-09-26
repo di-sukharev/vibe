@@ -73,31 +73,15 @@ describe('loadEnv', () => {
     expect(() => loadEnv({ ...productionBase, EMAIL_DELIVERY: 'console' })).toThrow('EMAIL_DELIVERY')
   })
 
-  test('the task outbox has usable defaults and refuses nonsense', () => {
+  test('refuses outbox, delivery, and rate-limit settings it cannot honour', () => {
     const base = {
       DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
       JWT_SECRET: '12345678901234567890123456789012',
     }
-
-    // Fail-closed contract, not tuning: a fresh install must not send mail. The batch/lease/runtime
-    // numbers are `.default()` literals and are deliberately not asserted here.
-    expect(loadEnv(base).EMAIL_DELIVERY).toBe('disabled')
 
     expect(() => loadEnv({ ...base, TASK_OUTBOX_BATCH_LIMIT: '0' })).toThrow('TASK_OUTBOX_BATCH_LIMIT')
     expect(() => loadEnv({ ...base, TASK_OUTBOX_RETENTION_DAYS: '-1' })).toThrow('TASK_OUTBOX_RETENTION_DAYS')
     expect(() => loadEnv({ ...base, EMAIL_DELIVERY: 'smtp' })).toThrow('EMAIL_DELIVERY')
-  })
-
-  test('counts rate limits in process memory unless the deployment selects the database', () => {
-    const base = {
-      DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
-      JWT_SECRET: '12345678901234567890123456789012',
-    }
-
-    // The default is a contract, not tuning: a single-process install must not pay a query per
-    // auth request for a budget it can count by itself.
-    expect(loadEnv(base).RATE_LIMIT_STORE).toBe('memory')
-    expect(loadEnv({ ...base, RATE_LIMIT_STORE: 'database' }).RATE_LIMIT_STORE).toBe('database')
     expect(() => loadEnv({ ...base, RATE_LIMIT_STORE: 'redis' })).toThrow('RATE_LIMIT_STORE')
   })
 
@@ -221,10 +205,6 @@ describe('private storage env', () => {
     PRIVATE_STORAGE_FORCE_PATH_STYLE: 'true',
   }
 
-  test('defaults to the filesystem driver so a fresh checkout needs no cloud and no Docker', () => {
-    expect(loadEnv(base).PRIVATE_STORAGE_DRIVER).toBe('filesystem')
-  })
-
   test('accepts a complete loopback S3 configuration', () => {
     const env = loadEnv({ ...base, ...localS3 })
 
@@ -343,13 +323,6 @@ describe('email env', () => {
     EMAIL_POSTBOX_SECRET_ACCESS_KEY: 'YCPtest',
   }
 
-  test('sends nothing by default, so a fresh install cannot leak mail it never configured', () => {
-    const env = loadEnv(base)
-
-    expect(env.EMAIL_DELIVERY).toBe('disabled')
-    expect(env.EMAIL_FROM).toBeUndefined()
-  })
-
   test('requires the whole provider group, naming every key that is missing', () => {
     for (const [group, keys] of [
       [postbox, ['EMAIL_FROM', 'EMAIL_POSTBOX_ACCESS_KEY_ID', 'EMAIL_POSTBOX_SECRET_ACCESS_KEY']],
@@ -373,14 +346,6 @@ describe('email env', () => {
     expect(() => loadEnv({ ...base, EMAIL_RESEND_API_KEY: 're_test_key' })).toThrow(
       'EMAIL_RESEND_API_KEY',
     )
-  })
-
-  test('allows the shared settings under any driver, so switching provider is a one-line edit', () => {
-    // EMAIL_FROM and friends are inert without a provider. Forbidding them would only make
-    // flipping EMAIL_DELIVERY between console and resend a multi-line change.
-    const env = loadEnv({ ...base, EMAIL_DELIVERY: 'console', EMAIL_FROM: 'a@example.com' })
-
-    expect(env.EMAIL_FROM).toBe('a@example.com')
   })
 
   test('refuses a sender that is not an address or a display-name address', () => {

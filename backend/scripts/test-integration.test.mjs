@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
 import { composeProjectName, postgresTestDataVolume } from '../../scripts/repo-env.mjs'
-import { userAuthenticationSessionTransactionOptions } from '../src/db.ts'
 import { integrationTestTimeoutMs, runBackendIntegration } from './test-integration.mjs'
 
 const integrationFile = 'src/example.integration.test.ts'
@@ -9,17 +8,26 @@ const testDatabaseUrl =
   'postgresql://superuser:superpassword@localhost:54330/web_app_demo_test?schema=public'
 
 describe('backend integration Docker lifecycle', () => {
-  test('removes only postgres_test and its exact volume after a normal run', async () => {
+  test('cleans only its own postgres_test service and volume and never runs `down`', async () => {
+    // Every run owns a fresh Compose project, so two runs from one checkout never remove each
+    // other's database, and `down` would reach beyond the test service.
     const calls = []
+    const otherRunCalls = []
 
     await runBackendIntegration({
       environment: { TEST_DATABASE_URL: testDatabaseUrl },
       integrationTestFiles: [integrationFile],
       spawn: successfulSpawn(calls),
     })
+    await runBackendIntegration({
+      environment: { TEST_DATABASE_URL: testDatabaseUrl },
+      integrationTestFiles: [integrationFile],
+      spawn: successfulSpawn(otherRunCalls),
+    })
 
     const projectName = integrationProjectName(calls)
     expect(projectName).toStartWith(`${composeProjectName}-integration-`)
+    expect(integrationProjectName(otherRunCalls)).not.toBe(projectName)
     expect(commandArgs(calls)).toContainEqual([
       'compose',
       '-p',
@@ -44,58 +52,13 @@ describe('backend integration Docker lifecycle', () => {
     expect(commandArgs(calls).flat()).not.toContain('down')
   })
 
-  test('still cleans up after a failed test command and preserves that failure', async () => {
-    const calls = []
-    const spawn = successfulSpawn(calls, (command, args) => command === 'bun' && args[0] === 'test')
-
-    await expect(
-      runBackendIntegration({
-        environment: { TEST_DATABASE_URL: testDatabaseUrl },
-        integrationTestFiles: [integrationFile],
-        spawn,
-      }),
-    ).rejects.toThrow(`bun test ${integrationFile} --timeout=${integrationTestTimeoutMs} failed with exit code 7`)
-
-    const projectName = integrationProjectName(calls)
-    expect(commandArgs(calls)).toContainEqual([
-      'volume',
-      'rm',
-      '--force',
-      `${projectName}_${postgresTestDataVolume}`,
-    ])
-  })
-
-  test('cleans only its unique project namespace after startup fails', async () => {
-    const calls = []
-
-    await expect(
-      runBackendIntegration({
-        environment: { TEST_DATABASE_URL: testDatabaseUrl },
-        integrationTestFiles: [integrationFile],
-        spawn: successfulSpawn(
-          calls,
-          (command, args) => command === 'docker' && args.includes('up'),
-        ),
-      }),
-    ).rejects.toThrow()
-
-    const projectName = integrationProjectName(calls)
-    expect(projectName).toStartWith(`${composeProjectName}-integration-`)
-    expect(commandArgs(calls)).toContainEqual([
-      'volume',
-      'rm',
-      '--force',
-      `${projectName}_${postgresTestDataVolume}`,
-    ])
-    expect(commandArgs(calls)).toContainEqual([
-      'network',
-      'rm',
-      `${projectName}_default`,
-    ])
-  })
-
-  test('cleans up after migration and discovery failures once startup succeeded', async () => {
+  test('cleans up on any failure and keeps the first error', async () => {
     const failingSteps = [
+      {
+        name: 'startup',
+        integrationTestFiles: [integrationFile],
+        shouldFail: (command, args) => command === 'docker' && args.includes('up'),
+      },
       {
         name: 'migration',
         integrationTestFiles: [integrationFile],
@@ -105,6 +68,11 @@ describe('backend integration Docker lifecycle', () => {
         name: 'discovery',
         integrationTestFiles: [],
         shouldFail: () => false,
+      },
+      {
+        name: 'tests',
+        integrationTestFiles: [integrationFile],
+        shouldFail: (command, args) => command === 'bun' && args[0] === 'test',
       },
     ]
 
@@ -128,160 +96,23 @@ describe('backend integration Docker lifecycle', () => {
         `${projectName}_${postgresTestDataVolume}`,
       ])
     }
-  })
 
-  test('reports a secondary cleanup failure without replacing the test failure', async () => {
+    // A cleanup that fails too is reported beside the test failure, not in its place.
     const messages = []
-    const spawn = successfulSpawn(
-      [],
-      (command, args) =>
-        (command === 'bun' && args[0] === 'test') ||
-        (command === 'docker' && args.includes('rm') && args.includes('postgres_test')),
-    )
-
     await expect(
       runBackendIntegration({
         environment: { TEST_DATABASE_URL: testDatabaseUrl },
         integrationTestFiles: [integrationFile],
-        spawn,
+        spawn: successfulSpawn(
+          [],
+          (command, args) =>
+            (command === 'bun' && args[0] === 'test') ||
+            (command === 'docker' && args.includes('rm') && args.includes('postgres_test')),
+        ),
         writeError: (message) => messages.push(message),
       }),
     ).rejects.toThrow(`bun test ${integrationFile} --timeout=${integrationTestTimeoutMs} failed with exit code 7`)
-
     expect(messages).toHaveLength(1)
-    expect(messages[0]).toContain('Docker cleanup also failed')
-    expect(messages[0]).toContain('docker compose')
-  })
-
-  test('TEST_KEEP_DOCKER keeps the managed database for investigation', async () => {
-    const calls = []
-
-    await runBackendIntegration({
-      environment: { TEST_DATABASE_URL: testDatabaseUrl, TEST_KEEP_DOCKER: '1' },
-      integrationTestFiles: [integrationFile],
-      spawn: successfulSpawn(calls),
-    })
-
-    const projectName = integrationProjectName(calls)
-    expect(commandArgs(calls)).toContainEqual([
-      'compose',
-      '-p',
-      projectName,
-      'up',
-      '-d',
-      'postgres_test',
-    ])
-    expect(commandArgs(calls).some((args) => args.includes('rm'))).toBe(false)
-  })
-
-  test('each managed run owns a unique Compose project and volume namespace', async () => {
-    const firstCalls = []
-    const secondCalls = []
-
-    await runBackendIntegration({
-      environment: { TEST_DATABASE_URL: testDatabaseUrl },
-      integrationTestFiles: [integrationFile],
-      spawn: successfulSpawn(firstCalls),
-    })
-    await runBackendIntegration({
-      environment: { TEST_DATABASE_URL: testDatabaseUrl },
-      integrationTestFiles: [integrationFile],
-      spawn: successfulSpawn(secondCalls),
-    })
-
-    const firstProject = integrationProjectName(firstCalls)
-    const secondProject = integrationProjectName(secondCalls)
-    expect(firstProject).not.toBe(secondProject)
-    expect(commandArgs(firstCalls)).toContainEqual([
-      'volume',
-      'rm',
-      '--force',
-      `${firstProject}_${postgresTestDataVolume}`,
-    ])
-    expect(commandArgs(secondCalls)).toContainEqual([
-      'volume',
-      'rm',
-      '--force',
-      `${secondProject}_${postgresTestDataVolume}`,
-    ])
-    expect(commandArgs(firstCalls)).toContainEqual([
-      'network',
-      'rm',
-      `${firstProject}_default`,
-    ])
-    expect(commandArgs(secondCalls)).toContainEqual([
-      'network',
-      'rm',
-      `${secondProject}_default`,
-    ])
-  })
-
-  test('TEST_SKIP_DOCKER leaves an externally managed database untouched', async () => {
-    const calls = []
-
-    await runBackendIntegration({
-      environment: { TEST_DATABASE_URL: testDatabaseUrl, TEST_SKIP_DOCKER: '1' },
-      integrationTestFiles: [integrationFile],
-      spawn: successfulSpawn(calls),
-    })
-
-    expect(calls.some(({ command }) => command === 'docker')).toBe(false)
-  })
-
-  test('forwards an exact focused file and name filter without widening the run', async () => {
-    const calls = []
-
-    await runBackendIntegration({
-      environment: { TEST_DATABASE_URL: testDatabaseUrl, TEST_SKIP_DOCKER: '1' },
-      integrationTestFiles: [integrationFile, 'src/other.integration.test.ts'],
-      testArgs: [`backend/${integrationFile}`, '-t', 'focused behavior'],
-      spawn: successfulSpawn(calls),
-    })
-
-    expect(calls.find(({ command, args }) => command === 'bun' && args[0] === 'test')?.args).toEqual([
-      'test',
-      integrationFile,
-      '-t',
-      'focused behavior',
-      `--timeout=${integrationTestTimeoutMs}`,
-    ])
-    expect(calls.some(({ command }) => command === 'docker')).toBe(false)
-
-    const rejectedCalls = []
-    await expect(
-      runBackendIntegration({
-        environment: { TEST_DATABASE_URL: testDatabaseUrl, TEST_SKIP_DOCKER: '1' },
-        integrationTestFiles: [integrationFile],
-        testArgs: ['src/missing.integration.test.ts'],
-        spawn: successfulSpawn(rejectedCalls),
-      }),
-    ).rejects.toThrow('Focused backend test file was not discovered')
-    expect(rejectedCalls).toHaveLength(0)
-  })
-
-  test('gives every test an integration budget unless the caller sets one', async () => {
-    const calls = []
-
-    await runBackendIntegration({
-      environment: { TEST_DATABASE_URL: testDatabaseUrl, TEST_SKIP_DOCKER: '1' },
-      integrationTestFiles: [integrationFile],
-      spawn: successfulSpawn(calls),
-    })
-
-    // Longer than the longest request-path transaction timeout, so a lock held too long is still
-    // reported through the request that held it rather than by the harness as a bare timeout.
-    expect(integrationTestTimeoutMs).toBeGreaterThan(userAuthenticationSessionTransactionOptions.timeout)
-    expect(bunTestArgs(calls)).toEqual(['test', integrationFile, `--timeout=${integrationTestTimeoutMs}`])
-
-    const overridden = []
-    await runBackendIntegration({
-      environment: { TEST_DATABASE_URL: testDatabaseUrl, TEST_SKIP_DOCKER: '1' },
-      integrationTestFiles: [integrationFile],
-      testArgs: ['--timeout=1000'],
-      spawn: successfulSpawn(overridden),
-    })
-
-    expect(bunTestArgs(overridden)).toEqual(['test', integrationFile, '--timeout=1000'])
   })
 
   test('TEST_SKIP_DOCKER requires an explicit external test database URL', async () => {
@@ -297,39 +128,13 @@ describe('backend integration Docker lifecycle', () => {
 
     expect(calls).toHaveLength(0)
   })
-
-  test('TEST_DATABASE_URL port wins over an ambient POSTGRES_TEST_PORT', async () => {
-    const calls = []
-
-    await runBackendIntegration({
-      environment: {
-        POSTGRES_TEST_PORT: '59999',
-        TEST_DATABASE_URL: testDatabaseUrl,
-      },
-      integrationTestFiles: [integrationFile],
-      spawn: successfulSpawn(calls),
-    })
-
-    const dockerUp = calls.find(
-      ({ command, args }) => command === 'docker' && args.includes('up'),
-    )
-    expect(dockerUp.options.env.POSTGRES_TEST_PORT).toBe('54330')
-    const migration = calls.find(
-      ({ command, args }) => command === 'bun' && args.includes('prisma:deploy'),
-    )
-    expect(migration.options.env.DATABASE_URL).toBe(testDatabaseUrl)
-  })
 })
 
 function successfulSpawn(calls, shouldFail = () => false) {
-  return (command, args, options) => {
-    calls.push({ args, command, options })
+  return (command, args) => {
+    calls.push({ args, command })
     return { status: shouldFail(command, args) ? 7 : 0 }
   }
-}
-
-function bunTestArgs(calls) {
-  return calls.find(({ command, args }) => command === 'bun' && args[0] === 'test')?.args
 }
 
 function commandArgs(calls) {

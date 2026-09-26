@@ -93,6 +93,7 @@ export function RegisterForm({ returnTo }: { returnTo?: string }) {
               aria-invalid={hasErrors(fieldErrors.displayName)}
               autoComplete="name"
               className="bg-background"
+              data-testid="signup-display-name"
               id={displayNameId}
               name={field.name}
               onBlur={field.handleBlur}
@@ -117,6 +118,7 @@ export function RegisterForm({ returnTo }: { returnTo?: string }) {
               aria-invalid={hasErrors(fieldErrors.email)}
               autoComplete="email"
               className="bg-background"
+              data-testid="signup-email"
               id={emailId}
               inputMode="email"
               name={field.name}
@@ -146,6 +148,7 @@ export function RegisterForm({ returnTo }: { returnTo?: string }) {
               aria-invalid={hasErrors(fieldErrors.password)}
               autoComplete="new-password"
               className="bg-background"
+              data-testid="signup-password"
               id={passwordId}
               name={field.name}
               onBlur={field.handleBlur}
@@ -172,6 +175,7 @@ export function RegisterForm({ returnTo }: { returnTo?: string }) {
               aria-invalid={hasErrors(fieldErrors.confirmPassword)}
               autoComplete="new-password"
               className="bg-background"
+              data-testid="signup-confirm-password"
               id={confirmPasswordId}
               name={field.name}
               onBlur={field.handleBlur}
@@ -192,7 +196,7 @@ export function RegisterForm({ returnTo }: { returnTo?: string }) {
 
         <Field>
           <form.Subscribe selector={(state) => state.isSubmitting} children={(isSubmitting) => (
-            <Button disabled={isSubmitting} type="submit">
+            <Button data-testid="signup-submit" disabled={isSubmitting} type="submit">
               {isSubmitting ? 'Creating account…' : 'Create Account'}
             </Button>
           )} />

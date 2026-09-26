@@ -8,15 +8,15 @@ import { enqueueTask } from './index'
 import { claimTask, completeTask } from './store'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
-const maybeDescribe = databaseUrl ? describe : describe.skip
+if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required; run bun run test:backend:integration')
 
 /**
  * The claim is the whole safety argument of this module, and it is made of database semantics a
  * fake client cannot have: two concurrent `UPDATE ... WHERE status = 'pending'` statements
  * serialising on a row lock. Everything here needs a real PostgreSQL.
  */
-maybeDescribe('the task outbox against a real database', () => {
-  const prisma = createPrisma(databaseUrl!)
+describe('the task outbox against a real database', () => {
+  const prisma = createPrisma(databaseUrl)
   const runtime = { prisma } as unknown as BackendRuntime
   const now = () => new Date()
 
@@ -156,6 +156,40 @@ maybeDescribe('the task outbox against a real database', () => {
     })
   })
 
+  test('a lease that is still fresh is left alone', async () => {
+    const handlers = registry(async () => undefined)
+    const { id } = await enqueueTask(prisma, { type: 'test:work', dedupeKey: 'fresh', payload: {} }, handlers)
+    await prisma.taskOutbox.update({
+      where: { id },
+      data: { processingToken: crypto.randomUUID(), status: 'processing' },
+    })
+
+    const metrics = await drainTaskOutbox(runtime, { handlers, now: now() })
+
+    expect(metrics).toMatchObject({ claimed: 0, recoveredStale: 0 })
+    expect((await prisma.taskOutbox.findUniqueOrThrow({ where: { id } })).status).toBe('processing')
+  })
+
+  test('the lease floor is applied, not merely available', async () => {
+    // A lease shorter than an attempt would let a second drain claim a row whose first runner is
+    // still working. The floor is a pure function, but it has to actually be called with the
+    // slowest handler deadline - otherwise an operator setting a tiny lease breaks the invariant.
+    const handlers: TaskHandlerRegistry = { 'test:work': { deadlineMs: 30_000, run: async () => undefined } }
+    const { id } = await enqueueTask(prisma, { type: 'test:work', dedupeKey: 'floor', payload: {} }, handlers)
+    await prisma.taskOutbox.update({
+      where: { id },
+      data: { processingToken: crypto.randomUUID(), status: 'processing' },
+    })
+    // Stale for the configured lease, fresh for twice the slowest deadline.
+    await prisma.$executeRaw`UPDATE task_outbox SET updated_at = now() - interval '20 seconds' WHERE id = ${id}::uuid`
+
+    // Absurdly short on purpose: the floor must override it.
+    const metrics = await drainTaskOutbox(runtime, { handlers, leaseStaleMs: 1, now: now() })
+
+    expect(metrics.recoveredStale).toBe(0)
+    expect((await prisma.taskOutbox.findUniqueOrThrow({ where: { id } })).status).toBe('processing')
+  })
+
   test('a failing task backs off and is given up on after its last attempt', async () => {
     const failing: TaskHandlerRegistry = {
       'test:work': {
@@ -230,5 +264,50 @@ maybeDescribe('the task outbox against a real database', () => {
     expect(metrics.deleted).toBe(1)
     expect(await prisma.taskOutbox.findUnique({ where: { id: old.id } })).toBeNull()
     expect(await prisma.taskOutbox.findUnique({ where: { id: recent.id } })).not.toBeNull()
+  })
+
+  test('work that is not due yet is left for a later pass', async () => {
+    const handlers = registry(async () => undefined)
+    const { id } = await enqueueTask(
+      prisma,
+      { type: 'test:work', dedupeKey: 'later', payload: {}, scheduledFor: new Date(Date.now() + 60_000) },
+      handlers,
+    )
+
+    const metrics = await drainTaskOutbox(runtime, { handlers, now: now() })
+
+    expect(metrics).toMatchObject({ backlog: 0, claimed: 0 })
+    expect((await prisma.taskOutbox.findUniqueOrThrow({ where: { id } })).status).toBe('pending')
+  })
+
+  test('a type this deployment cannot run is left pending and reported', async () => {
+    // An API already enqueueing work the runner beside it does not know yet. Claiming it would
+    // burn attempts on something no handler here can ever do.
+    const { id } = await enqueueTask(
+      prisma,
+      { type: 'shipped:later', dedupeKey: 'unknown', payload: {} },
+      { 'shipped:later': { run: async () => undefined } },
+    )
+
+    const metrics = await drainTaskOutbox(runtime, { handlers: registry(async () => undefined), now: now() })
+
+    expect(metrics).toMatchObject({ claimed: 0, unhandled: 1 })
+    expect((await prisma.taskOutbox.findUniqueOrThrow({ where: { id } })).status).toBe('pending')
+  })
+
+  test('backlog and the oldest wait are reported for alerting', async () => {
+    const handlers = registry(async () => undefined)
+    const passAt = now()
+    await enqueueTask(
+      prisma,
+      { type: 'test:work', dedupeKey: 'waiting', payload: {}, scheduledFor: new Date(passAt.getTime() - 300_000) },
+      handlers,
+    )
+    await enqueueTask(prisma, { type: 'test:work', dedupeKey: 'due', payload: {}, scheduledFor: passAt }, handlers)
+
+    // No runtime budget, so the pass claims nothing and only reports what is waiting.
+    const metrics = await drainTaskOutbox(runtime, { handlers, maxRuntimeMs: 0, now: passAt })
+
+    expect(metrics).toMatchObject({ backlog: 2, claimed: 0, oldestPendingAgeSeconds: 300 })
   })
 })

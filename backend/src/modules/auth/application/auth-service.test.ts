@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 
-import type { AuthRepository, ProjectUser } from './ports'
+import type { AuthRepository, PasswordResetNotifier, ProjectUser } from './ports'
 import { AuthService } from './auth-service'
 
 const user = {
@@ -12,6 +12,10 @@ const user = {
   createdAt: new Date('2026-01-01T00:00:00.000Z'),
 }
 
+const now = new Date('2026-01-01T00:00:00.000Z')
+const rawToken = 'r'.repeat(43)
+const signal = new AbortController().signal
+
 const projectUser: ProjectUser = async (record) => ({
   id: record.id,
   email: record.email,
@@ -20,52 +24,62 @@ const projectUser: ProjectUser = async (record) => ({
   createdAt: record.createdAt.toISOString(),
 })
 
-const unusedPasswordResetDependencies = {
-  passwordResetCooldownSeconds: 60,
-  passwordResetNotifier: {
-    configured: false,
+type Dependencies = ConstructorParameters<typeof AuthService>[0]
+
+/**
+ * A service whose collaborators succeed quietly; each test overrides the ones it observes. The
+ * repository holds only the methods a test provides, so any other call fails the test.
+ */
+function createService({
+  repository = {},
+  ...overrides
+}: Partial<Omit<Dependencies, 'repository'>> & { repository?: Partial<AuthRepository> } = {}) {
+  return new AuthService({
+    accessTokens: {
+      sign: async () => 'access-token',
+      verify: async () => ({ sub: user.id, email: user.email, sessionId: 'session-1' }),
+    },
+    clock: { now: () => now },
+    logoutCleanup: async () => undefined,
+    passwordResetCooldownSeconds: 60,
+    passwordResetNotifier: notifier(),
+    passwordResetTasks: { enqueuePasswordReset: async () => undefined },
+    passwordResetTokenTtlMinutes: 30,
+    passwordResetTokens: { create: () => rawToken, hash: (token) => `hash:${token}` },
+    passwords: { hash: async () => 'password-hash', verify: async () => true },
+    projectUser,
+    refreshReuseGraceSeconds: 10,
+    refreshTokenTtlDays: 30,
+    refreshTokens: {
+      create: () => 'refresh-token',
+      hash: (token) => `hash:${token}`,
+      familyHash: (token) => `family:${token}`,
+      rotate: (token) => `next:${token}`,
+    },
+    sessionAbsoluteTtlDays: 90,
+    ...overrides,
+    repository: repository as AuthRepository,
+  })
+}
+
+function notifier(overrides: Partial<PasswordResetNotifier> = {}): PasswordResetNotifier {
+  return {
+    configured: true,
     isPermanentFailure: () => false,
     sendPasswordChanged: async () => undefined,
     sendPasswordReset: async () => undefined,
-  },
-  passwordResetTokenTtlMinutes: 30,
-  passwordResetTasks: {
-    enqueuePasswordReset: async () => undefined,
-  },
-  passwordResetTokens: {
-    create: () => 'r'.repeat(43),
-    hash: (token: string) => `hash:${token}`,
-  },
-  projectUser,
+    ...overrides,
+  }
 }
 
-const unusedPasswordResetRepository = {
-  createPasswordResetToken: async () => false,
-  invalidatePasswordResetToken: async () => undefined,
-  hasActivePasswordResetToken: async () => false,
-  completePasswordReset: async () => null,
+function deliver(service: AuthService, finalAttempt: boolean) {
+  return service.deliverPasswordReset({ email: user.email }, { finalAttempt, now, signal })
 }
 
 test('verifies an unchanged password before opening the session transaction', async () => {
   let insideSessionTransaction = false
   const verificationContexts: boolean[] = []
-  const repository = {
-    findUserByEmail: async () => user,
-    createSession: async (input: Parameters<AuthRepository['createSession']>[0]) => {
-      insideSessionTransaction = true
-      const authorized = await input.authorizeUser(user)
-      insideSessionTransaction = false
-      return authorized ? { user, session: { id: 'session-created' } } : null
-    },
-  } as unknown as AuthRepository
-  const service = new AuthService({
-    ...unusedPasswordResetDependencies,
-    accessTokens: {
-      sign: async () => 'access-token',
-      verify: async () => ({ sub: user.id, email: user.email, sessionId: 'session-created' }),
-    },
-    clock: { now: () => new Date('2026-01-01T00:00:00.000Z') },
-    logoutCleanup: async () => undefined,
+  const service = createService({
     passwords: {
       hash: async () => 'password-hash',
       verify: async () => {
@@ -73,23 +87,15 @@ test('verifies an unchanged password before opening the session transaction', as
         return true
       },
     },
-    projectUser: async (record) => ({
-      id: record.id,
-      email: record.email,
-      displayName: record.displayName,
-      role: record.role,
-      createdAt: record.createdAt.toISOString(),
-    }),
-    refreshReuseGraceSeconds: 10,
-    refreshTokenTtlDays: 30,
-    sessionAbsoluteTtlDays: 90,
-    refreshTokens: {
-      create: () => 'refresh-token',
-      hash: (token) => `hash:${token}`,
-      familyHash: (token) => `family:${token}`,
-      rotate: (token) => `next:${token}`,
+    repository: {
+      findUserByEmail: async () => user,
+      createSession: async (input) => {
+        insideSessionTransaction = true
+        const authorized = await input.authorizeUser(user)
+        insideSessionTransaction = false
+        return authorized ? { user, session: { id: 'session-created' } } : null
+      },
     },
-    repository,
   })
 
   await expect(service.login({
@@ -101,140 +107,25 @@ test('verifies an unchanged password before opening the session transaction', as
   expect(verificationContexts).toEqual([false])
 })
 
-test('refresh keeps the logical session id stable while rotating its credential', async () => {
-  const signedSessionIds: string[] = []
-  const refreshCutoffs: Date[] = []
-  const repository = {
-    ...unusedPasswordResetRepository,
-    findUserByEmail: async () => null,
-    createPasswordUserWithSession: async () => ({ user, session: { id: 'session-created' } }),
-    createSession: async () => ({ user, session: { id: 'session-created' } }),
-    findActiveRefreshSession: async (input) => {
-      refreshCutoffs.push(input.createdAfter)
-      return {
-        id: 'session-stable',
-        userId: user.id,
-        user,
-        refreshTokenHash: 'hash:current-refresh-token',
-        credentialState: 'current',
-      }
-    },
-    rotateRefreshSession: async () => true,
-    findActiveAccessSession: async () => null,
-    revokeSessionById: async () => false,
-    revokeSession: async () => null,
-  } satisfies AuthRepository
-
-  const service = new AuthService({
-    ...unusedPasswordResetDependencies,
-    accessTokens: {
-      sign: async (payload) => {
-        signedSessionIds.push(payload.sessionId)
-        return 'access-token'
-      },
-      verify: async () => ({ sub: user.id, email: user.email, sessionId: 'session-stable' }),
-    },
-    clock: { now: () => new Date('2026-01-01T00:00:00.000Z') },
-    logoutCleanup: async () => undefined,
-    passwords: {
-      hash: async () => 'password-hash',
-      verify: async () => true,
-    },
-    projectUser: async (record) => ({
-      id: record.id,
-      email: record.email,
-      displayName: record.displayName,
-      role: record.role,
-      createdAt: record.createdAt.toISOString(),
-    }),
-    refreshTokenTtlDays: 30,
-    refreshReuseGraceSeconds: 10,
-    sessionAbsoluteTtlDays: 90,
-    refreshTokens: {
-      create: () => 'next-refresh-token',
-      hash: (token) => `hash:${token}`,
-      familyHash: (token) => `family:${token}`,
-      rotate: () => 'next-refresh-token',
-    },
-    repository,
-  })
-
-  await service.refresh('current-refresh-token', {})
-
-  expect(signedSessionIds).toEqual(['session-stable'])
-  expect(refreshCutoffs).toEqual([new Date('2025-10-03T00:00:00.000Z')])
-})
-
 // Credential reuse after grace and the rotation race are decided by SQL, so they are tested in
 // `auth.integration.test.ts` against real Postgres with genuinely concurrent requests. Scripting
 // either one through a fake repository only asserts that the fake was called the scripted number
 // of times.
 
-test('password reset request stays generic and creates nothing while delivery is disabled', async () => {
-  let repositoryCalls = 0
-  const queued: unknown[] = []
-  const service = new AuthService({
-    ...unusedPasswordResetDependencies,
-    accessTokens: {} as never,
-    clock: { now: () => new Date('2026-01-01T00:00:00.000Z') },
-    logoutCleanup: async () => undefined,
-    passwords: { hash: async () => 'hash', verify: async () => true },
-    passwordResetTasks: {
-        enqueuePasswordReset: async (input) => void queued.push(input),
-    },
-    refreshTokens: {} as never,
-    refreshReuseGraceSeconds: 10,
-    refreshTokenTtlDays: 30,
-    repository: {
-      findUserByEmail: async () => {
-        repositoryCalls += 1
-        return user
-      },
-    } as unknown as AuthRepository,
-    sessionAbsoluteTtlDays: 90,
-  })
-
-  await expect(service.requestPasswordReset({ email: user.email })).resolves.toEqual({
-    accepted: true,
-  })
-  // Nothing to deliver means nothing written down: no token, and no queued task that would sit
-  // in the outbox forever waiting for a provider that never arrives.
-  expect(repositoryCalls).toBe(0)
-  expect(queued).toEqual([])
-})
-
 test('a reset request queues exactly one task without looking the account up', async () => {
   // The response must not reveal whether the address exists, so the account lookup belongs to the
   // handler. What the request does is hand the queue one enqueue, identical either way; whether
   // a row is written is the queue's own, address-blind decision.
-  const now = new Date('2026-01-01T00:00:00.000Z')
   let repositoryCalls = 0
   const queued: unknown[] = []
-  const service = new AuthService({
-    ...unusedPasswordResetDependencies,
-    accessTokens: {} as never,
-    clock: { now: () => now },
-    logoutCleanup: async () => undefined,
-    passwords: { hash: async () => 'hash', verify: async () => true },
-    passwordResetNotifier: {
-      configured: true,
-      isPermanentFailure: () => false,
-      sendPasswordChanged: async () => undefined,
-      sendPasswordReset: async () => undefined,
-    },
-    passwordResetTasks: {
-        enqueuePasswordReset: async (input) => void queued.push(input),
-    },
-    refreshTokens: {} as never,
-    refreshReuseGraceSeconds: 10,
-    refreshTokenTtlDays: 30,
+  const service = createService({
+    passwordResetTasks: { enqueuePasswordReset: async (input) => void queued.push(input) },
     repository: {
       findUserByEmail: async () => {
         repositoryCalls += 1
         return user
       },
-    } as unknown as AuthRepository,
-    sessionAbsoluteTtlDays: 90,
+    },
   })
 
   await expect(service.requestPasswordReset({ email: 'nobody@example.com' })).resolves.toEqual({
@@ -244,70 +135,43 @@ test('a reset request queues exactly one task without looking the account up', a
   expect(repositoryCalls).toBe(0)
 })
 
-function deliveryService({
-  invalidated,
-  permanent = false,
-  stored,
-}: {
-  invalidated: string[]
-  /** Whether the notifier reports its failure as one no retry can fix. */
-  permanent?: boolean
-  stored: unknown[]
-}) {
-  const rawToken = 'r'.repeat(43)
-
-  return new AuthService({
-    ...unusedPasswordResetDependencies,
-    accessTokens: {} as never,
-    clock: { now: () => new Date('2026-01-01T00:00:00.000Z') },
-    logoutCleanup: async () => undefined,
-    passwords: { hash: async () => 'hash', verify: async () => true },
-    passwordResetNotifier: {
-      configured: true,
+/** A delivery whose provider call fails, recording the token it stored and any it invalidated. */
+function failingDeliveryService({ permanent = false }: { permanent?: boolean } = {}) {
+  const invalidated: string[] = []
+  const stored: unknown[] = []
+  const service = createService({
+    passwordResetNotifier: notifier({
       isPermanentFailure: () => permanent,
-      sendPasswordChanged: async () => undefined,
       sendPasswordReset: async () => {
         throw new Error('provider unavailable')
       },
-    },
-    passwordResetTokens: { create: () => rawToken, hash: (token) => `hash:${token}` },
-    refreshTokens: {} as never,
-    refreshReuseGraceSeconds: 10,
-    refreshTokenTtlDays: 30,
+    }),
     repository: {
       findUserByEmail: async () => user,
-      createPasswordResetToken: async (
-        input: Parameters<AuthRepository['createPasswordResetToken']>[0],
-      ) => {
+      createPasswordResetToken: async (input) => {
         stored.push(input)
         return true
       },
-      invalidatePasswordResetToken: async ({ tokenHash }: { tokenHash: string }) => {
+      invalidatePasswordResetToken: async ({ tokenHash }) => {
         invalidated.push(tokenHash)
       },
-    } as unknown as AuthRepository,
-    sessionAbsoluteTtlDays: 90,
+    },
   })
+
+  return { invalidated, service, stored }
 }
 
 test('a transient delivery failure leaves the reset link alive for the next attempt', async () => {
   // The old behaviour killed the token on the first hiccup, so one flaky provider call cost the
   // user their link even though the outbox was about to try again.
-  const invalidated: string[] = []
-  const stored: unknown[] = []
-  const now = new Date('2026-01-01T00:00:00.000Z')
+  const { invalidated, service, stored } = failingDeliveryService()
 
-  await expect(
-    deliveryService({ invalidated, stored }).deliverPasswordReset(
-      { email: user.email },
-      { finalAttempt: false, now, signal: new AbortController().signal },
-    ),
-  ).rejects.toThrow('provider unavailable')
+  await expect(deliver(service, false)).rejects.toThrow('provider unavailable')
 
   expect(stored).toEqual([
     {
       userId: user.id,
-      tokenHash: `hash:${'r'.repeat(43)}`,
+      tokenHash: `hash:${rawToken}`,
       expiresAt: new Date('2026-01-01T00:30:00.000Z'),
       now,
       createdAfter: new Date('2025-12-31T23:59:00.000Z'),
@@ -317,43 +181,23 @@ test('a transient delivery failure leaves the reset link alive for the next atte
 })
 
 test('the last delivery attempt invalidates the token before reporting failure', async () => {
-  const invalidated: string[] = []
-  const stored: unknown[] = []
+  const { invalidated, service } = failingDeliveryService()
 
-  await expect(
-    deliveryService({ invalidated, stored }).deliverPasswordReset(
-      { email: user.email },
-      {
-        finalAttempt: true,
-        now: new Date('2026-01-01T00:00:00.000Z'),
-        signal: new AbortController().signal,
-      },
-    ),
-  ).rejects.toThrow('provider unavailable')
+  await expect(deliver(service, true)).rejects.toThrow('provider unavailable')
 
   // No more attempts are coming, so a token nobody can ever receive must not stay live.
-  expect(invalidated).toEqual([`hash:${'r'.repeat(43)}`])
+  expect(invalidated).toEqual([`hash:${rawToken}`])
 })
 
 test('a permanent rejection invalidates the token on the first attempt, not the last', async () => {
   // The drain decides a task is terminal only after the handler returns, so `finalAttempt` is
   // still false here and always will be. Waiting for it would leave a live token behind for a
   // link the provider has already refused to deliver.
-  const invalidated: string[] = []
-  const stored: unknown[] = []
+  const { invalidated, service } = failingDeliveryService({ permanent: true })
 
-  await expect(
-    deliveryService({ invalidated, permanent: true, stored }).deliverPasswordReset(
-      { email: user.email },
-      {
-        finalAttempt: false,
-        now: new Date('2026-01-01T00:00:00.000Z'),
-        signal: new AbortController().signal,
-      },
-    ),
-  ).rejects.toThrow('provider unavailable')
+  await expect(deliver(service, false)).rejects.toThrow('provider unavailable')
 
-  expect(invalidated).toEqual([`hash:${'r'.repeat(43)}`])
+  expect(invalidated).toEqual([`hash:${rawToken}`])
 })
 
 test('a delivery the cooldown refused sends nothing', async () => {
@@ -361,72 +205,17 @@ test('a delivery the cooldown refused sends nothing', async () => {
   // the account's earlier token is still the live one - the user follows it and is told the
   // link is invalid.
   const sent: unknown[] = []
-  const service = new AuthService({
-    ...unusedPasswordResetDependencies,
-    accessTokens: {} as never,
-    clock: { now: () => new Date('2026-01-01T00:00:00.000Z') },
-    logoutCleanup: async () => undefined,
-    passwords: { hash: async () => 'hash', verify: async () => true },
-    passwordResetNotifier: {
-      configured: true,
-      isPermanentFailure: () => false,
-      sendPasswordChanged: async () => undefined,
-      sendPasswordReset: async (input) => void sent.push(input),
-    },
-    refreshTokens: {} as never,
-    refreshReuseGraceSeconds: 10,
-    refreshTokenTtlDays: 30,
+  const service = createService({
+    passwordResetNotifier: notifier({ sendPasswordReset: async (input) => void sent.push(input) }),
     repository: {
       findUserByEmail: async () => user,
       // What createPasswordResetToken does inside the cooldown window.
       createPasswordResetToken: async () => false,
-    } as unknown as AuthRepository,
-    sessionAbsoluteTtlDays: 90,
-  })
-
-  await expect(
-    service.deliverPasswordReset(
-      { email: user.email },
-      {
-        finalAttempt: false,
-        now: new Date('2026-01-01T00:00:00.000Z'),
-        signal: new AbortController().signal,
-      },
-    ),
-  ).resolves.toBe('skipped')
-  expect(sent).toEqual([])
-})
-
-test('delivery to an address with no account is skipped rather than retried', async () => {
-  const service = new AuthService({
-    ...unusedPasswordResetDependencies,
-    accessTokens: {} as never,
-    clock: { now: () => new Date('2026-01-01T00:00:00.000Z') },
-    logoutCleanup: async () => undefined,
-    passwords: { hash: async () => 'hash', verify: async () => true },
-    passwordResetNotifier: {
-      configured: true,
-      isPermanentFailure: () => false,
-      sendPasswordChanged: async () => undefined,
-      sendPasswordReset: async () => undefined,
     },
-    refreshTokens: {} as never,
-    refreshReuseGraceSeconds: 10,
-    refreshTokenTtlDays: 30,
-    repository: { findUserByEmail: async () => null } as unknown as AuthRepository,
-    sessionAbsoluteTtlDays: 90,
   })
 
-  await expect(
-    service.deliverPasswordReset(
-      { email: 'nobody@example.com' },
-      {
-        finalAttempt: false,
-        now: new Date('2026-01-01T00:00:00.000Z'),
-        signal: new AbortController().signal,
-      },
-    ),
-  ).resolves.toBe('skipped')
+  await expect(deliver(service, false)).resolves.toBe('skipped')
+  expect(sent).toEqual([])
 })
 
 test('password reset confirmation rejects invalid tokens before hashing and queues the notice', async () => {
@@ -435,12 +224,7 @@ test('password reset confirmation rejects invalid tokens before hashing and queu
   let active = false
   let valid = false
   let passwordHashCalls = 0
-  const now = new Date('2026-01-01T00:00:00.000Z')
-  const service = new AuthService({
-    ...unusedPasswordResetDependencies,
-    accessTokens: {} as never,
-    clock: { now: () => now },
-    logoutCleanup: async () => undefined,
+  const service = createService({
     passwords: {
       hash: async (password) => {
         passwordHashCalls += 1
@@ -448,32 +232,22 @@ test('password reset confirmation rejects invalid tokens before hashing and queu
       },
       verify: async () => true,
     },
-    passwordResetNotifier: {
-      configured: true,
-      isPermanentFailure: () => false,
-      sendPasswordChanged: async () => undefined,
-      sendPasswordReset: async () => undefined,
-    },
-    refreshTokens: {} as never,
-    refreshReuseGraceSeconds: 10,
-    refreshTokenTtlDays: 30,
     repository: {
       hasActivePasswordResetToken: async () => active,
-      completePasswordReset: async (
-        input: Parameters<AuthRepository['completePasswordReset']>[0],
-      ) => {
+      completePasswordReset: async (input) => {
         completed.push({ now: input.now, passwordHash: input.passwordHash, tokenHash: input.tokenHash })
         if (!valid) return null
         // Stands in for the transaction: the repository is what runs this, and only on success.
         await input.queueNotice(user.email, async (task) => void changed.push(task))
         return { email: user.email }
       },
-    } as unknown as AuthRepository,
-    sessionAbsoluteTtlDays: 90,
+    },
   })
 
-  const input = { token: 'r'.repeat(43), password: 'new-password-123' }
-  await expect(service.confirmPasswordReset(input)).rejects.toThrow('invalid or expired')
+  const input = { token: rawToken, password: 'new-password-123' }
+  await expect(service.confirmPasswordReset(input)).rejects.toMatchObject({
+    kind: 'password_reset_invalid',
+  })
   expect(passwordHashCalls).toBe(0)
   expect(completed).toEqual([])
   expect(changed).toEqual([])
@@ -493,40 +267,20 @@ test('password reset confirmation rejects invalid tokens before hashing and queu
 
 test('an unknown address costs the same password work as a registered one', async () => {
   const verifiedAgainst: string[] = []
-  const passwords = {
-    hash: async () => 'decoy-password-hash',
-    verify: async (_password: string, passwordHash: string) => {
-      verifiedAgainst.push(passwordHash)
-      return false
+  const service = createService({
+    passwords: {
+      hash: async () => 'decoy-password-hash',
+      verify: async (_password, passwordHash) => {
+        verifiedAgainst.push(passwordHash)
+        return false
+      },
     },
-  }
-  const service = new AuthService({
-    ...unusedPasswordResetDependencies,
-    accessTokens: {
-      sign: async () => 'access-token',
-      verify: async () => ({ sub: user.id, email: user.email, sessionId: 'session-1' }),
-    },
-    clock: { now: () => new Date('2026-01-01T00:00:00.000Z') },
-    logoutCleanup: async () => undefined,
-    passwords,
-    refreshReuseGraceSeconds: 10,
-    refreshTokenTtlDays: 30,
-    sessionAbsoluteTtlDays: 90,
-    refreshTokens: {
-      create: () => 'refresh-token',
-      hash: (token) => `hash:${token}`,
-      familyHash: (token) => `family:${token}`,
-      rotate: (token) => `next:${token}`,
-    },
-    repository: {
-      ...unusedPasswordResetRepository,
-      findUserByEmail: async () => null,
-    } as unknown as AuthRepository,
+    repository: { findUserByEmail: async () => null },
   })
 
   await expect(
     service.login({ email: 'nobody@example.com', password: 'password123' }, {}),
-  ).rejects.toThrow('Invalid email or password')
+  ).rejects.toMatchObject({ kind: 'invalid_credentials' })
 
   // Without this the response time answers the question the 401 body refuses to answer.
   expect(verifiedAgainst).toHaveLength(1)

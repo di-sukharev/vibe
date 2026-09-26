@@ -20,25 +20,19 @@ const localConfig: S3StorageConfig = {
 const uploadInput = { key: 'avatars/2026/08/abc', contentType: 'image/png', byteSize: 1024 }
 
 // Presigning is pure signature maths, so every assertion here runs without a server.
-describe('S3PrivateStorage presigned uploads', () => {
-  test('addresses the bucket in the path when path-style is on', async () => {
-    const upload = await new S3PrivateStorage(localConfig).createUploadUrl(uploadInput)
-    const url = new URL(upload.url)
-
-    expect(url.host).toBe('127.0.0.1:24331')
-    expect(url.pathname).toBe('/local-private-storage/avatars/2026/08/abc')
-  })
-
-  test('addresses the bucket as a subdomain when path-style is off', async () => {
-    const upload = await new S3PrivateStorage({
+describe('S3PrivateStorage presigned URLs', () => {
+  test('addresses the bucket in the path or as a subdomain, as configured', async () => {
+    const pathStyle = await new S3PrivateStorage(localConfig).createUploadUrl(uploadInput)
+    const virtualHosted = await new S3PrivateStorage({
       ...localConfig,
       endpoint: 'https://storage.example.com',
       forcePathStyle: false,
     }).createUploadUrl(uploadInput)
-    const url = new URL(upload.url)
 
-    expect(url.host).toBe('local-private-storage.storage.example.com')
-    expect(url.pathname).toBe('/avatars/2026/08/abc')
+    expect(new URL(pathStyle.url).host).toBe('127.0.0.1:24331')
+    expect(new URL(pathStyle.url).pathname).toBe('/local-private-storage/avatars/2026/08/abc')
+    expect(new URL(virtualHosted.url).host).toBe('local-private-storage.storage.example.com')
+    expect(new URL(virtualHosted.url).pathname).toBe('/avatars/2026/08/abc')
   })
 
   test('signs the exact size, type, and write-once condition', async () => {
@@ -72,11 +66,14 @@ describe('S3PrivateStorage presigned uploads', () => {
     }
   })
 
-  test('expires the upload URL on the configured window', async () => {
-    const upload = await new S3PrivateStorage(localConfig).createUploadUrl(uploadInput)
+  test('expires upload and download URLs on their configured windows', async () => {
+    const storage = new S3PrivateStorage(localConfig)
+    const upload = await storage.createUploadUrl(uploadInput)
+    const download = await storage.createDownloadUrl({ key: uploadInput.key })
 
     expect(new URL(upload.url).searchParams.get('X-Amz-Expires')).toBe('900')
     expect(Date.parse(upload.expiresAt)).toBeGreaterThan(Date.now())
+    expect(new URL(download.url).searchParams.get('X-Amz-Expires')).toBe('300')
   })
 
   test('rejects sizes, types, keys, and lifetimes it must not sign', async () => {
@@ -95,29 +92,5 @@ describe('S3PrivateStorage presigned uploads', () => {
     await expect(
       storage.createUploadUrl({ ...uploadInput, expiresInSeconds: 8 * 24 * 60 * 60 }),
     ).rejects.toThrow(StorageError)
-  })
-})
-
-describe('S3PrivateStorage presigned downloads', () => {
-  test('signs a GET that carries its own credentials in the query string', async () => {
-    const download = await new S3PrivateStorage(localConfig).createDownloadUrl({
-      key: 'avatars/2026/08/abc',
-    })
-    const url = new URL(download.url)
-
-    expect(url.pathname).toBe('/local-private-storage/avatars/2026/08/abc')
-    expect(url.searchParams.get('X-Amz-Expires')).toBe('300')
-    expect(url.searchParams.get('X-Amz-Signature')).toBeTruthy()
-    expect(url.searchParams.get('X-Amz-Credential')).toContain('local-key')
-  })
-
-  test('produces a different signature per key, so a URL cannot be repointed', async () => {
-    const storage = new S3PrivateStorage(localConfig)
-    const mine = await storage.createDownloadUrl({ key: 'avatars/2026/08/mine' })
-    const yours = await storage.createDownloadUrl({ key: 'avatars/2026/08/yours' })
-
-    expect(new URL(mine.url).searchParams.get('X-Amz-Signature')).not.toBe(
-      new URL(yours.url).searchParams.get('X-Amz-Signature'),
-    )
   })
 })

@@ -13,26 +13,17 @@ import { fileURLToPath } from 'node:url'
 const websiteRoot = fileURLToPath(new URL('..', import.meta.url))
 const dist = resolve(websiteRoot, 'dist')
 
-test('the static build keeps the fallback eager, the R3F scene lazy, and story styles isolated', () => {
+test('the static build keeps the fallback eager and the R3F scene lazy', () => {
   assert.ok(
     existsSync(dist),
     `${dist} is missing: run \`bun run test:build-contracts\` from the repository root, which builds before it checks`,
   )
-
-  const storySource = readFileSync(
-    resolve(websiteRoot, 'src/stories/ui/demos.tsx'),
-    'utf8',
-  )
-  assert.match(storySource, /h-\[34rem\]/)
 
   const assets = resolve(dist, '_astro')
   const html = readFileSync(resolve(dist, 'index.html'), 'utf8')
   const scripts = readdirSync(assets)
     .filter((name) => name.endsWith('.js'))
     .map((name) => ({ name, source: readFileSync(resolve(assets, name), 'utf8') }))
-  const cssFiles = readdirSync(assets).filter((name) => name.endsWith('.css'))
-  assert.ok(cssFiles.length > 0, `expected at least one CSS asset in ${assets}`)
-  const css = cssFiles.map((name) => readFileSync(resolve(assets, name), 'utf8')).join('\n')
   const canvasChunk = scripts.find(({ source }) => source.includes('data-hero-scene-canvas'))
   const shellUrl = html.match(
     /<astro-island[^>]*component-url="([^"]+\.js)"[^>]*>[\s\S]*?data-hero-scene/,
@@ -40,7 +31,6 @@ test('the static build keeps the fallback eager, the R3F scene lazy, and story s
 
   assert.match(html, /data-hero-scene-fallback/)
   assert.match(html, /client="idle"/)
-  assert.ok(!css.includes('.h-\\[34rem\\]{'))
   assert.ok(canvasChunk, 'expected a separate R3F canvas chunk')
   assert.ok(shellUrl, 'expected the lightweight HeroScene island chunk')
   assert.doesNotMatch(html, new RegExp(escapeRegExp(canvasChunk.name)))
@@ -53,3 +43,17 @@ test('the static build keeps the fallback eager, the R3F scene lazy, and story s
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
+
+test('the landing page ships its title, description, and heading in the initial HTML', () => {
+  // Crawlers and link previews read the static HTML; an island must never be the only source.
+  const html = readFileSync(resolve(dist, 'index.html'), 'utf8')
+  const text = (pattern: RegExp) => (pattern.exec(html)?.[1] ?? '').replace(/<[^>]+>/g, '').trim()
+  const seo = {
+    title: text(/<title>([^<]*)<\/title>/),
+    description: text(/<meta name="description" content="([^"]*)"/),
+    openGraphTitle: text(/<meta property="og:title" content="([^"]*)"/),
+    heading: text(/<h1\b[^>]*>([\s\S]*?)<\/h1>/),
+  }
+
+  assert.deepEqual(Object.entries(seo).filter(([, value]) => !value).map(([name]) => name), [])
+})

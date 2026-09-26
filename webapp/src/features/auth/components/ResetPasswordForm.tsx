@@ -155,7 +155,11 @@ export function ResetPasswordForm({ token }: { token: string }) {
 
             <Field>
               <form.Subscribe selector={(state) => state.isSubmitting} children={(isSubmitting) => (
-                <Button disabled={isSubmitting || !tokenIsValid} type="submit">
+                <Button
+                  data-testid="reset-password-submit"
+                  disabled={isSubmitting || !tokenIsValid}
+                  type="submit"
+                >
                   {isSubmitting ? 'Updating password…' : 'Update password'}
                 </Button>
               )} />

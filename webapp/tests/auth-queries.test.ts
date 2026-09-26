@@ -11,7 +11,7 @@ import {
   logoutAuthenticatedSession,
   sessionQueryKeys,
 } from '../src/features/auth/queries'
-import { avatarQueryKeys, avatarQueryOptions } from '../src/features/avatar/queries'
+import { avatarQueryOptions } from '../src/features/avatar/queries'
 import type { HttpRequestOptions } from '../src/platform/api'
 
 const user = {
@@ -181,43 +181,39 @@ test('session cleanup does not wait on the authenticated query it cancels', asyn
   await inFlightQuery.catch(() => undefined)
 })
 
-test('every session-scoped query hands the abort signal TanStack gives it to the transport', async () => {
+test('every session-scoped query forwards its abort signal and is removed by session cleanup', async () => {
   const queryClient = new QueryClient()
-  const received: Array<{ path: string; signal: unknown }> = []
+  const signals: unknown[] = []
   const transport = {
-    request: async (path: string, _schema: unknown, options?: HttpRequestOptions) => {
-      received.push({ path, signal: options?.signal })
+    request: async (_path: string, _schema: unknown, options?: HttpRequestOptions) => {
+      signals.push(options?.signal)
       return {} as never
     },
   }
   const api = {
     me: async (options?: { signal?: AbortSignal }) => {
-      received.push({ path: '/api/auth/me', signal: options?.signal })
+      signals.push(options?.signal)
       return { user: { ...user, role: 'user' as const } }
     },
   }
+  const sessionQueries = [
+    currentUserQueryOptions(api),
+    adminDashboardQueryOptions(transport),
+    adminUsersQueryOptions(transport, { page: 1, pageSize: 20 }),
+    avatarQueryOptions(transport),
+  ] as const
 
-  await queryClient.fetchQuery(currentUserQueryOptions(api))
-  await queryClient.fetchQuery(adminDashboardQueryOptions(transport))
-  await queryClient.fetchQuery(adminUsersQueryOptions(transport, { page: 1, pageSize: 20 }))
-  await queryClient.fetchQuery(avatarQueryOptions(transport))
+  await queryClient.fetchQuery(sessionQueries[0])
+  await queryClient.fetchQuery(sessionQueries[1])
+  await queryClient.fetchQuery(sessionQueries[2])
+  await queryClient.fetchQuery(sessionQueries[3])
 
-  expect(received.map((request) => request.path)).toEqual([
-    '/api/auth/me',
-    '/api/admin/dashboard',
-    '/api/admin/users?page=1&pageSize=20',
-    '/api/uploads/avatar',
-  ])
-  expect(received.every((request) => request.signal instanceof AbortSignal)).toBe(true)
-})
-
-test('every session-scoped feature cache is inside the namespace session cleanup removes', async () => {
-  const queryClient = new QueryClient()
-  queryClient.setQueryData(avatarQueryKeys.current(), {
-    avatar: { downloadUrl: 'https://storage.example/previous-user.jpg' },
-  })
+  expect(signals).toHaveLength(sessionQueries.length)
+  expect(signals.every((signal) => signal instanceof AbortSignal)).toBe(true)
 
   await clearAuthenticatedSession(queryClient, () => undefined)
 
-  expect(queryClient.getQueryData(avatarQueryKeys.current())).toBeUndefined()
+  for (const { queryKey } of sessionQueries) {
+    expect(queryClient.getQueryData(queryKey)).toBeUndefined()
+  }
 })

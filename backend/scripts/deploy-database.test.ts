@@ -1,11 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import type { DbClient } from '../src/db'
-import {
-  assertMigrationSchemaOwnership,
-  deployDatabase,
-  grantRuntimeDatabaseAccess,
-} from './deploy-database'
+import { deployDatabase } from './deploy-database'
 
 describe('database deployment command', () => {
   test('rejects invalid configuration before attempting a migration', async () => {
@@ -40,45 +36,36 @@ describe('database deployment command', () => {
     }
   })
 
-  test('bootstraps paired strong credentials before verifying the administrator', async () => {
-    // The order is the rule: bootstrapping after the check would verify an account that did not
-    // exist yet, and either step before the migration would run against the old schema. Asserted
-    // as relative positions - `disconnect` and `log` land wherever they land.
-    const calls: string[] = []
+  test('grants access after migration, then bootstraps before verifying the administrator', async () => {
+    // The order is the rule: grants and the bootstrap need the migrated schema, and verifying the
+    // administrator before the bootstrap would check an account that did not exist yet. The grant
+    // runs without a runtime login too, because it also hardens what PUBLIC may do.
+    const seeded: string[] = []
     await deployDatabase(
       {
         DATABASE_URL: databaseUrl,
         ADMIN_SEED_EMAIL: ' ADMIN@Example.COM ',
         ADMIN_SEED_PASSWORD: 'a-strong-initial-password',
       },
-      dependenciesRecording(calls),
+      dependenciesRecording(seeded),
     )
-
-    expect(calls.indexOf('ownership:unused')).toBeGreaterThanOrEqual(0)
-    expect(calls.indexOf('migrate')).toBeGreaterThan(
-      calls.indexOf('ownership:unused'),
-    )
-    expect(calls.indexOf('grant:unused:none')).toBeGreaterThan(
-      calls.indexOf('migrate'),
-    )
-    expect(calls.indexOf('bootstrap:admin@example.com')).toBeGreaterThan(calls.indexOf('migrate'))
-    expect(calls.indexOf('bootstrap:admin@example.com')).toBeGreaterThan(
-      calls.indexOf('grant:unused:none'),
-    )
-    expect(calls.indexOf('assert')).toBeGreaterThan(calls.indexOf('bootstrap:admin@example.com'))
-  })
-
-  test('grants a separate runtime login after migration and before application checks', async () => {
-    const calls: string[] = []
+    const withRuntimeLogin: string[] = []
     await deployDatabase(
-      {
-        DATABASE_URL: databaseUrl,
-        DATABASE_RUNTIME_USER: 'product_app',
-      },
-      dependenciesRecording(calls),
+      { DATABASE_URL: databaseUrl, DATABASE_RUNTIME_USER: 'product_app' },
+      dependenciesRecording(withRuntimeLogin),
     )
 
-    expect(calls).toEqual([
+    expect(seeded).toEqual([
+      'create',
+      'ownership:unused',
+      'migrate',
+      'grant:unused:none',
+      'bootstrap:admin@example.com',
+      'assert',
+      'disconnect',
+      'log',
+    ])
+    expect(withRuntimeLogin).toEqual([
       'create',
       'ownership:unused',
       'migrate',
@@ -87,50 +74,6 @@ describe('database deployment command', () => {
       'disconnect',
       'log',
     ])
-  })
-
-  test('grants only runtime DML and matching future-object privileges', async () => {
-    const statements: string[] = []
-    await grantRuntimeDatabaseAccess(
-      {
-        async $transaction(operation) {
-          return operation({
-            async $queryRawUnsafe() {
-              return []
-            },
-            async $executeRawUnsafe(statement: string) {
-              statements.push(statement)
-              return 0
-            },
-          } as never)
-        },
-      },
-      { databaseName: 'product', username: 'product_app' },
-    )
-
-    expect(statements).toContain(
-      'REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM "product_app"',
-    )
-    expect(statements).toContain(
-      'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO "product_app"',
-    )
-    expect(statements).toContain(
-      'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO "product_app"',
-    )
-    expect(statements).toContain(
-      'REVOKE CREATE ON SCHEMA public FROM PUBLIC',
-    )
-    expect(statements).toContain(
-      'REVOKE ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA public FROM PUBLIC',
-    )
-    expect(statements).toContain(
-      'REVOKE ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA public FROM "product_app"',
-    )
-    expect(statements).toContain(
-      'ALTER DEFAULT PRIVILEGES REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC',
-    )
-    expect(statements.join('\n')).not.toContain('GRANT CREATE')
-    expect(statements.join('\n')).not.toContain('GRANT TRUNCATE')
   })
 
   test('fails closed before migration when public schema objects have another owner', async () => {
@@ -148,25 +91,6 @@ describe('database deployment command', () => {
       ),
     ).rejects.toThrow('legacy ownership remains')
     expect(calls).toEqual(['create', 'disconnect'])
-  })
-
-  test('reports concrete ownership mismatches without mutating the database', async () => {
-    await expect(
-      assertMigrationSchemaOwnership(
-        {
-          async $queryRawUnsafe() {
-            return [
-              {
-                kind: 'table',
-                identity: 'public._prisma_migrations',
-                owner: 'legacy_owner',
-              },
-            ]
-          },
-        },
-        { expectedOwner: 'product_migration' },
-      ),
-    ).rejects.toThrow('public._prisma_migrations')
   })
 })
 

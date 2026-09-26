@@ -132,7 +132,7 @@ export function UserDirectory({ currentUser }: { currentUser: UserDto }) {
     <>
       <div className="grid gap-4">
         {mutationFeedback?.kind === 'success' && (
-          <Alert>
+          <Alert data-testid="role-change-success">
             <AlertTitle>Role changed</AlertTitle>
             <AlertDescription>
               {mutationFeedback.user.email} is now {mutationFeedback.user.role}.
@@ -157,12 +157,13 @@ export function UserDirectory({ currentUser }: { currentUser: UserDto }) {
                 </InputGroupAddon>
                 <InputGroupInput
                   aria-label="Search users"
+                  data-testid="user-search-input"
                   onChange={(event) => setDraftQuery(event.target.value)}
                   placeholder="Search by email or name"
                   value={draftQuery}
                 />
               </InputGroup>
-              <Button type="submit">Search</Button>
+              <Button data-testid="user-search-submit" type="submit">Search</Button>
             </form>
           }
         >
@@ -225,7 +226,7 @@ function UserTable({
       </TableHeader>
       <TableBody>
         {users.map((user) => (
-          <TableRow key={user.id}>
+          <TableRow data-testid="user-row" key={user.id}>
             <TableCell>
               <div className="grid">
                 <Typography variant="bodySmMedium">
@@ -273,7 +274,7 @@ function UserList({
     <ul aria-label="Users" className="grid gap-3" role="list">
       {users.map((user) => (
         <Item asChild key={user.id} variant="outline">
-          <li>
+          <li data-testid="user-row">
             <dl className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-3">
               <div className="grid min-w-0">
                 <Typography as="dt" variant="srOnly">
@@ -339,17 +340,22 @@ function RoleSelect({
       }}
       value={user.role}
     >
-      <SelectTrigger aria-label={`Role for ${user.email}`} className="w-28 capitalize">
+      <SelectTrigger
+        aria-label={`Role for ${user.email}`}
+        className="w-28 capitalize"
+        data-testid="role-select"
+      >
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
         <SelectItem
+          data-testid="role-option-user"
           disabled={user.id === currentUser.id && user.role === 'admin'}
           value="user"
         >
           User
         </SelectItem>
-        <SelectItem value="admin">Admin</SelectItem>
+        <SelectItem data-testid="role-option-admin" value="admin">Admin</SelectItem>
       </SelectContent>
     </Select>
   )
