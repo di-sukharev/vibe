@@ -25,10 +25,10 @@ import { Typography } from '@/components/typography'
 const themes = ['system', 'light', 'dark'] as const
 type Theme = typeof themes[number]
 
-const themeIcons = {
-  system: ComputerIcon,
-  light: Sun01Icon,
-  dark: Moon02Icon,
+const themeOptions = {
+  system: { icon: ComputerIcon, label: 'System' },
+  light: { icon: Sun01Icon, label: 'Light' },
+  dark: { icon: Moon02Icon, label: 'Dark' },
 } as const
 
 export function AppearancePanel() {
@@ -59,9 +59,9 @@ export function AppearancePanel() {
             </SelectTrigger>
             <SelectContent>
               {themes.map((item) => (
-                <SelectItem className="capitalize" key={item} value={item}>
-                  <HugeiconsIcon aria-hidden icon={themeIcons[item]} strokeWidth={2} />
-                  {item}
+                <SelectItem key={item} value={item}>
+                  <HugeiconsIcon aria-hidden icon={themeOptions[item].icon} strokeWidth={2} />
+                  {themeOptions[item].label}
                 </SelectItem>
               ))}
             </SelectContent>
