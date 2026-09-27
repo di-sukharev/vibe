@@ -4,4 +4,3 @@ export * from './iap'
 export * from './notifications'
 export * from './uploads'
 export * from './users'
-// scaffold:contracts-exports

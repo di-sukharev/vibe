@@ -10,12 +10,12 @@ Code comments that mention `docs/IAP.md` mark each spot: `rg -n 'docs/IAP.md'`.
 
 1. Uncomment the enums and models in `backend/prisma/schema/billing.prisma` and the three billing relations on `User` in `base.prisma`. Run `bun run --cwd backend prisma:migrate`.
 2. Delete `backend/src/modules/billing/infrastructure/prisma-billing-types.ts`, and restore the imports in the six files its header lists. Replace the `createBillingTestApp` helper in `billing.integration.test.ts` with `createApp`. Remove the stand-in notes that `rg -l prisma-billing-types` finds.
-3. In `backend/src/app.ts`, uncomment the billing import, the verifier options, `createBillingModule`, the webhook limit constants, the `/api/iap` and `/api/webhooks` ingress groups, and both routes. As the comment there says, add a `RateLimitPolicy` for each group in `backend/src/rate-limit/port.ts` and pass `store: rateLimitStore(...)`, so that `RATE_LIMIT_STORE=database` covers them.
+3. In `backend/src/app.ts`, uncomment the billing import, the verifier options, `createBillingModule`, the webhook limit constants, the `/api/iap` and `/api/webhooks` ingress groups with their entries in `routesWithOwnBudget`, and both routes. As the comment there says, add a `RateLimitPolicy` for each group in `backend/src/rate-limit/port.ts` and pass `store: rateLimitStore(...)`, so that `RATE_LIMIT_STORE=database` covers them.
 4. In `backend/src/jobs.ts`, uncomment the `billing:google-play:reconcile` job, its result type, the three helpers, and the Google Play lines in `maintenance:process`. Keep the billing import inside the job body: `jobs.ts` stays type-only at the top level.
 5. Bring the tests back:
    - Remove the `@parked-test` line from every suite under `backend/src/modules/billing/`.
    - Move the suites in `mobile/tests/parked/` up to `mobile/tests/`, and delete the directory.
-   - In `backend/src/app.test.ts`, restore the four body-limit and rate tests for `/api/iap` and `/api/webhooks` from `git show 13e67da -- backend/src/app.test.ts`. Put them next to the account-mutation ingress tests, where the comment about the App Store webhook suite stands.
+   - In `backend/src/app.test.ts`, restore the four body-limit and rate tests for `/api/iap` and `/api/webhooks` from `git show 13e67da -- backend/src/app.test.ts`. Put them next to the API write limit tests, where the comment about the App Store webhook suite stands.
    - `backend/src/jobs.test.ts` keeps no billing case. Test the Google Play job with the real-database job tests in `backend/src/jobs.integration.test.ts`.
    - In `backend/src/modules/users/users.integration.test.ts`, uncomment the check that the demo seed grants no entitlement.
 6. In `mobile/src/composition/AppProviders.tsx`, uncomment the `IapProvider` import, and wrap the tree in `<IapProvider api={apis.billing}>` where its comment says. In `mobile/src/app/(tabs)/profile.tsx`, uncomment the billing import, the `useSubscriptionIap()` line, and the `SubscriptionSummary` block.
@@ -85,6 +85,7 @@ In production, put the public values in `extra_runtime_env`. Put the two secrets
 - In-app Google Play code redemption. Users redeem codes in Google Play, and the next app sync ingests the purchase.
 - Google Real-time developer notifications (RTDN). The scheduled reconcile refreshes only tokens that the app already sent. Add RTDN when the product must see out-of-app purchases before the next app sync or react sooner. Route it through the same ingest and reconcile service.
 - Alternative billing, external purchase links, signed promotional offers, user-choice billing, and developer-billing reporting.
+- Sandbox purchases on a production server. App Review and TestFlight buy in the App Store sandbox with production builds, and a production server rejects those purchases. Before the first store review, decide who may unlock premium with a sandbox purchase, and implement that.
 
 Before you enable alternative billing or external purchase links, change the product scope and the code together:
 

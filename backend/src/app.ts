@@ -3,6 +3,7 @@
 import 'zod/compile'
 
 import { OpenAPIHono } from '@hono/zod-openapi'
+import { except } from 'hono/combine'
 import { cors } from 'hono/cors'
 import { secureHeaders } from 'hono/secure-headers'
 
@@ -23,7 +24,6 @@ import { createAuthModule, type AuthHttpEnv } from './modules/auth'
 import { createNotificationsModule } from './modules/notifications'
 import { createUploadsModule } from './modules/uploads'
 import { createUsersModule } from './modules/users'
-// scaffold:import
 import { createRateLimitStores } from './rate-limit'
 import {
   apiCorsAllowedHeaders,
@@ -97,7 +97,6 @@ export function createApp({
     requireAuth: auth.requireAuth,
     storage: storage.storage,
   })
-  // scaffold:module
   const app = new OpenAPIHono<AuthHttpEnv>({ defaultHook: validationErrorHook })
   app.openAPIRegistry.registerComponent('securitySchemes', 'BearerAuth', {
     type: 'http',
@@ -124,7 +123,7 @@ export function createApp({
       maxAge: 600,
     }),
   )
-  // Signing in, managing an account, and registering a device for push are three budgets of the
+  // Signing in, registering a device for push, and every other API route are three budgets of the
   // same size, keyed by client address. RATE_LIMIT_STORE says where each one counts.
   const publicWriteSecurity = {
     bodyLimitBytes: env.AUTH_BODY_LIMIT_BYTES,
@@ -139,15 +138,6 @@ export function createApp({
     store: rateLimitStore('auth'),
   })) {
     app.use('/api/auth/*', middleware)
-  }
-  for (const middleware of createIngressSecurity({
-    ...publicWriteSecurity,
-    store: rateLimitStore('account'),
-  })) {
-    app.use('/api/users/*', middleware)
-    app.use('/api/admin/*', middleware)
-    app.use('/api/uploads/*', middleware)
-    // scaffold:security
   }
   // A separate budget, so a phone that re-registers its push token on every launch never spends
   // the account budget behind a shared carrier address, and the reverse.
@@ -178,6 +168,21 @@ export function createApp({
   // })) {
   //   app.use('/api/webhooks/*', middleware)
   // }
+  // Every other API route shares the account budget, so a new route is limited without an edit.
+  const routesWithOwnBudget = [
+    '/api/auth/*',
+    '/api/notifications/*',
+    // Uncomment together with the subscription budgets above:
+    // '/api/iap/*',
+    // '/api/webhooks/*',
+  ]
+  app.use(
+    '/api/*',
+    except(
+      routesWithOwnBudget,
+      ...createIngressSecurity({ ...publicWriteSecurity, store: rateLimitStore('account') }),
+    ),
+  )
   app.get('/', (c) => {
     return c.json({
       name: 'web_app_demo backend',
@@ -217,7 +222,6 @@ export function createApp({
   app.route('/api/notifications', notifications.createRoutes(auth.authenticateAccessToken))
   app.route('/api/uploads', uploads.routes)
   // app.route('/api/webhooks', billing.webhookRoutes)
-  // scaffold:route-mount
 
   // Only the filesystem driver needs the backend to serve the URLs it signs. With an S3 driver
   // the browser uploads straight to the bucket and there is nothing to mount here.

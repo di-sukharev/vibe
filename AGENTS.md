@@ -29,8 +29,6 @@ In a new project from this template, finish [Agent setup instructions](README.md
 
 Read the guide for an area before you change it. Read only the sections you need. Find code with `rg`; do not scan the repository.
 
-Skills in `.agents/skills/` hold procedures: `feature` (new capability), `ui-review` (screenshots, theme), `release` (deploy). Use the matching one.
-
 ## Commands
 
 Run from the root. If `bun` is missing from `PATH`, prefix `PATH="/opt/homebrew/bin:$HOME/.bun/bin:$PATH"`.
@@ -65,7 +63,7 @@ Run the full `bun run check` only for a release or a system-wide change.
 
 1. Read the area guide and the nearest reference code. Prefer existing utilities and framework APIs. Before you use an unfamiliar or recently changed API, read its installed types or official docs.
 2. For multi-file work, plan the slice first: files, tests, checks. Then implement it in coherent passes.
-3. Full-stack order: contract and Prisma schema with its migration → failing backend test → backend module → webapp API and queries → UI with all states → screenshots → registry row. A new capability starts with the `feature` skill (`bun run scaffold:feature`).
+3. Full-stack order: contract and Prisma schema with its migration → failing backend test → backend module → webapp API and queries → UI with all states → screenshots → registry row.
 4. Fix a defect where it originates, not in its consumers. Check the callers of what you change.
 5. Check the risks of the change type. Contract: the backend route, the client API, and the forms. Auth or routes: server permissions, guards, sessions, and navigation. Queries: keys, invalidation, loading, errors, and stale data. Async work: retries, idempotency, order, and cancellation.
 6. Keep changes minimal and complete. No speculative abstractions, layers, or options.
@@ -98,7 +96,7 @@ Aim for elegant and consistent. Reuse the system; do not invent a new one. Patte
 - A product component owns its surface, padding, radius, and typography. Parents place it with layout wrappers, `gap`, and padding. Do not pass `className` or `style` into it.
 - Every data view handles loading, empty, error with retry, and success, and shows only real API data. Every mutation shows pending and result states.
 - Support 375 px and 1280 px widths, light and dark themes, keyboard focus, and reduced motion.
-- For a new screen, layout change, or brand (`theme.json`, `bun run theme`), use the `ui-review` skill; skip it for small cosmetic edits. Do not drive a browser interactively unless the user asks.
+- For a new screen, layout change, or brand change (`theme.json`, `bun run theme`), run `bun run screens` for the affected routes and review the images ([UI](docs/UI.md#visual-check)). Fix what you see; stop after two rounds. Skip it for small cosmetic edits. Do not drive a browser interactively unless the user asks.
 
 ## Git and safety
 
@@ -106,7 +104,7 @@ Aim for elegant and consistent. Reuse the system; do not invent a new one. Patte
 - Branches, worktrees, commits, pushes, rebases, and resets need an explicit request. Never use `git stash`.
 - No AI attribution in commit messages: no `Co-Authored-By` for an agent, no "Generated with".
 - Preserve other people's uncommitted work. Do not reset, clean, or reformat it.
-- Put temporary files in `.scratch/` and delete yours when done. Use your own ports; stop only processes you started.
+- Keep temporary files out of the repository, in the system temp directory, and delete yours when done. Use your own ports; stop only processes you started.
 - Never print or commit secrets, tokens, cookies, customer data, or `.env` and Terraform variable values.
 - Never weaken authentication, permissions, validation, encryption, rate limits, or auditing.
 - Change generated code through its generator (Prisma, shadcn CLI).
@@ -115,7 +113,7 @@ Aim for elegant and consistent. Reuse the system; do not invent a new one. Patte
 
 ## Deployment
 
-Deploy only on request, with the hosting in `CHECKLIST.md`. Use the `release` skill with `scripts/infra.mjs`, [DEPLOYMENT](docs/DEPLOYMENT.md), and the provider guide. Never run raw `terraform apply`, `-target`, or state edits. Stop if the tree is dirty, the branch is not pushed, or the release commit is unclear.
+Deploy only on request, with the hosting in `CHECKLIST.md`, through `scripts/infra.mjs`. Follow [DEPLOYMENT](docs/DEPLOYMENT.md) and the provider guide. Never run raw `terraform apply`, `-target`, or state edits. Stop if the tree is dirty, the branch is not pushed, or the release commit is unclear.
 
 ## Documentation
 

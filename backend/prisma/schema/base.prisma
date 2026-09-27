@@ -31,7 +31,6 @@ model User {
   pushDeliveries         PushDelivery[]
   passwordResetTokens    PasswordResetToken[]
   avatars                UserAvatar[]
-  // scaffold:user-relations
 
   @@index([role], map: "users_role_idx")
   @@map("users")

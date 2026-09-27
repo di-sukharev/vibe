@@ -7,7 +7,6 @@ coverage
 **/*.test.ts
 **/*.test.tsx
 .git
-.scratch
 .env
 .env.*
 .envrc

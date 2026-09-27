@@ -71,8 +71,6 @@ const userSettingsRoute = createRoute({
   component: lazyRouteComponent(() => import('./pages'), 'UserSettingsPage'),
 })
 
-// scaffold:route-definitions
-
 const adminWorkspaceRoute = createRoute({
   getParentRoute: () => rootRoute,
   id: 'adminWorkspace',
@@ -107,7 +105,6 @@ const routeTree = rootRoute.addChildren([
     userHomeRoute,
     userProfileRoute,
     userSettingsRoute,
-    // scaffold:route-children
   ]),
   adminWorkspaceRoute.addChildren([
     adminDashboardRoute,
