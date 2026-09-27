@@ -24,7 +24,6 @@ const iconsByPath = {
   '/app': Home01Icon,
   '/app/profile': UserIcon,
   '/app/settings': Settings01Icon,
-  // scaffold:nav-icon
   '/admin': DashboardSquare01Icon,
   '/admin/users': UserGroupIcon,
   '/admin/settings': Settings01Icon,

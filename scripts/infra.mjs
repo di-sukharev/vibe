@@ -11,6 +11,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -966,9 +967,7 @@ function terraformPlan({
   label,
   requireNoChanges = false,
 }) {
-  const scratchParent = resolve(repoRoot, '.scratch', 'infra-plans')
-  mkdirSync(scratchParent, { recursive: true })
-  const planDirectory = rememberDisposablePlan(mkdtempSync(resolve(scratchParent, `${label}-`)))
+  const planDirectory = rememberDisposablePlan(mkdtempSync(resolve(tmpdir(), `infra-plan-${label}-`)))
   const planPath = resolve(planDirectory, 'terraform.tfplan')
 
   try {
@@ -1198,9 +1197,7 @@ function boundedProcessOutput(current, chunk) {
 
 async function acquireProductionMutationLease(provider) {
   const paths = providerPaths(provider)
-  const scratchParent = resolve(repoRoot, '.scratch', 'infra-leases')
-  mkdirSync(scratchParent, { recursive: true })
-  const leaseDirectory = mkdtempSync(resolve(scratchParent, `${provider}-`))
+  const leaseDirectory = mkdtempSync(resolve(tmpdir(), `infra-lease-${provider}-`))
   const readySignal = resolve(leaseDirectory, 'ready')
   const releaseSignal = resolve(leaseDirectory, 'release')
   const terraformDataDirectory = resolve(leaseDirectory, 'terraform-data')
@@ -2219,11 +2216,7 @@ async function importResource(
     const hasRemoteState = existsSync(paths.stateEnvironment)
     let localDataDirectory = null
     if (!hasRemoteState) {
-      const scratchParent = resolve(repoRoot, '.scratch')
-      mkdirSync(scratchParent, { recursive: true })
-      localDataDirectory = mkdtempSync(
-        resolve(scratchParent, 'terraform-bootstrap-import-'),
-      )
+      localDataDirectory = mkdtempSync(resolve(tmpdir(), 'terraform-bootstrap-import-'))
     }
     const env = hasRemoteState
       ? backendEnvironment(
@@ -2452,9 +2445,7 @@ async function buildAndPushImage(
 }
 
 function buildYandexStaticArtifacts(commit, outputs) {
-  const scratchParent = resolve(repoRoot, '.scratch')
-  mkdirSync(scratchParent, { recursive: true })
-  const artifactRoot = mkdtempSync(resolve(scratchParent, 'infra-static-'))
+  const artifactRoot = mkdtempSync(resolve(tmpdir(), 'infra-static-'))
   try {
     const archive = gitArchive(commit)
     runCommand(

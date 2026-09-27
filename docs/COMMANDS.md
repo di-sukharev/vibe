@@ -13,21 +13,19 @@ Root scripts from [package.json](../package.json). Run `bun run <script>` from t
 - `build[:webapp|:website|:backend]`: production builds; backend and contracts only type-check.
 - `static:precompress`: `.br` and `.gz` copies of text assets in `webapp/dist` and `website/dist` for self-hosting ([DEPLOYMENT](DEPLOYMENT.md)).
 - `theme`: writes the theme tokens from `theme.json` into `webapp/src/index.css` and `website/src/styles/global.css` ([UI](UI.md)); `-- --check` only verifies.
-- `scaffold:feature -- <plural-kebab-name> [--singular <word>] [--dry-run]`: generates a full-stack owned-resource feature in the shape of `users`/`admin` ([ARCHITECTURE](ARCHITECTURE.md#new-feature)).
 
 ## Checks and tests
 
 [TESTING](TESTING.md) has focused runs, test databases, and the audit process.
 
-- `check`: `template:check` → `architecture:check` → `typecheck` → `lint` → `test` → `test:scaffold` → `test:build-contracts` → `audit` (Docker, package registry).
-- `template:check`: `CHECKLIST.md` and its registry, the `CLAUDE.md` import, the `AGENTS.md` word budget, Markdown links, and the Agent Skills (the `.claude/skills` symlink and `SKILL.md` frontmatter and length).
+- `check`: `template:check` → `architecture:check` → `typecheck` → `lint` → `test` → `test:build-contracts` → `audit` (Docker, package registry).
+- `template:check`: `CHECKLIST.md` and its registry, the `CLAUDE.md` import, the `AGENTS.md` word budget, Markdown links.
 - `architecture:check`: module and feature import boundaries.
 - `typecheck[:webapp|:website|:backend]`: types, all or one.
 - `lint`: webapp ESLint, including UI rules.
 - `audit`: `bun audit`; fails on any advisory.
 - `test`: `test:infra`, `test:contracts`, `test:backend`, `test:webapp`, `test:website` (Docker).
 - `test:infra`: tests of all repository scripts in `scripts/`; no cloud changes.
-- `test:scaffold`: generates sample features in a scratch copy and checks them, including their integration tests on a database of their own (Docker, [ARCHITECTURE](ARCHITECTURE.md#new-feature)).
 - `test:contracts`: Zod contracts.
 - `test:backend`: `test:backend:unit`, then `test:backend:integration` (Docker).
 - `test:webapp|website`: client unit tests; no build.

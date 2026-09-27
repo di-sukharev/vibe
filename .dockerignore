@@ -5,7 +5,6 @@ dist
 build
 coverage
 .git
-.scratch
 .env
 .env.*
 infra

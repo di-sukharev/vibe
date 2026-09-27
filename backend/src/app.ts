@@ -16,7 +16,6 @@ import { createAuthSecurity, createFixedWindowRateLimit } from './http/security'
 import { createAuthModule, type AuthHttpEnv } from './modules/auth'
 import { createUploadsModule } from './modules/uploads'
 import { createUsersModule } from './modules/users'
-// scaffold:import
 import { createRateLimitStores } from './rate-limit'
 import {
   apiCorsAllowedHeaders,
@@ -68,7 +67,6 @@ export function createApp({
     requireAuth: auth.requireAuth,
     storage: storage.storage,
   })
-  // scaffold:module
   const app = new OpenAPIHono<AuthHttpEnv>({
     defaultHook: validationErrorHook,
   })
@@ -115,7 +113,6 @@ export function createApp({
     app.use('/api/users/*', middleware)
     app.use('/api/admin/*', middleware)
     app.use('/api/uploads/*', middleware)
-    // scaffold:security
   }
   app.get('/', (c) => {
     return c.json({
@@ -153,7 +150,6 @@ export function createApp({
   app.route('/api/users', users.userRoutes)
   app.route('/api/admin', users.adminRoutes)
   app.route('/api/uploads', uploads.routes)
-  // scaffold:route-mount
 
   // Only the filesystem driver needs the backend to serve the URLs it signs. With an S3 driver
   // the browser uploads straight to the bucket and there is nothing to mount here.
