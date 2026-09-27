@@ -8,7 +8,7 @@ The capability is implemented and switched off. The route is defined but not mou
 
 1. Uncomment the `tokenSocialAuthRoute` handler in `backend/src/modules/auth/transport/routes.ts`.
 2. In `AuthScreen.tsx`, uncomment the `SocialAuthButtons` import and block, and change the screen description to mention the providers.
-3. Restore the eight social tests in `backend/src/modules/auth/auth.integration.test.ts` from `git show 13e67da -- backend/src/modules/auth/auth.integration.test.ts`. They cover creation and return, a concurrent first sign-in, a missing or conflicting email, provider errors, and a session that races a role change. Their `socialAuthProviderDeps` resets and `gateNextSessionCreate` helper are still in the file.
+3. Remove the `@parked-test` line from `backend/src/modules/auth/social-auth.integration.test.ts`. Its eight tests cover creation and return, a concurrent first sign-in, a missing or conflicting email, provider errors, and a session that races a role change.
 4. Set up the providers below.
 5. Sign in with each provider on a [development build](../mobile/README.md#development-build), not Expo Go.
 6. Run `bun run typecheck`, `bun run test`, and `bun run lint`. Set the `Social sign-in (Apple / Google)` row in [CHECKLIST](../CHECKLIST.md) to `included`.

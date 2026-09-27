@@ -64,8 +64,8 @@ test('CORS preflight allows the standard mutation methods exposed by the client 
   expect(response.headers.get('access-control-allow-methods')).toContain('PATCH')
 })
 
-// The App Store webhook ingress suite lived here commented out; docs/IAP.md says what to switch
-// on, and git log -p has the tests. Commented tests compile for nobody.
+// The subscription routes keep their ingress tests in modules/billing/billing-ingress.test.ts,
+// parked with billing.
 
 // `/api/future-resource` stands for the next feature's routes: they get the limits without an edit.
 test('API writes reject oversized bodies before authentication', async () => {

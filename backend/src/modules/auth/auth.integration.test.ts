@@ -1,14 +1,13 @@
 import { randomUUID } from 'node:crypto'
 
-import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 
 import { createApp } from '../../app'
-import { createPrisma, type DbClient } from '../../db'
+import { createPrisma } from '../../db'
 import type { EmailDelivery, EmailMessage } from '../../email'
 import { loadEnv } from '../../env'
 import { drainOptionsFromEnv, drainTaskOutbox } from '../../outbox'
 import type { BackendRuntime } from '../../runtime'
-import { socialAuthProviderDeps } from './infrastructure/social-providers'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required; run bun run test:backend:integration')
@@ -24,21 +23,12 @@ describe('auth API integration', () => {
   const env = loadEnv(envInput)
   const prisma = createPrisma(databaseUrl)
   const app = createApp({ env, prisma })
-  const originalVerifyGoogleIdToken = socialAuthProviderDeps.verifyGoogleIdToken
-  const originalVerifyAppleIdToken = socialAuthProviderDeps.verifyAppleIdToken
 
   beforeEach(async () => {
-    socialAuthProviderDeps.verifyGoogleIdToken = originalVerifyGoogleIdToken
-    socialAuthProviderDeps.verifyAppleIdToken = originalVerifyAppleIdToken
     await prisma.taskOutbox.deleteMany()
     await prisma.pushToken.deleteMany()
     await prisma.authSession.deleteMany()
     await prisma.user.deleteMany()
-  })
-
-  afterEach(() => {
-    socialAuthProviderDeps.verifyGoogleIdToken = originalVerifyGoogleIdToken
-    socialAuthProviderDeps.verifyAppleIdToken = originalVerifyAppleIdToken
   })
 
   afterAll(async () => {
@@ -982,10 +972,6 @@ describe('auth API integration', () => {
     expect(invalidLogin.status).toBe(401)
   })
 
-  // The social sign-in suite lived here commented out. Git still has it - `git log -p` on this
-  // file - and docs/SOCIAL_AUTH.md says what to switch on. A commented test is checked by no
-  // compiler and rots in silence.
-
   test('returns one created user and one conflict for concurrent duplicate registration', async () => {
     const payload = {
       email: 'register-race@example.com',
@@ -1045,34 +1031,5 @@ describe('auth API integration', () => {
       refreshToken: registerBody.refreshToken as string,
       userId: user.id,
     }
-  }
-
-  // Used only by the parked social suites above; keep it so they restore cleanly
-  // (docs/SOCIAL_AUTH.md).
-  function gateNextSessionCreate() {
-    let markReached: () => void = () => undefined
-    const reached = new Promise<void>((resolve) => {
-      markReached = resolve
-    })
-    let releaseGate: () => void = () => undefined
-    const barrier = new Promise<void>((resolve) => {
-      releaseGate = resolve
-    })
-    let gated = false
-    const db = prisma.$extends({
-      query: {
-        authSession: {
-          async create({ args, query }) {
-            if (!gated) {
-              gated = true
-              markReached()
-              await barrier
-            }
-            return query(args)
-          },
-        },
-      },
-    }) as unknown as DbClient
-    return { db, reached, release: releaseGate }
   }
 })
