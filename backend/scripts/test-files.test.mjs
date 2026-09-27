@@ -51,23 +51,26 @@ describe('backendTestFiles', () => {
     expect(backendTestFiles(root).parked).toEqual([])
   })
 
-  test('billing is parked exactly while its tables are commented out, and nothing else is', () => {
-    // Discovery would otherwise run the billing suites against a database that has no billing
-    // tables. Asserted against the schema rather than a fixed list, so this holds in all three
-    // states docs/IAP.md describes: subscriptions off, switched on, and removed entirely.
+  test('switched-off capabilities are parked exactly while they are off, and nothing else is', () => {
+    // Discovery would otherwise run billing suites against a database with no billing tables, and
+    // social sign-in suites against an unmounted route. Each rule reads the switch itself rather
+    // than a fixed list, so it holds while the capability is off, switched on, or removed entirely
+    // (docs/IAP.md, docs/SOCIAL_AUTH.md).
     const schemaPath = resolve(backendRoot, 'prisma/schema/billing.prisma')
-    const billingSuites = all.filter((file) => file.startsWith('src/modules/billing/'))
+    const billingIsOff =
+      existsSync(schemaPath) && !/^\s*model\s/m.test(readFileSync(schemaPath, 'utf8'))
+    const authRoutes = readFileSync(resolve(backendRoot, 'src/modules/auth/transport/routes.ts'), 'utf8')
+    const socialSignInIsOff = !/^\s*routes\.openapi\(tokenSocialAuthRoute\b/m.test(authRoutes)
 
-    if (billingSuites.length === 0 || !existsSync(schemaPath)) {
-      expect(parked).toEqual([])
-      return
-    }
-
-    const tablesAreCommentedOut = !/^\s*model\s/m.test(readFileSync(schemaPath, 'utf8'))
+    const switchedOff = all.filter(
+      (file) =>
+        (billingIsOff && file.startsWith('src/modules/billing/')) ||
+        (socialSignInIsOff && file === 'src/modules/auth/social-auth.integration.test.ts'),
+    )
 
     // Which files, not how many: a stray `@parked-test` in an unrelated header would otherwise
     // drop that suite from every runner with the run still exiting 0.
-    expect(parked).toEqual(tablesAreCommentedOut ? billingSuites : [])
+    expect(parked).toEqual(switchedOff)
   })
 
   test('tests needing a service no runner starts stay out of the fast suite', () => {
