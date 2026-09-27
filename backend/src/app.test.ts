@@ -63,7 +63,8 @@ test('CORS preflight allows the standard mutation methods exposed by the client 
   expect(response.status).toBe(204)
   expect(response.headers.get('access-control-allow-methods')).toContain('PATCH')
 })
-test('account mutations reject oversized bodies before authentication', async () => {
+// `/api/future-resource` stands for the next feature's routes: they get the limits without an edit.
+test('API writes reject oversized bodies before authentication', async () => {
   const app = createApp({
     env: { ...env, AUTH_BODY_LIMIT_BYTES: 32 },
     prisma: {} as DbClient,
@@ -77,9 +78,10 @@ test('account mutations reject oversized bodies before authentication', async ()
   expect((await request('/api/users/me')).status).toBe(413)
   expect((await request('/api/admin/users/0196f6f8-6600-7000-8000-000000000001/role')).status)
     .toBe(413)
+  expect((await request('/api/future-resource')).status).toBe(413)
 })
 
-test('account mutations share bounded write-rate protection', async () => {
+test('API writes outside sign-in share one bounded write-rate budget', async () => {
   const app = createApp({
     env: { ...env, AUTH_RATE_LIMIT_MAX: 1 },
     prisma: {} as DbClient,
@@ -96,6 +98,14 @@ test('account mutations share bounded write-rate protection', async () => {
   )
   expect(limited.status).toBe(429)
   expect(limited.headers.get('retry-after')).toBeTruthy()
+  expect((await request('/api/future-resource')).status).toBe(429)
+
+  const signUp = await app.request('/api/auth/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'invalid', password: 'short' }),
+  })
+  expect(signUp.status).toBe(400)
 })
 
 test('responses carry the secure headers', async () => {

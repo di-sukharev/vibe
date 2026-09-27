@@ -3,6 +3,7 @@
 import 'zod/compile'
 
 import { OpenAPIHono } from '@hono/zod-openapi'
+import { except } from 'hono/combine'
 import { cors } from 'hono/cors'
 import { secureHeaders } from 'hono/secure-headers'
 
@@ -95,7 +96,8 @@ export function createApp({
       maxAge: 600,
     }),
   )
-  // Signing in and managing an account are two budgets of the same size, keyed by client address.
+  // Signing in has its own budget. Every other API route shares the account budget, so a new
+  // route is limited without an edit. Both budgets are the same size, keyed by client address.
   const authSecurity = (policy: 'auth' | 'account') =>
     createAuthSecurity({
       bodyLimitBytes: env.AUTH_BODY_LIMIT_BYTES,
@@ -109,11 +111,7 @@ export function createApp({
   for (const middleware of authSecurity('auth')) {
     app.use('/api/auth/*', middleware)
   }
-  for (const middleware of authSecurity('account')) {
-    app.use('/api/users/*', middleware)
-    app.use('/api/admin/*', middleware)
-    app.use('/api/uploads/*', middleware)
-  }
+  app.use('/api/*', except('/api/auth/*', ...authSecurity('account')))
   app.get('/', (c) => {
     return c.json({
       name: 'web_app_demo backend',
