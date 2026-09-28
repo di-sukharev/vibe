@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "license": "Apache-2.0",
-  "packageManager": "bun@1.4.0",
+  "packageManager": "bun@1.4.2",
   "type": "module",
   "workspaces": [
     "webapp",
