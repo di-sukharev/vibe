@@ -1,9 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-
-import { capabilityRows } from './template-check.mjs'
 
 const repositoryRoot = resolve(fileURLToPath(new URL('..', import.meta.url)))
 
@@ -30,35 +27,6 @@ function mobileReleaseErrors({ branch, status, head, originMobile, masterIsAnces
   return errors
 }
 
-// The mobile line ships exactly these capabilities as `available`; no other row may be `available`.
-const mobileAvailableCapabilities = [
-  'Payments / subscriptions',
-  'Push notifications',
-  'Social sign-in (Apple / Google)',
-]
-
-export function validateMobileCapabilityContract(source) {
-  const rows = capabilityRows(source) ?? []
-  const states = new Map(rows.map(({ name, state }) => [name, state]))
-  const errors = []
-
-  for (const capability of mobileAvailableCapabilities) {
-    const state = states.get(capability)
-    if (state === undefined) {
-      errors.push(`Capability ledger is missing required capability "${capability}".`)
-    } else if (state !== 'available') {
-      errors.push(`Capability "${capability}" must be "available" for this template, found "${state}".`)
-    }
-  }
-  for (const { name, state } of rows) {
-    if (state === 'available' && !mobileAvailableCapabilities.includes(name)) {
-      errors.push(`Capability "${name}" must not be "available" for this template.`)
-    }
-  }
-
-  return errors
-}
-
 const mobileValidationCommands = [
   ['run', 'check'],
   ['run', '--cwd', 'mobile', 'e2e:maestro:audit'],
@@ -77,19 +45,14 @@ if (import.meta.main) {
   })
   if (ancestor.error) throw ancestor.error
 
-  const errors = [
-    ...mobileReleaseErrors({
-      branch: git(['branch', '--show-current']),
-      status: git(['status', '--porcelain=v1']),
-      head: git(['rev-parse', 'HEAD']),
-      originMobile: git(['rev-parse', 'origin/mobile']),
-      masterIsAncestor: ancestor.status === 0,
-      requirePublished: process.argv.includes('--published'),
-    }),
-    ...validateMobileCapabilityContract(
-      readFileSync(resolve(repositoryRoot, 'CHECKLIST.md'), 'utf8'),
-    ),
-  ]
+  const errors = mobileReleaseErrors({
+    branch: git(['branch', '--show-current']),
+    status: git(['status', '--porcelain=v1']),
+    head: git(['rev-parse', 'HEAD']),
+    originMobile: git(['rev-parse', 'origin/mobile']),
+    masterIsAncestor: ancestor.status === 0,
+    requirePublished: process.argv.includes('--published'),
+  })
 
   if (errors.length > 0) {
     console.error(`Mobile template check failed:\n- ${errors.join('\n- ')}`)

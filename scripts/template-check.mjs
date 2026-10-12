@@ -3,82 +3,13 @@ import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-// Repository drift checks: Markdown links and anchors, the CLAUDE.md import of AGENTS.md,
-// the CHECKLIST.md capability registry, and bootstrap cleanup after a completed install.
-
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const capabilityStates = new Set(['included', 'available', 'absent', 'removed'])
-const bootstrapMarkers = ['<!-- BOOTSTRAP_ONLY_START -->', '<!-- BOOTSTRAP_ONLY_END -->']
 
-// CHECKLIST.md: valid, unique capability states; a completed install has no bootstrap block in AGENTS.md.
-export function validateChecklist(checklist, agents = '') {
-  const errors = []
-  const rows = capabilityRows(checklist)
-  if (!rows) {
-    errors.push(
-      'CHECKLIST.md has no capability ledger table with a "Capability | State" or "Возможность | Состояние" header.',
-    )
-  }
-
-  const names = new Set()
-  for (const { name, state } of rows ?? []) {
-    if (!capabilityStates.has(state)) errors.push(`Capability "${name}" has invalid state "${state}".`)
-    if (names.has(name)) errors.push(`Capability ledger contains duplicate capability "${name}".`)
-    names.add(name)
-  }
-
-  const completed = /^completed\b/i.test(installStatus(checklist) ?? '')
-  if (completed && bootstrapMarkers.some((marker) => agents.includes(marker))) {
-    errors.push('A completed install must remove the BOOTSTRAP_ONLY section and its markers from AGENTS.md.')
-  }
-  return errors
-}
-
-// Rows of the capability registry table, found by its header in English or Russian.
-// Returns undefined when CHECKLIST.md has no such table. Fenced code and HTML comments do not count.
-export function capabilityRows(checklist) {
-  const lines = withoutFencedCode(checklist).replace(/<!--[\s\S]*?(?:-->|$)/g, '').split('\n')
-  const header = lines.findIndex((line) => {
-    const [capability, state] = tableCells(line) ?? []
-    return ['Capability', 'Возможность'].includes(capability) && ['State', 'Состояние'].includes(state)
-  })
-  if (header === -1) return undefined
-
-  const rows = []
-  for (const line of lines.slice(header + 1)) {
-    const cells = tableCells(line)
-    if (!cells) break
-    if (cells.every((cell) => /^:?-+:?$/.test(cell))) continue
-    rows.push({ name: cells[0], state: cells[1] ?? '' })
-  }
-  return rows
-}
-
-// Every agent session loads AGENTS.md, so its size is a per-session token cost. Area detail
-// belongs in docs/ and app READMEs, which agents read on demand.
-export const agentInstructionsWordBudget = 1500
-
-// CLAUDE.md must import AGENTS.md outside fenced code and must not copy its "## " sections.
-export function validateAgentInstructions(agents, claude) {
-  const errors = []
+export function validateAgentInstructions(claude) {
   const lines = withoutFencedCode(claude).split('\n').map((line) => line.trim())
-  const sections = new Set(
-    withoutFencedCode(agents).split('\n').map((line) => line.trim()).filter((line) => line.startsWith('## ')),
-  )
-  const words = agents.split(/\s+/).filter(Boolean).length
-
-  if (words > agentInstructionsWordBudget) {
-    errors.push(
-      `AGENTS.md has ${words} words; keep it at most ${agentInstructionsWordBudget}. Move area detail into docs/ or an app README.`,
-    )
-  }
-  if (!lines.includes('@AGENTS.md')) {
-    errors.push('CLAUDE.md must load the shared instructions with a standalone `@AGENTS.md` import line.')
-  }
-  if (lines.some((line) => sections.has(line))) {
-    errors.push('CLAUDE.md must not restate AGENTS.md sections; it imports them with `@AGENTS.md`.')
-  }
-  return errors
+  return lines.includes('@AGENTS.md')
+    ? []
+    : ['CLAUDE.md must load the shared instructions with a standalone `@AGENTS.md` import line.']
 }
 
 export function validateMarkdownLinks(files, trackedPaths) {
@@ -140,19 +71,6 @@ export function worktreePaths(root = repositoryRoot) {
   const args = ['ls-files', '--cached', '--others', '--exclude-standard', '-z']
   const candidates = execFileSync('git', args, { cwd: root, encoding: 'utf8' }).split('\0').filter(Boolean)
   return new Set(candidates.filter((filePath) => existsSync(path.join(root, filePath))))
-}
-
-// Lenient: the first backticked value on the status line, or undefined without one.
-function installStatus(checklist) {
-  return withoutFencedCode(checklist).match(
-    /^\*\*(?:Install status|Статус установки):\*\*[^`\n]*`([^`\n]*)`/m,
-  )?.[1]
-}
-
-function tableCells(line) {
-  const row = line.trim()
-  if (!row.startsWith('|')) return undefined
-  return row.slice(1).replace(/(?<!\\)\|$/, '').split(/(?<!\\)\|/).map((cell) => cell.trim())
 }
 
 function withoutFencedCode(source) {
@@ -234,17 +152,14 @@ function githubHeadingSlug(value) {
     .replace(/\s/g, '-')
 }
 
-function validateRepository() {
-  const paths = worktreePaths()
-  const read = (filePath) => readFileSync(path.join(repositoryRoot, filePath), 'utf8')
+export function validateRepository(root = repositoryRoot) {
+  const paths = worktreePaths(root)
+  const read = (filePath) => readFileSync(path.join(root, filePath), 'utf8')
   const markdownFiles = [...paths]
     .filter((filePath) => filePath.toLowerCase().endsWith('.md'))
     .map((filePath) => ({ path: filePath, source: read(filePath) }))
-  const agents = read('AGENTS.md')
-
   return [
-    ...validateChecklist(read('CHECKLIST.md'), agents),
-    ...validateAgentInstructions(agents, read('CLAUDE.md')),
+    ...validateAgentInstructions(read('CLAUDE.md')),
     ...validateMarkdownLinks(markdownFiles, paths),
   ]
 }

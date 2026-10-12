@@ -1,22 +1,11 @@
 # Contracts
 
-`@web-app-demo/contracts` holds the shared Zod schemas and inferred TypeScript types for API requests, responses, and errors. The backend, `webapp`, and `mobile` import them. Never redefine these shapes in an app. The contracts-first workflow, including which consumers to check after a change, is in [ARCHITECTURE](../../docs/ARCHITECTURE.md).
+This package defines API requests, responses, and errors with Zod. Applications import its schemas and inferred types directly from `src/index.ts`. There is no generated build output.
 
-## Rules
+Keep validation, normalization, and shared types here. Business rules belong to the backend. Import only Zod and other contract files. `bun run architecture:check` enforces the boundary.
 
-- Keep only validation, normalization, and shared types here, not business logic.
-- Import only Zod and other contract files. `bun run architecture:check` rejects backend, client, framework, and provider imports.
-- Put each schema and its inferred type in its domain file, such as `src/users.ts`, and re-export the file from `src/index.ts`.
-- Pin the scheme of every URL field, from user input or storage. `z.url()` alone accepts `javascript:` and `data:`. Require `https:` unless the product needs another scheme. Example: `httpUrlSchema` in `src/uploads.ts` also allows `http:` for local signed URLs.
-- Test each schema in the matching `src/*.test.ts`.
+Put each schema in its feature file and export it from `src/index.ts`. Update the backend and affected clients when the contract changes.
 
-## Commands
+Restrict URL schemes explicitly. `z.url()` also accepts `javascript:` and `data:`. Use `https:` unless the product requires another scheme. [src/uploads.ts](src/uploads.ts) permits HTTP for local signed URLs.
 
-From the root:
-
-```bash
-bun run test:contracts                       # the package's test script: bun test src
-bun run --cwd packages/contracts typecheck   # tsc --noEmit; build does the same
-```
-
-Apps import `src/index.ts` directly, so the package has no build output.
+Run `bun run test:contracts` from the root. [package.json](package.json) defines the other scripts.

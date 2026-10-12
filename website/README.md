@@ -1,73 +1,33 @@
 # Website
 
-`website` is the Astro project for SEO pages: the landing page, content, and the public catalog. It builds static HTML (SSG) by default. Signed-in screens live in [webapp](../webapp/README.md). Auth scope, carts, checkout, and build-time backend data follow [WEB_SURFACES](../docs/WEB_SURFACES.md).
+Astro renders public pages at build time (SSG). Signed-in pages belong to [webapp](../webapp/README.md). Scripts and dependencies are in [package.json](package.json).
 
-## Rules
+Run `bun run dev:website` from the root. The website can run without the backend. When Astro starts a background server, use `bun run --cwd website astro dev status`, `logs`, or `stop` to manage it.
 
-- Put SEO data in the initial HTML: title, description, canonical URL, Open Graph and Twitter tags, product and category names, descriptions, and meaningful public prices. Islands may add to this data but must not be its only source.
-- Stay on SSG until [CHECKLIST](../CHECKLIST.md) records a freshness or personalization need that a rebuild cannot meet, such as live search or prices and stock where stale HTML is unacceptable. A marketplace alone is not such a need.
-- Never put a secret in a `PUBLIC_*` variable: Astro inlines these values into the static output.
+## Pages and data
 
-## Stack and layout
+Keep SEO content in the initial HTML. Put pages in `src/pages`, sections in `src/components/landing`, and metadata in `src/layouts/BaseLayout.astro`.
 
-Astro with static output, Tailwind CSS 4 through `@tailwindcss/vite`, shadcn/ui React components (`radix-vega` style, lucide icons), and React Three Fiber for the hero scene. `@astrojs/react` renders React components to static HTML; a component ships JavaScript only with a `client:*` directive.
+Use SSG until the required freshness or personalization needs request-time rendering. React components remain static unless they have a `client:*` directive.
 
-Sections live in `src/components/landing`, the shadcn registry in `src/components/ui`, pages in `src/pages`, and metadata in `src/layouts/BaseLayout.astro`.
+For data fetched during a build, define a public schema in `packages/contracts`. Include only data safe to publish in static files. Keep credentials out of `PUBLIC_*` variables and build output. Fail the build when required data is missing or invalid.
 
-Add `@web-app-demo/contracts` when the site first reads API data.
+Displayed prices and availability are informational. The backend confirms them at checkout. Browser checkout belongs to `webapp`; the public site can hand off selected IDs and quantities through a shared, versioned contract. Do not trust client totals or payment results.
 
-### Hero scene
+## Configuration and UI
 
-The SSG HTML always contains the CSS hero. `HeroScene` hydrates with `client:idle` and imports the R3F canvas only on viewports at least 1024 px wide without a reduced-motion request. Phones and reduced-motion users never download 3D code. Keep SEO text out of the scene. `bun run test:build-contracts` checks the fallback and the lazy chunk.
+[.env.example](.env.example) defines canonical website and webapp origins. A release embeds these values in the static output. `PUBLIC_*` values are public.
 
-## Commands
+Use [UI](../docs/UI.md) for theme generation and screenshots. The decorative hero has a static CSS fallback. Its 3D code loads only on wide screens without reduced motion. Keep product information outside the scene.
 
-From the root: `bun run dev:website`, `typecheck:website`, `build:website`, `test:website`, and `storybook:website` (port 6007). `bun run --cwd website preview` serves the last build. The index is [COMMANDS](../docs/COMMANDS.md).
+`bun run storybook:website` shows React primitives and compositions. It does not render Astro pages.
 
-When an AI agent runs `astro dev`, Astro 7 starts it in the background and prints JSON. Manage that server with `bun run --cwd website astro dev status`, `… logs`, and `… stop`; stop the servers you start.
+## Request-time rendering
 
-Storybook renders `src/components/ui` modules and sample compositions in the dark theme through the React/Vite renderer. It has no Astro sections or pages and writes nothing to `website/dist`.
+Start with static pages and rebuilds. Add an Astro adapter only when a route needs server rendering. The steps are next to the configuration in [astro.config.mjs](astro.config.mjs).
 
-## Environment
+An adapter requires a runtime host and changes the build directories. Update the deployment with the rendering change. A static bucket cannot execute server routes or server islands.
 
-Copy [.env.example](.env.example) to `website/.env` for local values. Each release sets both values from Terraform.
+Cache only anonymous public output in a shared CDN. Keep personalized output private. Server islands need a stable secret `ASTRO_KEY` at build time and runtime during cached or gradual releases.
 
-- `PUBLIC_WEBSITE_URL`: the canonical origin, such as `https://www.example.com`. Without it, pages omit `canonical` and `og:url`.
-- `PUBLIC_WEBAPP_URL`: the webapp origin, such as `https://app.example.com`. Without it, the landing page keeps a local next-step link and builds without a webapp. A value that is not an absolute `http(s)` URL fails the build.
-
-## Rendering ladder
-
-Pick the first level that meets the need recorded in CHECKLIST:
-
-1. SSG with rebuild and deploy: listing, category, landing, and content changes.
-2. Cached on-demand SSR with `stale-while-revalidate`: when a full deploy is too slow.
-3. Astro server islands: small dynamic fragments without SEO value, such as the sign-in state or a listing action. The page stays static.
-4. Uncached or personal SSR: only when the initial HTML must reflect the current request.
-
-Levels 2–4 need an adapter and a runtime host; a Static Site or a static bucket cannot run them. Automatic rebuilds are specified in [BACKGROUND_JOBS](../docs/BACKGROUND_JOBS.md).
-
-Neither cloud stack has per-page ISR (a Vercel and Netlify feature): an update is a new static deploy or a cache refresh.
-
-### CDN caching
-
-- Use a shared CDN cache (`public`, `s-maxage`, `stale-while-revalidate`) only for anonymous public HTML.
-- Serve personal pages and islands with `private`, `no-store`, or an explicitly supported `Vary: Cookie` or `Vary: Authorization` strategy.
-
-### ASTRO_KEY
-
-Server islands encrypt their props. For caching or a gradual rollout, create a stable key with `astro create-key`. Pass it as the secret `ASTRO_KEY` to the build and the runtime so old HTML and a new server decrypt the same props. Never commit, print, or ship the key in static output. The key does not make a cache private.
-
-## SSR upgrade path
-
-Take this path only for a route whose need is recorded in CHECKLIST. `astro.config.mjs` repeats the steps.
-
-1. Install a Node adapter that matches the installed Astro: `bun add @astrojs/node --cwd website`. Check its `astro` peer range: a major-version mismatch fails the build.
-2. In `astro.config.mjs`, add `adapter: node({ mode: 'standalone' })` and keep `output: 'static'`. The build then emits `dist/client` and `dist/server`, and the static output moves to `website/dist/client`.
-3. Add `export const prerender = false` to the dynamic route.
-4. Change the selected Terraform stack: the site now needs a Node service or container instead of static hosting.
-
-Astro docs: [on-demand rendering](https://docs.astro.build/en/guides/on-demand-rendering/), [Node adapter](https://docs.astro.build/en/guides/integrations-guide/node/).
-
-## Deployment
-
-Follow [DEPLOYMENT](../docs/DEPLOYMENT.md). Without SSR or server islands, `website/dist` is fully static: Terraform hosts it on an App Platform Static Site or a Yandex Object Storage bucket.
+References: [Astro rendering](https://docs.astro.build/en/guides/on-demand-rendering/), [server islands](https://docs.astro.build/en/guides/server-islands/).

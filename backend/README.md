@@ -1,73 +1,82 @@
 # Backend
 
-The backend serves the API and owns sign-in, data storage, integrations, and server-side business rules. Module layers, auth internals, and Prisma rules are in [ARCHITECTURE](../docs/ARCHITECTURE.md).
+Bun and Hono serve the API. Prisma uses PostgreSQL. Package versions and scripts are in [package.json](package.json). [AGENTS.md](../AGENTS.md) defines module boundaries.
 
-## Stack
+## Local development
 
-Bun, Hono with `@hono/zod-openapi`, Prisma 7 on PostgreSQL 18, Zod, `jose`, and TypeScript.
-
-## Commands
-
-[COMMANDS](../docs/COMMANDS.md) indexes the scripts, and [TESTING](../docs/TESTING.md) covers the test runners. Backend-only commands, from the root:
+Install Docker Engine or Docker Desktop with Compose. Check it before database work:
 
 ```bash
-bun run --cwd backend dev              # API and scheduler, with watch
-bun run --cwd backend start:api        # API only, as deployed
-bun run --cwd backend prisma:generate  # client in src/generated/prisma
+docker compose version
+docker info
 ```
 
-`dev` runs the scheduler next to the API, so the outbox drains and local reset links appear within a minute. `dev`, `typecheck`, `build`, and `start:api` run `prisma:generate` first. [LOCAL_DATABASE](../docs/LOCAL_DATABASE.md) sets up PostgreSQL and `backend/.env`.
+From the repository root:
 
-## Entry points
+```bash
+cp backend/.env.example backend/.env
+docker compose --env-file backend/.env up -d --wait postgres
+bun run --cwd backend prisma:deploy
+bun run dev:seed
+bun run dev:backend
+```
 
-All processes share the Prisma schema, the `backend/Dockerfile` image, and `src/runtime.ts`. Jobs are declared in `src/jobs.ts`. [BACKGROUND_JOBS](../docs/BACKGROUND_JOBS.md) explains when to run each process.
+In PowerShell, use `Copy-Item` instead of `cp`. Generate `JWT_SECRET` locally before startup. `dev:backend` starts the API and scheduler. The scheduler sends queued local email and performs maintenance.
 
-| Process | Command | File |
-| --- | --- | --- |
-| API | `start:api` | `src/index.ts` |
-| One job, then exit | `start:cron -- <job>` | `src/cron.ts` |
-| Schedule from `src/job-schedules.json` | `start:scheduler` | `src/scheduler.ts` |
-| Loops; empty by default | `start:worker` | `src/worker.ts` |
-| Continuous push pipeline; optional | `start:worker:notifications` | `src/worker.ts` |
+[.env.example](.env.example) defines local settings. [src/env.ts](src/env.ts) validates them. If the database port is busy, change `POSTGRES_PORT` and the port in `DATABASE_URL` together.
 
-Cron, the scheduler, and the worker use `createBackgroundRuntime`. It replaces `JWT_SECRET` with a placeholder, so the background runtime never carries the token-signing key.
+The seed creates local accounts from `DEV_SEED_*`. It refuses production and non-loopback databases. Changing a seeded password revokes that account's sessions. `DEV_SEED_DEMO=1 bun run dev:seed` also creates list and pagination fixtures.
 
-## Environment
+### Reset local data
 
-`backend/.env.example` documents each variable. `src/env.ts` rejects invalid combinations at startup. Non-obvious choices:
+A changed or squashed migration history can cause `P3018`, `P3009`, or schema drift. Do not edit migration history to hide the error. Back up useful data and get approval before deleting it.
 
-- `RATE_LIMIT_STORE`: `memory` (default) counts inside one process, up to 10,000 keys. Use it while one API process serves every request. `database` shares counters across processes through one PostgreSQL upsert per limited request; Terraform sets it for Yandex. Its `rate_limit_buckets` rows hold client addresses or user IDs, which are temporary personal data. Only the auth cleanup deletes them, in `maintenance:process` every 15 minutes, so every deployment with `database` must run the scheduled jobs.
-- `SESSION_RETENTION_DAYS`: the auth cleanup keeps revoked and expired sessions this long, then deletes them. It also deletes expired reset tokens and spent rate-limit windows. `maintenance:process` runs it, and `auth:sessions:cleanup` runs it alone.
-- `TRUST_PROXY`: behind a proxy, set `TRUST_PROXY=true` and the proxy's `TRUSTED_PROXY_CLIENT_IP_HEADER`. Otherwise all clients share the proxy's rate-limit key. Set `TRUSTED_PROXY_CLIENT_IP_POSITION=last` only if the proxy appends the client address. Terraform sets both for its providers.
-- `EMAIL_DELIVERY`: the schema default is `disabled`; `.env.example` sets `console`, which prints reset links. Production refuses `console`. With `disabled`, a reset request answers normally but creates no token or task. See [EMAIL](../docs/EMAIL.md).
-- `PRIVATE_STORAGE_DRIVER`: `filesystem` (default) writes to `backend/.storage` without cloud or Docker. `s3` works with the local container (`bun run storage:local:start`) or a real bucket. Production refuses `filesystem`. See [STORAGE](../docs/STORAGE.md).
-- Production-like runtimes (`NODE_ENV=production` or `COOKIE_SECURE=true`) require HTTPS `CORS_ORIGINS` and a `JWT_SECRET` of at least 64 hex characters (`openssl rand -hex 32`). `NODE_ENV=production` also requires `COOKIE_SECURE=true`.
-- `src/db.ts` adds `uselibpqcompat=true` to a `DATABASE_URL` with `sslmode=require`, so TLS behaves as in libpq.
-- Seeds: `bun run dev:seed` creates the local admin and user from `DEV_SEED_*`, with no subscription or premium access. It refuses production and non-loopback database URLs. A rerun with unchanged passwords keeps the hashes, sessions, and push registrations. A changed password is rehashed, and that account's sessions and push registrations are revoked. `ADMIN_SEED_EMAIL` and `ADMIN_SEED_PASSWORD` feed only `db:deploy`, which creates the first production admin (12–128 characters, no placeholder or repeated pattern).
-- Push: `ENABLE_TEST_PUSH=true` opens the test endpoint; keep it off outside a check. `EXPO_PUSH_ACCESS_TOKEN` is needed only when the Expo project enables push security. APNs and FCM keys live in Expo, not here. Setup: [mobile/README](../mobile/README.md).
-- Apple and Google sign-in (`APPLE_AUTH_*`, `GOOGLE_AUTH_CLIENT_IDS`) ship switched off: the route and the buttons are not wired. See [SOCIAL_AUTH](../docs/SOCIAL_AUTH.md).
-- Store subscriptions (`APPLE_IAP_*`, `GOOGLE_PLAY_*`, and the `IAP_*` and `WEBHOOK_*` body and rate limits of their routes) ship switched off. Turn them on or remove them with [IAP](../docs/IAP.md).
+For a disposable development database, remove only its service and volume:
 
-## API
+```bash
+docker compose --env-file backend/.env rm --stop --force --volumes postgres
+docker volume rm <compose-project>_postgres_18_data
+docker compose --env-file backend/.env up -d --wait postgres
+bun run --cwd backend prisma:deploy
+bun run dev:seed
+```
 
-`GET /openapi.json` lists every `/api` route. Endpoint families:
+Find the project name with `docker compose --env-file backend/.env ls`. Check the volume name against [docker-compose.yml](../docker-compose.yml). Do not use `down -v`: it also deletes local storage data. Switching from `mobile` to `master` can require a database reset because mobile tables remain.
 
-| Prefix | Owner | Purpose |
-| --- | --- | --- |
-| `/api/auth/*` | auth | Browser cookie sessions, `/api/auth/token/*` for native apps, password reset |
-| `/api/users/*` | users | The current user's profile |
-| `/api/admin/*` | users | Dashboard, user directory, role changes; `admin` only |
-| `/api/uploads/*` | uploads | Avatar upload, finalize, read, and delete |
-| `/api/notifications/*` | notifications | Push token registration and unregistration; a test push only with `ENABLE_TEST_PUSH=true` |
-| `/storage/*` | storage | Signed local URLs; `filesystem` driver only |
-| `/health/live`, `/health/ready` | app | Liveness; readiness (`SELECT 1`, cached for one second, `200` or `503`) |
+## Configuration
 
-Switched-off capabilities mount no routes: social sign-in (`POST /api/auth/token/social/{provider}`) and subscriptions (`/api/iap/*`, `/api/webhooks/*`).
+Use the environment schema instead of copying its validation rules into documentation. Production needs HTTPS origins, secure cookies, a strong JWT secret, and persistent S3 storage.
 
-Each client address gets `AUTH_RATE_LIMIT_MAX` writes per window under `/api/auth/*`, a separate equal budget under users, admin, and uploads, and a third under `/api/notifications/*`. `AUTH_BODY_LIMIT_BYTES` caps those request bodies. Both limits run before authentication. The removed `INGRESS_RATE_LIMIT_PROVIDER=yandex-sws` stops the backend at startup ([YANDEX_CLOUD](../docs/YANDEX_CLOUD.md#removed-smart-web-security-mode)). `GET /api/admin/users` has its own per-admin budget (`ADMIN_USERS_READ_RATE_LIMIT_*`). Session, token, reset, and role rules are in [ARCHITECTURE](../docs/ARCHITECTURE.md).
+Set `RATE_LIMIT_STORE=database` when more than one API process serves requests. Run scheduled jobs to remove expired sessions, reset tokens, and rate-limit rows.
 
-`notifications` registers Expo push tokens per app installation and queues pushes in PostgreSQL. Unregistering keeps an inactive installation row with a newer generation. The test push allows one message per user per minute. `notifications:process` or `start:worker:notifications` sends the queue and checks receipts ([BACKGROUND_JOBS](../docs/BACKGROUND_JOBS.md#push-pipeline)).
+Configure `TRUST_PROXY` only for a trusted ingress and its actual client-IP header. An incorrect header can merge all clients into one rate-limit bucket.
 
-## Deploy
+Email and file procedures are in [Email](../docs/EMAIL.md) and [Storage](../docs/STORAGE.md).
 
-Follow [DEPLOYMENT](../docs/DEPLOYMENT.md) and the guide for the provider in `CHECKLIST.md`. `bun run release -- <provider>` runs `db:deploy` before it switches traffic. `db:deploy` checks database ownership, applies migrations, restricts privileges, optionally creates the first admin, and requires a login-capable admin. If the ownership check fails on an existing database, follow the `db:adopt-owner` steps in DEPLOYMENT.
+## Authentication
+
+The implementation is in [src/modules/auth](src/modules/auth). Browser refresh tokens stay in HttpOnly cookies. Native refresh tokens use the token endpoints and secure device storage. Browser JavaScript must not store refresh tokens.
+
+Protected requests load the active session and current user. Keep role checks and revocation on the server. Password reset must not reveal whether an account exists. Role changes, password changes, and session revocation also invalidate the related push registrations. Reset confirmation consumes tokens and revokes sessions in one transaction.
+
+Role changes must not remove the last administrator. Keep password changes, session creation, and role changes under the existing authentication locks.
+
+## API and background processes
+
+`GET /openapi.json` describes the API. `/health/live` checks the process; `/health/ready` checks database access.
+
+The API, scheduler, cron, and worker share the runtime and Docker image. Only the API needs the JWT signing secret. [Background jobs](../docs/BACKGROUND_JOBS.md) explains the other processes.
+
+## Database releases
+
+`db:deploy` checks ownership, applies migrations, restricts runtime grants, and requires a login-capable administrator. The first release can create that administrator from `ADMIN_SEED_*`. Never use the development seed in production.
+
+For existing databases and release recovery, follow [Deployment](../docs/DEPLOYMENT.md).
+
+## Push and optional sign-in
+
+The notifications module owns installation registration and the durable push queue. API calls only enqueue messages. Scheduled `notifications:process` sends them and checks receipts. An optional continuous worker uses `start:worker:notifications`.
+
+Keep push locks in the order used by the implementation: user, token, then installation. Sending rechecks active session ownership while holding these locks. Account and role changes must preserve that synchronization. Token-only compatibility routes remain until supported older applications stop using them.
+
+Apple and Google sign-in and store subscriptions are implemented but not mounted. Enable or remove them through [Social sign-in](../docs/SOCIAL_AUTH.md) and [Subscriptions](../docs/IAP.md).

@@ -1,195 +1,76 @@
-# Чеклист установки
+# Project setup
 
-Агент заполняет этот файл при установке и обновляет при изменении продукта. Пользователь может исправить любое решение.
+Use this questionnaire only when creating a project from the template. Ask in the user's language. Skip questions that do not apply. Leave unknown answers as `_unanswered_`; use `n/a` for excluded items.
 
-Задавай вопросы на языке пользователя, в терминах продукта. До разработки заполни разделы от «Проект» до «Возможности первой версии» и все применимые условные разделы. Решения из раздела «Решения агента» принимай сам.
+Apply the answers to the code, configuration, and project README. After setup and verification, delete this file and the template setup block in README.md.
 
-До ответа оставляй `_unanswered_`. Для неприменимого вопроса укажи `n/a`. При доработке шаблона оставляй ответы незаполненными, флажки — снятыми. Обновляй только реестр возможностей: он описывает текущую ветку.
+## Project and product
 
-**Статус установки:** `not started`
-<!-- Допустимо: not started | in progress | completed YYYY-MM-DD -->
-
-## 1. Проект
-
-| Вопрос | Ответ |
+| Question | Answer |
 | --- | --- |
-| Новый проект из шаблона или доработка самого шаблона? | _unanswered_ |
-| Название проекта / slug | _unanswered_ |
-| Адрес своего репозитория GitHub, если он есть | _unanswered_ |
+| What are the project name and slug? | _unanswered_ |
+| Is there a repository for this project? | _unanswered_ |
+| What should the first version do? | _unanswered_ |
+| Which user journey must work first? | _unanswered_ |
+| What must the first version exclude? | _unanswered_ |
+| Are mobile, public pages, or signed-in browser screens needed? | _unanswered_ |
+| What visual references, brand color, font, and writing tone should it use? | _unanswered_ |
 
-При установке отключи remote шаблона. Без своего адреса GitHub оставь репозиторий без `origin` и публикации. При доработке шаблона remote сохраняется.
+Choose the applications from these needs. Set the visual choices in `theme.json`.
 
-## 2. Продукт
+## Product capabilities
 
-| Вопрос | Ответ |
+| Question | Answer |
 | --- | --- |
-| Какой продукт нужно создать сначала? | _unanswered_ |
-| Какой пользовательский путь должен первым работать от начала до конца? | _unanswered_ |
-| Визуальный стиль: референсы, бренд-цвет, шрифт, тон текстов | _unanswered_ |
+| Do users need accounts, roles, or administration? | _unanswered_ |
+| What data must the product store? | _unanswered_ |
+| Which external integrations are needed? | _unanswered_ |
+| Does the product need chat, collaboration, or live updates? | _unanswered_ |
 
-По ответу о стиле агент записывает `theme.json` (бренд-цвет, скругление, шрифт — по каждому приложению) и запускает `bun run theme`, как описано в [UI](docs/UI.md#theme-tokens). Без ответа `brand` остаётся `null`, и сохраняется нейтральная тема шаблона.
+## Files and media
 
-## 3. Активные приложения
+Ask these questions when the product needs files beyond the included avatar example.
 
-Отметь нужные приложения. После ответа установи статус `in progress`. Остальные приложения отложены: не добавляй им функции, настройку и тесты. При статусе `not started` снятый флажок означает, что вопрос ещё не задан.
-
-- [ ] `backend` — API, БД и вход
-- [ ] `webapp` — браузерные экраны после входа, без SEO
-- [ ] `website` — публичные страницы для поиска и предпросмотра ссылок
-- [ ] `mobile` — приложение Expo из ветки `mobile`; выбери ветку до установки
-
-| Вопрос | Ответ |
+| Question | Answer |
 | --- | --- |
-| Почему остальные приложения отложены, если нужно пояснение | _unanswered_ |
-| Для активного `mobile`: нужны ли сейчас сборки Expo/EAS, Expo Push и Maestro E2E? | _unanswered_ |
+| What files can users upload, and with which size and type limits? | _unanswered_ |
+| Who can upload, view, replace, and delete each file? | _unanswered_ |
+| Are conversion, previews, compression, or moderation needed? | _unanswered_ |
+| How long must files remain after the related record is deleted? | _unanswered_ |
 
-Разделение `webapp` и `website` выбирает агент. Отложенные мобильные службы оставь ненастроенными.
+## Public data
 
-## 4. Возможности первой версии
-
-Спрашивай о потребностях продукта. Отметь нужное и заполни строку ограничений, даже если ничего не выбрано: так отказ отличается от незаданного вопроса.
-
-- [ ] Учётные записи / вход
-- [ ] Данные, которые сохраняются после перезапуска
-- [ ] Загрузка файлов, изображений или медиа → заполни «Файлы, изображения и медиа»
-- [ ] Подписки или разовые платежи → заполни «Платежи»
-- [ ] Администрирование или роли
-- [ ] Внешние интеграции (какие: _unanswered_)
-- [ ] Чат, присутствие, совместная работа или обновления в реальном времени
-
-| Вопрос | Ответ |
+| Question | Answer |
 | --- | --- |
-| Что первая версия НЕ должна делать? Если запретов нет, запиши «ничего не исключено» | _unanswered_ |
+| Which public data must appear in the initial website HTML? | _unanswered_ |
+| How quickly must the website reflect data changes? | _unanswered_ |
 
-## 5. Файлы, изображения и медиа
+## Payments
 
-Шаблон включает приватное хранилище и аватары. Ответь о дополнительных файлах продукта. Если их нет, укажи `n/a`.
-
-| Вопрос | Ответ |
+| Question | Answer |
 | --- | --- |
-| Что загружают пользователи? | _unanswered_ |
-| Доступ: всем, владельцу, выбранным людям или смешанный? | _unanswered_ |
-| Кто может загружать, смотреть, заменять и удалять файлы? | _unanswered_ |
-| Максимальный размер и допустимые типы файлов | _unanswered_ |
-| Нужны ли миниатюры, изменение размера/формата, сжатие, обрезка или модерация? | _unanswered_ |
-| Сколько хранить файл после удаления связанной записи? | _unanswered_ |
-| Нужно ли показывать имена файлов пользователям или скрывать их за идентификаторами? | _unanswered_ |
+| What do users pay for, and what access does payment grant? | _unanswered_ |
+| Are payments one-time, recurring, or both? | _unanswered_ |
+| Which platforms must accept payment? | _unanswered_ |
+| Must users select products before signing in? | _unanswered_ |
 
-## 6. Данные сайта и частота обновления
+## Mobile services
 
-Заполни для активного `website`. Иначе укажи `n/a`. Решения храни здесь, контракт реализации — в [WEB_SURFACES.md](docs/WEB_SURFACES.md).
-
-| Вопрос | Ответ |
+| Question | Answer |
 | --- | --- |
-| Какие публичные данные нужно брать из backend/БД при сборке сайта? | _unanswered_ |
-| Как быстро сайт должен показывать изменение данных? | _unanswered_ |
-| Какие изменения требуют автоматической пересборки и публикации? | _unanswered_ |
+| Are store subscriptions, push notifications, or social sign-in needed? | _unanswered_ |
+| Are development builds and device tests needed now? | _unanswered_ |
+| Which Expo account owns the project? | _unanswered_ |
 
-По умолчанию сайт — Astro SSG с данными БД на этапе сборки. SSR допустим только при записанной здесь потребности в свежести или персонализации, которую пересборка не обеспечивает.
+Remove optional mobile features that the product excludes. Follow the mobile branch's setup instructions for retained features.
 
-## 7. Платежи
+## Deployment
 
-Заполни при выбранных платежах. Иначе укажи `n/a`.
-
-| Вопрос | Ответ |
+| Question | Answer |
 | --- | --- |
-| За что платят пользователи? | _unanswered_ |
-| Подписка, разовая покупка или оба варианта? | _unanswered_ |
-| Нужны ли на публичном сайте корзина или выбор предложения до входа? | _unanswered_ |
-| Где нужна оплата: браузер, App Store / Google Play, нативный ввод карты, Apple Pay или Google Pay? | _unanswered_ |
-| Что недоступно без оплаты? | _unanswered_ |
+| Is deployment needed now, or is local startup enough? | _unanswered_ |
+| Where are the users, and where must their data remain? | _unanswered_ |
+| Which domains and applications must be published? | _unanswered_ |
+| Is there an existing hosting account or operating constraint? | _unanswered_ |
 
-До реализации прочитай [WEB_SURFACES.md](docs/WEB_SURFACES.md). Ветка `mobile` содержит рабочий, но выключенный код подписок App Store и Google Play. Если продукт от них отказывается, удали этот код при установке и запиши `removed`. Не оставляй его частично.
-
-## 8. Деплой
-
-| Вопрос | Ответ |
-| --- | --- |
-| Нужен деплой сейчас или пока достаточно локального запуска? | _unanswered_ |
-| Где находятся пользователи? Должны ли данные оставаться в России? | _unanswered_ |
-| Выбор агента по аудитории и данным: DigitalOcean / Yandex Cloud / свой сервер | _unanswered_ |
-| Рабочие домены / URL для API, webapp и website; нужен ли сейчас Yandex CDN? | _unanswered_ |
-| Какие приложения публикуем первыми | _unanswered_ |
-
-Спроси об аудитории и размещении данных. Хостинг выбери сам:
-
-| Хостинг | Когда выбрать | Что даёт шаблон |
-| --- | --- | --- |
-| DigitalOcean | По умолчанию для аудитории вне России. | Terraform для App Platform, Managed PostgreSQL, Spaces и scheduler. Релиз: `bun run release -- digitalocean`. |
-| Yandex Cloud | Аудитория в России или данные должны оставаться в России. | Terraform для Serverless Containers с таймерами, Managed PostgreSQL, API Gateway, Object Storage, CDN по выбору. Релиз: `bun run release -- yandex`. |
-| Свой сервер | Нужны полный контроль и независимость от провайдера; есть ответственный за сервер. | Тот же Docker-образ и scheduler, без скрипта релиза. TLS, резервные копии, обновления и мониторинг — на владельце. |
-
-Запиши выбор. В установленном проекте удали каталог невыбранного провайдера из `infra/` и его инструкцию; для своего сервера удали оба. Сохрани `scripts/infra.mjs` и [DEPLOYMENT.md](docs/DEPLOYMENT.md). Если деплой отложен, заполни раздел при запросе деплоя.
-
-## 9. Решения агента
-
-Принимай эти решения сам и объясняй их через результат для продукта:
-
-- Разделение `website` (публичные страницы и SEO) и `webapp` (экраны после входа).
-- Почта: Postbox для Yandex Cloud, Resend для остальных. Спрашивай об аудитории, не о почтовом сервисе.
-- Хостинг — по таблице раздела «Деплой»; профиль Terraform, размеры ресурсов, необходимость HA и CDN.
-- Монолитный backend на PostgreSQL; Redis-совместимый Pub/Sub — только для обмена в реальном времени между экземплярами.
-- Локальный PostgreSQL через Docker Compose на любой ОС; нативная установка — только по выбору пользователя.
-- Astro для `website`; Next.js — только при явном требовании ISR в стиле Vercel.
-- Мониторинг: штатные уведомления провайдера; новые сервисы наблюдения — только после записанного инцидента, где логов не хватило.
-- Библиотеки, файлы, имена, рефакторинг и объём проверок — по [AGENTS.md](AGENTS.md).
-
-## 10. Реестр возможностей
-
-Обновляй реестр при добавлении или удалении возможности. Допустимо одно состояние:
-
-- `included` — реализовано и должно работать.
-- `available` — частично готово; в примечании указано, чего не хватает.
-- `absent` — отсутствует. Добавляй только по запросу пользователя.
-- `removed` — намеренно удалено при установке. Возвращай только по запросу; старый код, миграция или документация не заменяют запрос.
-
-Без строки возможность считается `absent`. Прямого запроса на добавление или возврат достаточно: запиши решение и обновляй строку по ходу работы. Не переводи имена возможностей и состояния.
-
-| Возможность | Состояние | Примечание |
-| --- | --- | --- |
-| Auth (email + password) | included | Базовая возможность шаблона. |
-| Admin roles | included | Роли и seed в `backend`, интерфейс администратора в `webapp`. |
-| Password reset email delivery | included | Письмо со ссылкой сброса и уведомление о смене пароля идут через outbox. Провайдер выбирает `EMAIL_DELIVERY`; локально — `console`. См. [EMAIL.md](docs/EMAIL.md). |
-| File/media storage | included | Приватная загрузка в `webapp` и `mobile`, пример — аватары. Локальный диск или S3-совместимый бакет через `PRIVATE_STORAGE_*`. См. [STORAGE.md](docs/STORAGE.md). |
-| Infrastructure as code | included | Terraform для DigitalOcean и Yandex Cloud; операции через `scripts/infra.mjs`. См. [infra/README.md](infra/README.md). |
-| Static asset precompression | included | `bun run static:precompress` создаёт `.br`/`.gz` для своего сервера. Облачные релизы используют сжатие провайдера. |
-| Storybook component catalogs | included | Локальные каталоги `src/components/ui` для `webapp` и `website`; не публикуются. |
-| Website build-time backend data | absent | Контент лендинга хранится в репозитории. |
-| Automatic SSG rebuild | absent | Спецификация — в [BACKGROUND_JOBS.md](docs/BACKGROUND_JOBS.md). |
-| Website cart handoff | absent | При добавлении ведёт в единственный браузерный checkout по [WEB_SURFACES.md](docs/WEB_SURFACES.md). |
-| Browser checkout / payments | absent | Добавляй в `webapp` и backend. Нативные подписки магазинов — отдельная возможность ниже. |
-| Payments / subscriptions | available | Подписки App Store и Google Play реализованы, но выключены: таблицы закомментированы, маршруты и `IapProvider` не подключены. Включи или удали по [IAP.md](docs/IAP.md). |
-| Push notifications | available | Expo Push подключён, но нужны EAS project ID и ключи APNs/FCM. `notifications:process` по расписанию отправляет push и проверяет receipts. `ENABLE_TEST_PUSH` по умолчанию выключен. См. [mobile/README.md](mobile/README.md). |
-| Social sign-in (Apple / Google) | available | Реализован, но выключен: маршрут и кнопки не подключены. Включи или удали по [SOCIAL_AUTH.md](docs/SOCIAL_AUTH.md). |
-| Real-time / WebSockets | absent | Требуется явная потребность продукта. |
-| Shared rate-limit state | included | `RATE_LIMIT_STORE`: `memory` для одного процесса, `database` для нескольких (Yandex Serverless Containers). См. [backend/README.md](backend/README.md). |
-| Background jobs | included | Реестр `backend/src/jobs.ts`, расписание `backend/src/job-schedules.json`. См. [BACKGROUND_JOBS.md](docs/BACKGROUND_JOBS.md). |
-| Durable task outbox | included | `task_outbox` в PostgreSQL, обработчики в `backend/src/outbox/handlers.ts`, запуск через `outbox:drain`. Новый тип задачи требует кода, не миграции. |
-| Background job alerting | included | DigitalOcean — правила App Platform из Terraform; Yandex — два уведомления Monitoring вручную. См. [DIGITALOCEAN.md](docs/DIGITALOCEAN.md) и [YANDEX_CLOUD.md](docs/YANDEX_CLOUD.md). |
-
-## 11. Проверка окружения
-
-Проверь сам:
-
-- [ ] `docker compose version` и `docker info` успешны, если нужны backend/API, загрузки или проверки с БД
-- [ ] `git remote -v` проверен; remote шаблона отключён, кроме доработки шаблона
-- [ ] `.env` приложений созданы из `.env.example`; `JWT_SECRET` сгенерирован локально и не закоммичен
-- [ ] Выполнены минимальные значимые проверки активных приложений
-
-## 12. После установки
-
-- [ ] Ответы заполнены; статус — `completed YYYY-MM-DD`
-- [ ] Имена шаблона заменены: `web_app_demo`, `web-app-demo`, `webappdemo`, `vibecoding-template`, заголовок `Vibe Coding Template`; `bun.lock` пересоздан
-- [ ] README отложенных приложений содержат пояснение
-- [ ] Раздел «New project setup» и его маркеры удалены из `AGENTS.md`
-- [ ] Пользователю сообщены локальные URL, выполненные команды и действия, требующие его разрешения
-
-## 13. Исключения аудита зависимостей
-
-`bun run audit` пропускает только эти уязвимости. Каждое исключение одобрил пользователь. К дате пересмотра проверь, вышло ли совместимое исправление. Затем удали исключение или снова спроси пользователя.
-
-| Уязвимость | Путь | Причина | Пересмотр |
-| --- | --- | --- | --- |
-| [GHSA-vcc3-ghjq-m6fr](https://github.com/advisories/GHSA-vcc3-ghjq-m6fr), moderate | `mobile` → `expo-router` → `query-string@7` → `decode-uri-component@0.2.2` | Искажённый percent-encoding в deep link может надолго занять CPU приложения. Исправлена только версия 0.5.0, и она поставляется лишь как ESM. `query-string@7` требует `^0.2.2`, поэтому override сломал бы бандл Metro. Последний `expo-router` использует тот же `query-string`. | 2026-12-05 |
-
-Добавляй нужные проекту вопросы и разделы.
+Choose hosting from these answers. Use Yandex Cloud for a Russian data-location requirement. DigitalOcean is the default alternative. Choose a private server only when someone will operate it. Select email and resource sizes to match the deployment.
