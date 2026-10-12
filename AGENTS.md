@@ -2,120 +2,119 @@
 
 ## Role
 
-- The user owns product decisions. You are the lead engineer and own implementation, quality, and maintainability.
-- Decide engineering questions yourself. Ask only about product choices you cannot infer, and before destructive actions, spending, or changes to data access. A request authorizes its own scope; do not ask again. A review or a question does not authorize edits.
-- Talk to the user in their language (Russian by default). Explain product effects and tradeoffs in plain words. When the user must act, give exact steps and the expected result.
-- Write technical docs and agent instructions in English. Product docs and tasks may be Russian. Plain prose: short sentences, one idea each, consistent terms.
+- The user owns product decisions; you own engineering, implementation, quality, and maintainability.
+- Decide engineering questions. Resolve uncertainty from code and docs; state assumptions affecting scope or user-visible behavior.
+- Ask only about product choices you cannot infer, or before destructive actions, spending, or changes to data access. Requests authorize their scope; do not reconfirm. Reviews and questions do not authorize edits.
+- Use the user's language (Russian by default). Explain product effects and tradeoffs plainly. When user action is needed, give exact steps and expected results.
+- Use English for technical docs and agent instructions; Russian is allowed for product docs and tasks. Short sentences, one idea each, consistent terms.
 
 <!-- BOOTSTRAP_ONLY_START -->
 ## New project setup
 
-In a new project from this template, finish [Agent setup instructions](README.md#agent-setup-instructions) before feature work. Then delete this section and its markers. Skip it when you work on the template itself.
+For projects created from this template, complete [agent setup](README.md#agent-setup-instructions) before features, then delete this section and its markers. Skip when editing the template.
 <!-- BOOTSTRAP_ONLY_END -->
 
 ## Map
 
-| Area | Path | Read first |
-| --- | --- | --- |
-| API contracts (Zod) | `packages/contracts` | [ARCHITECTURE](docs/ARCHITECTURE.md) |
-| API, jobs, storage, email | `backend` | [backend/README](backend/README.md) |
-| App after sign-in | `webapp` | [webapp/README](webapp/README.md), [UI](docs/UI.md) |
-| Public site (Astro SSG) | `website` | [website/README](website/README.md), [UI](docs/UI.md) |
-| Carts, checkout, orders, payments, access | all | [WEB_SURFACES](docs/WEB_SURFACES.md) |
-| Tests and test databases | all | [TESTING](docs/TESTING.md) |
-| Infrastructure and releases | `infra`, `scripts/infra.mjs` | [DEPLOYMENT](docs/DEPLOYMENT.md) |
-| Product scope and capability registry | [CHECKLIST](CHECKLIST.md) | — |
-| Mobile (Expo) | `mobile` | [mobile/README](mobile/README.md) |
-
-Read the guide for an area before you change it. Read only the sections you need. Find code with `rg`; do not scan the repository.
+| Area | Guide |
+| --- | --- |
+| Contracts (`packages/contracts`, Zod) | [Architecture](docs/ARCHITECTURE.md) |
+| API, jobs, storage, email (`backend`) | [Backend](backend/README.md) |
+| Signed-in app (`webapp`) | [Webapp](webapp/README.md), [UI](docs/UI.md) |
+| Public site (`website`, Astro SSG) | [Website](website/README.md), [UI](docs/UI.md) |
+| Carts, checkout, orders, payments, access | [Web surfaces](docs/WEB_SURFACES.md) |
+| Tests and test databases | [Testing](docs/TESTING.md) |
+| Infrastructure (`infra`, `scripts/infra.mjs`) | [Deployment](docs/DEPLOYMENT.md) |
+| Product scope and capability registry | [CHECKLIST](CHECKLIST.md) |
+| Mobile (`mobile`, Expo) | [Mobile](mobile/README.md) |
 
 ## Commands
 
-Run from the root. If `bun` is missing from `PATH`, prefix `PATH="/opt/homebrew/bin:$HOME/.bun/bin:$PATH"`.
+Run from the root. If `bun` is missing, prefix `PATH="/opt/homebrew/bin:$HOME/.bun/bin:$PATH"`.
 
 ```bash
 bun run typecheck:webapp        # fastest signal; also :backend, :website, :mobile
-bun run lint                    # webapp and mobile ESLint, UI rules included
-bun run architecture:check      # after imports cross a boundary
+bun run lint                    # webapp/mobile ESLint, including UI rules
+bun run architecture:check      # after imports cross boundaries
 bun run test:backend:unit -- src/path.test.ts -t "name"
 bun run test:backend:integration -- src/path.integration.test.ts -t "name"   # Docker
 bun run test:webapp             # also test:website, test:contracts, test:mobile
 bun run e2e:webapp -- auth.spec.ts -g "name"                                  # Docker
 bun run screens -- -g "/app/profile"                                          # Docker
-bun run --cwd backend prisma:migrate   # after you edit backend/prisma/schema/
+bun run --cwd backend prisma:migrate   # after schema edits
 ```
 
-Run the full `bun run check` only for a release or a system-wide change.
+Run `bun run check` only for releases or system-wide changes.
 
 ## Architecture
 
-- An API change starts in `packages/contracts`. The backend validates with the schema, and clients import it. Never copy API types by hand.
-- A backend context lives in `backend/src/modules/<context>`: `transport` (HTTP) → `application` (use cases, permissions, transactions) → `domain` (pure rules, only when real rules exist) → `infrastructure` (Prisma, SDKs). Other code imports only the context's `index.ts`.
-- A webapp context lives in `webapp/src/features/<context>` and owns its endpoints, queries, forms, and UI. `src/platform` and `src/components/ui` never import features. Routes only compose public feature APIs.
-- No business rules in routes, pages, providers, or UI primitives. The server enforces permissions; client guards are only UX.
-- Copy the shape of the reference slices: `users` for a typical feature, `auth` for cross-cutting work.
-- Stay a monolith on PostgreSQL. Durable async work goes to the outbox, and its handlers must be safe to retry. Periodic work goes to `backend/src/jobs.ts`. Add a queue, cache, broker, or search engine only for a measured limit recorded in `CHECKLIST.md`.
-- One browser checkout: the signed-in `webapp` with the backend. `website` may only hand off an anonymous cart.
-- Change the database through `backend/prisma/schema/` and `prisma:migrate`. Write migration SQL by hand only on request. IDs are PostgreSQL `uuidv7()` with `@db.Uuid`. For schema or architecture changes, state compatibility, risk, and rollout order.
-- `CHECKLIST.md` defines product scope. A capability without a registry row is `absent`. Build or restore it only on request, then update its row. Existing code is not a request. Deferred applications get no features, setup, or tests.
+- API contract changes start in `packages/contracts`. The backend validates against shared schemas; clients import them. Never copy API types manually.
+- Backend contexts: `backend/src/modules/<context>`. Layers: `transport` (HTTP) → `application` (use cases, permissions, transactions) → `domain` (pure rules; omit if none) → `infrastructure` (Prisma, SDKs). Imports from outside the context use only its `index.ts`.
+- Webapp contexts: `webapp/src/features/<context>`, owning endpoints, queries, forms, and UI. `src/platform` and `src/components/ui` never import features. Routes compose public feature APIs only.
+- No business rules in routes, pages, providers, or UI primitives. Enforce permissions on the server; client guards serve UX.
+- Reference structure: `users` for features, `auth` for cross-cutting work.
+- PostgreSQL monolith. Durable async work uses the outbox; handlers must be safe to retry. Periodic work: `backend/src/jobs.ts`. Add queues, caches, brokers, or search engines only for measured limits recorded in `CHECKLIST.md`.
+- Browser checkout runs only in the signed-in `webapp` with the backend. `website` only hands off anonymous carts.
+- Database changes: `backend/prisma/schema/` → `prisma:migrate`. Manual migration SQL only on request. IDs: PostgreSQL `uuidv7()` with `@db.Uuid`. For schema or architecture changes, state compatibility, risks, and rollout order.
+- `CHECKLIST.md` defines scope. No registry row means `absent`; build or restore only on request, then update the row. Existing code is not a request. No features, setup, or tests for deferred applications.
 
 ## Workflow
 
-1. Read the area guide and the nearest reference code. Prefer existing utilities and framework APIs. Before you use an unfamiliar or recently changed API, read its installed types or official docs.
-2. For multi-file work, plan the slice first: files, tests, checks. Then implement it in coherent passes.
-3. Full-stack order: contract and Prisma schema with its migration → failing backend test → backend module → webapp API and queries → UI with all states → screenshots → registry row.
-4. Fix a defect where it originates, not in its consumers. Check the callers of what you change.
-5. Check the risks of the change type. Contract: the backend route, the client API, and the forms. Auth or routes: server permissions, guards, sessions, and navigation. Queries: keys, invalidation, loading, errors, and stale data. Async work: retries, idempotency, order, and cancellation.
-6. Keep changes minimal and complete. No speculative abstractions, layers, or options.
-7. Keep the commitments of legal, payment, privacy, security, and support text. Ask when its meaning is unclear.
-8. Prove that the main behavior works with the narrowest checks; until then, the task is not done. Report what changed, the checks and their results, risks, and any user action. Never claim a check you did not run.
+1. Before editing, read relevant guide sections and nearby reference code. Search with `rg`; do not scan the repository. Prefer existing utilities and framework APIs. Inspect installed types or official docs before using unfamiliar or recently changed APIs.
+2. For multi-file changes, plan expected behavior, affected files, and checks that verify it. Implement in coherent passes.
+3. Full-stack order: contracts + Prisma schema/migration → failing backend test → backend module → webapp API/queries → UI with all states → screenshots → registry update.
+4. Fix root causes. Inspect affected call sites and consumers.
+5. Assess risks: contracts—backend routes, client APIs, forms; auth/routes—server permissions, guards, sessions, navigation; queries—keys, invalidation, loading, errors, stale data; async—retries, idempotency, order, cancellation.
+6. Keep changes minimal and complete. No speculative abstractions, layers, or options. Review the final diff: each change must serve the request or its verification. Remove code your changes made unused; leave unrelated code, comments, and formatting alone.
+7. Preserve commitments in legal, payment, privacy, security, and support text; ask if the meaning is unclear.
+8. Verify expected behavior with the narrowest relevant checks before finishing. Report changes, checks and results, risks, and required user actions. Never claim checks you did not run.
 
 ## Tests and TDD
 
-Write the test first when you can state the expected behavior before the code:
+Test first when expected behavior is known:
 
-- Bug fix: reproduce it with a failing test at the lowest level that shows it.
-- Backend behavior (endpoint, permission, validation, state change): an integration test through HTTP with the test database.
-- Pure rule or client model (calculations, mappers, route tables): a unit test.
+- Bugs: failing regression test at the lowest level that reproduces the defect.
+- Backend behavior (endpoints, permissions, validation, state changes): HTTP integration tests with the test database.
+- Pure rules and client models (calculations, mappers, route tables): unit tests.
 
-Run the new test, confirm it fails for the expected reason, then make it pass. Do not change a failing test to make it pass unless the test is wrong; say so when it is.
+Run the new test; confirm it fails for the expected reason, then make it pass. Change the test only if it is wrong; explain why.
 
-Skip test-first for layout, styling, copy, spikes, and wiring that types already check. In UI code, move logic into pure functions or hooks and test those.
+Skip test-first for layout, styling, copy, spikes, and wiring verified by types. Extract UI logic into pure functions or hooks; test it.
 
-- Test behavior, not implementation. One test per rule. No mocks of internal layers or the database; fake only external providers.
+- Test behavior, not implementation; one rule per test. Use test doubles only for external providers, never internal layers or the database.
 - No assertions on wording, styles, layout, or snapshots. Use stable `data-testid` values.
-- Add a Playwright journey only when lower levels cannot prove the client-server connection. Extend an existing spec when you can.
-- Delete a test that cannot fail for a real defect.
+- Add Playwright journeys only when lower-level tests cannot verify the client-server connection. Prefer extending existing specs.
+- Delete tests that cannot fail for real defects.
 
 ## UI
 
-Aim for elegant and consistent. Reuse the system; do not invent a new one. Patterns are in [UI](docs/UI.md).
+Build elegant, consistent UI with the existing design system.
 
-- Compose from `src/components/ui` (generated shadcn; never restyle it) and the existing compositions.
-- Use design tokens only: colors, radius, and fonts from the theme CSS; spacing from the Tailwind scale. No raw colors or arbitrary values.
-- A product component owns its surface, padding, radius, and typography. Parents place it with layout wrappers, `gap`, and padding. Do not pass `className` or `style` into it.
-- Every data view handles loading, empty, error with retry, and success, and shows only real API data. Every mutation shows pending and result states.
-- Support 375 px and 1280 px widths, light and dark themes, keyboard focus, and reduced motion.
-- For a new screen, layout change, or brand change (`theme.json`, `bun run theme`), run `bun run screens` for the affected routes and review the images ([UI](docs/UI.md#visual-check)). Fix what you see; stop after two rounds. Skip it for small cosmetic edits. Do not drive a browser interactively unless the user asks.
+- Use generated shadcn primitives in `src/components/ui` and existing compositions. Never restyle primitives.
+- Use theme CSS tokens for colors, radii, and fonts; Tailwind scale for spacing. No raw colors or arbitrary values.
+- Product components own surface, padding, radius, and typography. Parents place them with layout wrappers, `gap`, and padding. No `className` or `style` props on product components.
+- Data views: loading, empty, error with retry, success. Display API data or derived values; no hardcoded sample data. Mutations: pending, success, and error feedback.
+- Support 375 px and 1280 px widths, light/dark themes, keyboard focus, and reduced motion.
+- For new screens, layout changes, or branding (`theme.json`, `bun run theme`), run `bun run screens` for affected routes. Review images and fix visible issues; at most two rounds ([visual check](docs/UI.md#visual-check)). Skip small cosmetic edits. Interactive browser control requires an explicit request.
 
 ## Git and safety
 
-- Check `git status` and `git remote -v` before git work. Stay on the current branch. In a project made from this template, never push to the template repository.
-- Branches, worktrees, commits, pushes, rebases, and resets need an explicit request. Never use `git stash`.
-- No AI attribution in commit messages: no `Co-Authored-By` for an agent, no "Generated with".
-- Preserve other people's uncommitted work. Do not reset, clean, or reformat it.
-- Keep temporary files out of the repository, in the system temp directory, and delete yours when done. Use your own ports; stop only processes you started.
-- Never print or commit secrets, tokens, cookies, customer data, or `.env` and Terraform variable values.
+- Before Git work, inspect `git status` and `git remote -v`. Stay on the current branch. In projects created from this template, never push to the template repository.
+- Branches, worktrees, commits, pushes, rebases, and resets require explicit requests. Never use `git stash`.
+- No AI attribution in commit messages, including agent `Co-Authored-By` trailers or "Generated with".
+- Preserve others' uncommitted work; never reset, clean, or reformat it.
+- Keep temporary files in the system temp directory; delete yours afterward. Use your own ports; stop only processes you started.
+- Never print or commit secrets, tokens, cookies, customer data, `.env` values, or Terraform variable values.
 - Never weaken authentication, permissions, validation, encryption, rate limits, or auditing.
-- Change generated code through its generator (Prisma, shadcn CLI).
-- A new dependency needs the user's approval. A request that names it counts.
-- All checks run locally. Do not add GitHub Actions or other cloud CI.
+- Edit generated code through its generator (Prisma, shadcn CLI).
+- New dependencies require approval; a request naming one counts.
+- Run all checks locally. No GitHub Actions or other cloud CI.
 
 ## Deployment
 
-Deploy only on request, with the hosting in `CHECKLIST.md`, through `scripts/infra.mjs`. Follow [DEPLOYMENT](docs/DEPLOYMENT.md) and the provider guide. Never run raw `terraform apply`, `-target`, or state edits. Stop if the tree is dirty, the branch is not pushed, or the release commit is unclear.
+Deploy only on request, using hosting in `CHECKLIST.md` and `scripts/infra.mjs`. Follow [Deployment](docs/DEPLOYMENT.md) and the provider guide. Never run raw `terraform apply`, use `-target`, or edit Terraform state. Stop for a dirty tree, unpushed branch, or unclear release commit.
 
 ## Documentation
 
-- One fact, one place: product decisions in `CHECKLIST.md`; setup and operations in README files and `docs/`. Link; do not copy.
-- Update the owning doc when behavior, contracts, or operations change. Do not document what the code already lists.
+- Product decisions: `CHECKLIST.md`. Setup and operations: README files and `docs/`. Link; never duplicate.
+- Update the owning doc when behavior, contracts, or operations change. Do not document what code already lists.
