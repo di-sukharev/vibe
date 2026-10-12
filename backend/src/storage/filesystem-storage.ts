@@ -119,7 +119,8 @@ export class FilesystemPrivateStorage implements PrivateStorage {
     }
   }
 
-  async deleteObject(key: string) {
+  async deleteObject(key: string, options: { signal?: AbortSignal } = {}) {
+    options.signal?.throwIfAborted()
     const safeKey = assertSafeObjectKey(key)
 
     await Promise.all([

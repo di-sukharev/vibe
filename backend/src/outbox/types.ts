@@ -12,7 +12,7 @@ export type TaskHandlerContext = {
   payload: unknown
   /** 1-based, counting this run. */
   attempt: number
-  /** True when a failure now is the last one, so compensating work has to happen here. */
+  /** True on the last allowed attempt. Always false when maxAttempts is null. */
   finalAttempt: boolean
   now: Date
   /** Aborts at the entry's `deadlineMs`. Pass it to every provider call. */
@@ -26,8 +26,8 @@ export type TaskHandler = (
 
 export type TaskHandlerEntry = {
   run: TaskHandler
-  /** Attempts before the task is given up on and marked `failed`. */
-  maxAttempts?: number
+  /** Attempts before failure. Omit for the default limit; null retries transient errors until success. */
+  maxAttempts?: number | null
   /** How long one attempt may take. Must stay well below the lease - see `resolveLeaseStaleMs`. */
   deadlineMs?: number
 }

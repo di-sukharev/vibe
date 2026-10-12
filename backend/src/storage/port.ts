@@ -73,5 +73,5 @@ export interface PrivateStorage {
   readRange(key: string, range: ReadRangeInput): Promise<Uint8Array | null>
 
   /** Idempotent: deleting a key that is not there succeeds. */
-  deleteObject(key: string): Promise<void>
+  deleteObject(key: string, options?: { signal?: AbortSignal }): Promise<void>
 }

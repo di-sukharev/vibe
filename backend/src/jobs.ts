@@ -34,69 +34,22 @@ export const backgroundJobs = {
     await prisma.$queryRaw`SELECT 1`
     console.log('Job db:ping completed.')
   },
-  'auth:sessions:cleanup': async ({ env, prisma }, now) => {
-    const dayMs = 24 * 60 * 60 * 1000
-    const retentionCutoff = new Date(
-      now.getTime() - env.SESSION_RETENTION_DAYS * dayMs,
-    )
-    const absoluteRetentionCutoff = new Date(
-      now.getTime() - (env.SESSION_ABSOLUTE_TTL_DAYS + env.SESSION_RETENTION_DAYS) * dayMs,
-    )
-    const [sessions, resetTokens, rateLimitWindows] = await Promise.all([
-      prisma.authSession.deleteMany({
-        where: {
-          OR: [
-            { expiresAt: { lt: retentionCutoff } },
-            { revokedAt: { lt: retentionCutoff } },
-            { createdAt: { lt: absoluteRetentionCutoff } },
-          ],
-        },
-      }),
-      prisma.passwordResetToken.deleteMany({
-        where: { expiresAt: { lt: now } },
-      }),
-      // A rate-limit window past its end is never read again - every request looks up the window
-      // containing its own clock - so the rows are pure weight. Only RATE_LIMIT_STORE=database
-      // writes them; elsewhere this sweeps an empty table.
-      prisma.rateLimitBucket.deleteMany({
-        where: { expiresAt: { lt: now } },
-      }),
+  'auth:sessions:cleanup': async (runtime, now) => {
+    const { cleanupAuthState } = await import('./modules/auth')
+    const { cleanupExpiredRateLimitWindows } = await import('./rate-limit')
+    const [auth, rateLimitWindowsDeleted] = await Promise.all([
+      cleanupAuthState(runtime, now),
+      cleanupExpiredRateLimitWindows(runtime.prisma, now),
     ])
     console.log(
-      `Job auth:sessions:cleanup removed ${sessions.count} stale sessions, ${resetTokens.count} expired password reset tokens and ${rateLimitWindows.count} spent rate-limit windows.`,
+      `Job auth:sessions:cleanup removed ${auth.sessionsDeleted} stale sessions, ${auth.passwordResetTokensDeleted} expired password reset tokens and ${rateLimitWindowsDeleted} spent rate-limit windows.`,
     )
   },
   'uploads:pending:cleanup': async ({ prisma, privateStorage }, now) => {
-    // An upload whose signed URL has expired can never be finalized, so its row and any bytes
-    // that did land are junk. Objects go first: a row deleted before its object would leave
-    // storage holding a file nothing points at and nothing will ever look for again.
-    const abandoned = await prisma.userAvatar.findMany({
-      where: { state: 'pending', expiresAt: { lt: new Date(now.getTime() - 60 * 60 * 1000) } },
-      orderBy: { expiresAt: 'asc' },
-      take: 500,
-    })
-
-    // Only rows whose object is actually gone are deleted. Dropping a row after a failed object
-    // delete would strand that object forever: the row is the only record of its key, so nothing
-    // would ever look for it again. Keeping the row means the next run simply retries. Deletes
-    // are idempotent, so a missing object still counts as removed and cannot block the queue.
-    const deletedIds: string[] = []
-    for (const upload of abandoned) {
-      try {
-        await privateStorage.storage.deleteObject(upload.objectKey)
-        deletedIds.push(upload.id)
-      } catch (error) {
-        console.error(`Job uploads:pending:cleanup could not delete ${upload.objectKey}:`, error)
-      }
-    }
-
-    const rows =
-      deletedIds.length > 0
-        ? await prisma.userAvatar.deleteMany({ where: { id: { in: deletedIds } } })
-        : { count: 0 }
-
+    const { cleanupUploads } = await import('./modules/uploads')
+    const result = await cleanupUploads({ db: prisma, storage: privateStorage.storage }, now)
     console.log(
-      `Job uploads:pending:cleanup removed ${rows.count} abandoned uploads, and left ${abandoned.length - deletedIds.length} to retry.`,
+      `Job uploads:pending:cleanup removed ${result.removed} abandoned uploads, and left ${result.leftToRetry} to retry.`,
     )
   },
   'outbox:drain': async (runtime, now) => {

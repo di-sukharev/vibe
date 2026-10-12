@@ -231,6 +231,52 @@ describe('the task outbox against a real database', () => {
     }
   })
 
+  test('object deletion survives more than five provider failures and finishes after recovery', async () => {
+    const objectKey = 'avatars/2026/10/durable-deletion'
+    const objects = new Set([objectKey])
+    let unavailable = true
+    const storageRuntime = {
+      ...runtime,
+      privateStorage: {
+        storage: {
+          async deleteObject(key: string, options: { signal?: AbortSignal } = {}) {
+            expect(options.signal).toBeInstanceOf(AbortSignal)
+            options.signal?.throwIfAborted()
+            if (unavailable) throw new Error('storage unavailable')
+            objects.delete(key)
+          },
+        },
+      },
+    } as unknown as BackendRuntime
+    let attemptAt = now()
+    const { id } = await prisma.$transaction((tx) => enqueueTask(tx, {
+      type: 'uploads:delete-object', dedupeKey: `${objectKey}:immediate`,
+      payload: { objectKey }, scheduledFor: attemptAt,
+    }))
+
+    for (let attempt = 1; attempt <= 6; attempt += 1) {
+      const metrics = await drainTaskOutbox(storageRuntime, {
+        now: attemptAt, clock: () => attemptAt, random: () => 0,
+      })
+      expect(metrics).toMatchObject({ transientFailed: 1, terminalFailed: 0 })
+      const task = await prisma.taskOutbox.findUniqueOrThrow({ where: { id } })
+      expect(task).toMatchObject({
+        attempts: attempt, status: 'pending', payload: { objectKey }, redactedAt: null,
+      })
+      expect(objects.has(objectKey)).toBe(true)
+      attemptAt = task.scheduledFor
+    }
+
+    unavailable = false
+    expect(await drainTaskOutbox(storageRuntime, {
+      now: attemptAt, clock: () => attemptAt,
+    })).toMatchObject({ done: 1, terminalFailed: 0 })
+    expect(objects.has(objectKey)).toBe(false)
+    expect(await prisma.taskOutbox.findUniqueOrThrow({ where: { id } })).toMatchObject({
+      attempts: 7, status: 'done', payload: {}, redactedAt: expect.any(Date),
+    })
+  })
+
   test('terminal rows keep their audit skeleton and lose their payload', async () => {
     const handlers = registry(async () => undefined)
     const { id } = await enqueueTask(

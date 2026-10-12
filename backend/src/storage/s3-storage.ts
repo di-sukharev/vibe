@@ -155,9 +155,10 @@ export class S3PrivateStorage implements PrivateStorage {
     }
   }
 
-  async deleteObject(key: string) {
+  async deleteObject(key: string, options: { signal?: AbortSignal } = {}) {
     await this.s3.send(
       new DeleteObjectCommand({ Bucket: this.config.bucket, Key: assertSafeObjectKey(key) }),
+      { abortSignal: options.signal },
     )
   }
 }

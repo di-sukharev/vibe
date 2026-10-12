@@ -44,3 +44,7 @@ export function createDatabaseRateLimitStore(
     },
   }
 }
+
+export async function cleanupExpiredRateLimitWindows(db: Pick<DbClient, 'rateLimitBucket'>, now: Date) {
+  return (await db.rateLimitBucket.deleteMany({ where: { expiresAt: { lt: now } } })).count
+}

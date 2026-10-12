@@ -33,7 +33,7 @@ Restrict stored and returned URL schemes explicitly. Use the shared upload schem
 
 ## Deletion and recovery
 
-Avatar deletion runs after the response. A failed delete leaves an orphan because its database row is gone. User deletion can also orphan an avatar. Before using this pattern for larger files, retain deletion records and add reconciliation.
+Avatar changes queue object deletion in the same database transaction. The outbox retries failed deletions after a restart. A second deletion after the old upload URL expires removes late uploads. Run the outbox worker or scheduled drain. Direct database user deletion can still orphan an avatar; it needs a separate deletion workflow. Existing orphaned objects need reconciliation.
 
 Cloud media buckets retain noncurrent versions for 30 days. Recovery restores bytes, not ownership. Back up PostgreSQL separately. Reconciliation must preserve delete markers.
 

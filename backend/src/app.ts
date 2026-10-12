@@ -7,7 +7,6 @@ import { except } from 'hono/combine'
 import { cors } from 'hono/cors'
 import { secureHeaders } from 'hono/secure-headers'
 
-import { createBackgroundTasks, type TaskDeferrer } from './background-tasks'
 import type { DbClient } from './db'
 import { disabledEmailDelivery, type EmailDelivery } from './email'
 import type { AppEnv } from './env'
@@ -26,7 +25,6 @@ import {
 } from './storage'
 
 type CreateAppOptions = {
-  backgroundTasks?: TaskDeferrer
   emailDelivery?: EmailDelivery
   env: AppEnv
   prisma: DbClient
@@ -38,7 +36,6 @@ type CreateAppOptions = {
 }
 
 export function createApp({
-  backgroundTasks = createBackgroundTasks(),
   emailDelivery = disabledEmailDelivery,
   env,
   prisma,
@@ -63,7 +60,6 @@ export function createApp({
     requireAuth: auth.requireAuth,
   })
   const uploads = createUploadsModule({
-    backgroundTasks,
     db: prisma,
     requireAuth: auth.requireAuth,
     storage: storage.storage,

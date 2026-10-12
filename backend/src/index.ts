@@ -4,7 +4,6 @@ import { shutdownBackend } from './shutdown'
 
 const runtime = createBackendRuntime()
 const app = createApp({
-  backgroundTasks: runtime.backgroundTasks,
   emailDelivery: runtime.emailDelivery,
   env: runtime.env,
   prisma: runtime.prisma,

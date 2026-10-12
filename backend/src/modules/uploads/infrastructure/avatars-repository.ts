@@ -1,7 +1,11 @@
 import type { AvatarContentType } from '@web-app-demo/contracts'
 
 import { acquireUserAvatarMutationLock, type DbClient } from '../../../db'
+import { enqueueTask } from '../../../outbox'
+import { avatarDeletionTasks } from '../application/deletion-tasks'
+
 import type {
+  AvatarMaintenanceStore,
   AvatarRecord,
   AvatarRepository,
   StartAvatarUploadInput,
@@ -28,7 +32,10 @@ type UserAvatarRow = {
  * a unique index turns a race into a constraint error rather than a correct outcome. The lock
  * makes concurrent requests queue, so the constraint stays a safety net rather than a code path.
  */
-export function createPrismaAvatarsRepository(db: DbClient): AvatarRepository {
+export function createPrismaAvatarsRepository(db: DbClient, clock = () => new Date()): AvatarRepository {
+  async function queueDeletion(tx: Pick<DbClient, 'taskOutbox'>, avatar: { objectKey: string; expiresAt: Date }) {
+    for (const task of avatarDeletionTasks(avatar, clock())) await enqueueTask(tx, task)
+  }
   return {
     async startUpload(input: StartAvatarUploadInput) {
       return db.$transaction(async (tx) => {
@@ -39,6 +46,7 @@ export function createPrismaAvatarsRepository(db: DbClient): AvatarRepository {
         })
 
         if (abandoned) {
+          await queueDeletion(tx, abandoned)
           await tx.userAvatar.delete({ where: { id: abandoned.id } })
         }
 
@@ -53,10 +61,7 @@ export function createPrismaAvatarsRepository(db: DbClient): AvatarRepository {
           },
         })
 
-        return {
-          pending: toAvatarRecord(pending),
-          replacedObjectKey: abandoned?.objectKey ?? null,
-        }
+        return toAvatarRecord(pending)
       })
     },
 
@@ -94,6 +99,7 @@ export function createPrismaAvatarsRepository(db: DbClient): AvatarRepository {
         // for the length of a statement. `previous` can never be this upload, because the row
         // was just confirmed pending under the same lock.
         if (previous) {
+          await queueDeletion(tx, previous)
           await tx.userAvatar.delete({ where: { id: previous.id } })
         }
 
@@ -102,10 +108,7 @@ export function createPrismaAvatarsRepository(db: DbClient): AvatarRepository {
           data: { state: 'ready', readyAt },
         })
 
-        return {
-          avatar: toAvatarRecord(avatar),
-          replacedObjectKey: previous?.objectKey ?? null,
-        }
+        return toAvatarRecord(avatar)
       })
     },
 
@@ -113,19 +116,16 @@ export function createPrismaAvatarsRepository(db: DbClient): AvatarRepository {
       return db.$transaction(async (tx) => {
         await acquireUserAvatarMutationLock(tx, userId)
 
-        // Read and delete under the same lock. Reading outside it and acting on the result is
-        // what lets this hand the caller the object key of a row a concurrent finalize just
-        // published - and the caller deletes what it is given, leaving a live avatar row
-        // pointing at bytes that no longer exist. The lock is what makes the pair atomic, so a
-        // row found pending here is still pending when it is deleted.
+        // Re-read under the lock so cleanup cannot target an avatar that was just published.
         const pending = await tx.userAvatar.findFirst({
           where: { id: uploadId, userId, state: 'pending' },
         })
-        if (!pending) return null
+        if (!pending) return false
 
+        await queueDeletion(tx, pending)
         await tx.userAvatar.delete({ where: { id: pending.id } })
 
-        return pending.objectKey
+        return true
       })
     },
 
@@ -134,9 +134,9 @@ export function createPrismaAvatarsRepository(db: DbClient): AvatarRepository {
         await acquireUserAvatarMutationLock(tx, userId)
 
         const rows = await tx.userAvatar.findMany({ where: { userId } })
+        for (const row of rows) await queueDeletion(tx, row)
         await tx.userAvatar.deleteMany({ where: { userId } })
 
-        return rows.map((row) => row.objectKey)
       })
     },
   }
@@ -153,5 +153,18 @@ function toAvatarRecord(row: UserAvatarRow): AvatarRecord {
     expiresAt: row.expiresAt,
     readyAt: row.readyAt,
     updatedAt: row.updatedAt,
+  }
+}
+
+export function createPrismaAvatarMaintenanceStore(db: DbClient): AvatarMaintenanceStore {
+  return {
+    findAbandoned: (before, limit) => db.userAvatar.findMany({
+      where: { state: 'pending', expiresAt: { lt: before } },
+      orderBy: { expiresAt: 'asc' }, take: limit,
+      select: { id: true, objectKey: true },
+    }),
+    async removeAbandoned(ids) {
+      return (await db.userAvatar.deleteMany({ where: { id: { in: ids } } })).count
+    },
   }
 }

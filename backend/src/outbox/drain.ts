@@ -159,7 +159,7 @@ async function runClaimedTask({
 }) {
   const entry = requireTaskHandler(candidate.type, handlers)
   const attempt = candidate.attempts + 1
-  const finalAttempt = isFinalAttempt(attempt, entry.maxAttempts ?? defaultMaxAttempts)
+  const finalAttempt = entry.maxAttempts !== null && isFinalAttempt(attempt, entry.maxAttempts ?? defaultMaxAttempts)
 
   // The work and the bookkeeping fail for different reasons and are handled apart. Folding them
   // into one `try` would record a database blip while writing the result as a failure of the

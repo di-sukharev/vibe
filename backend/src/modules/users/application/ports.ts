@@ -26,13 +26,14 @@ export type AdminUsersReader = {
   listUsers(query: AdminUsersQuery): Promise<AdminUsersResponse>
 }
 
+export type UserRoleTransaction = {
+  findUser(id: string): Promise<UserRecord | null>
+  countAdmins(): Promise<number>
+  updateRoleAndRevoke(userId: string, role: UserRole, now: Date): Promise<AdminUserSummary>
+}
+
 export type UserRoleUpdater = {
-  updateRole(input: {
-    actorUserId: string
-    targetUserId: string
-    role: UserRole
-    now: Date
-  }): Promise<AdminUserSummary>
+  withRoleMutation<T>(targetUserId: string, run: (tx: UserRoleTransaction) => Promise<T>): Promise<T>
 }
 
 export type Clock = {

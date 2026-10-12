@@ -16,6 +16,20 @@ export type TaskHandlerRegistry = Record<string, TaskHandlerEntry>
  * `await import()` inside `run`, which also keeps a module out of the runs that do not use it.
  */
 export const taskHandlers = {
+  'uploads:delete-object': {
+    maxAttempts: null,
+    run: async ({ payload, signal }, runtime) => {
+      const objectKey = (payload as { objectKey?: unknown } | null)?.objectKey
+      const { assertSafeObjectKey } = await import('../storage/object-keys')
+      try {
+        if (typeof objectKey !== 'string') throw new Error('Missing object key')
+        assertSafeObjectKey(objectKey)
+      } catch {
+        throw new TerminalTaskError('Invalid storage deletion payload')
+      }
+      await runtime.privateStorage.storage.deleteObject(objectKey, { signal })
+    },
+  },
   /**
    * The account-dependent half of a password reset: look the address up, mint a token, send it.
    *

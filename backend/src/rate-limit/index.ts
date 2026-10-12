@@ -26,3 +26,5 @@ export type {
   RateLimitStore,
   RateLimitStoreFactory,
 } from './port'
+
+export { cleanupExpiredRateLimitWindows } from './database-store'

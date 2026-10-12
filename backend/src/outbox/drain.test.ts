@@ -15,7 +15,7 @@ import type { TaskHandlerRegistry } from './handlers'
 const now = new Date('2026-08-09T12:00:00.000Z')
 const noJitter = () => 0
 
-function registry(run: TaskHandlerRegistry['string']['run'], entry: Partial<{ maxAttempts: number }> = {}) {
+function registry(run: TaskHandlerRegistry['string']['run'], entry: Partial<{ maxAttempts: number | null }> = {}) {
   return { 'test:work': { run, ...entry } } satisfies TaskHandlerRegistry
 }
 
@@ -40,16 +40,16 @@ describe('drainTaskOutbox', () => {
     expect(rows[0]?.status).toBe('skipped')
   })
 
-  test('a handler that knows the work can never succeed stops immediately', async () => {
+  test.each([undefined, null])('a terminal error stops a handler with attempt limit %s', async (maxAttempts) => {
     const rows = [taskRow({ id: 'a', type: 'test:work' })]
     const error = spyOn(console, 'error').mockImplementation(() => {})
 
     try {
       const metrics = await drain(rows, registry(async () => {
         throw new TerminalTaskError('payload will never validate')
-      }))
+      }, { maxAttempts }))
 
-      // One attempt of five, but no retry: the handler opted out.
+      // A terminal error stops retries even when the handler has no attempt limit.
       expect(metrics).toMatchObject({ terminalFailed: 1 })
       expect(rows[0]).toMatchObject({ attempts: 1, status: 'failed' })
     } finally {
@@ -66,6 +66,15 @@ describe('drainTaskOutbox', () => {
     await drain(rows, registry(async ({ finalAttempt }) => void flags.push(finalAttempt), { maxAttempts: 2 }))
 
     expect(flags).toEqual([true])
+  })
+
+  test('an unbounded handler never receives a final-attempt flag', async () => {
+    const rows = [taskRow({ id: 'a', type: 'test:work', attempts: 10 })]
+    const flags: boolean[] = []
+
+    await drain(rows, registry(async ({ finalAttempt }) => void flags.push(finalAttempt), { maxAttempts: null }))
+
+    expect(flags).toEqual([false])
   })
 
   test('the runtime budget stops a pass between items rather than mid-task', async () => {

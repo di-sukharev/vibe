@@ -167,3 +167,8 @@ export type Clock = {
 
 export type ProjectUser = (user: AuthUserRecord) => UserDto | Promise<UserDto>
 export type LogoutCleanup = (input: { userId: string }) => void | Promise<void>
+
+export type AuthMaintenanceStore = {
+  deleteSessions(expiredBefore: Date, createdBefore: Date): Promise<number>
+  deleteResetTokens(before: Date): Promise<number>
+}
