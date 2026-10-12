@@ -1,8 +1,10 @@
 # Mobile template
 
-The working Expo app lives on the `mobile` branch, not on `master`. That branch adds the Expo app, development builds, Maestro E2E, Expo Push, and social sign-in. App Store and Google Play subscriptions are in the code but disabled by configuration.
+The Expo application lives on the `mobile` branch. It includes development builds, Maestro tests, push notifications, and social sign-in. Store subscriptions are disabled by configuration until setup.
 
-## Start from the mobile branch
+## Select the branch
+
+Before creating a mobile project:
 
 ```bash
 git fetch origin
@@ -11,25 +13,27 @@ git switch mobile
 bun install --frozen-lockfile
 ```
 
-Stop setup if the ancestry check fails; the template owner must merge `master` into `mobile` first. Never resolve template conflicts inside a product project.
+Stop if the ancestry check fails. The template owner must merge `master` into `mobile` first. Follow the README on that branch for Expo and optional feature setup.
 
-## Branch ownership
+Mobile uses isolated Bun dependencies. Before switching between this branch and `master`, remove root and workspace `node_modules` directories. Keep `bun.lock` and install again. This prevents dependencies from the previous branch from surviving the switch.
 
-- Make shared web, backend, infrastructure, deployment, and contract changes on `master`.
-- Make mobile app changes, and backend or contract changes that only mobile needs, on `mobile`.
-- Mobile payments are native and separate from the browser checkout. Read [WEB_SURFACES.md](../docs/WEB_SURFACES.md) first, and check the current store rules for the product, storefront, and region.
+## Template maintenance
 
-## Template owner: sync and publish
+Keep shared application, backend, contract, and infrastructure changes on `master`. Keep mobile-specific changes on `mobile`.
 
-Merge `master` into `mobile`, align docs and the capability registry, then check and publish both branches.
+Merge `master` into `mobile` before publishing the mobile template. Run these checks on a clean mobile commit:
 
 ```bash
-git fetch origin
-bun install --frozen-lockfile
-bun run mobile:template:check                 # before publishing a clean candidate
-bun run mobile:template:check -- --published  # after the push
+bun run mobile:template:check
+bun run mobile:template:check -- --published
 ```
 
-The default mode accepts a clean commit ahead of `origin/mobile`; `--published` requires `HEAD` to equal it. Both modes require a clean tree on `mobile` that contains the current `origin/master`, and exactly the payments, push, and social capabilities in state `available`. The check then runs `bun run check` on the synchronized project and the Maestro rule audit.
+Both modes require `origin/master` to be an ancestor of HEAD. The second also requires HEAD to equal `origin/mobile`. The command runs the full local checks and the Maestro audit.
 
-After setup, capability states become `included` or `removed`, and this template check no longer applies. Use the project's own recorded checks for releases.
+This publication command applies only to the template. A new product uses its own release process.
+
+## Payments
+
+Mobile payments use native UI and backend verification. Check the current rules for the product, storefront, and region before changing purchase behavior.
+
+References: [Apple payments](https://developer.apple.com/app-store/review/guidelines/#business), [Google Play payments](https://support.google.com/googleplay/android-developer/answer/10281818).

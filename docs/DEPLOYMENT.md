@@ -1,104 +1,65 @@
 # Deployment
 
-Production setup, release, and recovery. The hosting choice is in [CHECKLIST](../CHECKLIST.md). Roots, command flow, the lease, and the release-source guard: [infra/README](../infra/README.md). Provider details: [DIGITALOCEAN](DIGITALOCEAN.md), [YANDEX_CLOUD](YANDEX_CLOUD.md).
+Use [scripts/infra.mjs](../scripts/infra.mjs) for production changes. Terraform files define resources and defaults. Provider setup is in [DigitalOcean](DIGITALOCEAN.md) and [Yandex Cloud](YANDEX_CLOUD.md).
 
-**Never run raw `terraform apply`, `-target`, or state edits, and never unlock a live lock; use `scripts/infra.mjs` (manual Terraform only in documented recovery steps).**
+Never run raw `terraform apply`, use `-target`, edit state, or unlock a live process. The recovery steps below describe the permitted exceptions.
 
-Define resource sizes and composition in Terraform. Ask the user only for what Terraform cannot do: accounts, billing, CLI setup, domains, certificates, DNS, and permissions.
+## Configuration and commands
 
-## Production composition
+Only `bootstrap/` and `production/` take `terraform.tfvars`. The script supplies temporary inputs to the other roots. Keep secrets in `TF_VAR_*`, not tfvars: a tfvars value overrides the environment.
 
-Both clouds use Managed PostgreSQL 18, a container registry, and private versioned buckets for media and Terraform state.
-
-- DigitalOcean: App Platform runs the API service, the scheduler worker, and Static Sites with a built-in CDN. Terraform creates the alerts.
-- Yandex Cloud: Serverless Containers run the API behind API Gateway and one timed container per job. Public buckets serve the static sites, optionally through Cloud CDN. Alerts are manual.
-
-The start profile (one database node, one DigitalOcean API instance) is cheap, not highly available. Scale up before the load grows.
-
-`RATE_LIMIT_STORE` sets where auth and admin rate limits count. DigitalOcean runs one API process with the default `memory`. Yandex containers scale out (`concurrency` limits requests per instance, not the instance count), so Terraform sets `database`. Self-hosting with several API processes also needs `database`.
-
-## Release order
-
-Apply foundation changes first with `infra:apply`: a release needs a foundation plan with no changes. The release builds and pushes one immutable image, migrates the database, switches the API and jobs, publishes the static sites, and checks the API (`/health/ready`), webapp, and website; the provider guide has the exact steps. A failed migration stops the release, and the old runtime and static sites keep serving. Release roots are safe to rerun.
-
-## Setup and bootstrap
-
-You need Terraform `>= 1.15, < 2`, Bun, Docker, Git, the production branch pushed to its upstream, HTTPS domains for the API, webapp, and website, and a JWT secret of 64+ hex characters (`openssl rand -hex 32`). Prepare the tools, credentials, `terraform.tfvars` files, and secret exports from the provider guide. Then run:
+`bootstrap/` creates remote state access. `production/`, called foundation by the CLI, creates persistent resources. Runtime, migration, and static roots publish releases. `operations/` holds the mutation lease.
 
 ```bash
 bun run infra:bootstrap -- <provider> --new --dry-run
 bun run infra:bootstrap -- <provider> --new
-bun run infra:apply -- <provider> --dry-run
+bun run infra:plan -- <provider>
 bun run infra:apply -- <provider>
+bun run release -- <provider> --dry-run
+bun run release -- <provider>
+bun run infra:output -- <provider>
 ```
 
-The first bootstrap runs with local state, creates the state bucket and its scoped key, and then migrates the state into the bucket. Noncurrent state versions expire after 30 days and incomplete uploads after 7. An older install gets this rule on its next `infra:bootstrap -- <provider>`; without it, a Yandex state bucket can fill its 1 GiB `max_size` and refuse the lock.
+Use `digitalocean` or `yandex` for `<provider>`. Pass `--new` only for the first bootstrap. Apply foundation changes before releasing. A release requires a foundation plan with no changes.
 
-Bootstrap writes ignored `0600` files: the backend keys in `infra/<provider>/.env.terraform-state` (keep a copy in a secret manager) and `backend.backend.hcl` in each root. If bootstrap stops before the migration, rerun it without `--new`. The local `terraform.tfstate` stays the source of truth until the script has migrated it and checked the remote outputs.
+Each apply uses a saved, reviewed plan. Deletion or replacement needs an exact `--allow-destroy=<address>`. Protected resources remain blocked. Rotate protected credentials by adding a replacement, releasing, verifying, and removing the old credential in a later change.
 
-### Yandex temporary folder role
+## Release requirements
 
-The first Yandex bootstrap applies the state bucket policy with a temporary folder-level `storage.admin` role and removes the role in the same command. Later the state account has no IAM role, so a change to this policy can fail at apply although the plan shows it. Roll such a change out in one command:
+Use the pushed branch selected in Terraform. The worktree must be clean and HEAD must equal its upstream commit. DigitalOcean also checks the GitHub repository. Keep the checkout unchanged throughout the release.
 
-1. Add `bootstrap_folder_storage_access = true` to `infra/yandex/bootstrap/terraform.tfvars`.
-2. Run `bun run infra:bootstrap -- yandex`. It grants the role, applies, and removes the role.
-3. Delete the line.
+The script builds from an archive of that commit. DigitalOcean static builds use an immutable `infra-release/<commit>` branch. Do not edit those branches or enable deploy-on-push.
 
-If the refusal repeats right after the grant, wait for IAM propagation and retry with the line kept. Every bootstrap plan, `--dry-run` included, accepts the removal of this binding without `--allow-destroy`, so the role never outlives the next run. State recovery refuses to run while the line is present.
+A release builds the image, applies migrations, switches the API and jobs, publishes static sites, and checks public URLs. Migration failure stops the switch. Static publication can fail after the backend switches; rerun the same release after correcting the cause.
 
-### Lost state access
+Migrations go forward. Keep the previous runtime compatible with the migrated schema. Roll back through a reviewed revert and a new release.
 
-If the env file and the local bootstrap state are both lost, bootstrap without `--new` refuses to run. Never pass `--new` for an existing install; reattach the backend with a temporary key to the state bucket. On Yandex the key must belong to the `<project_slug>-tf-state` service account: the bucket policy rejects other identities, even with a folder role. Save the key's resource ID.
+## Initial setup
 
-```bash
-export TF_STATE_RECOVERY_ACCESS_KEY_ID='<temporary key id>'
-export TF_STATE_RECOVERY_SECRET_ACCESS_KEY='<temporary key secret>'
-bun run infra:bootstrap -- <provider> \
-  --recover-state-bucket=<existing-state-bucket> \
-  --recover-state-region=<existing-bucket-region>
-unset TF_STATE_RECOVERY_ACCESS_KEY_ID TF_STATE_RECOVERY_SECRET_ACCESS_KEY
-```
+Use the tool versions required by the configuration and provider guide. Prepare Docker, Git, Bun, Terraform, provider access, HTTPS domains, and a strong JWT secret.
 
-If the command stops, rerun it with the same key. Recovery has no `--dry-run` and needs normal bootstrap apply rights. After success, revoke the temporary key at once; on Yandex: `yc iam access-key delete <recovery-access-key-resource-id>`.
+Bootstrap starts with local state, creates a private state bucket, and migrates state into it. It writes ignored files with mode `0600`: `.env.terraform-state` and each root's `backend.backend.hcl`. Keep the state credentials in a secret manager.
 
-## Plan and release
+If bootstrap stops before migration, rerun without `--new`. Local state remains authoritative until remote migration and output verification succeed.
 
-For the first release only, pass the first admin through the environment:
+For the first release, supply the first administrator:
 
 ```bash
 export ADMIN_SEED_EMAIL='owner@example.com'
 export ADMIN_SEED_PASSWORD='<random one-time password>'
-bun run release -- <provider> --dry-run
 bun run release -- <provider>
 unset ADMIN_SEED_EMAIL ADMIN_SEED_PASSWORD
 ```
 
-The release removes the seed after the migration, but the seed stays in deployment history, Lockbox, and state versions. Change the password right after the first sign-in. Never pass the seed again: a new value resets that admin's password and ends their sessions. Every `db:deploy` requires an admin with a password.
+Change that password after first sign-in. The seed can remain in deployment history, secret versions, and state. Do not resend it: a new seed can reset the administrator and revoke sessions.
 
-Every plan refuses a deletion or replacement without an exact `--allow-destroy=<address>` for that reviewed resource. It refuses protected resources even then (`protectedResourcePatterns` in `scripts/infra.mjs`, plus the live Yandex credential version). Import or move a resource instead of replacing it.
+Only the API receives `JWT_SECRET`. Jobs and migrations must not receive the signing key.
 
-To rotate a protected key or slot, add the new one and apply only that. Release and verify, then remove the old one in a separate reviewed foundation change. A direct replacement would cut access before the API and jobs switch. Never weaken the protection list for one apply.
+## Extra runtime variables
 
-### After a template update
+Use `extra_runtime_env` for non-secret settings. Use `extra_runtime_secret_env` on DigitalOcean or `extra_secret_bindings` on Yandex for secrets.
 
-`infra:plan` plans the foundation, then plans each existing release root from the foundation outputs saved in state. After a template update that changes those outputs, the foundation plan shows only output changes, and the release-root plan stops with `run infra:apply to refresh the foundation outputs`. Nothing has changed yet. Review the foundation plan, then:
-
-1. Run `bun run infra:apply -- <provider>`. It applies only the foundation root.
-2. Run `bun run infra:plan -- <provider>` again and review the release roots.
-3. Release as usual. `release` refuses while the foundation plan has changes.
-
-The update to per-component secrets works this way. Its release removes `JWT_SECRET` from the scheduler worker and the job containers in place.
-
-## Secrets and state
-
-- State contains secrets. Treat the state bucket and its key as production access, not build artifacts.
-- Pass secrets only through `TF_VAR_*`. Never put secret fields in `terraform.tfvars`, even empty ones: tfvars values override the environment.
-- The runtime gets secrets through provider secret fields or Lockbox, never through the image.
-- Only the API receives `JWT_SECRET`; the scheduler worker, the job containers, and the migration run without it.
-
-### Extra runtime variables
-
-`extra_runtime_env` holds extra non-secret settings. Extra secrets go in `extra_runtime_secret_env` on DigitalOcean and in `extra_secret_bindings` on Yandex Cloud. By default, each extra variable reaches the API and every job. To narrow one, add it to `extra_env_components` in the production `terraform.tfvars`. Map the variable name to `api`, `jobs`, or job keys from `backend/src/job-schedules.json`:
+By default, extra variables reach the API and every job. Narrow them with `extra_env_components`:
 
 ```hcl
 extra_env_components = {
@@ -107,37 +68,39 @@ extra_env_components = {
 }
 ```
 
-- Give every variable of one env group the same targets as its secret. The backend refuses a partial group at startup.
-- Keep a variable that every component validates on all components, for example `EMAIL_RESEND_API_KEY` with `EMAIL_DELIVERY`.
-- DigitalOcean runs every job in one scheduler worker, so any job target reaches that worker. Yandex Cloud gives each job its own container.
-- Every plan rejects an unknown name or target, an empty target list, and an extra variable that repeats a built-in one. It also rejects a job key named `api` or `jobs`, because those are target names.
-- Yandex Cloud grants each extra Lockbox secret to the one runtime service account that every container uses. Scoping controls which containers bind the secret, not who may read it.
+Targets are `api`, `jobs`, or keys from `backend/src/job-schedules.json`. Keep related variables and secrets on the same targets. Keep variables required by every process on all processes.
 
-To scope a variable on an existing install, add the entry and run `infra:apply`: only the foundation outputs change. Then run `release`, which updates the API and job runners in place. Old revisions and deployment history keep the value, so rotate a secret that must stop being exposed.
+DigitalOcean runs all jobs in one worker. Yandex gives each job a container, but all containers share one runtime identity. Binding scope does not restrict that identity's secret-read permission.
 
-## Existing manually created infrastructure
+For an existing deployment, apply the foundation output change, then release. Old revisions keep previous secret values. Rotate secrets when removing historical exposure matters.
 
-Never apply the first foundation over resources that old CLI instructions created. Import each one by its real ID into its root and address, then plan:
+## Existing infrastructure
+
+Import existing resources before applying configuration over them:
 
 ```bash
-bun run infra:import -- <provider> <root> <terraform-address> <provider-resource-id>
+bun run infra:import -- <provider> <root> <address> <resource-id>
 bun run infra:plan -- <provider>
 ```
 
-Bootstrap resources can go into local state before backend keys exist; the next bootstrap, without `--new`, migrates them. Release roots need exact immutable inputs: `--runtime-image-digest=sha256:<64-hex>` for `runtime` and Yandex `migration`, and `--release-revision=<40-char-sha> --source-branch=infra-release/<40-char-sha>` for DigitalOcean `static`. Use the provider's current import ID format. Import linked timers and static apps before you accept a clean plan. A matching name does not prove ownership.
+Use exact provider IDs. Matching names do not prove ownership. Import bootstrap resources into local state when necessary, then bootstrap without `--new`.
 
-Keys (`digitalocean_spaces_key`, `yandex_iam_service_account_static_access_key`) cannot be imported, and their secret exists only at creation. Import the bucket, service account, Lockbox secret, and policy. Let Terraform create a new key. Apply, release, verify state, media, and static sites, and then revoke the old key. Revoke an old state key only after a second successful init and plan with the new one.
+Release-root imports need immutable inputs. Use `--runtime-image-digest=sha256:<64-hex>` for runtime and Yandex migration. DigitalOcean static imports also need `--release-revision=<40-char-sha>` and `--source-branch=infra-release/<40-char-sha>`.
 
-An imported database keeps its object owners, and `db:deploy` stops until the migration owner owns the public schema and its objects. List the other owners' objects through a privileged legacy connection, kept in the environment only:
+Access keys cannot be imported. Import the surrounding resources, create new scoped keys, apply, release, and verify. Revoke old keys afterward. For state keys, require another successful init and plan before revocation.
+
+### Database ownership
+
+An imported database can retain a legacy owner. `db:deploy` stops until the migration owner owns the schema and objects. Inventory them through a privileged legacy connection:
 
 ```bash
-export DATABASE_URL='<legacy owner or privileged connection URL>'
-export DATABASE_LEGACY_OWNER='<owner reported by the inventory>'
-export DATABASE_MIGRATION_USER='<new migration owner from Terraform>'
+export DATABASE_URL='<legacy privileged connection>'
+export DATABASE_LEGACY_OWNER='<inventory owner>'
+export DATABASE_MIGRATION_USER='<Terraform migration owner>'
 bun run --cwd backend db:adopt-owner
 ```
 
-The list skips extension objects and refuses mixed legacy owners. Review it, then transfer ownership once:
+Review the inventory and obtain approval before transfer:
 
 ```bash
 export CONFIRM_DATABASE_OWNER_ADOPTION="${DATABASE_LEGACY_OWNER}->${DATABASE_MIGRATION_USER}"
@@ -145,32 +108,58 @@ bun run --cwd backend db:adopt-owner -- --apply
 unset DATABASE_URL DATABASE_LEGACY_OWNER DATABASE_MIGRATION_USER CONFIRM_DATABASE_OWNER_ADOPTION
 ```
 
-After each migration, `db:deploy` also revokes `PUBLIC` rights on the public schema, its objects, temporary tables, and default privileges.
+The command excludes extension objects and refuses mixed legacy owners. Deployment then restricts runtime and PUBLIC privileges.
 
-## Rollback and recovery
+## Recovery
 
-- Roll back with a new commit, usually a revert, and a normal release. Never point a service at a mutable tag.
-- To roll back across the per-component secrets update, revert it and release. Never deploy an older image instead: it requires `JWT_SECRET` in the scheduler worker and the job containers, which no longer receive it.
-- Migrations only go forward. Use expand/contract changes so the previous version still works.
-- With external DNS, the first release can fail at the URL checks. Create the records from the provider guide, wait for propagation, and rerun the release instead of recreating resources.
-- After a failed apply, fix the owning configuration and plan again.
-- If the runtime state is lost while the app still runs, plan and apply stop. Recover or import that state; never treat it as a first release.
-- A crashed run can leave the lease locked; see [infra/README](../infra/README.md).
+A lost runtime state must be recovered or imported. Never treat an existing deployment as a first release. After an interrupted apply, correct the configuration and plan again.
 
-## Self-hosting
+If foundation outputs changed, run `infra:apply`, review `infra:plan` again, then release. This refreshes the outputs used by release roots.
 
-Self-hosting uses the same Docker image and scheduler, without the release script:
+External DNS can make the first URL check fail. Add the required records, wait for propagation, and rerun. Do not recreate infrastructure for a DNS failure.
 
-- Build `backend/Dockerfile` and run PostgreSQL 18+.
-- Before switching, run `bun run --cwd backend db:deploy` with the schema owner's `DATABASE_URL`. The first run also needs `ADMIN_SEED_EMAIL` and `ADMIN_SEED_PASSWORD`.
-- Serve `webapp/dist` and `website/dist` with Caddy or nginx. Route unknown webapp paths to `index.html`.
-- Run `bun run --cwd backend start:scheduler` under a supervisor.
-- Connect a private S3-compatible media bucket.
+### Lost state credentials
 
-After both static builds, run `bun run static:precompress`. Caddy serves the files with `precompressed`. nginx needs `gzip_static` for `.gz` and `brotli_static` from `ngx_brotli` for `.br`. Cloud releases never read these files; keep precompression out of cloud commands.
+If both local bootstrap state and credentials are lost, use a temporary key for the existing state bucket. On Yandex, it must belong to the `<project_slug>-tf-state` service account.
 
-Use Ansible only here, for packages, users, firewall, systemd, and the proxy. Keep database data, secrets, and releases out of playbooks. The owner handles TLS, backups, restore tests, updates, monitoring, and rollback.
+```bash
+export TF_STATE_RECOVERY_ACCESS_KEY_ID='<temporary key id>'
+export TF_STATE_RECOVERY_SECRET_ACCESS_KEY='<temporary secret>'
+bun run infra:bootstrap -- <provider> \
+  --recover-state-bucket=<existing bucket> \
+  --recover-state-region=<existing region>
+unset TF_STATE_RECOVERY_ACCESS_KEY_ID TF_STATE_RECOVERY_SECRET_ACCESS_KEY
+```
 
-## Local checks
+Retry with the same key after interruption. Recovery has no dry-run. Revoke the temporary key immediately after success.
 
-After an infrastructure change, run `bun run test:infra` and `bun run test:terraform`. The latter needs the Terraform CLI and network access for providers, but no backend keys, and never reaches the cloud. Mocks prove only the configuration shape: before a release, run `infra:plan` with real keys to check account limits, regions, domains, and the current cloud state.
+### Yandex state policy updates
+
+A state policy update needs temporary folder-level storage access. Add `bootstrap_folder_storage_access = true` to the bootstrap tfvars and run `infra:bootstrap -- yandex`. The command grants, uses, and removes the role. Delete the setting afterward.
+
+If IAM propagation delays the apply, retry with the setting retained. Do not start state recovery while it is present.
+
+### Stale locks
+
+Real foundation applies, releases, and non-bootstrap imports hold a provider-wide lease. Never unlock it while the owning process runs.
+
+After confirming that the run has stopped, enter the locked root. Set `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` from its saved `TF_STATE_*` credentials without printing them. Initialize and unlock:
+
+```bash
+terraform init -reconfigure -backend-config=backend.backend.hcl
+terraform force-unlock <LOCK_ID>
+```
+
+For the mutation lease, use `infra/<provider>/operations`. Other root locks need the same procedure in their own directories. Verify `Who`, `Created`, and `Operation` against the stopped run before unlocking.
+
+## Private servers
+
+Run the backend Docker image with PostgreSQL and private S3 storage. Apply `db:deploy` before switching the runtime. Run `start:scheduler` under a supervisor.
+
+Serve static builds with Caddy or nginx. Webapp fallback routes must return `index.html`. `bun run static:precompress` creates compressed assets for hosts configured to serve them.
+
+The operator owns TLS, backups, restore tests, updates, monitoring, and rollback. Cloud release commands do not manage this setup.
+
+## Local verification
+
+After infrastructure changes, run `bun run test:infra` and `bun run test:terraform`. Mocked tests verify configuration shape. Before release, a real `infra:plan` verifies credentials and current cloud state.
