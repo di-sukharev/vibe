@@ -1,4 +1,4 @@
-import type { BillingDbClient } from './infrastructure/prisma-billing-types'
+import type { DbClient } from '../../db'
 import type { AppEnv } from '../../env'
 import type { AuthenticatedPrincipal } from '../auth'
 import { BillingService } from './application/billing-service'
@@ -15,7 +15,7 @@ import { createAppStoreWebhookRoutes, createIapRoutes } from './transport/routes
 
 export function createBillingModule(input: {
   appStoreVerifier?: AppStoreSubscriptionVerifier
-  db: BillingDbClient
+  db: DbClient
   env: AppEnv
   googlePlayVerifier?: GooglePlaySubscriptionVerifier
 }) {
@@ -33,6 +33,7 @@ export function createBillingModule(input: {
   )
 
   return {
+    acknowledgeGooglePlayPurchase: (purchaseId: string, signal?: AbortSignal) => service.acknowledgeGooglePlayPurchase(purchaseId, signal),
     createRoutes: (
       authenticateAccessToken: (
         accessToken: string | undefined,
@@ -49,3 +50,12 @@ export function createBillingModule(input: {
 
 export type { AppStoreSubscriptionVerifier } from './infrastructure/apple-verifier'
 export type { GooglePlaySubscriptionVerifier } from './infrastructure/google-play-verifier'
+
+export function createBillingTasks(input: {
+  db: DbClient
+  env: AppEnv
+  googlePlayVerifier?: GooglePlaySubscriptionVerifier
+}) {
+  const billing = createBillingModule(input)
+  return { acknowledgeGooglePlayPurchase: billing.acknowledgeGooglePlayPurchase }
+}

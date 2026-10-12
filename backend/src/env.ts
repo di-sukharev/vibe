@@ -81,6 +81,7 @@ const envSchema = z.object({
   AUTH_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
   ADMIN_USERS_READ_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(120),
   ADMIN_USERS_READ_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
+  BILLING_ENABLED: booleanStringSchema,
   IAP_BODY_LIMIT_BYTES: z.coerce.number().int().positive().max(1024 * 1024).default(64 * 1024),
   IAP_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(60),
   IAP_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),

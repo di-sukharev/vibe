@@ -19,10 +19,9 @@ model User {
   updatedAt     DateTime      @updatedAt @map("updated_at")
   sessions      AuthSession[]
 
-  // Uncomment together with prisma/schema/billing.prisma (docs/IAP.md step 1):
-  // subscriptionEntitlement SubscriptionEntitlement?
-  // appStoreTransactions    AppStoreTransaction[]
-  // googlePlaySubscriptions GooglePlaySubscriptionPurchase[]
+  subscriptionEntitlement SubscriptionEntitlement?
+  appStoreTransactions    AppStoreTransaction[]
+  googlePlaySubscriptions GooglePlaySubscriptionPurchase[]
 
   // Push delivery tables; remove together with prisma/schema/notifications.prisma.
   pushInstallations      PushInstallation[]

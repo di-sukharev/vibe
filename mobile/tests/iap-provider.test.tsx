@@ -93,11 +93,13 @@ type Purchase = {
 };
 
 type UseIapOptions = {
+  onError?: (error: unknown) => void;
   onPurchaseError?: (error: unknown) => void;
   onPurchaseSuccess?: (purchase: Purchase) => void | Promise<void>;
 };
 
 type IapContextProbe = {
+  subscription: SubscriptionSnapshot | null;
   error: string | null;
   isConnected: boolean;
   isLoadingProducts: boolean;
@@ -105,6 +107,7 @@ type IapContextProbe = {
   isPurchasing: boolean;
   isRedeemingOfferCode: boolean;
   isRestoring: boolean;
+  isRetryingStore: boolean;
   isSupported: boolean;
   isSyncing: boolean;
   manageSubscriptions: () => Promise<void>;
@@ -117,6 +120,7 @@ type IapContextProbe = {
   purchase: () => Promise<void>;
   redeemOfferCode: () => Promise<void>;
   restore: () => Promise<void>;
+  retryStore: () => Promise<void>;
   sync: () => Promise<void>;
 };
 
@@ -190,6 +194,8 @@ let authState: {
   user: { id: string } | null;
 };
 let availablePurchases: Purchase[] = [];
+let fetchProductsMock: ReturnType<typeof mock>;
+let syncIOSMock: ReturnType<typeof mock>;
 let deepLinkToSubscriptionsMock: ReturnType<typeof mock> = mock(async () => undefined);
 let getAvailablePurchasesMock: ReturnType<typeof mock> = mock(async () => availablePurchases);
 let platformOS: 'android' | 'ios' = 'ios';
@@ -198,11 +204,10 @@ let useIapCallCount = 0;
 let currentIap: {
   availablePurchases: Purchase[];
   connected: boolean;
-  fetchProducts: ReturnType<typeof mock>;
   finishTransaction: ReturnType<typeof mock>;
   getAvailablePurchases: ReturnType<typeof mock>;
   requestPurchase: ReturnType<typeof mock>;
-  restorePurchases: ReturnType<typeof mock>;
+  reconnect: ReturnType<typeof mock>;
   subscriptions: unknown[];
 };
 let latestUseIapOptions: UseIapOptions = {};
@@ -226,6 +231,7 @@ function isAccountScopeCurrent(scope: { generation: number; userId: string }) {
   );
 }
 
+process.env.EXPO_PUBLIC_IAP_IOS_MONTHLY_PRODUCT_ID = 'premium_monthly';
 process.env.EXPO_PUBLIC_IAP_ANDROID_MONTHLY_PRODUCT_ID = 'premium';
 process.env.EXPO_PUBLIC_IAP_ANDROID_MONTHLY_BASE_PLAN_ID = 'monthly';
 process.env.EXPO_PUBLIC_IAP_ANDROID_YEARLY_PRODUCT_ID = 'premium';
@@ -264,17 +270,39 @@ mock.module('react-native', () => ({
 mock.module('expo-iap', () => ({
   deepLinkToSubscriptions: (options?: unknown) => deepLinkToSubscriptionsMock(options),
   getAvailablePurchases: (options?: unknown) => getAvailablePurchasesMock(options),
+  fetchProducts: (options?: unknown) => fetchProductsMock(options),
+  syncIOS: () => syncIOSMock(),
   openRedeemOfferCodeAndroid: mock(async () => undefined),
   presentCodeRedemptionSheetIOS: () => presentCodeRedemptionSheetIOSMock(),
   useIAP(options: UseIapOptions) {
     const [hookAvailablePurchases, setHookAvailablePurchases] = React.useState<Purchase[]>(
       currentIap.availablePurchases,
     );
+    const [, rerenderConnection] = React.useReducer((value) => value + 1, 0);
     updateHookAvailablePurchases = setHookAvailablePurchases;
     useIapCallCount += 1;
     latestUseIapOptions = options;
     return {
       ...currentIap,
+      // Match expo-iap 4.6.0: hook methods notify the latest callback, and
+      // restorePurchases suppresses AppStore.sync failures.
+      fetchProducts: React.useCallback(async (options: unknown) => {
+        try {
+          await fetchProductsMock(options);
+        } catch (error) {
+          latestUseIapOptions.onError?.(error);
+          throw error;
+        }
+      }, []),
+      restorePurchases: React.useCallback(async () => {
+        await syncIOSMock().catch(() => undefined);
+      }, []),
+      reconnect: React.useCallback(async () => {
+        const result = await currentIap.reconnect();
+        currentIap.connected = result;
+        rerenderConnection();
+        return result;
+      }, []),
       availablePurchases: hookAvailablePurchases,
     };
   },
@@ -313,13 +341,14 @@ beforeEach(() => {
   deepLinkToSubscriptionsMock = mock(async () => undefined);
   getAvailablePurchasesMock = mock(async () => availablePurchases);
   platformOS = 'ios';
+  fetchProductsMock = mock(async () => currentIap.subscriptions);
+  syncIOSMock = mock(async () => true);
   presentCodeRedemptionSheetIOSMock = mock(async () => true);
   useIapCallCount = 0;
   latestUseIapOptions = {};
   currentIap = {
     availablePurchases: [],
     connected: true,
-    fetchProducts: mock(async () => undefined),
     finishTransaction: mock(async () => undefined),
     getAvailablePurchases: mock(async (options?: unknown) => {
       const purchases = await getAvailablePurchasesMock(options);
@@ -327,7 +356,7 @@ beforeEach(() => {
       updateHookAvailablePurchases?.([...purchases]);
     }),
     requestPurchase: mock(async () => undefined),
-    restorePurchases: mock(async () => undefined),
+    reconnect: mock(async () => true),
     subscriptions: [],
   };
   updateHookAvailablePurchases = null;
@@ -351,6 +380,50 @@ beforeEach(() => {
     },
   };
   latestContext = null;
+});
+
+
+test('IapProvider replaces stale hook products with the latest store catalogue', async () => {
+  platformOS = 'android';
+  const oldProduct = androidSubscriptionProduct();
+  currentIap.subscriptions = [oldProduct];
+  const freshProduct = {
+    ...oldProduct,
+    subscriptionOffers: oldProduct.subscriptionOffers.map((offer) => ({
+      ...offer,
+      displayPrice: '$12.00',
+      offerTokenAndroid: 'fresh-offer-token',
+    })),
+  };
+  fetchProductsMock = mock(async () => [freshProduct]);
+  const root = await renderProvider();
+  expect(latestContext?.plans[0]?.displayPrice).toBe('$12.00');
+  await act(async () => {
+    await latestContext?.purchase();
+  });
+  expect(currentIap.requestPurchase.mock.calls[0]?.[0].request.google.subscriptionOffers[0].offerToken)
+    .toBe('fresh-offer-token');
+  await unmount(root);
+});
+
+test('IapProvider discards an obsolete account catalogue response', async () => {
+  platformOS = 'android';
+  let resolveOld: ((products: unknown[]) => void) | undefined;
+  const oldProduct = androidSubscriptionProduct();
+  currentIap.subscriptions = [oldProduct];
+  fetchProductsMock = mock(() => fetchProductsMock.mock.calls.length === 1
+    ? new Promise<unknown[]>((resolve) => { resolveOld = resolve; })
+    : Promise.resolve([]));
+  const root = await renderProvider();
+  authState.user = { id: '018fd4f2-1f3a-7c88-bc49-444444444444' };
+  authState.sessionGeneration = 2;
+  await rerenderProvider(root);
+  await act(async () => {
+    resolveOld?.([oldProduct]);
+    await waitForEffects();
+  });
+  expect(latestContext?.plans).toEqual([]);
+  await unmount(root);
 });
 
 test('IapProvider finishes purchase callbacks only after backend ingest succeeds', async () => {
@@ -385,7 +458,6 @@ test('IapProvider finishes a verified purchase but never publishes user A entitl
       resolveIngest = resolve;
     }),
   );
-  authState.setSubscription = mock(() => undefined);
   const root = await renderProvider();
 
   let purchasePromise: Promise<void> | void;
@@ -414,6 +486,84 @@ test('IapProvider finishes a verified purchase but never publishes user A entitl
   await unmount(root);
 });
 
+test('IapProvider discards a purchase response after sign-out and re-verifies on same-user login', async () => {
+  const user = authState.user;
+  let resolveIngest!: (value: { subscription: SubscriptionSnapshot }) => void;
+  authState.api.ingestAppStoreTransaction = mock(
+    () => new Promise<{ subscription: SubscriptionSnapshot }>((resolve) => {
+      resolveIngest = resolve;
+    }),
+  );
+  const root = await renderProvider();
+  let pendingPurchase: Promise<void> | void;
+  await act(async () => {
+    pendingPurchase = latestUseIapOptions.onPurchaseSuccess?.(purchase);
+    await waitForEffects();
+  });
+  authState.user = null;
+  authState.sessionGeneration = 2;
+  await rerenderProvider(root);
+  expect(latestContext?.subscription?.isActive ?? false).toBe(false);
+  await act(async () => {
+    resolveIngest({ subscription: activeSubscription });
+    await pendingPurchase;
+    await waitForEffects();
+  });
+  expect(currentIap.finishTransaction).toHaveBeenCalledTimes(1);
+  expect(latestContext?.subscription?.isActive ?? false).toBe(false);
+
+  authState.user = user;
+  authState.sessionGeneration = 3;
+  await rerenderProvider(root);
+  await act(async () => {
+    pendingPurchase = latestUseIapOptions.onPurchaseSuccess?.(purchase);
+    await waitForEffects();
+  });
+  expect(authState.api.ingestAppStoreTransaction).toHaveBeenCalledTimes(2);
+  await act(async () => {
+    resolveIngest({ subscription: activeSubscription });
+    await pendingPurchase;
+    await waitForEffects();
+  });
+  expect(latestContext?.subscription).toEqual(activeSubscription);
+  await unmount(root);
+});
+
+test('IapProvider ignores an old entitlement response after sign-out and same-user login', async () => {
+  const user = authState.user;
+  const root = await renderProvider();
+  let resolveOldEntitlement!: (value: { subscription: SubscriptionSnapshot }) => void;
+  authState.api.entitlement = mock(
+    () => new Promise<{ subscription: SubscriptionSnapshot }>((resolve) => {
+      resolveOldEntitlement = resolve;
+    }),
+  );
+  let oldSync: Promise<void> | undefined;
+  await act(async () => {
+    oldSync = latestContext?.sync();
+    await waitForEffects();
+  });
+  authState.user = null;
+  authState.sessionGeneration = 2;
+  await rerenderProvider(root);
+  expect(latestContext?.subscription?.isActive ?? false).toBe(false);
+
+  const currentSubscription = { ...activeSubscription, originalTransactionId: null, transactionId: 'new-session-transaction' };
+  authState.api.entitlement = mock(async () => ({ subscription: currentSubscription }));
+  authState.user = user;
+  authState.sessionGeneration = 3;
+  await rerenderProvider(root);
+  expect(latestContext?.subscription).toEqual(currentSubscription);
+  await act(async () => {
+    resolveOldEntitlement({ subscription: inactiveSubscription });
+    await oldSync;
+    await waitForEffects();
+  });
+  expect(latestContext?.subscription).toEqual(currentSubscription);
+  expect(latestContext?.isSyncing).toBe(false);
+  await unmount(root);
+});
+
 test('IapProvider re-verifies the same store transaction after the signed-in account changes', async () => {
   const root = await renderProvider();
 
@@ -439,7 +589,7 @@ test('IapProvider re-verifies the same store transaction after the signed-in acc
   await unmount(root);
 });
 
-test('IapProvider does not suppress a new account store error after the previous account succeeds', async () => {
+test('IapProvider ignores unscoped error events after the account changes', async () => {
   const root = await renderProvider();
 
   await act(async () => {
@@ -458,7 +608,7 @@ test('IapProvider does not suppress a new account store error after the previous
     await waitForEffects();
   });
 
-  expect(latestContext?.error).not.toBeNull();
+  expect(latestContext?.error).toBeNull();
   await unmount(root);
 });
 
@@ -466,8 +616,8 @@ test('IapProvider keeps user B product loading state when user A product request
   platformOS = 'android';
   let rejectUserAProducts: ((reason: Error) => void) | null = null;
   let resolveUserBProducts: (() => void) | null = null;
-  currentIap.fetchProducts = mock(() => {
-    if (currentIap.fetchProducts.mock.calls.length === 1) {
+  fetchProductsMock = mock(() => {
+    if (fetchProductsMock.mock.calls.length === 1) {
       return new Promise<void>((_resolve, reject) => {
         rejectUserAProducts = reject;
       });
@@ -484,7 +634,7 @@ test('IapProvider keeps user B product loading state when user A product request
   };
   authState.sessionGeneration = 2;
   await rerenderProvider(root);
-  expect(currentIap.fetchProducts).toHaveBeenCalledTimes(2);
+  expect(fetchProductsMock).toHaveBeenCalledTimes(2);
   expect(latestContext?.isLoadingProducts).toBe(true);
 
   await act(async () => {
@@ -508,8 +658,8 @@ test('IapProvider invalidates an old product request when the same account recon
   currentIap.connected = false;
   let rejectFirstProducts: ((reason: Error) => void) | null = null;
   let resolveSecondProducts: (() => void) | null = null;
-  currentIap.fetchProducts = mock(() => {
-    if (currentIap.fetchProducts.mock.calls.length === 1) {
+  fetchProductsMock = mock(() => {
+    if (fetchProductsMock.mock.calls.length === 1) {
       return new Promise<void>((_resolve, reject) => {
         rejectFirstProducts = reject;
       });
@@ -528,7 +678,7 @@ test('IapProvider invalidates an old product request when the same account recon
   await rerenderProvider(root);
   currentIap.connected = true;
   await rerenderProvider(root);
-  expect(currentIap.fetchProducts).toHaveBeenCalledTimes(2);
+  expect(fetchProductsMock).toHaveBeenCalledTimes(2);
   expect(latestContext?.isLoadingProducts).toBe(true);
 
   await act(async () => {
@@ -549,7 +699,7 @@ test('IapProvider invalidates an old product request when the same account recon
 test('IapProvider clears an abandoned product loader when the next account is disconnected', async () => {
   platformOS = 'android';
   let rejectUserAProducts: ((reason: Error) => void) | null = null;
-  currentIap.fetchProducts = mock(
+  fetchProductsMock = mock(
     () => new Promise<void>((_resolve, reject) => {
       rejectUserAProducts = reject;
     }),
@@ -624,7 +774,9 @@ test('IapProvider never reconciles user A available-purchase snapshot as user B'
   await unmount(root);
 });
 
-test('IapProvider ignores a delayed purchase error listener from user A after user B starts purchasing', async () => {
+test('IapProvider handles the current SDK purchase error callback after an account change', async () => {
+  let rejectRequest!: (error: unknown) => void;
+  currentIap.requestPurchase = mock(() => new Promise<void>((_resolve, reject) => { rejectRequest = reject; }));
   currentIap.subscriptions = [
     {
       displayName: 'Premium',
@@ -634,7 +786,6 @@ test('IapProvider ignores a delayed purchase error listener from user A after us
     },
   ];
   const root = await renderProvider();
-  const userAPurchaseError = latestUseIapOptions.onPurchaseError;
 
   authState.user = {
     id: '018fd4f2-1f3a-7c88-bc49-444444444444',
@@ -642,29 +793,32 @@ test('IapProvider ignores a delayed purchase error listener from user A after us
   authState.sessionGeneration = 2;
   await rerenderProvider(root);
 
+  let request: Promise<void> | undefined;
   await act(async () => {
-    await latestContext?.purchase();
+    request = latestContext?.purchase();
     await waitForEffects();
   });
   expect(latestContext?.isPurchasing).toBe(true);
 
   await act(async () => {
-    userAPurchaseError?.({ code: 'network-error' });
+    latestUseIapOptions.onPurchaseError?.({ code: 'network-error' });
+    rejectRequest({ code: 'network-error' });
+    await request;
     await waitForEffects();
   });
 
-  expect(latestContext?.error).toBeNull();
-  expect(latestContext?.isPurchasing).toBe(true);
+  expect(latestContext?.error).not.toBeNull();
+  expect(latestContext?.isPurchasing).toBe(false);
 
   await act(async () => {
-    await latestContext?.purchase();
+    void latestContext?.purchase();
     await waitForEffects();
   });
-  expect(currentIap.requestPurchase).toHaveBeenCalledTimes(1);
+  expect(currentIap.requestPurchase).toHaveBeenCalledTimes(2);
   await unmount(root);
 });
 
-test('IapProvider ignores a delayed native purchase rejection from user A after user B starts purchasing', async () => {
+test('IapProvider releases a previous account native request on rejection before user B can purchase', async () => {
   currentIap.subscriptions = [
     {
       displayName: 'Premium',
@@ -715,10 +869,10 @@ test('IapProvider ignores a delayed native purchase rejection from user A after 
   });
 
   expect(latestContext?.error).toBeNull();
-  expect(latestContext?.isPurchasing).toBe(true);
+  expect(latestContext?.isPurchasing).toBe(false);
 
   await act(async () => {
-    await latestContext?.purchase();
+    userBPurchase = latestContext?.purchase();
     await waitForEffects();
   });
   expect(currentIap.requestPurchase).toHaveBeenCalledTimes(2);
@@ -968,7 +1122,100 @@ test('IapProvider keeps purchase intent pending until StoreKit sends a purchase 
   await unmount(root);
 });
 
+test.each(['single', 'array'] as const)('IapProvider recovers a repeated %s purchase result when the SDK suppresses its callback', async (resultShape) => {
+  currentIap.subscriptions = [{
+    displayName: 'Premium',
+    displayPrice: '$9.99',
+    id: 'premium_monthly',
+    title: 'Premium Monthly',
+  }];
+  let now = 0;
+  let lastDeliveryAt: number | null = null;
+  let callbacks = 0;
+  // expo-iap 4.6.0 deduplicates both native events and returned purchase
+  // callbacks for 30 seconds, but still returns the purchase to the caller.
+  currentIap.requestPurchase = mock(async () => {
+    if (lastDeliveryAt === null || now - lastDeliveryAt >= 30_000) {
+      lastDeliveryAt = now;
+      callbacks += 1;
+      latestUseIapOptions.onPurchaseSuccess?.(purchase);
+    }
+    return resultShape === 'array' ? [purchase] : purchase;
+  });
+  authState.api.ingestAppStoreTransaction
+    .mockRejectedValueOnce(new Error('Verification unavailable'));
+  const root = await renderProvider();
+  try {
+    await act(async () => {
+      await latestContext?.purchase();
+      await waitForEffects();
+    });
+    expect(authState.api.ingestAppStoreTransaction).toHaveBeenCalledTimes(1);
+    expect(currentIap.finishTransaction).not.toHaveBeenCalled();
+    expect(latestContext?.isPurchasing).toBe(false);
+
+    now = 1_000;
+    await act(async () => {
+      await latestContext?.purchase();
+      await waitForEffects();
+    });
+    expect(callbacks).toBe(1);
+    expect(authState.api.ingestAppStoreTransaction).toHaveBeenCalledTimes(2);
+    expect(currentIap.finishTransaction).toHaveBeenCalledTimes(1);
+    expect(latestContext?.subscription).toEqual(activeSubscription);
+    expect(latestContext?.isPurchasing).toBe(false);
+
+    await act(async () => {
+      await latestContext?.purchase();
+      await waitForEffects();
+    });
+    expect(currentIap.requestPurchase).toHaveBeenCalledTimes(3);
+    expect(authState.api.ingestAppStoreTransaction).toHaveBeenCalledTimes(2);
+  } finally {
+    await unmount(root);
+  }
+});
+
+test('IapProvider releases an obsolete returned purchase without ingesting it as the new account', async () => {
+  currentIap.subscriptions = [{
+    displayName: 'Premium',
+    displayPrice: '$9.99',
+    id: 'premium_monthly',
+    title: 'Premium Monthly',
+  }];
+  let resolvePurchase!: (result: Purchase[]) => void;
+  currentIap.requestPurchase = mock(() => new Promise<Purchase[]>((resolve) => { resolvePurchase = resolve; }));
+  const root = await renderProvider();
+  try {
+    let oldRequest: Promise<void> | undefined;
+    await act(async () => {
+      oldRequest = latestContext?.purchase();
+      await waitForEffects();
+    });
+    authState.user = { id: '018fd4f2-1f3a-7c88-bc49-444444444444' };
+    authState.sessionGeneration = 2;
+    await rerenderProvider(root);
+    await act(async () => {
+      resolvePurchase([purchase]);
+      await oldRequest;
+      await waitForEffects();
+    });
+    expect(authState.api.ingestAppStoreTransaction).not.toHaveBeenCalled();
+    expect(currentIap.finishTransaction).not.toHaveBeenCalled();
+    expect(latestContext?.isPurchasing).toBe(false);
+    await act(async () => {
+      void latestContext?.purchase();
+      await waitForEffects();
+    });
+    expect(currentIap.requestPurchase).toHaveBeenCalledTimes(2);
+  } finally {
+    await unmount(root);
+  }
+});
+
 test('IapProvider allows retrying a purchase after StoreKit sends an error callback', async () => {
+  let rejectRequest!: (error: unknown) => void;
+  currentIap.requestPurchase = mock(() => new Promise<void>((_resolve, reject) => { rejectRequest = reject; }));
   currentIap.subscriptions = [
     {
       displayName: 'Premium',
@@ -980,8 +1227,9 @@ test('IapProvider allows retrying a purchase after StoreKit sends an error callb
 
   const root = await renderProvider();
 
+  let request: Promise<void> | undefined;
   await act(async () => {
-    await latestContext?.purchase();
+    request = latestContext?.purchase();
     await waitForEffects();
   });
 
@@ -990,6 +1238,8 @@ test('IapProvider allows retrying a purchase after StoreKit sends an error callb
 
   await act(async () => {
     latestUseIapOptions.onPurchaseError?.({ code: 'network-error' });
+    rejectRequest({ code: 'network-error' });
+    await request;
     await waitForEffects();
   });
 
@@ -997,7 +1247,7 @@ test('IapProvider allows retrying a purchase after StoreKit sends an error callb
   expect(latestContext?.error).not.toBeNull();
 
   await act(async () => {
-    await latestContext?.purchase();
+    void latestContext?.purchase();
     await waitForEffects();
   });
 
@@ -1079,10 +1329,7 @@ test('IapProvider restore reconciles available purchases with the backend before
   });
 
   expect(events).toEqual(['ingest', 'finish', 'reconcile']);
-  expect(currentIap.restorePurchases).toHaveBeenCalledWith({
-    alsoPublishToEventListenerIOS: false,
-    onlyIncludeActiveItemsIOS: false,
-  });
+  expect(syncIOSMock).toHaveBeenCalledTimes(1);
   expect(getAvailablePurchasesMock).toHaveBeenLastCalledWith({
     alsoPublishToEventListenerIOS: false,
     onlyIncludeActiveItemsIOS: false,
@@ -1395,7 +1642,7 @@ test('IapProvider ignores user-cancelled offer-code redemption sheets', async ()
   }
 });
 
-test('IapProvider purchases Android subscriptions through Google Play before finishing', async () => {
+test('IapProvider accepts server-acknowledged Android subscriptions without a second client acknowledgement', async () => {
   platformOS = 'android';
   currentIap.subscriptions = [androidSubscriptionProduct()];
 
@@ -1446,7 +1693,8 @@ test('IapProvider purchases Android subscriptions through Google Play before fin
     productId: 'premium',
     purchaseToken: 'google-purchase-token',
   });
-  expect(currentIap.finishTransaction).toHaveBeenCalledTimes(1);
+  expect(currentIap.finishTransaction).not.toHaveBeenCalled();
+  expect(latestContext?.subscription?.isActive).toBe(true);
   await unmount(root);
 });
 
@@ -1472,7 +1720,7 @@ test('IapProvider restore reconciles Android available purchases without StoreKi
     await waitForEffects();
   });
 
-  expect(currentIap.restorePurchases).not.toHaveBeenCalled();
+  expect(syncIOSMock).not.toHaveBeenCalled();
   expect(authState.api.reconcileGooglePlayTransactions).toHaveBeenCalledWith({
     purchases: [
       {
@@ -1486,6 +1734,10 @@ test('IapProvider restore reconciles Android available purchases without StoreKi
 
 test('IapProvider does not reuse a failed Android purchase plan for a later restore', async () => {
   platformOS = 'android';
+  currentIap.requestPurchase = mock(async () => {
+    latestUseIapOptions.onPurchaseError?.({ code: 'network-error' });
+    throw { code: 'network-error' };
+  });
   currentIap.subscriptions = [androidSubscriptionProduct()];
   availablePurchases = [
     {
@@ -1502,7 +1754,6 @@ test('IapProvider does not reuse a failed Android purchase plan for a later rest
 
   await act(async () => {
     await latestContext?.purchase();
-    latestUseIapOptions.onPurchaseError?.({ code: 'network-error' });
     await waitForEffects();
   });
   authState.api.reconcileGooglePlayTransactions = mock(async () => ({
@@ -1522,6 +1773,37 @@ test('IapProvider does not reuse a failed Android purchase plan for a later rest
       },
     ],
   });
+  await unmount(root);
+});
+
+test.each([
+  ['user-cancelled', false],
+  ['deferred-payment', true],
+] as const)('IapProvider recovers from %s through the scoped native promise', async (code, showsError) => {
+  currentIap.subscriptions = [{ id: 'premium_monthly', displayPrice: '$9.99', title: 'Premium' }];
+  currentIap.requestPurchase = mock(async () => {
+    latestUseIapOptions.onPurchaseError?.({ code });
+    throw { code };
+  });
+  const root = await renderProvider();
+  await act(async () => {
+    await latestContext?.purchase();
+    await waitForEffects();
+  });
+  expect(latestContext?.isPurchasing).toBe(false);
+  expect(Boolean(latestContext?.error)).toBe(showsError);
+  expect(authState.api.ingestAppStoreTransaction).not.toHaveBeenCalled();
+  currentIap.requestPurchase = mock(async () => undefined);
+  await rerenderProvider(root);
+  await act(async () => {
+    if (code === 'user-cancelled') await latestContext?.purchase();
+    // Deferred approvals arrive independently after the original request ended.
+    latestUseIapOptions.onPurchaseSuccess?.(purchase);
+    await waitForEffects();
+  });
+  expect(latestContext?.subscription?.isActive).toBe(true);
+  expect(latestContext?.isPurchasing).toBe(false);
+  expect(currentIap.finishTransaction).toHaveBeenCalledTimes(1);
   await unmount(root);
 });
 
@@ -1576,7 +1858,7 @@ test('IapProvider does not apply a pending Android purchase plan to a different 
 test('IapProvider restore does not mask StoreKit restore failures as empty restores', async () => {
   const originalWarn = console.warn;
   console.warn = mock(() => undefined) as never;
-  currentIap.restorePurchases = mock(async () => {
+  syncIOSMock = mock(async () => {
     throw { code: 'network-error' };
   });
 
@@ -1635,7 +1917,7 @@ test('IapProvider restore ignores user-cancelled restore sheets', async () => {
   authState.api.entitlement = mock(async () => ({
     subscription: { ...inactiveSubscription, originalTransactionId: 'original-1' },
   }));
-  currentIap.restorePurchases = mock(async () => {
+  syncIOSMock = mock(async () => {
     throw { code: 'user-cancelled' };
   });
 
@@ -1665,7 +1947,7 @@ test('IapProvider restore surfaces StoreKit failures for linked original transac
   authState.api.entitlement = mock(async () => ({
     subscription: { ...inactiveSubscription, originalTransactionId: 'original-1' },
   }));
-  currentIap.restorePurchases = mock(async () => {
+  syncIOSMock = mock(async () => {
     throw { code: 'network-error' };
   });
   authState.api.reconcileAppStoreTransactions = mock(async () => ({ subscription: inactiveSubscription }));
@@ -1841,7 +2123,7 @@ test('IapProvider reconciles known original transactions even before StoreKit co
   expect(authState.api.reconcileAppStoreTransactions).toHaveBeenCalledWith({
     originalTransactionIds: ['original-1'],
   });
-  expect(currentIap.fetchProducts).not.toHaveBeenCalled();
+  expect(fetchProductsMock).not.toHaveBeenCalled();
   expect(currentIap.finishTransaction).not.toHaveBeenCalled();
   await unmount(root);
 });
@@ -1912,7 +2194,7 @@ test('IapProvider blocks store actions while the App Store connection is not rea
   });
 
   expect(latestContext?.error).not.toBeNull();
-  expect(currentIap.restorePurchases).not.toHaveBeenCalled();
+  expect(syncIOSMock).not.toHaveBeenCalled();
   expect(authState.api.reconcileAppStoreTransactions).not.toHaveBeenCalled();
 
   await act(async () => {
@@ -2028,3 +2310,236 @@ async function unmount(root: Root) {
     await waitForEffects();
   });
 }
+
+
+test('IapProvider retries an unavailable connection and loads the recovered catalogue', async () => {
+  platformOS = 'android';
+  currentIap.connected = false;
+  currentIap.subscriptions = [androidSubscriptionProduct()];
+  const root = await renderProvider();
+  expect(latestContext?.plans).toEqual([]);
+  await act(async () => {
+    await latestContext?.retryStore();
+    await waitForEffects();
+  });
+  expect(currentIap.reconnect).toHaveBeenCalledTimes(1);
+  expect(fetchProductsMock).toHaveBeenCalledTimes(1);
+  expect(latestContext?.plans).toHaveLength(2);
+  expect(latestContext?.isRetryingStore).toBe(false);
+  await unmount(root);
+});
+
+test('IapProvider retry replaces a failed catalogue without reconnecting an open store', async () => {
+  platformOS = 'android';
+  fetchProductsMock = mock(async () => { throw { code: 'query-product' }; });
+  const root = await renderProvider();
+  expect(latestContext?.error).not.toBeNull();
+  fetchProductsMock = mock(async () => [androidSubscriptionProduct()]);
+  await act(async () => {
+    await latestContext?.retryStore();
+    await waitForEffects();
+  });
+  expect(currentIap.reconnect).not.toHaveBeenCalled();
+  expect(latestContext?.plans).toHaveLength(2);
+  expect(latestContext?.error).toBeNull();
+  await unmount(root);
+});
+
+test('IapProvider ignores a previous account reconnect failure during a new retry', async () => {
+  platformOS = 'android';
+  currentIap.connected = false;
+  let completeFirst: ((value: boolean) => void) | undefined;
+  let completeSecond: ((value: boolean) => void) | undefined;
+  currentIap.reconnect = mock(() => new Promise<boolean>((resolve) => {
+    if (currentIap.reconnect.mock.calls.length === 1) completeFirst = resolve;
+    else completeSecond = resolve;
+  }));
+  const root = await renderProvider();
+  let first: Promise<void> | undefined;
+  await act(async () => { first = latestContext?.retryStore(); });
+  authState.user = { id: '018fd4f2-1f3a-7c88-bc49-444444444444' };
+  authState.sessionGeneration = 2;
+  await rerenderProvider(root);
+  let second: Promise<void> | undefined;
+  await act(async () => { second = latestContext?.retryStore(); });
+  await act(async () => { completeFirst?.(false); await first; });
+  expect(latestContext?.isRetryingStore).toBe(true);
+  expect(latestContext?.error).toBeNull();
+  await act(async () => { completeSecond?.(false); await second; });
+  expect(latestContext?.isRetryingStore).toBe(false);
+  expect(latestContext?.error).not.toBeNull();
+  await unmount(root);
+});
+
+
+test('IapProvider keeps a verified purchase when an older same-account entitlement read returns', async () => {
+  let resolveEntitlement: ((value: { subscription: SubscriptionSnapshot }) => void) | undefined;
+  authState.api.entitlement = mock(() => new Promise((resolve) => { resolveEntitlement = resolve; }));
+  const root = await renderProvider();
+  await act(async () => {
+    await latestUseIapOptions.onPurchaseSuccess?.(purchase);
+    await waitForEffects();
+  });
+  expect(latestContext?.subscription).toEqual(activeSubscription);
+  await act(async () => {
+    resolveEntitlement?.({ subscription: inactiveSubscription });
+    await waitForEffects();
+  });
+  expect(latestContext?.subscription).toEqual(activeSubscription);
+  await unmount(root);
+});
+
+test('IapProvider never replaces a verified purchase with an older reconciliation snapshot', async () => {
+  platformOS = 'android';
+  let resolveReconcile!: (value: { subscription: SubscriptionSnapshot }) => void;
+  authState.api.reconcileGooglePlayTransactions = mock(() => new Promise((resolve) => { resolveReconcile = resolve; }));
+  const root = await renderProvider();
+  await act(async () => {
+    latestUseIapOptions.onPurchaseSuccess?.({
+      productId: 'premium',
+      purchaseState: 'purchased',
+      purchaseToken: 'new-token',
+      store: 'google',
+      transactionId: 'new-order',
+    });
+    await waitForEffects();
+  });
+  expect(latestContext?.subscription?.isActive).toBe(true);
+  await act(async () => {
+    resolveReconcile({ subscription: inactiveSubscription });
+    await waitForEffects();
+  });
+  expect(latestContext?.subscription?.isActive).toBe(true);
+  await unmount(root);
+});
+
+test('IapProvider accepts a newer server commit from an earlier request', async () => {
+  let resolveEntitlement!: (value: { subscription: SubscriptionSnapshot }) => void;
+  authState.api.entitlement = mock(() => new Promise((resolve) => { resolveEntitlement = resolve; }));
+  const root = await renderProvider();
+  await act(async () => {
+    latestUseIapOptions.onPurchaseSuccess?.(purchase);
+    await waitForEffects();
+  });
+  const revoked = {
+    ...activeSubscription,
+    isActive: false,
+    state: 'revoked' as const,
+    updatedAt: '2026-05-20T00:00:00.000Z',
+    originalTransactionId: null,
+  };
+  await act(async () => {
+    resolveEntitlement({ subscription: revoked });
+    await waitForEffects();
+  });
+  expect(latestContext?.subscription).toEqual(revoked);
+  await unmount(root);
+});
+
+test('IapProvider keeps the newer read when expiry changes without a database write', async () => {
+  currentIap.connected = false;
+  const reads: ((value: { subscription: SubscriptionSnapshot }) => void)[] = [];
+  authState.api.entitlement = mock(() => new Promise((resolve) => { reads.push(resolve); }));
+  const root = await renderProvider();
+  let secondSync: Promise<void> | undefined;
+  await act(async () => {
+    secondSync = latestContext?.sync();
+    await waitForEffects();
+  });
+  const active = { ...activeSubscription, originalTransactionId: null };
+  const expired = { ...active, isActive: false, state: 'expired' as const };
+  await act(async () => {
+    reads[1]?.({ subscription: expired });
+    await secondSync;
+    reads[0]?.({ subscription: active });
+    await waitForEffects();
+  });
+  expect(latestContext?.subscription).toEqual(expired);
+  await unmount(root);
+});
+
+test('IapProvider cannot publish an older ingest after its slow StoreKit finish', async () => {
+  let finish!: () => void;
+  currentIap.finishTransaction = mock(() => new Promise<void>((resolve) => { finish = resolve; }));
+  const root = await renderProvider();
+  await act(async () => {
+    latestUseIapOptions.onPurchaseSuccess?.(purchase);
+    await waitForEffects();
+  });
+  const revoked = {
+    ...activeSubscription,
+    isActive: false,
+    state: 'revoked' as const,
+    updatedAt: '2026-05-20T00:00:00.000Z',
+    originalTransactionId: null,
+  };
+  authState.api.entitlement = mock(async () => ({ subscription: revoked }));
+  await act(async () => {
+    await latestContext?.sync();
+    finish();
+    await waitForEffects();
+  });
+  expect(latestContext?.subscription).toEqual(revoked);
+  expect(currentIap.finishTransaction).toHaveBeenCalledTimes(1);
+  await unmount(root);
+});
+
+test('IapProvider serializes native purchase ownership across accounts and drains the latest error callback', async () => {
+  platformOS = 'android';
+  currentIap.subscriptions = [androidSubscriptionProduct()];
+  let rejectPurchase!: (reason: unknown) => void;
+  currentIap.requestPurchase = mock(() => new Promise<void>((_resolve, reject) => { rejectPurchase = reject; }));
+  const root = await renderProvider();
+  let oldRequest: Promise<void> | undefined;
+  await act(async () => {
+    oldRequest = latestContext?.purchase();
+    await waitForEffects();
+  });
+  authState.user = { id: '018fd4f2-1f3a-7c88-bc49-444444444444' };
+  authState.sessionGeneration = 2;
+  await rerenderProvider(root);
+  await act(async () => {
+    void latestContext?.purchase();
+    await waitForEffects();
+  });
+  expect(currentIap.requestPurchase).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    latestUseIapOptions.onPurchaseError?.({ code: 'network-error' });
+    void latestContext?.purchase();
+    await waitForEffects();
+  });
+  expect(currentIap.requestPurchase).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    rejectPurchase({ code: 'network-error' });
+    await oldRequest;
+    await waitForEffects();
+  });
+  expect(latestContext?.error).toBeNull();
+  expect(latestContext?.isPurchasing).toBe(false);
+  currentIap.requestPurchase = mock(async () => undefined);
+  await rerenderProvider(root);
+  await act(async () => {
+    await latestContext?.purchase();
+    // The bridge can deliver the previous request's error after its promise rejects.
+    latestUseIapOptions.onPurchaseError?.({ code: 'network-error' });
+    await waitForEffects();
+  });
+  expect(latestContext?.isPurchasing).toBe(true);
+  expect(latestContext?.error).toBeNull();
+  await act(async () => {
+    latestUseIapOptions.onPurchaseSuccess?.({
+      productId: 'premium',
+      purchaseState: 'purchased',
+      purchaseToken: 'b-token',
+      store: 'google',
+      transactionId: 'b-order',
+    });
+    await waitForEffects();
+  });
+  expect(authState.api.ingestGooglePlayTransaction).toHaveBeenCalledWith({
+    productId: 'premium',
+    purchaseToken: 'b-token',
+    basePlanId: 'monthly',
+  });
+  await unmount(root);
+});

@@ -1,7 +1,7 @@
 import type { UserDto } from '@web-app-demo/contracts'
 import { useRef, useState, type ChangeEvent } from 'react'
 
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
@@ -27,7 +27,7 @@ export function AvatarPanel({ user }: { user: UserDto }) {
   const remove = useDeleteAvatarMutation()
   const imageUrl = useAvatarImage(avatarQuery.data?.avatar?.downloadUrl)
 
-  const busy = upload.isPending || remove.isPending
+  const busy = upload.isPending || remove.isPending || avatarQuery.data === undefined
   const hasAvatar = Boolean(avatarQuery.data?.avatar)
 
   const pick = (event: ChangeEvent<HTMLInputElement>) => {
@@ -54,6 +54,29 @@ export function AvatarPanel({ user }: { user: UserDto }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-5">
+        {avatarQuery.isPending && (
+          <div data-testid="avatar-loading" role="status">
+            <Typography tone="muted" variant="bodySm">Loading photo…</Typography>
+          </div>
+        )}
+        {avatarQuery.isError && (
+          <Alert data-testid="avatar-query-error" variant="destructive">
+            <AlertTitle>Photo is unavailable</AlertTitle>
+            <AlertDescription>{avatarQuery.error.message}</AlertDescription>
+            <AlertAction>
+              <Button
+                data-testid="avatar-query-retry"
+                disabled={avatarQuery.isFetching}
+                onClick={() => void avatarQuery.refetch()}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Try again
+              </Button>
+            </AlertAction>
+          </Alert>
+        )}
         <div className="flex flex-wrap items-center gap-5">
           <Avatar data-testid="avatar-preview" size="xl">
             {imageUrl && <AvatarImage alt="" src={imageUrl} />}

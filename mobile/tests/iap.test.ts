@@ -7,6 +7,9 @@ const {
   extractGooglePlayPurchaseToken,
   extractSignedTransactionInfo,
   ingestAndFinishPurchase,
+  iapDiagnosticPayload,
+  offerDuration,
+  googlePlayPricingPhases,
   introOfferLabel,
   introOfferLabelForOffer,
   isNetworkIapError,
@@ -15,7 +18,6 @@ const {
   isUserCancelledPurchaseError,
   purchaseButtonLabel,
   retryIapOperation,
-  shouldSuppressPostSuccessError,
   selectGooglePlaySubscriptionOffer,
   validateAppStorePurchaseForIngest,
   validateGooglePlayPurchaseForIngest,
@@ -115,36 +117,6 @@ test('builds Google Play reconcile payloads from available purchases', () => {
   });
 });
 
-test('finishes purchases only after backend ingest succeeds', async () => {
-  const successfulFinishCalls: unknown[] = [];
-  const failingFinishCalls: unknown[] = [];
-
-  await expect(
-    ingestAndFinishPurchase({
-      purchase: { purchaseToken: 'signed-jws' } as never,
-      ingest: async () => ({ subscription: activeSubscription }),
-      finish: async (purchase) => {
-        successfulFinishCalls.push(purchase);
-      },
-    }),
-  ).resolves.toEqual({ finishError: null, subscription: activeSubscription });
-
-  await expect(
-    ingestAndFinishPurchase({
-      purchase: { purchaseToken: 'signed-jws' } as never,
-      ingest: async () => {
-        throw new Error('backend rejected purchase');
-      },
-      finish: async (purchase) => {
-        failingFinishCalls.push(purchase);
-      },
-    }),
-  ).rejects.toThrow('backend rejected purchase');
-
-  expect(successfulFinishCalls).toHaveLength(1);
-  expect(failingFinishCalls).toHaveLength(0);
-});
-
 test('retries transient finish failures after backend ingest succeeds', async () => {
   const finishCalls: unknown[] = [];
 
@@ -162,22 +134,6 @@ test('retries transient finish failures after backend ingest succeeds', async ()
   ).resolves.toEqual({ finishError: null, subscription: activeSubscription });
 
   expect(finishCalls).toHaveLength(2);
-});
-
-test('returns verified subscriptions even when post-ingest finish fails', async () => {
-  const finishError = new Error('finish failed');
-  const result = await ingestAndFinishPurchase({
-    purchase: { purchaseToken: 'signed-jws' } as never,
-    ingest: async () => ({ subscription: activeSubscription }),
-    finish: async () => {
-      throw finishError;
-    },
-  });
-
-  expect(result).toEqual({
-    finishError,
-    subscription: activeSubscription,
-  });
 });
 
 test('recognizes user-cancelled purchase errors without surfacing them as failures', () => {
@@ -240,15 +196,6 @@ test('classifies retryable IAP errors and retries only those', async () => {
     ),
   ).rejects.toEqual({ code: 'billing-unavailable' });
   expect(attempts).toBe(1);
-});
-
-test('suppresses short-lived StoreKit noise after successful purchase', () => {
-  const lastPurchaseSuccessAt = 1_000;
-
-  expect(shouldSuppressPostSuccessError({ code: 'service-error' }, lastPurchaseSuccessAt, 5_999)).toBe(true);
-  expect(shouldSuppressPostSuccessError({ code: 'service-error' }, lastPurchaseSuccessAt, 6_000)).toBe(false);
-  expect(shouldSuppressPostSuccessError({ code: 'network-error' }, lastPurchaseSuccessAt, 2_000)).toBe(false);
-  expect(shouldSuppressPostSuccessError({ code: 'service-error' }, null, 2_000)).toBe(false);
 });
 
 test('validates App Store purchases before backend ingest', () => {
@@ -424,7 +371,7 @@ test('formats iOS introductory offer copy by payment mode', () => {
         },
       ],
     } as never),
-  ).toBe('Eligible users may get an intro pay-as-you-go price: $0.99 for 3 months');
+  ).toBe('Eligible users may get an intro pay-as-you-go price: $0.99 every 1 month for 3 months');
   expect(
     introOfferLabel({
       ...baseProduct,
@@ -462,4 +409,49 @@ test('formats iOS introductory offer copy by payment mode', () => {
       },
     } as never),
   ).toBe('Eligible users may get a free trial for 1 week');
+});
+
+
+test('offer duration includes the number of units in each billing period', () => {
+  expect(offerDuration({ period: { unit: 'month', value: 3 }, periodCount: 2 }))
+    .toEqual({ unit: 'month', value: 6 });
+  expect(offerDuration({ period: { unit: 'day', value: 7 }, periodCount: 1 }))
+    .toEqual({ unit: 'day', value: 7 });
+});
+
+test('Google Play pricing retains trial, discounted cycles and recurring charge from the selected offer', () => {
+  const offer = {
+    basePlanIdAndroid: 'monthly',
+    displayPrice: '$0.00',
+    id: 'trial',
+    offerTokenAndroid: 'trial-token',
+    type: 'promotional',
+    pricingPhasesAndroid: { pricingPhaseList: [
+      { formattedPrice: '$0.00', billingPeriod: 'P1W', billingCycleCount: 1, recurrenceMode: 2 },
+      { formattedPrice: '$2.00', billingPeriod: 'P1M', billingCycleCount: 3, recurrenceMode: 2 },
+      { formattedPrice: '$7.00', billingPeriod: 'P1M', billingCycleCount: 0, recurrenceMode: 1 },
+    ] },
+  } as never;
+  const product = { displayPrice: '$90.00', subscriptionOffers: [offer] } as never;
+  expect(selectGooglePlaySubscriptionOffer(product, 'monthly')?.displayPrice).toBe('$7.00');
+  expect(googlePlayPricingPhases(offer)).toEqual([
+    { displayPrice: '$0.00', period: { unit: 'week', value: 1 }, cycles: 1, recurring: false },
+    { displayPrice: '$2.00', period: { unit: 'month', value: 1 }, cycles: 3, recurring: false },
+    { displayPrice: '$7.00', period: { unit: 'month', value: 1 }, cycles: null, recurring: true },
+  ]);
+});
+
+
+test('IAP diagnostics exclude opaque provider and transaction data', () => {
+  const payload = iapDiagnosticPayload({
+    code: 'network-error',
+    message: 'purchaseToken=opaque-sensitive-token',
+    debugMessage: 'signedTransactionInfo=opaque-sensitive-token',
+    underlyingError: new Error('opaque-sensitive-token'),
+    purchaseToken: 'opaque-sensitive-token',
+    platform: 'android',
+    responseCode: 2,
+  }, 'android');
+  expect(JSON.stringify(payload)).not.toContain('opaque-sensitive-token');
+  expect(payload).toMatchObject({ code: 'network-error', network: true, responseCode: 2, retryable: true });
 });

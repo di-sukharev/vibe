@@ -1,3 +1,5 @@
+import { maintainAuthState } from './application/maintenance'
+import { createAuthMaintenanceStore } from './infrastructure/maintenance-store'
 import type { DbClient } from '../../db'
 import type { EmailDelivery } from '../../email'
 import type { AppEnv } from '../../env'
@@ -127,3 +129,10 @@ function buildAuthService({
 export type { AuthHttpEnv }
 export type { LogoutCleanup } from './application/ports'
 export type { AuthenticatedPrincipal } from './domain/user'
+
+export function cleanupAuthState(runtime: Pick<BackendRuntime, 'prisma' | 'env'>, now: Date) {
+  return maintainAuthState(createAuthMaintenanceStore(runtime.prisma), now, {
+    retentionDays: runtime.env.SESSION_RETENTION_DAYS,
+    absoluteTtlDays: runtime.env.SESSION_ABSOLUTE_TTL_DAYS,
+  })
+}

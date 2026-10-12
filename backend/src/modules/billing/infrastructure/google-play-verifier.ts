@@ -1,64 +1,25 @@
-import { GoogleAuth, type JWTInput } from 'google-auth-library'
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { GoogleAuth, gaxios, type JWTInput } from 'google-auth-library'
 
 import type { AppEnv } from '../../../env'
 import { BillingFailure } from '../domain/errors'
+import type { GooglePlaySubscriptionPurchase } from '../domain/provider-values'
 
 const androidPublisherScope = 'https://www.googleapis.com/auth/androidpublisher'
 const androidPublisherBaseUrl = 'https://androidpublisher.googleapis.com/androidpublisher/v3'
 const googlePlayRequestTimeoutMs = 15_000
 
-export type GooglePlayAcknowledgementState =
-  | 'ACKNOWLEDGEMENT_STATE_UNSPECIFIED'
-  | 'ACKNOWLEDGEMENT_STATE_PENDING'
-  | 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED'
-
-export type GooglePlaySubscriptionState =
-  | 'SUBSCRIPTION_STATE_UNSPECIFIED'
-  | 'SUBSCRIPTION_STATE_PENDING'
-  | 'SUBSCRIPTION_STATE_ACTIVE'
-  | 'SUBSCRIPTION_STATE_PAUSED'
-  | 'SUBSCRIPTION_STATE_IN_GRACE_PERIOD'
-  | 'SUBSCRIPTION_STATE_ON_HOLD'
-  | 'SUBSCRIPTION_STATE_CANCELED'
-  | 'SUBSCRIPTION_STATE_EXPIRED'
-  | 'SUBSCRIPTION_STATE_PENDING_PURCHASE_CANCELED'
-
-export type GooglePlaySubscriptionLineItem = {
-  autoRenewingPlan?: {
-    autoRenewEnabled?: boolean | null
-  } | null
-  expiryTime?: string | null
-  offerDetails?: {
-    basePlanId?: string | null
-    offerId?: string | null
-    offerTags?: string[] | null
-  } | null
-  productId?: string | null
-}
-
-export type GooglePlaySubscriptionPurchase = {
-  acknowledgementState?: GooglePlayAcknowledgementState | string | null
-  externalAccountIdentifiers?: {
-    externalAccountId?: string | null
-    obfuscatedExternalAccountId?: string | null
-    obfuscatedExternalProfileId?: string | null
-  } | null
-  latestOrderId?: string | null
-  lineItems?: GooglePlaySubscriptionLineItem[] | null
-  linkedPurchaseToken?: string | null
-  regionCode?: string | null
-  startTime?: string | null
-  subscriptionState?: GooglePlaySubscriptionState | string | null
-  testPurchase?: Record<string, never> | null
-}
+export type { GooglePlaySubscriptionPurchase, GooglePlaySubscriptionLineItem } from '../domain/provider-values'
 
 export type GooglePlaySubscriptionVerifier = {
   acknowledgeSubscription: (input: {
     productId: string
     purchaseToken: string
+    signal?: AbortSignal
   }) => Promise<void>
   getSubscriptionPurchase: (input: {
     purchaseToken: string
+    signal?: AbortSignal
   }) => Promise<GooglePlaySubscriptionPurchase>
 }
 
@@ -66,27 +27,60 @@ type GooglePlayApiRequester = {
   request: <T>(input: {
     data?: unknown
     method: 'GET' | 'POST'
-    timeout?: number
+    signal?: AbortSignal
     url: string
   }) => Promise<{ data: T }>
 }
 
 export function createGooglePlaySubscriptionVerifier(
   env: AppEnv,
-  requester?: GooglePlayApiRequester,
+  options: {
+    requester?: GooglePlayApiRequester
+    fetchImplementation?: gaxios.GaxiosOptions['fetchImplementation']
+    requestTimeoutMs?: number
+  } = {},
 ): GooglePlaySubscriptionVerifier {
-  const getRequester = requester ? () => requester : createRequesterFactory(env)
+  const requestScope = new AsyncLocalStorage<AbortSignal>()
+  const requester = options.requester
+  const getRequester = requester
+    ? () => requester
+    : createRequesterFactory(env, requestScope, options.fetchImplementation)
+
+  async function request<T>(input: Parameters<GooglePlayApiRequester['request']>[0]) {
+    const controller = new AbortController()
+    const signal = input.signal ? AbortSignal.any([controller.signal, input.signal]) : controller.signal
+    signal.throwIfAborted()
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    const deadline = new Promise<never>((_resolve, reject) => {
+      timeout = setTimeout(() => {
+        const error = new DOMException('Google Play request timed out', 'AbortError')
+        controller.abort(error)
+        reject(error)
+      }, options.requestTimeoutMs ?? googlePlayRequestTimeoutMs)
+    })
+    try {
+      // Abort network work and also bound SDK retry delays between requests.
+      return await Promise.race([
+        requestScope.run(signal, () =>
+          getRequester().request<T>({ ...input, signal }),
+        ),
+        deadline,
+      ])
+    } finally {
+      clearTimeout(timeout)
+    }
+  }
 
   return {
-    async getSubscriptionPurchase({ purchaseToken }) {
+    async getSubscriptionPurchase({ purchaseToken, signal }) {
       const url = `${androidPublisherBaseUrl}/applications/${encodeURIComponent(
         googlePlayPackageName(env),
       )}/purchases/subscriptionsv2/tokens/${encodeURIComponent(purchaseToken)}`
 
       try {
-        const response = await getRequester().request<GooglePlaySubscriptionPurchase>({
+        const response = await request<GooglePlaySubscriptionPurchase>({
           method: 'GET',
-          timeout: googlePlayRequestTimeoutMs,
+          signal,
           url,
         })
         return response.data
@@ -94,7 +88,7 @@ export function createGooglePlaySubscriptionVerifier(
         throw mapGooglePlayApiError(error)
       }
     },
-    async acknowledgeSubscription({ productId, purchaseToken }) {
+    async acknowledgeSubscription({ productId, purchaseToken, signal }) {
       const url = `${androidPublisherBaseUrl}/applications/${encodeURIComponent(
         googlePlayPackageName(env),
       )}/purchases/subscriptions/${encodeURIComponent(productId)}/tokens/${encodeURIComponent(
@@ -102,10 +96,10 @@ export function createGooglePlaySubscriptionVerifier(
       )}:acknowledge`
 
       try {
-        await getRequester().request<unknown>({
+        await request<unknown>({
           data: {},
           method: 'POST',
-          timeout: googlePlayRequestTimeoutMs,
+          signal,
           url,
         })
       } catch (error) {
@@ -115,12 +109,31 @@ export function createGooglePlaySubscriptionVerifier(
   }
 }
 
-function createRequesterFactory(env: AppEnv) {
+function createRequesterFactory(
+  env: AppEnv,
+  requestScope: AsyncLocalStorage<AbortSignal>,
+  fetchImplementation?: gaxios.GaxiosOptions['fetchImplementation'],
+) {
   let requester: GooglePlayApiRequester | null = null
 
   return () => {
     if (!requester) {
+      const transporter = new gaxios.Gaxios({ fetchImplementation })
+      // GoogleAuth does not forward the API request signal to its OAuth request.
+      transporter.interceptors.request.add({
+        resolved: async (options) => {
+          const signal = requestScope.getStore()
+          if (signal) {
+            signal.throwIfAborted()
+            options.signal = options.signal
+              ? AbortSignal.any([options.signal, signal])
+              : signal
+          }
+          return options
+        },
+      })
       requester = new GoogleAuth({
+        clientOptions: { transporter },
         credentials: googlePlayServiceAccount(env),
         scopes: [androidPublisherScope],
       })
@@ -167,10 +180,11 @@ function googlePlayServiceAccount(env: AppEnv): JWTInput {
 function mapGooglePlayApiError(error: unknown) {
   const status = googleApiStatus(error)
 
-  if (status === 400 || status === 404) {
+  if (status === 400 || status === 404 || status === 410) {
     return new BillingFailure(
       'IAP_INVALID_TRANSACTION',
       'Google Play purchase could not be verified',
+      { providerStatus: status },
     )
   }
 

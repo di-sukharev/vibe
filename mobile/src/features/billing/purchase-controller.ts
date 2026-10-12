@@ -178,10 +178,6 @@ export function isRetryableIapError(error: unknown) {
   return Boolean(code && isRecoverableIapError(error) && !nonRetryableRecoverableErrorCodes.has(code));
 }
 
-export function isPostSuccessNoiseError(error: unknown) {
-  return getIapErrorCode(error) === ErrorCode.ServiceError;
-}
-
 export function friendlyIapErrorMessage(error: unknown) {
   const code = getIapErrorCode(error);
 
@@ -235,18 +231,6 @@ export function iapErrorMessage(error: unknown) {
   return friendlyIapErrorMessage(error);
 }
 
-export function shouldSuppressPostSuccessError(
-  error: unknown,
-  lastPurchaseSuccessAt: number | null,
-  now = Date.now(),
-) {
-  return (
-    Boolean(lastPurchaseSuccessAt) &&
-    isPostSuccessNoiseError(error) &&
-    now - Number(lastPurchaseSuccessAt) < 5_000
-  );
-}
-
 export function iapDiagnosticPayload(error: unknown, platform: string): IapDiagnosticPayload {
   const code = typeof error === 'string' ? null : getIapErrorCode(error);
   const network = typeof error === 'string' ? false : isNetworkIapError(error);
@@ -254,14 +238,11 @@ export function iapDiagnosticPayload(error: unknown, platform: string): IapDiagn
 
   return {
     code,
-    debugMessage: diagnosticStringField(error, 'debugMessage'),
-    message: diagnosticMessage(error),
     network,
-    platform: diagnosticStringField(error, 'platform') ?? platform,
+    platform,
     productId: diagnosticStringField(error, 'productId'),
     responseCode: diagnosticNumberField(error, 'responseCode'),
     retryable,
-    underlyingError: diagnosticStringField(error, 'underlyingError'),
   };
 }
 
@@ -388,13 +369,56 @@ export function selectGooglePlaySubscriptionOffer(product: ProductSubscription, 
   const standardizedOffer = product.subscriptionOffers?.find((offer) => isMatchingGooglePlayOffer(offer, basePlanId));
   if (standardizedOffer?.offerTokenAndroid) {
     return {
-      displayPrice: standardizedOffer.displayPrice || product.displayPrice,
+      displayPrice: googlePlayPricingPhases(standardizedOffer).find((phase) => phase.recurring)?.displayPrice
+        ?? (standardizedOffer.displayPrice || product.displayPrice),
       offer: standardizedOffer,
       offerToken: standardizedOffer.offerTokenAndroid,
     };
   }
 
   return null;
+}
+
+export function offerDuration(offer: {
+  period?: { unit?: string | null; value?: number | null } | null;
+  periodCount?: number | null;
+}) {
+  const unit = offer.period?.unit;
+  const value = (offer.period?.value ?? 1) * (offer.periodCount ?? 0);
+  return unit && unit !== 'unknown' && unit !== 'empty' && value > 0 ? { unit, value } : null;
+}
+
+export function googlePlayPricingPhases(offer: SubscriptionOffer) {
+  return (offer.pricingPhasesAndroid?.pricingPhaseList ?? []).map((phase) => ({
+    displayPrice: phase.formattedPrice,
+    period: parseBillingPeriod(phase.billingPeriod),
+    cycles: phase.recurrenceMode === 1 ? null : phase.billingCycleCount || 1,
+    recurring: phase.recurrenceMode === 1,
+  }));
+}
+
+export function googlePlayBillingTerms(offer: SubscriptionOffer) {
+  return googlePlayPricingPhases(offer).map((phase) => {
+    const period = formatOfferPeriod(phase.period?.value, phase.period?.unit);
+    if (!period) return phase.displayPrice;
+    return phase.recurring
+      ? `${phase.displayPrice} every ${period}, auto-renews`
+      : `${phase.displayPrice} every ${period} for ${phase.cycles} payment${phase.cycles === 1 ? '' : 's'}`;
+  }).join(', then ') || null;
+}
+
+export function appStoreBillingTerms(product: ProductSubscription) {
+  if (!('subscriptionPeriodUnitIOS' in product)) return null;
+  const period = formatOfferPeriod(Number(product.subscriptionPeriodNumberIOS), product.subscriptionPeriodUnitIOS);
+  return period ? `${product.displayPrice} every ${period}, auto-renews` : null;
+}
+
+function parseBillingPeriod(period: string) {
+  const match = /^P(\d+)([DWMY])$/.exec(period);
+  if (!match) return null;
+  const unit = ({ D: 'day', W: 'week', M: 'month', Y: 'year' } as Record<string, string>)[match[2] ?? ''];
+  const value = Number(match[1]);
+  return unit && value > 0 ? { unit, value } : null;
 }
 
 export function sortProductsByConfiguredOrder(products: ProductSubscription[], productIds: string[]) {
@@ -430,18 +454,20 @@ export function introOfferLabelForOffer(offer: SubscriptionOffer | null | undefi
 function formatIntroOfferLabel(offer: {
   displayPrice: string;
   paymentMode?: string | null;
-  period?: { unit?: string | null } | null;
+  period?: { unit?: string | null; value?: number | null } | null;
   periodCount?: number | null;
 }) {
 
-  const period = formatOfferPeriod(offer.periodCount, offer.period?.unit);
+  const duration = offerDuration(offer);
+  const period = formatOfferPeriod(duration?.value, duration?.unit);
+  const billingPeriod = formatOfferPeriod(offer.period?.value ?? 1, offer.period?.unit);
 
   switch (offer.paymentMode) {
     case 'free-trial':
       return period ? `Eligible users may get a free trial for ${period}` : 'Eligible users may get a free trial';
     case 'pay-as-you-go':
       return period
-        ? `Eligible users may get an intro pay-as-you-go price: ${offer.displayPrice} for ${period}`
+        ? `Eligible users may get an intro pay-as-you-go price: ${offer.displayPrice} every ${billingPeriod} for ${period}`
         : `Eligible users may get an intro pay-as-you-go price: ${offer.displayPrice}`;
     case 'pay-up-front':
       return period
@@ -469,26 +495,9 @@ function isMatchingGooglePlayOffer(offer: SubscriptionOffer, basePlanId: string)
   return offer.basePlanIdAndroid === basePlanId && Boolean(offer.offerTokenAndroid?.trim());
 }
 
-function diagnosticMessage(error: unknown) {
-  if (error instanceof Error) return error.message;
-  if (typeof error === 'string') return error;
+function diagnosticStringField(error: unknown, field: 'productId') {
   if (!isRecord(error)) return undefined;
-
-  return diagnosticString(error.message);
-}
-
-function diagnosticStringField(error: unknown, field: 'debugMessage' | 'platform' | 'productId' | 'underlyingError') {
-  if (!isRecord(error)) return undefined;
-
-  return diagnosticString(error[field]);
-}
-
-function diagnosticString(value: unknown) {
-  if (value instanceof Error) return value.message;
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-
-  return undefined;
+  return typeof error[field] === 'string' ? error[field] : undefined;
 }
 
 function diagnosticNumberField(error: unknown, field: 'responseCode') {

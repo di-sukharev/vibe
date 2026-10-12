@@ -9,6 +9,7 @@ import { Typography } from '@/components/ui/typography';
 import { TEST_IDS } from '@/constants/testIds';
 
 export type PaywallPlanPresentation = {
+  billingTerms: string | null;
   description: string;
   displayName: string;
   displayPrice: string;
@@ -61,7 +62,7 @@ export function PaywallPlanSelector({
           />
         ) : showEmpty ? (
           <ScreenState
-            description="Check the store product configuration, tester account, real-device build, and custom development client."
+            description="Try again to load the available subscription plans."
             status="empty"
             testID={TEST_IDS.paywall.empty}
             title="Products are not available yet"
@@ -94,6 +95,9 @@ export function PaywallErrorNotice({ message }: { message: string }) {
 
 type PaywallActionsProps = {
   canRestore: boolean;
+  canRetry: boolean;
+  isRetryingStore: boolean;
+  onRetry: () => void;
   isPurchasing: boolean;
   isRedeemingOfferCode: boolean;
   isRestoring: boolean;
@@ -107,6 +111,9 @@ type PaywallActionsProps = {
 
 export function PaywallActions({
   canRestore,
+  canRetry,
+  isRetryingStore,
+  onRetry,
   isPurchasing,
   isRedeemingOfferCode,
   isRestoring,
@@ -119,9 +126,14 @@ export function PaywallActions({
 }: PaywallActionsProps) {
   return (
     <SectionCard
-      description="Access is granted only after the backend verifies the store transaction."
+      description="Your subscription renews automatically. You can cancel renewal in your store account settings."
       title="Complete subscription">
       <View style={styles.actionStack}>
+        {canRetry ? (
+          <Button disabled={isRetryingStore || isPurchasing || isRestoring} loading={isRetryingStore} onPress={onRetry} variant="outline">
+            Try again
+          </Button>
+        ) : null}
         <Button
           disabled={!selectedPlanPrice || isPurchasing || isSyncing}
           loading={isPurchasing}
@@ -222,6 +234,7 @@ function PaywallPlanOption({
         <Typography variant="bodySm" muted>
           {plan.description || plan.productId}
         </Typography>
+        {plan.billingTerms ? <Typography variant="bodySm" muted>{plan.billingTerms}</Typography> : null}
         {plan.introOfferLabel ? (
           <Typography variant="bodySm" muted>
             {plan.introOfferLabel}

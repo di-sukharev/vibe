@@ -1,20 +1,27 @@
 import type { SubscriptionSnapshot } from '@web-app-demo/contracts'
 
-export type VerifiedProviderValue = object
+import type {
+  VerifiedAppStoreTransaction,
+  VerifiedAppStoreRenewal,
+  GooglePlaySubscriptionPurchase,
+  AppStoreSubscriptionStatus,
+  OfferCodeRedemptionProof,
+} from '../domain/provider-values'
 
 export type AppStoreStatusItem = {
-  status?: number
+  status?: AppStoreSubscriptionStatus
   signedRenewalInfo?: string
   signedTransactionInfo?: string
 }
 
 export type AppStoreNotificationDetails = {
+  signedDate: number
   environment: string | null
   notificationType: string | null
   notificationUuid: string | null
   signedRenewalInfo?: string
   signedTransactionInfo?: string
-  status?: number
+  status?: AppStoreSubscriptionStatus
   subtype: string | null
 }
 
@@ -29,10 +36,14 @@ export type StoredGooglePlayPurchaseReference = GooglePlayPurchaseReference & {
   userId: string
 }
 
-export type OfferCodeRedemptionProof = {
-  issuedAt: Date
-  userId: string
+export type BillingRevision = { id: string; revision: number } | null
+
+export type GooglePlayVerificationRevision = {
+  purchase: BillingRevision
+  entitlement: BillingRevision
 }
+
+export type { OfferCodeRedemptionProof } from '../domain/provider-values'
 
 export type AppStoreWebhookClaim =
   | { status: 'claimed'; claimToken: string; id: string }
@@ -40,18 +51,21 @@ export type AppStoreWebhookClaim =
   | { status: 'processed' }
 
 export type AppStoreProvider = {
-  describeNotification(value: VerifiedProviderValue): AppStoreNotificationDetails
   getSubscriptionStatuses(input: {
-    environment?: string | null
     transactionId: string
   }): Promise<AppStoreStatusItem[]>
-  verifyNotification(signedPayload: string): Promise<VerifiedProviderValue>
-  verifyRenewalInfo(signedRenewalInfo: string): Promise<VerifiedProviderValue>
-  verifyTransaction(signedTransactionInfo: string): Promise<VerifiedProviderValue>
+  verifyNotification(signedPayload: string): Promise<AppStoreNotificationDetails>
+  verifyRenewalInfo(signedRenewalInfo: string): Promise<VerifiedAppStoreRenewal>
+  verifyTransaction(signedTransactionInfo: string): Promise<VerifiedAppStoreTransaction>
 }
 
 export type GooglePlayProvider = {
-  verifyPurchase(purchaseToken: string): Promise<VerifiedProviderValue>
+  acknowledgePurchase(input: {
+    productId: string
+    purchaseToken: string
+    signal?: AbortSignal
+  }): Promise<void>
+  verifyPurchase(purchaseToken: string, signal?: AbortSignal): Promise<GooglePlaySubscriptionPurchase>
 }
 
 export type OfferCodeTokens = {
@@ -60,27 +74,48 @@ export type OfferCodeTokens = {
 }
 
 export type BillingRepository = {
+  retireUnavailableGooglePlayPurchase(input: {
+    purchaseToken: string
+    userId: string
+    expectedRevision: GooglePlayVerificationRevision
+    now: Date
+  }): Promise<SubscriptionSnapshot | null>
+  findGooglePlayPurchaseForAcknowledgement(purchaseId: string): Promise<{
+    id: string
+    productId: string
+    purchaseToken: string
+    acknowledgementState: string | null
+    expiresAt: Date | null
+  } | null>
+  markGooglePlayAcknowledged(purchaseId: string): Promise<void>
   applyAppStoreTransaction(input: {
+    notificationSignedDate?: number
     allowTokenlessFirstClaim?: boolean
     offerCodeRedemption?: OfferCodeRedemptionProof | null
     signedRenewalInfo?: string | null
     signedTransactionInfo: string
-    status?: number | null
+    status?: AppStoreSubscriptionStatus | null
     userId: string
-    verifiedRenewal?: VerifiedProviderValue | null
-    verifiedTransaction: VerifiedProviderValue
+    verifiedRenewal?: VerifiedAppStoreRenewal | null
+    verifiedTransaction: VerifiedAppStoreTransaction
   }): Promise<SubscriptionSnapshot>
   applyGooglePlayPurchase(input: {
+    expectedRevision: GooglePlayVerificationRevision
     purchase: GooglePlayPurchaseReference
+    refreshStoredPurchase?: boolean
     userId: string
-    verifiedPurchase: VerifiedProviderValue
-  }): Promise<SubscriptionSnapshot>
+    verifiedPurchase: GooglePlaySubscriptionPurchase
+  }): Promise<{ subscription: SubscriptionSnapshot; acknowledgePurchaseId: string | null }>
+  getGooglePlayVerificationRevision(input: {
+    purchaseToken: string
+    userId: string
+  }): Promise<GooglePlayVerificationRevision>
   claimAppStoreWebhook(signedPayload: string): Promise<AppStoreWebhookClaim>
   claimVerifiedAppStoreWebhook(input: {
     claimToken: string
     details: AppStoreNotificationDetails
     id: string
-    verifiedTransaction?: VerifiedProviderValue | null
+    verifiedTransaction?: VerifiedAppStoreTransaction | null
   }): Promise<AppStoreWebhookClaim>
   findGooglePlayPurchases(userId: string): Promise<GooglePlayPurchaseReference[]>
   findGooglePlayPurchasesDue(input: {
@@ -98,19 +133,16 @@ export type BillingRepository = {
     before: Date
     purchaseId: string
   }): Promise<boolean>
-  getAppStoreEnvironment(input: {
-    originalTransactionId: string
-    userId: string
-  }): Promise<string>
   getSubscription(userId: string): Promise<SubscriptionSnapshot>
   markAppStoreWebhookProcessed(claim: { claimToken: string; id: string }): Promise<void>
   releaseAppStoreWebhookClaim(claim: { claimToken: string; id: string }): Promise<void>
   resolveAppStoreWebhookUserId(
-    verifiedTransaction: VerifiedProviderValue,
+    verifiedTransaction: VerifiedAppStoreTransaction,
   ): Promise<string | null>
 }
 
 export type BillingServiceDependencies = {
+  billingEnabled: boolean
   appStore: AppStoreProvider
   googlePlay: GooglePlayProvider
   offerCodeTokens: OfferCodeTokens

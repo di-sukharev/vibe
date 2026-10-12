@@ -1,3 +1,4 @@
+import { NotificationFailure } from '../domain/errors'
 import type {
   RegisterPushTokenRequest,
   TestPushNotificationPayload,
@@ -38,9 +39,12 @@ export class NotificationService {
     return this.dependencies.tokens.hasActive(userId)
   }
 
-  sendTestPush(userId: string, payload: TestPushNotificationPayload) {
+  async sendTestPush(userId: string, payload: TestPushNotificationPayload) {
+    if (!await this.dependencies.tokens.hasActive(userId)) {
+      throw new NotificationFailure('no_active_token', 'No active Expo push token registered for this user')
+    }
     const minuteBucket = Math.floor(this.dependencies.now().getTime() / 60_000)
-    return this.dependencies.outbox.enqueue({
+    const queued = await this.dependencies.outbox.enqueue({
       body: payload.body,
       data: {
         href: payload.href,
@@ -50,6 +54,8 @@ export class NotificationService {
       title: payload.title,
       userId,
     })
+    if (!queued.created) throw new NotificationFailure('rate_limited', 'Test push is limited to once per minute')
+    return queued
   }
 
   processOutbox(options?: ProcessPushOutboxOptions) {

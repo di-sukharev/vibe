@@ -1,3 +1,4 @@
+import { NotificationFailure } from '../domain/errors'
 import {
   apiErrorSchema,
   pushMutationResponseSchema,
@@ -204,14 +205,11 @@ export function createNotificationRoutes(input: {
 
     const userId = await currentUserId(c, input.authenticateAccessToken)
 
-    if (!(await input.service.hasActiveToken(userId))) {
-      throw new AppError(409, 'CONFLICT', 'No active Expo push token registered for this user')
-    }
-
-    const queued = await input.service.sendTestPush(userId, c.req.valid('json'))
-    if (!queued.created) {
-      throw new AppError(429, 'RATE_LIMITED', 'Test push is limited to once per minute')
-    }
+    const queued = await input.service.sendTestPush(userId, c.req.valid('json')).catch((error: unknown) => {
+      if (!(error instanceof NotificationFailure)) throw error
+      if (error.kind === 'no_active_token') throw new AppError(409, 'CONFLICT', error.message)
+      throw new AppError(429, 'RATE_LIMITED', error.message)
+    })
 
     return c.json({ ok: true as const, outboxId: queued.id }, 200)
   })

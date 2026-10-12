@@ -37,7 +37,6 @@ export type AppStoreSubscriptionVerifier = {
   ) => Promise<AppStoreVerificationResult<ResponseBodyV2DecodedPayload>>
   getSubscriptionStatuses: (input: {
     transactionId: string
-    environment?: Environment | string | null
   }) => Promise<AppStoreStatusTransaction[]>
 }
 
@@ -74,7 +73,7 @@ const appStoreServerBaseUrls = {
 } as const
 
 class AbortableAppStoreServerAPIClient extends AppStoreServerAPIClient {
-  private readonly controllers = new Set<AbortController>()
+  private readonly controller = new AbortController()
 
   constructor(
     signingKey: string,
@@ -88,8 +87,7 @@ class AbortableAppStoreServerAPIClient extends AppStoreServerAPIClient {
   }
 
   abortPendingRequests() {
-    for (const controller of this.controllers) controller.abort()
-    this.controllers.clear()
+    this.controller.abort()
   }
 
   protected override makeFetchRequest(
@@ -99,8 +97,6 @@ class AbortableAppStoreServerAPIClient extends AppStoreServerAPIClient {
     requestBody: string | Buffer | undefined,
     headers: Record<string, string>,
   ): ReturnType<AppStoreServerAPIClient['makeFetchRequest']> {
-    const controller = new AbortController()
-    this.controllers.add(controller)
     const query = parsedQueryParameters.toString()
     const request = this.fetchImpl(
       `${appStoreServerBaseUrls[this.environment]}${path}${query ? `?${query}` : ''}`,
@@ -108,11 +104,9 @@ class AbortableAppStoreServerAPIClient extends AppStoreServerAPIClient {
         body: requestBody as BodyInit | undefined,
         headers,
         method,
-        signal: controller.signal,
+        signal: this.controller.signal,
       },
-    ).finally(() => {
-      this.controllers.delete(controller)
-    })
+    )
     return request as unknown as ReturnType<AppStoreServerAPIClient['makeFetchRequest']>
   }
 }
@@ -223,28 +217,22 @@ export function createAppStoreSubscriptionVerifier(
     return client
   }
 
-  function verificationEnvironments() {
-    return [normalizeEnvironment(env.APPLE_IAP_ENVIRONMENT)]
-  }
-
-  async function verifyWithFallback<T>(
+  async function verifySignedPayload<T>(
     verify: (verifier: SignedDataVerifier) => Promise<T>,
   ): Promise<AppStoreVerificationResult<T>> {
-    for (const environment of verificationEnvironments()) {
-      try {
-        return {
-          environment,
-          payload: await verify(getVerifier(environment)),
-        }
-      } catch (error) {
-        if (isIapConfigurationError(error)) throw error
+    const environment = normalizeEnvironment(env.APPLE_IAP_ENVIRONMENT)
+    try {
+      return {
+        environment,
+        payload: await verify(getVerifier(environment)),
       }
+    } catch (error) {
+      if (isIapConfigurationError(error)) throw error
+      throw new BillingFailure(
+        'IAP_INVALID_TRANSACTION',
+        'App Store signed payload could not be verified',
+      )
     }
-
-    throw new BillingFailure(
-      'IAP_INVALID_TRANSACTION',
-      'App Store signed payload could not be verified',
-    )
   }
 
   function normalizeEnvironment(value: Environment | string | null | undefined) {
@@ -261,13 +249,13 @@ export function createAppStoreSubscriptionVerifier(
 
   return {
     verifyTransaction: (signedTransactionInfo) =>
-      verifyWithFallback((verifier) => verifier.verifyAndDecodeTransaction(signedTransactionInfo)),
+      verifySignedPayload((verifier) => verifier.verifyAndDecodeTransaction(signedTransactionInfo)),
     verifyRenewalInfo: (signedRenewalInfo) =>
-      verifyWithFallback((verifier) => verifier.verifyAndDecodeRenewalInfo(signedRenewalInfo)),
+      verifySignedPayload((verifier) => verifier.verifyAndDecodeRenewalInfo(signedRenewalInfo)),
     verifyNotification: (signedPayload) =>
-      verifyWithFallback((verifier) => verifier.verifyAndDecodeNotification(signedPayload)),
-    getSubscriptionStatuses: async ({ transactionId, environment }) => {
-      const client = getApiClient(normalizeEnvironment(environment))
+      verifySignedPayload((verifier) => verifier.verifyAndDecodeNotification(signedPayload)),
+    getSubscriptionStatuses: async ({ transactionId }) => {
+      const client = getApiClient(normalizeEnvironment(env.APPLE_IAP_ENVIRONMENT))
       const timeoutMs = options.statusLookupTimeoutMs ?? appStoreStatusLookupTimeoutMs
       const response = await withApplicationDeadline(
         client.getAllSubscriptionStatuses(transactionId),

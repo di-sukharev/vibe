@@ -1,6 +1,6 @@
 # Mobile
 
-Expo serves ordinary users on iOS, Android, and web. Administration belongs to webapp. Scripts and dependencies are in [package.json](package.json). Store subscriptions and social sign-in are implemented but disabled.
+Expo serves ordinary users on iOS, Android, and web. Administration belongs to webapp. Scripts and dependencies are in [package.json](package.json). Store subscriptions are disabled by default. Social sign-in remains disabled.
 
 ## Run locally
 

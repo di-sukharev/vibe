@@ -180,6 +180,7 @@ run "mobile_env_defaults_to_the_components_that_read_it" {
 
   variables {
     extra_runtime_env = {
+      BILLING_ENABLED          = "true"
       APPLE_IAP_BUNDLE_ID      = "com.example.app"
       GOOGLE_PLAY_PACKAGE_NAME = "com.example.app"
     }
@@ -206,7 +207,7 @@ run "mobile_env_defaults_to_the_components_that_read_it" {
       contains(keys(output.runtime_inputs.component_environments[component]), "GOOGLE_PLAY_PACKAGE_NAME") &&
       contains(keys(output.runtime_inputs.component_secret_environments[component]), "GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64")
     ])
-    error_message = "The Google Play group must reach the API and the scheduler worker, which runs the maintenance job."
+    error_message = "The Google Play group must reach the API and the scheduler worker, which runs maintenance and acknowledgement tasks."
   }
 
   assert {
@@ -215,6 +216,14 @@ run "mobile_env_defaults_to_the_components_that_read_it" {
       contains(keys(output.runtime_inputs.component_secret_environments["scheduler"]), "EXPO_PUSH_ACCESS_TOKEN")
     )
     error_message = "Only the notifications job sends pushes: the Expo access token must reach the scheduler worker, not the API."
+  }
+
+  assert {
+    condition = (
+      output.runtime_inputs.component_environments["api"]["BILLING_ENABLED"] == "true" &&
+      output.runtime_inputs.component_environments["scheduler"]["BILLING_ENABLED"] == "true"
+    )
+    error_message = "Billing availability must reach the API and scheduler worker."
   }
 }
 

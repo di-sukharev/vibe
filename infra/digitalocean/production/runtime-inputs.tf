@@ -54,7 +54,7 @@ locals {
   # The mobile env groups default to the components that read them, so an operator who sets them
   # without extra_env_components does not hand them to every runner. Only the API verifies App
   # Store purchases and webhooks; Google Play is verified by the API and reconciled by the
-  # `maintenance` job; only the `notifications` job sends pushes, while the API just queues them.
+  # `maintenance` job and acknowledged by `outbox`; only `notifications` sends pushes.
   # A group keeps one target set because backend/src/env.ts refuses a partial group. An entry in
   # extra_env_components replaces the default for that variable.
   mobile_env_components = merge(
@@ -76,8 +76,9 @@ locals {
         "GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64",
         "GOOGLE_PLAY_PRODUCT_IDS",
         "GOOGLE_PLAY_BASE_PLAN_IDS",
-      ] : name => toset(["api", "maintenance"])
+      ] : name => toset(["api", "maintenance", "outbox"])
     },
+    { BILLING_ENABLED = toset(["api", "maintenance", "outbox"]) },
     { EXPO_PUSH_ACCESS_TOKEN = toset(["notifications"]) },
   )
   extra_env_components = merge(local.mobile_env_components, var.extra_env_components)

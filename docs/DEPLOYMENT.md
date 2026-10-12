@@ -59,7 +59,7 @@ Only the API receives `JWT_SECRET`. Jobs and migrations must not receive the sig
 
 Use `extra_runtime_env` for non-secret settings. Use `extra_runtime_secret_env` on DigitalOcean or `extra_secret_bindings` on Yandex for secrets.
 
-Most extra variables reach the API and every job. Mobile credential groups have narrower defaults in each production root's `runtime-inputs.tf`. Apple billing targets the API; Google billing also targets maintenance. The Expo push secret targets the notification sender. Override targets with `extra_env_components`:
+Most extra variables reach the API and every job. Mobile credential groups have narrower defaults in each production root's `runtime-inputs.tf`. Apple billing targets the API. Google billing targets the API, maintenance, and outbox. The Expo push secret targets the notification sender. Override targets with `extra_env_components`:
 
 ```hcl
 extra_env_components = {

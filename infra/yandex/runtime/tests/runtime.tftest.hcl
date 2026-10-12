@@ -55,6 +55,19 @@ variables {
 run "immutable_runtime_with_provider_timers" {
   command = plan
 
+  # Read the application settings so increasing its budget cannot silently exceed
+  # the server or provider deadline. Bun defaults to ten seconds if omitted.
+  assert {
+    condition = (
+      try(tonumber(regex("idleTimeout: ([0-9]+)", file("../../../backend/src/index.ts"))[0]), 10) >=
+      tonumber(replace(regex("const reconciliationBudgetMs = ([0-9_]+)", file("../../../backend/src/modules/billing/application/billing-service.ts"))[0], "_", "")) / 1000 + 10 &&
+      try(tonumber(regex("idleTimeout: ([0-9]+)", file("../../../backend/src/index.ts"))[0]), 10) <= 255 &&
+      tonumber(trimsuffix(yandex_serverless_container.api.execution_timeout, "s")) >=
+      try(tonumber(regex("idleTimeout: ([0-9]+)", file("../../../backend/src/index.ts"))[0]), 10) + 30
+    )
+    error_message = "The finite Bun timeout must allow ten seconds after reconciliation; the API container must allow another thirty seconds for cold start."
+  }
+
   assert {
     condition     = strcontains(yandex_serverless_container.api.image[0].url, var.runtime_image_digest)
     error_message = "The API must use the exact promoted image digest."

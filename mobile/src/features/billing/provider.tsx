@@ -1,8 +1,10 @@
 import type { SubscriptionSnapshot } from '@web-app-demo/contracts';
 import {
   deepLinkToSubscriptions,
+  fetchProducts as fetchProductsFromStore,
   getAvailablePurchases as getAvailablePurchasesFromStore,
   presentCodeRedemptionSheetIOS,
+  syncIOS,
   useIAP,
   type ProductSubscription,
   type Purchase,
@@ -15,9 +17,11 @@ import { useAuth, type AuthAccountScope } from '@/features/auth';
 import type { BillingApiPort } from './api';
 import { trackIapDiagnostic } from './iap-diagnostics';
 import {
+  appStoreBillingTerms,
   buildReconcilePayloadFromPurchases,
   buildGooglePlayReconcilePayloadFromPurchases,
   buildSubscriptionPurchaseRequest,
+  googlePlayBillingTerms,
   iapDiagnosticPayload,
   iapErrorMessage,
   ingestAndFinishPurchase,
@@ -25,7 +29,6 @@ import {
   introOfferLabelForOffer,
   isUserCancelledPurchaseError,
   retryIapOperation,
-  shouldSuppressPostSuccessError,
   selectGooglePlaySubscriptionOffer,
   sortProductsByConfiguredOrder,
   validateAppStorePurchaseForIngest,
@@ -66,6 +69,7 @@ const allIosAvailablePurchaseOptions: PurchaseOptions = {
 type StorePlatform = 'android' | 'ios';
 
 type SubscriptionPlan = {
+  billingTerms: string | null;
   basePlanId: string | null;
   displayName: string;
   displayPrice: string;
@@ -84,6 +88,12 @@ type IapOperationScope = {
   generation: number;
 };
 
+type NativePurchaseRequest = {
+  scope: IapOperationScope;
+  pending: boolean;
+  completed: boolean;
+};
+
 type SubscriptionContextValue = {
   error: string | null;
   isConnected: boolean;
@@ -92,6 +102,7 @@ type SubscriptionContextValue = {
   isPurchasing: boolean;
   isRedeemingOfferCode: boolean;
   isRestoring: boolean;
+  isRetryingStore: boolean;
   isSupported: boolean;
   isSyncing: boolean;
   platform: typeof Platform.OS;
@@ -101,6 +112,7 @@ type SubscriptionContextValue = {
   purchase: () => Promise<void>;
   redeemOfferCode: () => Promise<void>;
   restore: () => Promise<void>;
+  retryStore: () => Promise<void>;
   manageSubscriptions: () => Promise<void>;
   selectedPlanId: string | null;
   selectedProductId: string | null;
@@ -136,32 +148,46 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
   // Billing owns the entitlement: `sync` reads it from the backend and every verified purchase
   // updates it here, so the auth user contract stays free of subscription state.
   const [subscription, setSubscriptionState] = useState<SubscriptionSnapshot | null>(null);
+  const subscriptionRequestIdRef = useRef(0);
+  const publishedSubscriptionRef = useRef<{ updatedAt: number; requestId: number } | null>(null);
   const setSubscription = useCallback(
-    (next: SubscriptionSnapshot, scope: AuthAccountScope) => {
+    (next: SubscriptionSnapshot, scope: AuthAccountScope, requestId: number) => {
       if (!isAccountScopeCurrent(scope)) return false;
+      const updatedAt = next.updatedAt ? Date.parse(next.updatedAt) : 0;
+      const published = publishedSubscriptionRef.current;
+      // Server commits determine freshness. Request order breaks ties, including
+      // snapshots whose effective state expires without a database write.
+      if (published && (
+        updatedAt < published.updatedAt ||
+        (updatedAt === published.updatedAt && requestId < published.requestId)
+      )) return false;
+      publishedSubscriptionRef.current = { updatedAt, requestId };
       setSubscriptionState(next);
       return true;
     },
     [isAccountScopeCurrent],
   );
   const productIds = platform === 'ios' ? iosProductIds : androidProductIds;
+  const [products, setProducts] = useState<ProductSubscription[]>([]);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(defaultPlanId(platform));
   const [error, setError] = useState<string | null>(null);
   const [isLoadingProducts, setIsLoadingProducts] = useState(false);
   const [isManagingSubscriptions, setIsManagingSubscriptions] = useState(false);
   const [isPurchasing, setIsPurchasing] = useState(false);
   const [isRedeemingOfferCode, setIsRedeemingOfferCode] = useState(false);
+  const [isRetryingStore, setIsRetryingStore] = useState(false);
+  const retryStoreScopeRef = useRef<IapOperationScope | null>(null);
   const [isRestoring, setIsRestoring] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const iapRef = useRef<ReturnType<typeof useIAP> | null>(null);
   const inFlightReconcileKeysRef = useRef(new Set<string>());
   const purchaseRequestInFlightRef = useRef(false);
+  const nativePurchaseRequestRef = useRef<NativePurchaseRequest | null>(null);
   const processingTransactionsRef = useRef(new Set<string>());
   const processedTransactionsRef = useRef(new Set<string>());
   const pendingGooglePlayBasePlanByProductIdRef = useRef(new Map<string, string>());
   const queuedPurchaseKeysRef = useRef(new Set<string>());
   const queuedPurchasesRef = useRef<{ generation: number; purchase: Purchase }[]>([]);
-  const lastPurchaseSuccessAtRef = useRef<number | null>(null);
   const loadProductsOperationIdRef = useRef(0);
   const offerCodeControllerRef = useRef(new OfferCodeRedemptionController());
   const offerCodeRedemptionOperationIdRef = useRef(0);
@@ -185,6 +211,12 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
     [isAccountScopeCurrent],
   );
 
+  const releaseNativePurchase = useCallback((request: NativePurchaseRequest) => {
+    if (nativePurchaseRequestRef.current !== request || request.pending || !request.completed) return;
+    nativePurchaseRequestRef.current = null;
+    if (!isOperationScopeCurrent(request.scope)) setIsPurchasing(false);
+  }, [isOperationScopeCurrent]);
+
   useEffect(() => {
     inFlightReconcileKeysRef.current.clear();
     purchaseRequestInFlightRef.current = false;
@@ -192,19 +224,22 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
     processedTransactionsRef.current.clear();
     pendingGooglePlayBasePlanByProductIdRef.current.clear();
     queuedPurchaseKeysRef.current.clear();
-    lastPurchaseSuccessAtRef.current = null;
     loadProductsOperationIdRef.current += 1;
     offerCodeControllerRef.current.clear();
     offerCodeRedemptionOperationIdRef.current += 1;
     manageSubscriptionsOperationIdRef.current += 1;
     setError(null);
+    setProducts([]);
     setIsLoadingProducts(false);
     setIsManagingSubscriptions(false);
-    setIsPurchasing(false);
+    setIsPurchasing(Boolean(nativePurchaseRequestRef.current));
     setIsRedeemingOfferCode(false);
     setIsRestoring(false);
+    setIsRetryingStore(false);
+    retryStoreScopeRef.current = null;
     setIsSyncing(false);
     // A new account starts with no entitlement until its own sync answers.
+    publishedSubscriptionRef.current = null;
     setSubscriptionState(null);
   }, [accountScope?.generation, userId]);
 
@@ -244,9 +279,8 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
     [api, finishPurchase],
   );
 
-  const ingestAndFinishGooglePlayPurchase = useCallback(
+  const ingestGooglePlayPurchase = useCallback(
     async (
-      purchase: Purchase,
       validation: GooglePlayPurchaseValidation,
       basePlanIdHint?: string | null,
       scope?: AuthAccountScope,
@@ -269,17 +303,13 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
         ...(basePlanId ? { basePlanId } : {}),
       });
 
-      try {
-        await retryIapOperation(() => finishPurchase(purchase));
-        if (usesPendingPurchaseIntent && (!scope || isScopeCurrent(scope))) {
-          pendingGooglePlayBasePlanByProductIdRef.current.delete(validation.productId);
-        }
-        return { finishError: null, subscription: response.subscription };
-      } catch (finishError) {
-        return { finishError, subscription: response.subscription };
+      // The backend acknowledges Google Play only after it persists ownership.
+      if (usesPendingPurchaseIntent && (!scope || isScopeCurrent(scope))) {
+        pendingGooglePlayBasePlanByProductIdRef.current.delete(validation.productId);
       }
+      return { finishError: null, subscription: response.subscription };
     },
-    [api, finishPurchase, isScopeCurrent],
+    [api, isScopeCurrent],
   );
 
   const handlePurchase = useCallback(
@@ -325,23 +355,22 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
       setError(null);
 
       try {
+        const requestId = ++subscriptionRequestIdRef.current;
         const result =
           platform === 'ios'
             ? await ingestAndFinishAppStorePurchase(purchase, validation as AppStorePurchaseValidation)
-            : await ingestAndFinishGooglePlayPurchase(
-                purchase,
+            : await ingestGooglePlayPurchase(
                 validation as GooglePlayPurchaseValidation,
                 undefined,
                 scope,
               );
         if (!isOperationScopeCurrent(purchaseScope)) return;
-        setSubscription(result.subscription, scope);
+        setSubscription(result.subscription, scope, requestId);
         if (result.finishError) {
           reportIapDiagnostic('purchase-finish-error', result.finishError);
         } else {
           processedTransactionsRef.current.add(validation.transactionKey);
         }
-        lastPurchaseSuccessAtRef.current = Date.now();
       } catch (caughtError) {
         if (!isOperationScopeCurrent(purchaseScope)) return;
         reportIapDiagnostic('purchase-ingest-error', caughtError);
@@ -356,7 +385,7 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
     },
     [
       ingestAndFinishAppStorePurchase,
-      ingestAndFinishGooglePlayPurchase,
+      ingestGooglePlayPurchase,
       auth.isBootstrapping,
       isOperationScopeCurrent,
       operationScope,
@@ -369,19 +398,21 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
 
   const iap = useIAP({
     onPurchaseSuccess: (purchase) => {
+      const request = nativePurchaseRequestRef.current;
+      if (request) {
+        request.completed = true;
+        releaseNativePurchase(request);
+        if (!isOperationScopeCurrent(request.scope)) return;
+      }
       void handlePurchase(purchase);
     },
     onPurchaseError: (purchaseError) => {
-      if (!isOperationScopeCurrent(operationScope)) return;
-      pendingGooglePlayBasePlanByProductIdRef.current.clear();
-      purchaseRequestInFlightRef.current = false;
-      setIsPurchasing(false);
+      // expo-iap 4.6.0 rejects requestPurchase for request errors (including
+      // cancellation and deferred payment). This duplicate event has no request
+      // identity and can arrive after a new account starts another purchase.
+      // Only the scoped promise catch below may change request state or UI.
       if (!isUserCancelledPurchaseError(purchaseError)) {
-        if (shouldSuppressPostSuccessError(purchaseError, lastPurchaseSuccessAtRef.current)) {
-          return;
-        }
         reportIapDiagnostic('purchase-error', purchaseError);
-        setError(iapErrorMessage(purchaseError));
       }
     },
     onError: (caughtError) => {
@@ -390,16 +421,15 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
         return;
       }
       reportIapDiagnostic('iap-error', caughtError);
-      setError(iapErrorMessage(caughtError));
+      // Hook errors use the latest callback even when an older request failed.
+      // Promise-based store operations report errors through their scoped catches.
     },
   });
   iapRef.current = iap;
   const {
     connected,
-    fetchProducts,
+    reconnect,
     requestPurchase,
-    restorePurchases,
-    subscriptions,
   } = iap;
 
   const loadProducts = useCallback(async () => {
@@ -420,7 +450,9 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
     setError(null);
 
     try {
-      await retryIapOperation(() => fetchProducts({ skus: productIds, type: 'subs' }));
+      const fetched = await retryIapOperation(() => fetchProductsFromStore({ skus: productIds, type: 'subs' }));
+      if (!ownsOperation()) return;
+      setProducts((fetched ?? []) as ProductSubscription[]);
     } catch (caughtError) {
       if (!ownsOperation()) return;
       reportIapDiagnostic('product-fetch-error', caughtError);
@@ -430,9 +462,9 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
         setIsLoadingProducts(false);
       }
     }
-  }, [fetchProducts, isOperationScopeCurrent, operationScope, productIds]);
+  }, [isOperationScopeCurrent, operationScope, productIds]);
 
-  const plans = useMemo(() => buildSubscriptionPlans(platform, subscriptions), [platform, subscriptions]);
+  const plans = useMemo(() => buildSubscriptionPlans(platform, products), [platform, products]);
   const selectedPlan = plans.find((plan) => plan.id === selectedPlanId) ?? null;
 
   const reconcileAndFinishPurchases = useCallback(
@@ -483,16 +515,16 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
           processingTransactionsRef.current.add(validation.transactionKey);
 
           try {
+            const requestId = ++subscriptionRequestIdRef.current;
             const result =
               platform === 'ios'
                 ? await ingestAndFinishAppStorePurchase(purchase, validation as AppStorePurchaseValidation)
-                : await ingestAndFinishGooglePlayPurchase(
-                    purchase,
+                : await ingestGooglePlayPurchase(
                     validation as GooglePlayPurchaseValidation,
                     null,
                   );
             if (!isScopeCurrent(scope)) return null;
-            setSubscription(result.subscription, scope);
+            setSubscription(result.subscription, scope, requestId);
             latestSubscription = result.subscription;
 
             if (result.finishError) {
@@ -529,9 +561,10 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
 
         inFlightReconcileKeysRef.current.add(googleReconcileKey);
         try {
+          const requestId = ++subscriptionRequestIdRef.current;
           const response = await api.reconcileGooglePlayTransactions(googlePayload);
           if (!isScopeCurrent(scope)) return null;
-          setSubscription(response.subscription, scope);
+          setSubscription(response.subscription, scope, requestId);
           if (pendingPurchaseMessage && !response.subscription.isActive) {
             setError(pendingPurchaseMessage);
           }
@@ -565,9 +598,10 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
 
       inFlightReconcileKeysRef.current.add(originalReconcileKey);
       try {
+        const requestId = ++subscriptionRequestIdRef.current;
         const response = await api.reconcileAppStoreTransactions(originalPayload);
         if (!isScopeCurrent(scope)) return null;
-        setSubscription(response.subscription, scope);
+        setSubscription(response.subscription, scope, requestId);
         if (pendingPurchaseMessage && !response.subscription.isActive) {
           setError(pendingPurchaseMessage);
         }
@@ -582,7 +616,7 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
       api,
       accountScope,
       ingestAndFinishAppStorePurchase,
-      ingestAndFinishGooglePlayPurchase,
+      ingestGooglePlayPurchase,
       platform,
       isScopeCurrent,
       setSubscription,
@@ -597,9 +631,10 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
     setIsSyncing(true);
 
     try {
+      const requestId = ++subscriptionRequestIdRef.current;
       const entitlement = await api.entitlement();
       if (!isOperationScopeCurrent(syncScope)) return;
-      setSubscription(entitlement.subscription, scope);
+      setSubscription(entitlement.subscription, scope, requestId);
       const originalTransactionIds = platform === 'ios' && entitlement.subscription.originalTransactionId
         ? [entitlement.subscription.originalTransactionId]
         : undefined;
@@ -653,27 +688,66 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
     }
   }, [api, auth.isTransitioning, connected, isOperationScopeCurrent, operationScope, platform, reconcileAndFinishPurchases, setSubscription, userId]);
 
+  const retryStore = useCallback(async () => {
+    const scope = operationScope;
+    if (!scope.accountScope || auth.isTransitioning || !isOperationScopeCurrent(scope)) return;
+    if (retryStoreScopeRef.current === scope) return;
+    retryStoreScopeRef.current = scope;
+    setIsRetryingStore(true);
+    setError(null);
+    try {
+      if (!connected) {
+        const reconnected = await reconnect();
+        if (!isOperationScopeCurrent(scope)) return;
+        if (!reconnected) {
+          setError('The store is unavailable. Check your connection and try again.');
+        }
+        // A successful reconnect triggers the catalogue and entitlement effect.
+        return;
+      }
+      await Promise.all([loadProducts(), sync()]);
+    } catch (caughtError) {
+      if (isOperationScopeCurrent(scope)) setError(iapErrorMessage(caughtError));
+    } finally {
+      if (isOperationScopeCurrent(scope)) {
+        retryStoreScopeRef.current = null;
+        setIsRetryingStore(false);
+      }
+    }
+  }, [auth.isTransitioning, connected, isOperationScopeCurrent, loadProducts, operationScope, reconnect, sync]);
+
   const purchase = useCallback(async () => {
     const purchaseScope = operationScope;
     if (
       !user ||
       !purchaseScope.accountScope ||
       auth.isTransitioning ||
-      !selectedPlan ||
       !isOperationScopeCurrent(purchaseScope)
     ) return;
-    if (purchaseRequestInFlightRef.current) return;
+    if (purchaseRequestInFlightRef.current || nativePurchaseRequestRef.current) return;
 
     if (!connected) {
       setError(`${storeDisplayName(platform)} connection is not ready yet. Please try again in a moment.`);
       return;
     }
 
+    if (!selectedPlan) return;
+
     setIsPurchasing(true);
     purchaseRequestInFlightRef.current = true;
     setError(null);
 
+    // Keep one owner across sign-out until the promise settles and a purchase
+    // result arrives. A rejected promise is itself a terminal result.
+    const nativeRequest: NativePurchaseRequest = {
+      scope: purchaseScope,
+      pending: true,
+      completed: false,
+    };
+    nativePurchaseRequestRef.current = nativeRequest;
+
     try {
+      let request: ReturnType<typeof buildSubscriptionPurchaseRequest>;
       if (platform === 'android') {
         if (!selectedPlan.basePlanId) {
           throw new Error('Google Play base plan is not configured for this subscription.');
@@ -684,25 +758,33 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
         }
 
         pendingGooglePlayBasePlanByProductIdRef.current.set(selectedPlan.productId, selectedPlan.basePlanId);
-        await requestPurchase(
-          buildSubscriptionPurchaseRequest({
-            appAccountToken: user.id,
-            offerToken: selectedPlan.offerToken,
-            platform: 'android',
-            productId: selectedPlan.productId,
-          }),
-        );
-        return;
-      }
-
-      await requestPurchase(
-        buildSubscriptionPurchaseRequest({
+        request = buildSubscriptionPurchaseRequest({
+          appAccountToken: user.id,
+          offerToken: selectedPlan.offerToken,
+          platform: 'android',
+          productId: selectedPlan.productId,
+        });
+      } else {
+        request = buildSubscriptionPurchaseRequest({
           appAccountToken: user.id,
           platform: 'ios',
           productId: selectedPlan.productId,
-        }),
-      );
+        });
+      }
+
+      const result = await requestPurchase(request);
+      const purchases = Array.isArray(result) ? result : result ? [result] : [];
+      // expo-iap suppresses duplicate transaction callbacks for 30 seconds but
+      // still returns the purchase. Empty results can precede a later event.
+      if (!nativeRequest.completed && purchases.length > 0) {
+        nativeRequest.completed = true;
+        if (!isOperationScopeCurrent(purchaseScope)) return;
+        for (const returnedPurchase of purchases) {
+          await handlePurchase(returnedPurchase);
+        }
+      }
     } catch (caughtError) {
+      nativeRequest.completed = true;
       if (!isOperationScopeCurrent(purchaseScope)) return;
       if (platform === 'android') {
         pendingGooglePlayBasePlanByProductIdRef.current.clear();
@@ -713,8 +795,11 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
         reportIapDiagnostic('purchase-request-error', caughtError);
         setError(iapErrorMessage(caughtError));
       }
+    } finally {
+      nativeRequest.pending = false;
+      releaseNativePurchase(nativeRequest);
     }
-  }, [auth.isTransitioning, connected, isOperationScopeCurrent, operationScope, platform, requestPurchase, selectedPlan, user]);
+  }, [auth.isTransitioning, connected, handlePurchase, isOperationScopeCurrent, operationScope, platform, releaseNativePurchase, requestPurchase, selectedPlan, user]);
 
   const restore = useCallback(async () => {
     const restoreScope = operationScope;
@@ -733,7 +818,7 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
       let restoreError: unknown = null;
       let restoreCancelled = false;
       if (platform === 'ios') {
-        await restorePurchases(allIosAvailablePurchaseOptions).catch((caughtError) => {
+        await syncIOS().catch((caughtError) => {
           if (!isOperationScopeCurrent(restoreScope)) return;
           if (isUserCancelledPurchaseError(caughtError)) {
             restoreCancelled = true;
@@ -782,7 +867,7 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
         setIsRestoring(false);
       }
     }
-  }, [auth.isTransitioning, connected, isOperationScopeCurrent, operationScope, platform, reconcileAndFinishPurchases, restorePurchases, subscription, user]);
+  }, [auth.isTransitioning, connected, isOperationScopeCurrent, operationScope, platform, reconcileAndFinishPurchases, subscription, user]);
 
   const redeemOfferCode = useCallback(async () => {
     const redemptionScope = operationScope;
@@ -942,15 +1027,17 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
       isPurchasing,
       isRedeemingOfferCode,
       isRestoring,
+      isRetryingStore,
       isSupported: true,
       isSyncing,
       platform: Platform.OS,
       plans,
       productIds,
-      products: sortProductsByConfiguredOrder(subscriptions, productIds),
+      products: sortProductsByConfiguredOrder(products, productIds),
       purchase,
       redeemOfferCode,
       restore,
+      retryStore,
       manageSubscriptions,
       selectedPlanId,
       selectedProductId,
@@ -967,19 +1054,21 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
       isPurchasing,
       isRedeemingOfferCode,
       isRestoring,
+      isRetryingStore,
       isSyncing,
       manageSubscriptions,
       purchase,
       productIds,
       plans,
+      products,
       redeemOfferCode,
       restore,
+      retryStore,
       selectedPlanId,
       selectedProductId,
       setSelectedProductId,
       subscription,
       sync,
-      subscriptions,
     ],
   );
 
@@ -1004,6 +1093,7 @@ function unsupportedSubscriptionValue(subscription: SubscriptionSnapshot | null)
     isPurchasing: false,
     isRedeemingOfferCode: false,
     isRestoring: false,
+    isRetryingStore: false,
     isSupported: false,
     isSyncing: false,
     platform: Platform.OS,
@@ -1013,6 +1103,7 @@ function unsupportedSubscriptionValue(subscription: SubscriptionSnapshot | null)
     purchase: async () => undefined,
     redeemOfferCode: async () => undefined,
     restore: async () => undefined,
+    retryStore: async () => undefined,
     manageSubscriptions: async () => undefined,
     selectedPlanId: null,
     selectedProductId: null,
@@ -1030,6 +1121,7 @@ function defaultPlanId(platform: StorePlatform) {
 function buildSubscriptionPlans(platform: StorePlatform, products: ProductSubscription[]): SubscriptionPlan[] {
   if (platform === 'ios') {
     return sortProductsByConfiguredOrder(products, iosProductIds).map((product) => ({
+      billingTerms: appStoreBillingTerms(product),
       basePlanId: null,
       displayName: product.displayName ?? product.title,
       displayPrice: product.displayPrice,
@@ -1050,11 +1142,12 @@ function buildSubscriptionPlans(platform: StorePlatform, products: ProductSubscr
 
     return [
       {
+        billingTerms: googlePlayBillingTerms(offer.offer),
         basePlanId: config.basePlanId,
         displayName: product.displayName ?? config.label,
         displayPrice: offer.displayPrice,
         id: config.id,
-        introOfferLabel: introOfferLabelForOffer(offer.offer),
+        introOfferLabel: offer.offer.pricingPhasesAndroid?.pricingPhaseList.length ? null : introOfferLabelForOffer(offer.offer),
         offerToken: offer.offerToken,
         product,
         productId: product.id,

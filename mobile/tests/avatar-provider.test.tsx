@@ -12,9 +12,7 @@ import { createRoot, type Root } from 'react-dom/client';
  * spinner when an in-flight write outlives its account - live here and cannot be observed from
  * anywhere else.
  *
- * The DOM shim below is a local copy rather than a shared helper: every file under `tests/` is
- * self-contained. `parked/iap-provider.test.tsx` carries the other copy, which is what makes the
- * point - a shared helper would have been parked with it.
+ * The local DOM shim keeps this provider suite independent of other feature suites.
  */
 
 type FakeElement = FakeNode & {

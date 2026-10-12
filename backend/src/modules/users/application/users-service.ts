@@ -6,6 +6,7 @@ import type {
 } from '@web-app-demo/contracts'
 
 import type { AuthenticatedPrincipal } from '../../auth'
+import { UsersFailure } from '../domain/errors'
 import type {
   AdminDashboardReader,
   AdminUsersReader,
@@ -50,14 +51,23 @@ export class UsersService {
     targetUserId: string,
     input: UpdateUserRoleRequest,
   ) {
-    return {
-      user: await this.dependencies.userRoleUpdater.updateRole({
-        actorUserId: principal.id,
-        targetUserId,
-        role: input.role,
-        now: this.dependencies.clock.now(),
-      }),
-    }
+    const user = await this.dependencies.userRoleUpdater.withRoleMutation(targetUserId, async (tx) => {
+      const actor = await tx.findUser(principal.id)
+      if (actor?.role !== 'admin') {
+        throw new UsersFailure('forbidden', 'Administrator access is required')
+      }
+      const target = await tx.findUser(targetUserId)
+      if (!target) throw new UsersFailure('not_found', 'User not found')
+      if (target.role === input.role) return this.userDto(target)
+      if (target.id === actor.id && input.role !== 'admin') {
+        throw new UsersFailure('role_conflict', 'You cannot remove your own administrator role')
+      }
+      if (target.role === 'admin' && input.role === 'user' && await tx.countAdmins() <= 1) {
+        throw new UsersFailure('role_conflict', 'At least one administrator must remain')
+      }
+      return tx.updateRoleAndRevoke(target.id, input.role, this.dependencies.clock.now())
+    })
+    return { user }
   }
 
   private userDto(user: UserRecord): UserDto {

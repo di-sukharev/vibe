@@ -26,12 +26,9 @@ import type { BackendRuntime } from './runtime'
  */
 export type BackgroundJob = (runtime: BackendRuntime, now: Date) => Promise<void>
 
-// Uncomment with the billing job below (docs/IAP.md). Import it inside the job body, never at the
-// top of this file: a top-level import pulls the Apple and Google SDKs into every background run.
-//
-// type GooglePlayReconcileResult = Awaited<
-//   ReturnType<Awaited<ReturnType<typeof loadBillingModule>>['reconcileGooglePlayBatch']>
-// >
+type GooglePlayReconcileResult = Awaited<
+  ReturnType<Awaited<ReturnType<typeof loadBillingModule>>['reconcileGooglePlayBatch']>
+>
 
 export const backgroundJobs = {
   noop: async () => {
@@ -47,70 +44,42 @@ export const backgroundJobs = {
     const receipts = await notifications.checkReceipts()
     console.log('Job notifications:process completed.', { outbox, receipts })
   },
-  // Uncomment together with the billing module (docs/IAP.md):
-  // 'billing:google-play:reconcile': async (runtime, now) => {
-  //   const result = await reconcileGooglePlayPurchases(runtime, now)
-  //   console.log('Job billing:google-play:reconcile completed.', result)
-  //   assertGooglePlayReconcileSucceeded(result)
-  // },
+  'billing:google-play:reconcile': async (runtime, now) => {
+    if (!runtime.env.BILLING_ENABLED) throw new Error('Billing is disabled')
+    const result = await reconcileGooglePlayPurchases(runtime, now)
+    console.log('Job billing:google-play:reconcile completed.', result)
+    assertGooglePlayReconcileSucceeded(result)
+  },
   'auth:sessions:cleanup': async (runtime, now) => {
-    const { passwordResetTokensDeleted, rateLimitWindowsDeleted, sessionsDeleted } =
-      await cleanupAuthState(runtime, now)
+    const { auth, rateLimitWindowsDeleted } = await cleanupRuntimeAuthState(runtime, now)
     console.log(
-      `Job auth:sessions:cleanup removed ${sessionsDeleted} stale sessions, ${passwordResetTokensDeleted} expired password reset tokens and ${rateLimitWindowsDeleted} spent rate-limit windows.`,
+      `Job auth:sessions:cleanup removed ${auth.sessionsDeleted} stale sessions, ${auth.passwordResetTokensDeleted} expired password reset tokens and ${rateLimitWindowsDeleted} spent rate-limit windows.`,
     )
   },
   'uploads:pending:cleanup': async ({ prisma, privateStorage }, now) => {
-    // An upload whose signed URL has expired can never be finalized, so its row and any bytes
-    // that did land are junk. Objects go first: a row deleted before its object would leave
-    // storage holding a file nothing points at and nothing will ever look for again.
-    const abandoned = await prisma.userAvatar.findMany({
-      where: { state: 'pending', expiresAt: { lt: new Date(now.getTime() - 60 * 60 * 1000) } },
-      orderBy: { expiresAt: 'asc' },
-      take: 500,
-    })
-
-    // Only rows whose object is actually gone are deleted. Dropping a row after a failed object
-    // delete would strand that object forever: the row is the only record of its key, so nothing
-    // would ever look for it again. Keeping the row means the next run simply retries. Deletes
-    // are idempotent, so a missing object still counts as removed and cannot block the queue.
-    const deletedIds: string[] = []
-    for (const upload of abandoned) {
-      try {
-        await privateStorage.storage.deleteObject(upload.objectKey)
-        deletedIds.push(upload.id)
-      } catch (error) {
-        console.error(`Job uploads:pending:cleanup could not delete ${upload.objectKey}:`, error)
-      }
-    }
-
-    const rows =
-      deletedIds.length > 0
-        ? await prisma.userAvatar.deleteMany({ where: { id: { in: deletedIds } } })
-        : { count: 0 }
-
+    const { cleanupUploads } = await import('./modules/uploads')
+    const result = await cleanupUploads({ db: prisma, storage: privateStorage.storage }, now)
     console.log(
-      `Job uploads:pending:cleanup removed ${rows.count} abandoned uploads, and left ${abandoned.length - deletedIds.length} to retry.`,
+      `Job uploads:pending:cleanup removed ${result.removed} abandoned uploads, and left ${result.leftToRetry} to retry.`,
     )
   },
   'maintenance:process': async (runtime, now) => {
-    const { passwordResetTokensDeleted, rateLimitWindowsDeleted, sessionsDeleted } =
-      await cleanupAuthState(runtime, now)
+    const { auth: { passwordResetTokensDeleted, sessionsDeleted }, rateLimitWindowsDeleted } =
+      await cleanupRuntimeAuthState(runtime, now)
     const terminalNotificationOutboxesRedacted = await (
       await loadNotificationsModule(runtime)
     ).redactTerminalData()
-    // Uncomment together with the billing module so maintenance also reconciles Google Play:
-    // const googlePlay = runtime.env.GOOGLE_PLAY_PACKAGE_NAME
-    //   ? await reconcileGooglePlayPurchases(runtime, now)
-    //   : null
+    const googlePlay = runtime.env.BILLING_ENABLED && runtime.env.GOOGLE_PLAY_PACKAGE_NAME
+      ? await reconcileGooglePlayPurchases(runtime, now)
+      : null
     console.log('Job maintenance:process completed.', {
       authSessionsDeleted: sessionsDeleted,
-      // googlePlay,
+      googlePlay,
       passwordResetTokensDeleted,
       rateLimitWindowsDeleted,
       terminalNotificationOutboxesRedacted,
     })
-    // if (googlePlay) assertGooglePlayReconcileSucceeded(googlePlay)
+    if (googlePlay) assertGooglePlayReconcileSucceeded(googlePlay)
   },
   'outbox:drain': async (runtime, now) => {
     const { drainOptionsFromEnv, drainTaskOutbox } = await import('./outbox')
@@ -131,101 +100,46 @@ async function loadNotificationsModule({ env, prisma }: BackendRuntime) {
   return createNotificationsModule({ db: prisma, env })
 }
 
-// async function loadBillingModule({ env, prisma }: BackendRuntime) {
-//   const { createBillingModule } = await import('./modules/billing')
-//   return createBillingModule({ db: prisma, env })
-// }
-//
-// async function reconcileGooglePlayPurchases(runtime: BackendRuntime, now: Date) {
-//   const billing = await loadBillingModule(runtime)
-//   const result = await billing.reconcileGooglePlayBatch({
-//     before: new Date(now.getTime() - 15 * 60 * 1000),
-//     deadline: new Date(now.getTime() + 50 * 1000),
-//     limit: 100,
-//   })
-//   return {
-//     ...result,
-//     backlogOldestAgeSeconds: result.backlogOldestDueAt
-//       ? Math.max(
-//           0,
-//           Math.floor((now.getTime() - result.backlogOldestDueAt.getTime()) / 1_000),
-//         )
-//       : null,
-//   }
-// }
-//
-// function assertGooglePlayReconcileSucceeded(result: GooglePlayReconcileResult) {
-//   if (result.failed > 0) {
-//     throw new Error(
-//       `Google Play reconcile failed for ${result.failed} of ${result.attempted} attempted purchases`,
-//     )
-//   }
-// }
+async function loadBillingModule({ env, prisma }: BackendRuntime) {
+  const { createBillingModule } = await import('./modules/billing')
+  return createBillingModule({ db: prisma, env })
+}
 
-async function cleanupAuthState({ env, prisma }: BackendRuntime, now: Date) {
-  const dayMs = 24 * 60 * 60 * 1000
-  const retentionCutoff = new Date(
-    now.getTime() - env.SESSION_RETENTION_DAYS * dayMs,
-  )
-  const absoluteRetentionCutoff = new Date(
-    now.getTime() - (env.SESSION_ABSOLUTE_TTL_DAYS + env.SESSION_RETENTION_DAYS) * dayMs,
-  )
-  const absoluteSessionNotBefore = new Date(
-    now.getTime() - env.SESSION_ABSOLUTE_TTL_DAYS * dayMs,
-  )
-  await prisma.$executeRaw`
-    UPDATE "push_tokens" AS token
-    SET "registration_session_id" = (
-      SELECT session."id"
-      FROM "auth_sessions" AS session
-      WHERE session."user_id" = token."user_id"
-        AND session."revoked_at" IS NULL
-        AND session."expires_at" > ${now}
-        AND session."created_at" > ${absoluteSessionNotBefore}
-      ORDER BY session."created_at" DESC, session."id" DESC
-      LIMIT 1
-    )
-    WHERE token."installation_id" IS NULL
-      AND token."registration_session_id" IS NULL
-  `
-  await prisma.$executeRaw`
-    DELETE FROM "push_tokens" AS token
-    WHERE token."registration_session_id" IS NULL
-      OR NOT EXISTS (
-        SELECT 1
-        FROM "auth_sessions" AS session
-        WHERE session."id" = token."registration_session_id"
-          AND session."user_id" = token."user_id"
-          AND session."revoked_at" IS NULL
-          AND session."expires_at" > ${now}
-          AND session."created_at" > ${absoluteSessionNotBefore}
-      )
-  `
-  const [sessions, passwordResetTokens, rateLimitWindows] = await Promise.all([
-    prisma.authSession.deleteMany({
-      where: {
-        OR: [
-          { expiresAt: { lt: retentionCutoff } },
-          { revokedAt: { lt: retentionCutoff } },
-          { createdAt: { lt: absoluteRetentionCutoff } },
-        ],
-      },
-    }),
-    prisma.passwordResetToken.deleteMany({
-      where: { expiresAt: { lt: now } },
-    }),
-    // A rate-limit window past its end is never read again - every request looks up the window
-    // containing its own clock - so the rows are pure weight. Only RATE_LIMIT_STORE=database
-    // writes them; elsewhere this sweeps an empty table.
-    prisma.rateLimitBucket.deleteMany({
-      where: { expiresAt: { lt: now } },
-    }),
-  ])
+async function reconcileGooglePlayPurchases(runtime: BackendRuntime, now: Date) {
+  const billing = await loadBillingModule(runtime)
+  const result = await billing.reconcileGooglePlayBatch({
+    before: new Date(now.getTime() - 15 * 60 * 1000),
+    deadline: new Date(now.getTime() + 50 * 1000),
+    limit: 100,
+  })
   return {
-    passwordResetTokensDeleted: passwordResetTokens.count,
-    rateLimitWindowsDeleted: rateLimitWindows.count,
-    sessionsDeleted: sessions.count,
+    ...result,
+    backlogOldestAgeSeconds: result.backlogOldestDueAt
+      ? Math.max(
+          0,
+          Math.floor((now.getTime() - result.backlogOldestDueAt.getTime()) / 1_000),
+        )
+      : null,
   }
+}
+
+function assertGooglePlayReconcileSucceeded(result: GooglePlayReconcileResult) {
+  if (result.failed > 0) {
+    throw new Error(
+      `Google Play reconcile failed for ${result.failed} of ${result.attempted} attempted purchases`,
+    )
+  }
+}
+
+async function cleanupRuntimeAuthState(runtime: BackendRuntime, now: Date) {
+  const { cleanupAuthState } = await import('./modules/auth')
+  const { cleanupPushRegistrations } = await import('./modules/notifications')
+  const { cleanupExpiredRateLimitWindows } = await import('./rate-limit')
+  await cleanupPushRegistrations({ db: runtime.prisma, env: runtime.env }, now)
+  const [auth, rateLimitWindowsDeleted] = await Promise.all([
+    cleanupAuthState(runtime, now), cleanupExpiredRateLimitWindows(runtime.prisma, now),
+  ])
+  return { auth, rateLimitWindowsDeleted }
 }
 
 export type BackgroundJobName = keyof typeof backgroundJobs

@@ -198,3 +198,8 @@ export type LogoutCleanup = (input: {
   store: LogoutCleanupStore
   userId: string
 }) => void | Promise<void>
+
+export type AuthMaintenanceStore = {
+  deleteSessions(expiredBefore: Date, createdBefore: Date): Promise<number>
+  deleteResetTokens(before: Date): Promise<number>
+}

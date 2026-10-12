@@ -23,8 +23,6 @@ type AvatarsServiceDependencies = {
   objectKeys: ObjectKeyFactory
   repository: AvatarRepository
   storage: PrivateStorage
-  /** Deletes that must not fail the request they belong to. */
-  deferDelete: (objectKey: string) => void
 }
 
 export class AvatarsService {
@@ -35,7 +33,7 @@ export class AvatarsService {
    *
    * A new key every time, deliberately. The key is signed write-once, so reusing one after an
    * interrupted transfer would hand the user a URL that can only ever answer 412. Starting over
-   * is what makes a retry work, and the abandoned object is swept up behind the response.
+   * is what makes a retry work. The transaction queues cleanup for the abandoned object.
    */
   async createUpload(
     userId: string,
@@ -49,15 +47,13 @@ export class AvatarsService {
       byteSize: input.byteSize,
     })
 
-    const { pending, replacedObjectKey } = await this.dependencies.repository.startUpload({
+    const pending = await this.dependencies.repository.startUpload({
       userId,
       objectKey,
       contentType: input.contentType,
       byteSize: input.byteSize,
       expiresAt: new Date(upload.expiresAt),
     })
-
-    if (replacedObjectKey) this.dependencies.deferDelete(replacedObjectKey)
 
     return {
       upload: {
@@ -122,9 +118,7 @@ export class AvatarsService {
     // deleting the avatar that just succeeded.
     if (!promoted) throw new UploadsFailure('not_found', 'Upload not found')
 
-    if (promoted.replacedObjectKey) this.dependencies.deferDelete(promoted.replacedObjectKey)
-
-    return { avatar: await this.avatarDto(promoted.avatar) }
+    return { avatar: await this.avatarDto(promoted) }
   }
 
   async getAvatar(userId: string): Promise<AvatarResponse> {
@@ -134,16 +128,13 @@ export class AvatarsService {
 
   /** Idempotent: removing an avatar that is not there is a success, not a 404. */
   async removeAvatar(userId: string): Promise<AvatarResponse> {
-    for (const objectKey of await this.dependencies.repository.removeAll(userId)) {
-      this.dependencies.deferDelete(objectKey)
-    }
+    await this.dependencies.repository.removeAll(userId)
 
     return { avatar: null }
   }
 
   private async discard(userId: string, pending: AvatarRecord) {
-    const objectKey = await this.dependencies.repository.removePending(userId, pending.id)
-    if (objectKey) this.dependencies.deferDelete(objectKey)
+    await this.dependencies.repository.removePending(userId, pending.id)
   }
 
   private async avatarDto(avatar: AvatarRecord) {

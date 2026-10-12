@@ -12,10 +12,9 @@ import { Glob } from 'bun'
  * unit runner useful without Docker or provider credentials. The root `bun run test` still needs
  * Docker because it intentionally includes the integration runner.
  *
- * A suite belonging to a capability that ships switched off - billing, for instance, whose tables
- * are commented out in the Prisma schema - marks itself `@parked-test` in its opening comment and
- * is skipped by every runner until that line is removed. Parking is declared in the file it
- * affects rather than in a list here.
+ * A suite for an unavailable capability, such as unmounted social sign-in, can declare
+ * `@parked-test` in its opening comment. Every runner skips it until the marker is removed.
+ * Billing tests stay active because its schema exists in both configuration modes.
  */
 export function backendTestFiles(backendRoot) {
   const all = [...new Glob('{src,scripts}/**/*.test.{ts,mjs}').scanSync(backendRoot)].sort()

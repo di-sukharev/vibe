@@ -40,15 +40,14 @@ export function PaywallScreen() {
     return (
       <ScreenShell
         centered
-        description="This screen is the template's subscription flow, kept ready but switched off."
+        description="Purchases are not available in this app."
         eyebrow="Premium"
         testID={TEST_IDS.paywall.screen}
         title="Subscriptions are not enabled.">
         <Alert>
           <AlertTitle>Nothing is for sale in this project yet</AlertTitle>
           <AlertDescription>
-            The purchase flow, store verification, and receipts are implemented and waiting. Turn
-            them on by following “How To Turn Subscriptions On” in docs/IAP.md.
+            There are no subscription plans available yet.
           </AlertDescription>
         </Alert>
         <AuthSessionErrorNotice />
@@ -102,6 +101,7 @@ export function PaywallScreen() {
   const isProductListEmpty = iap.isConnected && !iap.isLoadingProducts && iap.plans.length === 0;
   const storeName = iap.platform === 'android' ? 'Google Play' : 'App Store';
   const planPresentations = iap.plans.map((plan) => ({
+    billingTerms: plan.billingTerms,
     description: plan.product.description,
     displayName: plan.displayName,
     displayPrice: plan.displayPrice,
@@ -112,7 +112,7 @@ export function PaywallScreen() {
 
   return (
     <ScreenShell
-      description={`Subscribe through ${storeName}. The backend verifies every transaction before premium access is granted.`}
+      description={`Subscribe through ${storeName} to get premium access.`}
       eyebrow="Premium"
       testID={TEST_IDS.paywall.screen}
       title="Unlock the full component workspace.">
@@ -133,6 +133,9 @@ export function PaywallScreen() {
 
       <PaywallActions
         canRestore={iap.isConnected}
+        canRetry={Boolean(iap.error) || !iap.isConnected || isProductListEmpty}
+        isRetryingStore={iap.isRetryingStore}
+        onRetry={() => void iap.retryStore()}
         isPurchasing={iap.isPurchasing}
         isRedeemingOfferCode={iap.isRedeemingOfferCode}
         isRestoring={iap.isRestoring}

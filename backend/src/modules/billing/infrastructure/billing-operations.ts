@@ -1,75 +1,72 @@
+import {
+  assertAppStoreOwnership,
+  assertGooglePlayOwnership,
+  assertGooglePlayProductionPurchase,
+} from '../domain/purchase-policy'
+import {
+  assertAppStoreProduct,
+  assertGooglePlayExternalIdentityConsistent,
+  isValidOfferCodeTokenlessFirstClaim,
+  assertSubscriptionHasExpiration,
+  assertGooglePlayProductConfigured,
+  selectGooglePlayLineItem,
+  assertGooglePlaySubscriptionHasExpiration,
+  toDate,
+  toDateFromIso,
+  formatEnvironment,
+  normalizeString,
+  normalizeRequiredString,
+} from '../domain/purchase-policy'
 import { createHash, randomUUID } from 'node:crypto'
 
-import { AutoRenewStatus, Environment, OfferType, Status, Type, type JWSRenewalInfoDecodedPayload, type JWSTransactionDecodedPayload } from '@apple/app-store-server-library'
 import type { SubscriptionSnapshot } from '@web-app-demo/contracts'
 
 import type { AppEnv } from '../../../env'
+import { enqueueTask } from '../../../outbox'
 import { Prisma } from '../../../generated/prisma/client'
-import { SubscriptionState, type BillingDbClient } from './prisma-billing-types'
+import type { DbClient } from '../../../db'
 import { BillingFailure } from '../domain/errors'
+import { mergeAppStoreSnapshot } from '../domain/apple-snapshot'
+import { refreshSubscriptionEntitlement } from './subscription-entitlement'
 import type {
+  BillingRepository,
+  BillingRevision,
+  GooglePlayVerificationRevision,
+  GooglePlayPurchaseReference,
+  OfferCodeRedemptionProof,
   AppStoreNotificationDetails,
   AppStoreWebhookClaim,
 } from '../application/ports'
-import type { AppStoreVerificationResult } from './apple-verifier'
 import type {
-  GooglePlaySubscriptionLineItem,
+  AppStoreTransaction,
+  VerifiedAppStoreTransaction,
+} from '../domain/provider-values'
+import type {
   GooglePlaySubscriptionPurchase,
-  GooglePlaySubscriptionVerifier,
 } from './google-play-verifier'
 import {
+  googlePlayTokenRetentionAfterExpiryMs,
   inactiveSubscriptionSnapshot,
   resolveGooglePlaySubscriptionState,
   resolveGooglePlayWillAutoRenew,
   shouldAcknowledgeGooglePlayPurchase,
-  shouldUpdateEntitlement,
   toSubscriptionSnapshot,
-  type EntitlementRecord,
 } from '../domain/subscription'
 
-export type ApplyTransactionInput = {
-  userId: string
-  signedTransactionInfo: string
-  signedRenewalInfo?: string | null
-  allowTokenlessFirstClaim?: boolean
-  verifiedTransaction: AppStoreVerificationResult<JWSTransactionDecodedPayload>
-  verifiedRenewal?: AppStoreVerificationResult<JWSRenewalInfoDecodedPayload> | null
-  status?: Status | number | null
-}
-
-export type OfferCodeRedemptionProof = {
-  issuedAt: Date
-  userId: string
-}
-
-export type GooglePlayPurchaseReferenceInput = {
-  basePlanId?: string | null
-  productId: string
-  purchaseToken: string
-}
+type ApplyTransactionInput = Parameters<BillingRepository['applyAppStoreTransaction']>[0]
 
 const APP_STORE_WEBHOOK_CLAIM_LEASE_MS = 5 * 60 * 1000
 
-export async function getSubscriptionSnapshot(db: BillingDbClient, userId: string): Promise<SubscriptionSnapshot> {
-  const entitlement = await db.subscriptionEntitlement.findUnique({
-    where: { userId },
+export async function getSubscriptionSnapshot(db: DbClient, userId: string): Promise<SubscriptionSnapshot> {
+  const now = new Date()
+  const entitlement = await db.$transaction(async (tx) => {
+    await acquireEntitlementLock(tx, userId)
+    return refreshSubscriptionEntitlement(tx, userId, now)
   })
-
-  return entitlement ? toSubscriptionSnapshot(entitlement, new Date()) : inactiveSubscriptionSnapshot()
+  return entitlement ? toSubscriptionSnapshot(entitlement, now) : inactiveSubscriptionSnapshot()
 }
 
-export async function resolveStatusLookupEnvironment({
-  env,
-}: {
-  db: BillingDbClient
-  env: AppEnv
-  userId: string
-  originalTransactionId: string
-}) {
-  return toAppStoreEnvironment(env.APPLE_IAP_ENVIRONMENT)
-}
-
-export async function claimAppStoreWebhook(db: BillingDbClient, signedPayload: string) {
+export async function claimAppStoreWebhook(db: DbClient, signedPayload: string) {
   const signedPayloadHash = hashToken(signedPayload)
   const claimToken = randomUUID()
   const claimedAt = new Date()
@@ -111,12 +108,12 @@ export async function claimAppStoreWebhook(db: BillingDbClient, signedPayload: s
 }
 
 export async function claimVerifiedAppStoreWebhook(
-  db: BillingDbClient,
+  db: DbClient,
   input: {
     claimToken: string
     details: AppStoreNotificationDetails
     id: string
-    verifiedTransaction?: AppStoreVerificationResult<JWSTransactionDecodedPayload> | null
+    verifiedTransaction?: VerifiedAppStoreTransaction | null
   },
 ): Promise<AppStoreWebhookClaim> {
   const claimedAt = new Date()
@@ -204,7 +201,7 @@ export async function claimVerifiedAppStoreWebhook(
 }
 
 export async function markAppStoreWebhookProcessed(
-  db: BillingDbClient,
+  db: DbClient,
   claim: { claimToken: string; id: string },
 ) {
   const result = await db.appStoreWebhook.updateMany({
@@ -216,7 +213,7 @@ export async function markAppStoreWebhookProcessed(
 }
 
 export async function releaseFailedAppStoreWebhookClaim(
-  db: BillingDbClient,
+  db: DbClient,
   claim: { claimToken: string; id: string },
 ) {
   await db.appStoreWebhook.deleteMany({
@@ -238,18 +235,20 @@ export function webhookClaimLostError() {
 export async function applyVerifiedGooglePlayPurchase({
   db,
   env,
+  expectedRevision,
   input,
   userId,
-  verifier,
   verifiedPurchase,
+  refreshStoredPurchase,
 }: {
-  db: BillingDbClient
+  db: DbClient
   env: AppEnv
-  input: GooglePlayPurchaseReferenceInput
+  expectedRevision: GooglePlayVerificationRevision
+  input: GooglePlayPurchaseReference
   userId: string
-  verifier: GooglePlaySubscriptionVerifier
   verifiedPurchase: GooglePlaySubscriptionPurchase
-}): Promise<SubscriptionSnapshot> {
+  refreshStoredPurchase?: boolean
+}): Promise<{ subscription: SubscriptionSnapshot; acknowledgePurchaseId: string | null }> {
   const requestedProductId = normalizeRequiredString(input.productId)
   const now = new Date()
   const requestedBasePlanId = normalizeString(input.basePlanId)
@@ -261,22 +260,28 @@ export async function applyVerifiedGooglePlayPurchase({
     normalizeString(verifiedPurchase.externalAccountIdentifiers?.externalAccountId)
   const externalProfileId = normalizeString(verifiedPurchase.externalAccountIdentifiers?.obfuscatedExternalProfileId)
 
-  assertGooglePlayProductConfigured(env, requestedProductId)
+  if (!refreshStoredPurchase) assertGooglePlayProductConfigured(env, requestedProductId)
 
-  if (env.NODE_ENV === 'production' && verifiedPurchase.testPurchase != null) {
-    throw new BillingFailure(
-      'IAP_INVALID_TRANSACTION',
-      'Google Play test purchases are not accepted in production',
-    )
-  }
+  assertGooglePlayProductionPurchase(env, verifiedPurchase.testPurchase != null)
 
-  const lineItem = selectGooglePlayLineItem({
+  const requestedLineItem = selectGooglePlayLineItem({
     env,
     productId: requestedProductId,
     basePlanId: requestedBasePlanId,
     purchase: verifiedPurchase,
+    refreshStoredPurchase,
   })
+  const lineItem = expectedRevision.purchase && !refreshStoredPurchase
+    ? selectGooglePlayLineItem({
+        env,
+        productId: requestedProductId,
+        basePlanId: requestedBasePlanId,
+        purchase: verifiedPurchase,
+        refreshStoredPurchase: true,
+      })
+    : requestedLineItem
   const productId = normalizeRequiredString(lineItem.productId)
+  assertGooglePlayProductConfigured(env, productId)
   const basePlanId = normalizeString(lineItem.offerDetails?.basePlanId)
 
   assertGooglePlayExternalIdentityConsistent({ externalAccountId, externalProfileId })
@@ -305,27 +310,17 @@ export async function applyVerifiedGooglePlayPurchase({
     verifiedPurchase.subscriptionState,
     lineItem.autoRenewingPlan?.autoRenewEnabled,
   )
-  const latestOrderId = normalizeString(verifiedPurchase.latestOrderId)
+  const latestOrderId = normalizeString(lineItem.latestSuccessfulOrderId) ??
+    normalizeString(verifiedPurchase.latestOrderId)
   const acknowledgementState = normalizeString(verifiedPurchase.acknowledgementState)
   const shouldAcknowledge = shouldAcknowledgeGooglePlayPurchase({
     state,
     subscriptionState: verifiedPurchase.subscriptionState,
     acknowledgementState,
   })
-  const acknowledgedAt = shouldAcknowledge ? now : null
-
-  if (shouldAcknowledge) {
-    await verifier.acknowledgeSubscription({
-      productId,
-      purchaseToken,
-    })
-  }
-
-  const storedAcknowledgementState = shouldAcknowledge
-    ? 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED'
-    : acknowledgementState
   const environment = verifiedPurchase.testPurchase != null ? 'sandbox' : 'production'
 
+  let acknowledgePurchaseId: string | null = null
   const entitlement = await db.$transaction(async (tx) => {
     await acquireGooglePlayPurchaseLocks(tx, [purchaseTokenHash, linkedPurchaseTokenHash])
     await acquireEntitlementLock(tx, userId)
@@ -338,7 +333,50 @@ export async function applyVerifiedGooglePlayPurchase({
       userId,
     })
 
-    await tx.googlePlaySubscriptionPurchase.upsert({
+    const [storedPurchase, existingEntitlement] = await Promise.all([
+      tx.googlePlaySubscriptionPurchase.findUnique({ where: { purchaseTokenHash } }),
+      tx.subscriptionEntitlement.findUnique({ where: { userId } }),
+    ])
+    // Store responses can finish out of order. Check both records after ownership:
+    // a purchase may change while a stronger entitlement stays on another provider.
+    if (
+      !sameRevision(expectedRevision.purchase, storedPurchase) ||
+      !sameRevision(expectedRevision.entitlement, existingEntitlement)
+    ) {
+      if (!storedPurchase) {
+        // Native must not finish a first purchase until its token is durable.
+        throw new BillingFailure(
+          'IAP_NOT_CONFIGURED',
+          'Subscription changed during verification; retry the purchase',
+        )
+      }
+      if (!storedPurchase.supersededById && shouldAcknowledgeGooglePlayPurchase({
+        state: storedPurchase.state,
+        acknowledgementState: storedPurchase.acknowledgementState,
+        subscriptionState: null,
+      })) {
+        throw new BillingFailure(
+          'IAP_NOT_CONFIGURED',
+          'Subscription acknowledgement is pending; retry the purchase',
+        )
+      }
+      return refreshSubscriptionEntitlement(tx, userId, now)
+    }
+
+    const successor = await tx.googlePlaySubscriptionPurchase.findFirst({
+      where: { linkedPurchaseTokenHash: purchaseTokenHash, replacesLinkedPurchase: true },
+      select: { id: true },
+    })
+    // A late intermediate token still connects its predecessor to the replacement
+    // chain. Retain that evidence without granting access or acknowledging it again.
+    const supersededById = storedPurchase?.supersededById ?? successor?.id ?? null
+    const completesReplacement = Boolean(
+      linkedPurchaseTokenHash &&
+      state !== 'pending' &&
+      verifiedPurchase.subscriptionState !== 'SUBSCRIPTION_STATE_PENDING_PURCHASE_CANCELED',
+    )
+
+    const savedPurchase = await tx.googlePlaySubscriptionPurchase.upsert({
       where: { purchaseTokenHash },
       create: {
         userId,
@@ -346,91 +384,131 @@ export async function applyVerifiedGooglePlayPurchase({
         purchaseTokenHash,
         linkedPurchaseToken,
         linkedPurchaseTokenHash,
+        supersededById,
+        replacesLinkedPurchase: completesReplacement,
         productId,
         basePlanId,
         latestOrderId,
         state,
         environment,
-        acknowledgementState: storedAcknowledgementState,
+        acknowledgementState,
         externalAccountId,
         externalProfileId,
         expiresAt,
         willAutoRenew,
-        acknowledgedAt,
         reconcileAttemptedAt: now,
       },
-      update: {
+      update: supersededById ? {
+        revision: { increment: 1 },
+        supersededById,
+        ...(completesReplacement ? {
+          linkedPurchaseToken,
+          linkedPurchaseTokenHash,
+          replacesLinkedPurchase: true,
+        } : {}),
+      } : {
+        revision: { increment: 1 },
         purchaseToken,
         linkedPurchaseToken,
         linkedPurchaseTokenHash,
+        supersededById,
+        replacesLinkedPurchase: completesReplacement,
         productId,
         basePlanId,
         latestOrderId,
         state,
         environment,
-        acknowledgementState: storedAcknowledgementState,
+        acknowledgementState,
         externalAccountId,
         externalProfileId,
         expiresAt,
         willAutoRenew,
-        ...(acknowledgedAt ? { acknowledgedAt } : {}),
         reconcileAttemptedAt: now,
       },
     })
 
-    const existingEntitlement = await tx.subscriptionEntitlement.findUnique({
-      where: { userId },
-    })
-
-    if (
-      existingEntitlement &&
-      !shouldUpdateEntitlement({
-        existing: existingEntitlement,
-        incoming: {
-          platform: 'android',
-          transactionId: latestOrderId,
-          originalTransactionId: null,
-          purchaseDate: toDateFromIso(verifiedPurchase.startTime),
-          expiresAt,
-          revokedAt: null,
-          state,
-        },
-        now,
+    if (shouldAcknowledge && !supersededById) {
+      await enqueueTask(tx, {
+        type: 'billing:google-play:acknowledge',
+        dedupeKey: savedPurchase.id,
+        payload: { purchaseId: savedPurchase.id },
       })
-    ) {
-      return existingEntitlement
+      acknowledgePurchaseId = savedPurchase.id
     }
 
-    return tx.subscriptionEntitlement.upsert({
-      where: { userId },
-      create: {
-        userId,
-        entitlementKey: 'premium',
-        platform: 'android',
-        state,
-        productId,
-        originalTransactionId: null,
-        transactionId: latestOrderId,
-        webOrderLineItemId: null,
-        expiresAt,
-        willAutoRenew,
-        environment,
-      },
-      update: {
-        platform: 'android',
-        state,
-        productId,
-        originalTransactionId: null,
-        transactionId: latestOrderId,
-        webOrderLineItemId: null,
-        expiresAt,
-        willAutoRenew,
-        environment,
-      },
-    })
+    const predecessor = completesReplacement && linkedPurchaseTokenHash
+      ? await tx.googlePlaySubscriptionPurchase.findUnique({
+          where: { purchaseTokenHash: linkedPurchaseTokenHash },
+        })
+      : null
+    if (predecessor && predecessor.id !== savedPurchase.id) {
+      await tx.googlePlaySubscriptionPurchase.update({
+        where: { id: predecessor.id },
+        data: { supersededById: savedPurchase.id, revision: { increment: 1 } },
+      })
+    }
+    return refreshSubscriptionEntitlement(tx, userId, now)
   })
 
-  return toSubscriptionSnapshot(entitlement, now)
+  return {
+    acknowledgePurchaseId,
+    subscription: entitlement ? toSubscriptionSnapshot(entitlement, now) : inactiveSubscriptionSnapshot(),
+  }
+}
+
+export async function retireUnavailableGooglePlayPurchase(
+  db: DbClient,
+  input: {
+    purchaseToken: string
+    userId: string
+    expectedRevision: GooglePlayVerificationRevision
+    now: Date
+  },
+): Promise<SubscriptionSnapshot | null> {
+  const purchaseTokenHash = hashToken(input.purchaseToken)
+  return db.$transaction(async (tx) => {
+    await acquireGooglePlayPurchaseLocks(tx, [purchaseTokenHash])
+    await acquireEntitlementLock(tx, input.userId)
+    const purchase = await tx.googlePlaySubscriptionPurchase.findUnique({
+      where: { purchaseTokenHash },
+    })
+    if (
+      !purchase ||
+      purchase.userId !== input.userId ||
+      !sameRevision(input.expectedRevision.purchase, purchase) ||
+      !purchase.expiresAt ||
+      purchase.expiresAt.getTime() > input.now.getTime() - googlePlayTokenRetentionAfterExpiryMs
+    ) {
+      return null
+    }
+    await tx.googlePlaySubscriptionPurchase.update({
+      where: { id: purchase.id },
+      data: { state: 'expired', revision: { increment: 1 } },
+    })
+    const entitlement = await refreshSubscriptionEntitlement(tx, input.userId, input.now)
+    return entitlement ? toSubscriptionSnapshot(entitlement, input.now) : inactiveSubscriptionSnapshot()
+  })
+}
+
+export async function getGooglePlayVerificationRevision(
+  db: DbClient,
+  input: { purchaseToken: string; userId: string },
+): Promise<GooglePlayVerificationRevision> {
+  const [purchase, entitlement] = await Promise.all([
+    db.googlePlaySubscriptionPurchase.findUnique({
+      where: { purchaseTokenHash: hashToken(normalizeRequiredString(input.purchaseToken)) },
+      select: { id: true, revision: true },
+    }),
+    db.subscriptionEntitlement.findUnique({
+      where: { userId: input.userId },
+      select: { id: true, revision: true },
+    }),
+  ])
+  return { purchase, entitlement }
+}
+
+function sameRevision(expected: BillingRevision, actual: BillingRevision) {
+  return expected?.id === actual?.id && expected?.revision === actual?.revision
 }
 
 export async function applyVerifiedAppStoreTransaction({
@@ -439,7 +517,7 @@ export async function applyVerifiedAppStoreTransaction({
   offerCodeRedemption,
   input,
 }: {
-  db: BillingDbClient
+  db: DbClient
   env: AppEnv
   offerCodeRedemption?: OfferCodeRedemptionProof | null
   input: ApplyTransactionInput
@@ -447,41 +525,20 @@ export async function applyVerifiedAppStoreTransaction({
   const transaction = input.verifiedTransaction.payload
   const now = new Date()
   const renewal = input.verifiedRenewal?.payload ?? null
-  const originalTransactionId = transaction.originalTransactionId ?? renewal?.originalTransactionId
-  const transactionId = transaction.transactionId
-  const productId = transaction.productId ?? renewal?.productId ?? renewal?.autoRenewProductId
+  const originalTransactionId = transaction.originalTransactionId ?? ''
+  const transactionId = transaction.transactionId ?? ''
+  const productId = transaction.productId ?? ''
 
-  if (!originalTransactionId || !transactionId || !productId) {
-    throw new BillingFailure('IAP_INVALID_TRANSACTION', 'App Store transaction is missing required identifiers')
-  }
-
-  if (env.APPLE_IAP_PRODUCT_IDS.length === 0) {
-    throw new BillingFailure(
-      'IAP_NOT_CONFIGURED',
-      'App Store subscription product IDs are not configured',
-    )
-  }
-
-  if (!env.APPLE_IAP_PRODUCT_IDS.includes(productId)) {
-    throw new BillingFailure('IAP_INVALID_TRANSACTION', 'App Store transaction product is not configured')
-  }
-
-  if (transaction.type !== Type.AUTO_RENEWABLE_SUBSCRIPTION) {
-    throw new BillingFailure(
-      'IAP_INVALID_TRANSACTION',
-      'App Store transaction is not an auto-renewable subscription',
-    )
-  }
-
-  assertAppStoreEnvironmentMatchesConfiguration({
-    configuredEnvironment: env.APPLE_IAP_ENVIRONMENT,
-    renewalEnvironment: renewal?.environment,
-    transactionEnvironment: transaction.environment,
+  assertAppStoreProduct({
+    env,
+    originalTransactionId,
+    transactionId,
+    productId,
+    transaction,
+    renewal,
     verifiedEnvironment: input.verifiedTransaction.environment,
   })
-
-  const expiresAt = resolveSubscriptionExpiresAt(transaction, renewal, input.status)
-  assertSubscriptionHasExpiration(transaction, renewal, expiresAt, input.status)
+  assertSubscriptionHasExpiration(transaction, renewal, toDate(transaction.expiresDate), input.status)
   const allowTokenlessFirstClaim =
     input.allowTokenlessFirstClaim ||
     isValidOfferCodeTokenlessFirstClaim({
@@ -498,10 +555,9 @@ export async function applyVerifiedAppStoreTransaction({
     allowTokenlessFirstClaim,
   })
 
-  const state = resolveSubscriptionState(transaction, renewal, input.status, now)
-  const willAutoRenew =
-    renewal?.autoRenewStatus == null ? null : renewal.autoRenewStatus === AutoRenewStatus.ON
-  const environment = formatEnvironment(transaction.environment ?? renewal?.environment ?? input.verifiedTransaction.environment)
+  const environment = formatEnvironment(
+    transaction.environment ?? renewal?.environment ?? input.verifiedTransaction.environment,
+  )
   const signedTransactionHash = hashToken(input.signedTransactionInfo)
   const signedRenewalHash = input.signedRenewalInfo ? hashToken(input.signedRenewalInfo) : null
 
@@ -517,96 +573,49 @@ export async function applyVerifiedAppStoreTransaction({
       allowTokenlessFirstClaim,
     })
 
+    const storedTransaction = await tx.appStoreTransaction.findUnique({ where: { transactionId } })
+    const merged = mergeAppStoreSnapshot({
+      existing: storedTransaction,
+      transaction,
+      renewal,
+      status: input.status,
+      notificationSignedDate: input.notificationSignedDate,
+      now,
+    })
+    if (!merged.changed) return refreshSubscriptionEntitlement(tx, input.userId, now)
+
+    const transactionData = {
+      webOrderLineItemId: transaction.webOrderLineItemId ?? null,
+      productId,
+      environment,
+      appAccountToken: transaction.appAccountToken ?? null,
+      purchaseDate: toDate(transaction.purchaseDate),
+      signedTransactionHash,
+    }
     await tx.appStoreTransaction.upsert({
       where: { transactionId },
       create: {
         userId: input.userId,
         originalTransactionId,
         transactionId,
-        webOrderLineItemId: transaction.webOrderLineItemId ?? null,
-        productId,
-        state,
-        environment,
-        appAccountToken: transaction.appAccountToken ?? null,
-        purchaseDate: toDate(transaction.purchaseDate),
-        expiresAt,
-        revokedAt: toDate(transaction.revocationDate),
-        willAutoRenew,
-        signedTransactionHash,
+        ...transactionData,
+        ...merged.facts,
         signedRenewalHash,
       },
       update: {
-        webOrderLineItemId: transaction.webOrderLineItemId ?? null,
-        productId,
-        state,
-        environment,
-        appAccountToken: transaction.appAccountToken ?? null,
-        purchaseDate: toDate(transaction.purchaseDate),
-        expiresAt,
-        revokedAt: toDate(transaction.revocationDate),
-        willAutoRenew,
-        signedTransactionHash,
-        signedRenewalHash,
+        ...(merged.transactionChanged ? transactionData : {}),
+        ...merged.facts,
+        ...(merged.renewalChanged ? { signedRenewalHash } : {}),
       },
     })
-
-    const existingEntitlement = await tx.subscriptionEntitlement.findUnique({
-      where: { userId: input.userId },
-    })
-
-    if (
-      existingEntitlement &&
-      !shouldUpdateEntitlement({
-        existing: existingEntitlement,
-        incoming: {
-          platform: 'ios',
-          transactionId,
-          originalTransactionId,
-          purchaseDate: toDate(transaction.purchaseDate),
-          expiresAt,
-          revokedAt: toDate(transaction.revocationDate),
-          state,
-        },
-        now,
-      })
-    ) {
-      return existingEntitlement
-    }
-
-    return tx.subscriptionEntitlement.upsert({
-      where: { userId: input.userId },
-      create: {
-        userId: input.userId,
-        entitlementKey: 'premium',
-        platform: 'ios',
-        state,
-        productId,
-        originalTransactionId,
-        transactionId,
-        webOrderLineItemId: transaction.webOrderLineItemId ?? null,
-        expiresAt,
-        willAutoRenew,
-        environment,
-      },
-      update: {
-        platform: 'ios',
-        state,
-        productId,
-        originalTransactionId,
-        transactionId,
-        webOrderLineItemId: transaction.webOrderLineItemId ?? null,
-        expiresAt,
-        willAutoRenew,
-        environment,
-      },
-    })
+    return refreshSubscriptionEntitlement(tx, input.userId, now)
   })
 
-  return toSubscriptionSnapshot(entitlement, now)
+  return entitlement ? toSubscriptionSnapshot(entitlement, now) : inactiveSubscriptionSnapshot()
 }
 
 async function acquireAppStoreTransactionLocks(
-  db: Pick<BillingDbClient, '$executeRaw'>,
+  db: Pick<DbClient, '$executeRaw'>,
   originalTransactionId: string,
   transactionId: string,
 ) {
@@ -619,7 +628,7 @@ async function acquireAppStoreTransactionLocks(
 }
 
 async function acquireEntitlementLock(
-  db: Pick<BillingDbClient, '$executeRaw'>,
+  db: Pick<DbClient, '$executeRaw'>,
   userId: string,
 ) {
   await db.$executeRaw(
@@ -628,7 +637,7 @@ async function acquireEntitlementLock(
 }
 
 async function acquireGooglePlayPurchaseLocks(
-  db: Pick<BillingDbClient, '$executeRaw'>,
+  db: Pick<DbClient, '$executeRaw'>,
   purchaseTokenHashes: Array<string | null>,
 ) {
   const uniqueHashes = [...new Set(purchaseTokenHashes.filter((hash): hash is string => hash != null))]
@@ -637,30 +646,6 @@ async function acquireGooglePlayPurchaseLocks(
   for (const purchaseTokenHash of uniqueHashes) {
     await db.$executeRaw(
       Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`billing-google-play-purchase:${purchaseTokenHash}`}, 0))`,
-    )
-  }
-}
-
-function assertAppStoreEnvironmentMatchesConfiguration({
-  configuredEnvironment,
-  renewalEnvironment,
-  transactionEnvironment,
-  verifiedEnvironment,
-}: {
-  configuredEnvironment: AppEnv['APPLE_IAP_ENVIRONMENT']
-  renewalEnvironment?: Environment | string | null
-  transactionEnvironment?: Environment | string | null
-  verifiedEnvironment: Environment
-}) {
-  const configured = toAppStoreEnvironment(configuredEnvironment)
-  const observed = [verifiedEnvironment, transactionEnvironment, renewalEnvironment]
-    .filter((value): value is Environment | string => value != null)
-    .map(toAppStoreEnvironment)
-
-  if (observed.some((environment) => environment !== configured)) {
-    throw new BillingFailure(
-      'IAP_INVALID_TRANSACTION',
-      'App Store transaction environment does not match the configured environment',
     )
   }
 }
@@ -675,16 +660,11 @@ async function assertTransactionOwnership({
 }: {
   allowTokenlessFirstClaim?: boolean
   appAccountToken: string | null | undefined
-  db: Pick<BillingDbClient, 'appStoreTransaction' | 'subscriptionEntitlement'>
+  db: Pick<DbClient, 'appStoreTransaction' | 'subscriptionEntitlement'>
   originalTransactionId: string
   transactionId: string
   userId: string
 }) {
-  if (appAccountToken) {
-    if (appAccountToken === userId) return
-    throw ownershipMismatchError()
-  }
-
   const [existingEntitlement, existingTransactions] = await Promise.all([
     db.subscriptionEntitlement.findUnique({
       where: { originalTransactionId },
@@ -701,26 +681,8 @@ async function assertTransactionOwnership({
       },
     }),
   ])
-  const transactionIdentityMismatch = existingTransactions.some(
-    (stored) =>
-      stored.transactionId === transactionId &&
-      (stored.originalTransactionId !== originalTransactionId || stored.userId !== userId),
-  )
-  const originalTransactionOwnerMismatch = existingTransactions.some(
-    (stored) =>
-      stored.originalTransactionId === originalTransactionId && stored.userId !== userId,
-  )
-
-  if (transactionIdentityMismatch || originalTransactionOwnerMismatch) {
-    throw ownershipMismatchError()
-  }
-
-  if (existingEntitlement?.userId === userId) return
-  if (existingEntitlement) throw ownershipMismatchError()
-  if (existingTransactions.some((stored) => stored.userId === userId)) return
-  if (allowTokenlessFirstClaim) return
-
-  throw ownershipMismatchError()
+  assertAppStoreOwnership({ userId, appAccountToken, originalTransactionId, transactionId,
+    allowTokenlessFirstClaim, existingEntitlement, existingTransactions })
 }
 
 async function assertGooglePlayPurchaseOwnership({
@@ -731,7 +693,7 @@ async function assertGooglePlayPurchaseOwnership({
   purchaseTokenHash,
   userId,
 }: {
-  db: Pick<BillingDbClient, 'googlePlaySubscriptionPurchase'>
+  db: Pick<DbClient, 'googlePlaySubscriptionPurchase'>
   externalAccountId: string | null
   externalProfileId: string | null
   linkedPurchaseTokenHash: string | null
@@ -753,172 +715,15 @@ async function assertGooglePlayPurchaseOwnership({
     select: { userId: true },
   })
 
-  if (existingPurchases.length > 0) {
-    if (existingPurchases.every((purchase) => purchase.userId === userId)) return
-    throw googlePlayOwnershipMismatchError()
-  }
-
-  if (externalAccountId === userId || externalProfileId === userId) return
-
-  if (externalAccountId || externalProfileId) {
-    throw googlePlayOwnershipMismatchError()
-  }
-
-  throw googlePlayOwnershipMismatchError()
-}
-
-function assertGooglePlayExternalIdentityConsistent({
-  externalAccountId,
-  externalProfileId,
-}: {
-  externalAccountId: string | null
-  externalProfileId: string | null
-}) {
-  if (externalAccountId && externalProfileId && externalAccountId !== externalProfileId) {
-    throw googlePlayOwnershipMismatchError()
-  }
-}
-
-function googlePlayOwnershipMismatchError() {
-  return new BillingFailure(
-    'IAP_OWNERSHIP_MISMATCH',
-    'This Google Play purchase is linked to another account',
-  )
-}
-
-function isValidOfferCodeTokenlessFirstClaim({
-  offerCodeRedemption,
-  transaction,
-  userId,
-}: {
-  offerCodeRedemption?: OfferCodeRedemptionProof | null
-  transaction: JWSTransactionDecodedPayload
-  userId: string
-}) {
-  if (!offerCodeRedemption) return false
-  if (offerCodeRedemption.userId !== userId) return false
-  if (transaction.appAccountToken) return false
-  if (transaction.offerType !== OfferType.OFFER_CODE) return false
-  if (!transaction.offerIdentifier?.trim()) return false
-
-  const purchaseDate = toDate(transaction.purchaseDate)
-  if (!purchaseDate) return false
-
-  return purchaseDate.getTime() >= offerCodeRedemption.issuedAt.getTime() - 5 * 60 * 1000
-}
-
-function ownershipMismatchError() {
-  return new BillingFailure(
-    'IAP_OWNERSHIP_MISMATCH',
-    'This App Store purchase is linked to another account',
-  )
-}
-
-function assertSubscriptionHasExpiration(
-  transaction: JWSTransactionDecodedPayload,
-  renewal: JWSRenewalInfoDecodedPayload | null,
-  expiresAt: Date | null,
-  status: Status | number | null | undefined,
-) {
-  if (expiresAt || transaction.revocationDate || status === Status.REVOKED) return
-
-  throw new BillingFailure(
-    'IAP_INVALID_TRANSACTION',
-    'App Store subscription transaction is missing an expiration date',
-    renewal ? undefined : { transactionId: transaction.transactionId },
-  )
-}
-
-function assertGooglePlayProductConfigured(env: AppEnv, productId: string) {
-  if (env.GOOGLE_PLAY_PRODUCT_IDS.length === 0) {
-    throw new BillingFailure(
-      'IAP_NOT_CONFIGURED',
-      'Google Play subscription product IDs are not configured',
-    )
-  }
-
-  if (!env.GOOGLE_PLAY_PRODUCT_IDS.includes(productId)) {
-    throw new BillingFailure('IAP_INVALID_TRANSACTION', 'Google Play purchase product is not configured')
-  }
-}
-
-function selectGooglePlayLineItem({
-  basePlanId,
-  env,
-  productId,
-  purchase,
-}: {
-  basePlanId: string | null
-  env: AppEnv
-  productId: string
-  purchase: GooglePlaySubscriptionPurchase
-}) {
-  const lineItems = purchase.lineItems ?? []
-  const matchingProductItems = lineItems.filter((item) => normalizeString(item.productId) === productId)
-  const matchingItems = basePlanId
-    ? matchingProductItems.filter((item) => normalizeString(item.offerDetails?.basePlanId) === basePlanId)
-    : matchingProductItems
-  const selected = matchingItems.sort(compareGooglePlayLineItemsByExpiryDesc)[0] ?? null
-
-  if (!selected) {
-    throw new BillingFailure('IAP_INVALID_TRANSACTION', 'Google Play purchase does not include the configured product')
-  }
-
-  const actualBasePlanId = normalizeString(selected.offerDetails?.basePlanId)
-  if (basePlanId && actualBasePlanId !== basePlanId) {
-    throw new BillingFailure('IAP_INVALID_TRANSACTION', 'Google Play purchase base plan does not match the request')
-  }
-
-  if (env.GOOGLE_PLAY_BASE_PLAN_IDS.length === 0) {
-    throw new BillingFailure(
-      'IAP_NOT_CONFIGURED',
-      'Google Play subscription base plan IDs are not configured',
-    )
-  }
-
-  if (!actualBasePlanId || !env.GOOGLE_PLAY_BASE_PLAN_IDS.includes(actualBasePlanId)) {
-    throw new BillingFailure('IAP_INVALID_TRANSACTION', 'Google Play purchase base plan is not configured')
-  }
-
-  return selected
-}
-
-function assertGooglePlaySubscriptionHasExpiration({
-  expiresAt,
-  state,
-  subscriptionState,
-}: {
-  expiresAt: Date | null
-  state: SubscriptionState
-  subscriptionState: string | null | undefined
-}) {
-  if (
-    expiresAt ||
-    state === SubscriptionState.pending ||
-    subscriptionState === 'SUBSCRIPTION_STATE_PENDING_PURCHASE_CANCELED'
-  ) {
-    return
-  }
-
-  throw new BillingFailure(
-    'IAP_INVALID_TRANSACTION',
-    'Google Play subscription purchase is missing an expiration date',
-  )
-}
-
-function compareGooglePlayLineItemsByExpiryDesc(
-  left: GooglePlaySubscriptionLineItem,
-  right: GooglePlaySubscriptionLineItem,
-) {
-  return (toDateFromIso(right.expiryTime)?.getTime() ?? 0) - (toDateFromIso(left.expiryTime)?.getTime() ?? 0)
+  assertGooglePlayOwnership({ userId, externalAccountId, externalProfileId, existingPurchases })
 }
 
 export async function resolveWebhookUserId({
   db,
   transaction,
 }: {
-  db: BillingDbClient
-  transaction: JWSTransactionDecodedPayload
+  db: DbClient
+  transaction: AppStoreTransaction
 }) {
   if (transaction.appAccountToken) {
     const user = await db.user.findUnique({
@@ -934,98 +739,21 @@ export async function resolveWebhookUserId({
       select: { userId: true },
     })
     if (entitlement) return entitlement.userId
+
+    // Another store can replace the current entitlement. The Apple chain still
+    // belongs to the account recorded by its verified purchase history.
+    const purchase = await db.appStoreTransaction.findFirst({
+      where: { originalTransactionId: transaction.originalTransactionId },
+      select: { userId: true },
+    })
+    if (purchase) return purchase.userId
   }
 
   return null
 }
 
-function resolveSubscriptionState(
-  transaction: JWSTransactionDecodedPayload,
-  renewal: JWSRenewalInfoDecodedPayload | null,
-  status: Status | number | null | undefined,
-  now: Date,
-): SubscriptionState {
-  if (transaction.revocationDate) return SubscriptionState.revoked
-
-  switch (status) {
-    case Status.ACTIVE:
-      return SubscriptionState.active
-    case Status.BILLING_GRACE_PERIOD:
-      return SubscriptionState.billing_grace_period
-    case Status.BILLING_RETRY:
-      return SubscriptionState.billing_retry
-    case Status.EXPIRED:
-      return SubscriptionState.expired
-    case Status.REVOKED:
-      return SubscriptionState.revoked
-  }
-
-  if (renewal?.isInBillingRetryPeriod) return SubscriptionState.billing_retry
-
-  const expiresAt = resolveSubscriptionExpiresAt(transaction, renewal, status)
-  if (!expiresAt || expiresAt.getTime() > now.getTime()) return SubscriptionState.active
-
-  return SubscriptionState.expired
-}
-
-function resolveSubscriptionExpiresAt(
-  transaction: JWSTransactionDecodedPayload,
-  renewal: JWSRenewalInfoDecodedPayload | null,
-  status?: Status | number | null,
-) {
-  const standardExpiresAt = toDate(transaction.expiresDate ?? renewal?.renewalDate)
-  const gracePeriodExpiresAt =
-    status === Status.BILLING_GRACE_PERIOD ? toDate(renewal?.gracePeriodExpiresDate) : null
-
-  if (
-    gracePeriodExpiresAt &&
-    (!standardExpiresAt || gracePeriodExpiresAt.getTime() > standardExpiresAt.getTime())
-  ) {
-    return gracePeriodExpiresAt
-  }
-
-  return standardExpiresAt
-}
-
-function toDate(value: number | null | undefined) {
-  if (!value) return null
-  return new Date(value)
-}
-
-function toDateFromIso(value: string | null | undefined) {
-  if (!value) return null
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? null : date
-}
-
-function formatEnvironment(value: Environment | string | null | undefined) {
-  if (!value) return null
-  return String(value).toLowerCase()
-}
-
-function toAppStoreEnvironment(value: Environment | string | null | undefined) {
-  if (value === Environment.PRODUCTION || value === 'Production' || value === 'production') {
-    return Environment.PRODUCTION
-  }
-
-  return Environment.SANDBOX
-}
-
 function hashToken(value: string) {
   return createHash('sha256').update(value).digest('hex')
-}
-
-function normalizeString(value: string | null | undefined) {
-  const normalized = value?.trim()
-  return normalized ? normalized : null
-}
-
-function normalizeRequiredString(value: string | null | undefined) {
-  const normalized = normalizeString(value)
-  if (!normalized) {
-    throw new BillingFailure('IAP_INVALID_TRANSACTION', 'Google Play purchase is missing required identifiers')
-  }
-  return normalized
 }
 
 function isUniqueConstraintError(error: unknown) {

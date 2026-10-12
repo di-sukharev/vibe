@@ -64,8 +64,7 @@ test('CORS preflight allows the standard mutation methods exposed by the client 
   expect(response.headers.get('access-control-allow-methods')).toContain('PATCH')
 })
 
-// The subscription routes keep their ingress tests in modules/billing/billing-ingress.test.ts,
-// parked with billing.
+// Subscription ingress is covered by modules/billing/billing.integration.test.ts.
 
 // `/api/future-resource` stands for the next feature's routes: they get the limits without an edit.
 test('API writes reject oversized bodies before authentication', async () => {

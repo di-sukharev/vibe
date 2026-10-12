@@ -61,7 +61,7 @@ Keep transitive overrides only while needed. Upgrade the three Prisma packages t
 
 ## Mobile tests
 
-`bun run test:mobile` checks mobile client behavior. Billing suites in `mobile/tests/parked` are excluded while subscriptions are disabled. Backend suites use the `@parked-test` marker for the same purpose. Restore those tests when enabling the feature.
+`bun run test:mobile` checks mobile client behavior. Billing tests run even when billing is disabled. Backend integration tests cover both configuration modes with PostgreSQL. Only social sign-in tests remain parked until that feature is enabled.
 
 ### Mobile E2E
 

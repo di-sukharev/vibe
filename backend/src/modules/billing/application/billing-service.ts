@@ -6,16 +6,28 @@ import type {
   GooglePlayPurchaseReference,
 } from './ports'
 import { BillingFailure } from '../domain/errors'
+import type { GooglePlaySubscriptionPurchase } from '../domain/provider-values'
+import {
+  googlePlayTokenRetentionAfterExpiryMs,
+  resolveGooglePlaySubscriptionState,
+  shouldAcknowledgeGooglePlayPurchase,
+} from '../domain/subscription'
+import { toDateFromIso } from '../domain/purchase-policy'
 
 type ReconcileAttemptState = {
   firstError: unknown
   latestSnapshot: SubscriptionSnapshot | null
 }
 
+const reconciliationBudgetMs = 50_000
+const minimumAppStoreReconcileAttemptBudgetMs = 16_000
 const minimumGooglePlayReconcileAttemptBudgetMs = 31_000
 
 export class BillingService {
-  constructor(private readonly dependencies: BillingServiceDependencies) {}
+  constructor(
+    private readonly dependencies: BillingServiceDependencies,
+    private readonly now: () => Date = () => new Date(),
+  ) {}
 
   getSubscription(userId: string) {
     return this.dependencies.repository.getSubscription(userId)
@@ -53,6 +65,7 @@ export class BillingService {
     userId: string
   }) {
     const state = emptyReconcileState()
+    const deadline = this.now().getTime() + reconciliationBudgetMs
 
     for (const signedTransactionInfo of input.signedTransactions ?? []) {
       await recordAttempt(state, () =>
@@ -64,13 +77,9 @@ export class BillingService {
     }
 
     for (const originalTransactionId of input.originalTransactionIds ?? []) {
+      if (deadline - this.now().getTime() < minimumAppStoreReconcileAttemptBudgetMs) break
       await recordAttempt(state, async () => {
-        const environment = await this.dependencies.repository.getAppStoreEnvironment({
-          originalTransactionId,
-          userId: input.userId,
-        })
         const statusItems = await this.dependencies.appStore.getSubscriptionStatuses({
-          environment,
           transactionId: originalTransactionId,
         })
         return this.applyAppStoreStatusItems(input.userId, statusItems)
@@ -83,13 +92,99 @@ export class BillingService {
     )
   }
 
-  async ingestGooglePlay(input: GooglePlayPurchaseReference & { userId: string }) {
-    const verifiedPurchase = await this.dependencies.googlePlay.verifyPurchase(input.purchaseToken)
-    return this.dependencies.repository.applyGooglePlayPurchase({
+  async acknowledgeGooglePlayPurchase(
+    purchaseId: string,
+    signal?: AbortSignal,
+    verifiedPurchase?: GooglePlaySubscriptionPurchase,
+  ) {
+    if (!this.dependencies.billingEnabled) {
+      throw new BillingFailure(
+        'IAP_NOT_CONFIGURED',
+        'Billing is disabled; acknowledgement will retry',
+      )
+    }
+    signal?.throwIfAborted()
+
+    const stored = await this.dependencies.repository.findGooglePlayPurchaseForAcknowledgement(
+      purchaseId,
+    )
+    if (!stored || stored.acknowledgementState === 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED') return
+
+    let verified: GooglePlaySubscriptionPurchase
+    try {
+      verified = verifiedPurchase ?? await this.dependencies.googlePlay.verifyPurchase(
+        stored.purchaseToken,
+        signal,
+      )
+    } catch (error) {
+      if (
+        isRetiredGooglePlayToken(error) &&
+        stored.expiresAt &&
+        stored.expiresAt.getTime() <= this.now().getTime() - googlePlayTokenRetentionAfterExpiryMs
+      ) {
+        return
+      }
+      throw error
+    }
+
+    if (verified.acknowledgementState !== 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED') {
+      const item = verified.lineItems?.find((line) => line.productId === stored.productId)
+      const state = resolveGooglePlaySubscriptionState(
+        verified.subscriptionState,
+        toDateFromIso(item?.expiryTime),
+        this.now(),
+      )
+      if (!shouldAcknowledgeGooglePlayPurchase({
+        acknowledgementState: verified.acknowledgementState ?? null,
+        state,
+        subscriptionState: verified.subscriptionState,
+      })) {
+        return
+      }
+      await this.dependencies.googlePlay.acknowledgePurchase({
+        productId: stored.productId,
+        purchaseToken: stored.purchaseToken,
+        signal,
+      })
+    }
+    await this.dependencies.repository.markGooglePlayAcknowledged(stored.id)
+  }
+
+  async ingestGooglePlay(input: GooglePlayPurchaseReference & {
+    userId: string
+    refreshStoredPurchase?: boolean
+  }) {
+    const expectedRevision = await this.dependencies.repository.getGooglePlayVerificationRevision(input)
+    let verifiedPurchase: GooglePlaySubscriptionPurchase
+    try {
+      verifiedPurchase = await this.dependencies.googlePlay.verifyPurchase(input.purchaseToken)
+    } catch (error) {
+      if (isRetiredGooglePlayToken(error)) {
+        const retired = await this.dependencies.repository.retireUnavailableGooglePlayPurchase({
+          purchaseToken: input.purchaseToken,
+          userId: input.userId,
+          expectedRevision,
+          now: this.now(),
+        })
+        if (retired) return retired
+      }
+      throw error
+    }
+    const applied = await this.dependencies.repository.applyGooglePlayPurchase({
+      expectedRevision,
       purchase: input,
+      refreshStoredPurchase: input.refreshStoredPurchase,
       userId: input.userId,
       verifiedPurchase,
     })
+    if (applied.acknowledgePurchaseId) {
+      await this.acknowledgeGooglePlayPurchase(
+        applied.acknowledgePurchaseId,
+        undefined,
+        verifiedPurchase,
+      )
+    }
+    return applied.subscription
   }
 
   async reconcileGooglePlay(input: {
@@ -97,8 +192,12 @@ export class BillingService {
     userId: string
   }) {
     const state = emptyReconcileState()
+    const deadline = this.now().getTime() + reconciliationBudgetMs
+    const hasAttemptBudget = () =>
+      deadline - this.now().getTime() >= minimumGooglePlayReconcileAttemptBudgetMs
 
     for (const purchase of input.purchases ?? []) {
+      if (!hasAttemptBudget()) break
       await recordAttempt(state, () =>
         this.ingestGooglePlay({ ...purchase, userId: input.userId }),
       )
@@ -106,8 +205,13 @@ export class BillingService {
 
     if (!state.latestSnapshot && !state.firstError) {
       for (const purchase of await this.dependencies.repository.findGooglePlayPurchases(input.userId)) {
+        if (!hasAttemptBudget()) break
         await recordAttempt(state, () =>
-          this.ingestGooglePlay({ ...purchase, userId: input.userId }),
+          this.ingestGooglePlay({
+            ...purchase,
+            userId: input.userId,
+            refreshStoredPurchase: true,
+          }),
         )
       }
     }
@@ -156,7 +260,7 @@ export class BillingService {
 
       try {
         const { id: _purchaseId, ...reference } = purchase
-        await this.ingestGooglePlay(reference)
+        await this.ingestGooglePlay({ ...reference, refreshStoredPurchase: true })
         succeeded += 1
       } catch {
         failed += 1
@@ -191,8 +295,7 @@ export class BillingService {
     let claim = { claimToken: webhook.claimToken, id: webhook.id }
 
     try {
-      const verifiedNotification = await this.dependencies.appStore.verifyNotification(signedPayload)
-      const details = this.dependencies.appStore.describeNotification(verifiedNotification)
+      const details = await this.dependencies.appStore.verifyNotification(signedPayload)
       const verifiedTransaction = details.signedTransactionInfo
         ? await this.dependencies.appStore.verifyTransaction(details.signedTransactionInfo)
         : null
@@ -234,6 +337,7 @@ export class BillingService {
       }
 
       const subscription = await this.dependencies.repository.applyAppStoreTransaction({
+        notificationSignedDate: details.signedDate,
         signedRenewalInfo: details.signedRenewalInfo,
         signedTransactionInfo: details.signedTransactionInfo,
         status: details.status,
@@ -300,4 +404,10 @@ async function resolveReconcileResult(
   if (state.latestSnapshot) return state.latestSnapshot
   if (state.firstError) throw state.firstError
   return fallback()
+}
+
+function isRetiredGooglePlayToken(error: unknown) {
+  if (!(error instanceof BillingFailure) || error.code !== 'IAP_INVALID_TRANSACTION') return false
+  const status = (error.details as { providerStatus?: number } | undefined)?.providerStatus
+  return status === 410
 }

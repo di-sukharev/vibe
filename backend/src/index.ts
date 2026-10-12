@@ -4,7 +4,6 @@ import { shutdownBackend } from './shutdown'
 
 const runtime = createBackendRuntime()
 const app = createApp({
-  backgroundTasks: runtime.backgroundTasks,
   emailDelivery: runtime.emailDelivery,
   env: runtime.env,
   prisma: runtime.prisma,
@@ -13,6 +12,8 @@ const app = createApp({
 
 const server = Bun.serve({
   port: runtime.env.PORT,
+  // Let bounded provider reconciliation finish before closing an idle response.
+  idleTimeout: 60,
   fetch: app.fetch,
 })
 

@@ -1,12 +1,5 @@
-// @parked-test
-//
-// Subscriptions ship switched off: the tables are commented out in prisma/schema/billing.prisma,
-// the routes are not mounted in src/app.ts, and this module is typed through hand-written
-// stand-ins. Until docs/IAP.md is followed and billing is turned on, these suites assert a
-// feature nobody runs, so they are parked rather than deleted - remove the marker above and they
-// come back with the capability.
-
 import { expect, test } from 'bun:test'
+import { generateKeyPairSync } from 'node:crypto'
 
 import { loadEnv } from '../../../env'
 import { createGooglePlaySubscriptionVerifier } from './google-play-verifier'
@@ -28,24 +21,26 @@ const baseEnv = loadEnv({
 type RequestInput = {
   data?: unknown
   method: 'GET' | 'POST'
-  timeout?: number
+  signal?: AbortSignal
   url: string
 }
 
 test('Google Play verifier calls subscriptionsv2 get and subscription acknowledge endpoints', async () => {
   const calls: RequestInput[] = []
   const verifier = createGooglePlaySubscriptionVerifier(baseEnv, {
-    async request<T>(input: RequestInput) {
-      calls.push(input)
-      return {
-        data: (input.method === 'GET'
-          ? {
-              acknowledgementState: 'ACKNOWLEDGEMENT_STATE_PENDING',
-              latestOrderId: 'GPA.1234-5678-9012-34567',
-              subscriptionState: 'SUBSCRIPTION_STATE_ACTIVE',
-            }
-          : {}) as T,
-      }
+    requester: {
+      async request<T>(input: RequestInput) {
+        calls.push(input)
+        return {
+          data: (input.method === 'GET'
+            ? {
+                acknowledgementState: 'ACKNOWLEDGEMENT_STATE_PENDING',
+                latestOrderId: 'GPA.1234-5678-9012-34567',
+                subscriptionState: 'SUBSCRIPTION_STATE_ACTIVE',
+              }
+            : {}) as T,
+        }
+      },
     },
   })
 
@@ -59,13 +54,13 @@ test('Google Play verifier calls subscriptionsv2 get and subscription acknowledg
   expect(calls).toEqual([
     {
       method: 'GET',
-      timeout: 15_000,
+      signal: expect.any(AbortSignal),
       url: 'https://androidpublisher.googleapis.com/androidpublisher/v3/applications/com.example.app/purchases/subscriptionsv2/tokens/purchase%20token%2Fwith%2Fslash',
     },
     {
       data: {},
       method: 'POST',
-      timeout: 15_000,
+      signal: expect.any(AbortSignal),
       url: 'https://androidpublisher.googleapis.com/androidpublisher/v3/applications/com.example.app/purchases/subscriptions/premium.subscription/tokens/purchase%20token%2Fwith%2Fslash:acknowledge',
     },
   ])
@@ -74,8 +69,10 @@ test('Google Play verifier calls subscriptionsv2 get and subscription acknowledg
 test('Google Play verifier maps invalid purchase and authorization API failures', async () => {
   await expect(
     createGooglePlaySubscriptionVerifier(baseEnv, {
-      async request() {
-        throw { response: { status: 404 } }
+      requester: {
+        async request() {
+          throw { response: { status: 404 } }
+        },
       },
     }).getSubscriptionPurchase({ purchaseToken: 'missing-token' }),
   ).rejects.toMatchObject({
@@ -84,11 +81,64 @@ test('Google Play verifier maps invalid purchase and authorization API failures'
 
   await expect(
     createGooglePlaySubscriptionVerifier(baseEnv, {
-      async request() {
-        throw { response: { status: 403 } }
+      requester: {
+        async request() {
+          throw { response: { status: 403 } }
+        },
       },
     }).acknowledgeSubscription({ productId: 'premium', purchaseToken: 'purchase-token' }),
   ).rejects.toMatchObject({
     code: 'IAP_NOT_CONFIGURED',
   })
+})
+
+test('Google Play verifier cancels a stalled OAuth refresh and can retry', async () => {
+  const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
+  const env = {
+    ...baseEnv,
+    GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64: JSON.stringify({
+      client_email: 'iap@example.com',
+      private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }),
+    }),
+  }
+  let stall: 'oauth' | 'acknowledge' | null = 'oauth'
+  let aborted = false
+  let resourceRequests = 0
+  const verifier = createGooglePlaySubscriptionVerifier(env, {
+    requestTimeoutMs: 40,
+    fetchImplementation: Object.assign(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const oauth = String(url).includes('oauth2.googleapis.com/token')
+      if ((oauth && stall === 'oauth') || (!oauth && stall === 'acknowledge')) {
+        return new Promise<Response>((_resolve, reject) => {
+          const fallback = setTimeout(() => reject(new Error('Provider stalled')), 300)
+          init?.signal?.addEventListener('abort', () => {
+            aborted = true
+            clearTimeout(fallback)
+            reject(init.signal?.reason)
+          }, { once: true })
+        })
+      }
+      if (oauth) {
+        return Response.json({ access_token: 'external-test-token', expires_in: 3600 })
+      }
+      resourceRequests += 1
+      return Response.json({ subscriptionState: 'SUBSCRIPTION_STATE_ACTIVE' })
+    }, { preconnect() {} }),
+  })
+
+  await expect(verifier.getSubscriptionPurchase({ purchaseToken: 'test-purchase' }))
+    .rejects.toMatchObject({ code: 'IAP_NOT_CONFIGURED' })
+  expect(aborted).toBe(true)
+  expect(resourceRequests).toBe(0)
+
+  stall = null
+  const purchase = await verifier.getSubscriptionPurchase({ purchaseToken: 'test-purchase' })
+  expect(purchase.subscriptionState).toBe('SUBSCRIPTION_STATE_ACTIVE')
+  expect(resourceRequests).toBe(1)
+
+  stall = 'acknowledge'
+  aborted = false
+  await expect(verifier.acknowledgeSubscription({ productId: 'premium', purchaseToken: 'test-purchase' }))
+    .rejects.toMatchObject({ code: 'IAP_NOT_CONFIGURED' })
+  expect(aborted).toBe(true)
 })

@@ -32,6 +32,8 @@ Add a handler to `taskHandlers`. Load its implementation inside `run`. Enqueue t
 
 Validate the JSON payload. Make repeated execution harmless. Pass `signal` to provider calls and keep their deadlines below the stale-lease timeout. Throw `TerminalTaskError` only when retry cannot help. Compensate before a terminal failure and on the final attempt.
 
+Handlers use five attempts by default. Set `maxAttempts` to a number for another limit or to `null` to retry transient failures until success. Object deletion uses `null`: the task is its only remaining cleanup record. Invalid payloads still fail immediately. Monitor its backlog during storage outages.
+
 The pair `(type, dedupeKey)` is unique until retention removes the row. Use a permanent product record when duplicate prevention must outlive that retention. Keep personal data out of errors because `last_error` outlives the payload.
 
 Tests in `backend/src/outbox/outbox.integration.test.ts` cover claims and retries. Password-reset handlers show provider failure and compensation behavior.

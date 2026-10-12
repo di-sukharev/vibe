@@ -12,13 +12,14 @@ locals {
 }
 
 resource "yandex_serverless_container" "api" {
-  folder_id          = var.folder_id
-  name               = "${local.name_prefix}-api"
-  memory             = var.api_memory_mb
-  cores              = 1
-  core_fraction      = 100
-  concurrency        = 1
-  execution_timeout  = "30s"
+  folder_id     = var.folder_id
+  name          = "${local.name_prefix}-api"
+  memory        = var.api_memory_mb
+  cores         = 1
+  core_fraction = 100
+  concurrency   = 1
+  # Allow the 60-second HTTP idle deadline plus container initialization.
+  execution_timeout  = "90s"
   service_account_id = var.runtime_service_account
 
   runtime { type = "http" }

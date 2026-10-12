@@ -52,10 +52,8 @@ describe('backendTestFiles', () => {
   })
 
   test('switched-off capabilities are parked exactly while they are off, and nothing else is', () => {
-    // Discovery would otherwise run billing suites against a database with no billing tables, and
-    // social sign-in suites against an unmounted route. Each rule reads the switch itself rather
-    // than a fixed list, so it holds while the capability is off, switched on, or removed entirely
-    // (docs/IAP.md, docs/SOCIAL_AUTH.md).
+    // Check schema and routes rather than a fixed list. Billing retains its models while disabled;
+    // social sign-in remains unmounted. Removal of a capability must also remove or park its tests.
     const schemaPath = resolve(backendRoot, 'prisma/schema/billing.prisma')
     const billingIsOff =
       existsSync(schemaPath) && !/^\s*model\s/m.test(readFileSync(schemaPath, 'utf8'))

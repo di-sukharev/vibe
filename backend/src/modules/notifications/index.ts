@@ -1,3 +1,5 @@
+import { maintainPushRegistrations } from './application/maintenance'
+import { createPushMaintenanceStore } from './infrastructure/maintenance-store'
 import type { DbClient } from '../../db'
 import type { AppEnv } from '../../env'
 import type { AuthenticatedPrincipal, LogoutCleanup } from '../auth'
@@ -47,3 +49,7 @@ export type {
   ProcessPushOutboxMetrics,
   RedactTerminalNotificationDataOptions,
 } from './application/ports'
+
+export function cleanupPushRegistrations(input: { db: DbClient; env: AppEnv }, now: Date) {
+  return maintainPushRegistrations(createPushMaintenanceStore(input.db), now, input.env.SESSION_ABSOLUTE_TTL_DAYS)
+}

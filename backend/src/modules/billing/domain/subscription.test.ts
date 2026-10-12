@@ -1,17 +1,8 @@
-// @parked-test
-//
-// Subscriptions ship switched off: the tables are commented out in prisma/schema/billing.prisma,
-// the routes are not mounted in src/app.ts, and this module is typed through hand-written
-// stand-ins. Until docs/IAP.md is followed and billing is turned on, these suites assert a
-// feature nobody runs, so they are parked rather than deleted - remove the marker above and they
-// come back with the capability.
-
 import { describe, expect, test } from 'bun:test'
 
 import {
   effectiveSubscriptionState,
   resolveGooglePlaySubscriptionState,
-  shouldUpdateEntitlement,
 } from './subscription'
 
 const now = new Date('2026-07-10T12:00:00.000Z')
@@ -49,30 +40,4 @@ describe('billing subscription decisions', () => {
     ).toBe('expired')
   })
 
-  test('keeps a fresh active entitlement over a stale unrelated transaction', () => {
-    expect(
-      shouldUpdateEntitlement({
-        existing: {
-          platform: 'ios',
-          state: 'active',
-          productId: 'premium',
-          originalTransactionId: 'original-new',
-          transactionId: 'transaction-new',
-          expiresAt: new Date('2026-08-10T00:00:00.000Z'),
-          willAutoRenew: true,
-          updatedAt: now,
-        },
-        incoming: {
-          platform: 'android',
-          state: 'expired',
-          originalTransactionId: null,
-          transactionId: 'transaction-old',
-          purchaseDate: new Date('2026-06-01T00:00:00.000Z'),
-          expiresAt: new Date('2026-07-01T00:00:00.000Z'),
-          revokedAt: null,
-        },
-        now,
-      }),
-    ).toBe(false)
-  })
 })

@@ -7,7 +7,6 @@ import { except } from 'hono/combine'
 import { cors } from 'hono/cors'
 import { secureHeaders } from 'hono/secure-headers'
 
-import { createBackgroundTasks, type TaskDeferrer } from './background-tasks'
 import type { DbClient } from './db'
 import { disabledEmailDelivery, type EmailDelivery } from './email'
 import type { AppEnv } from './env'
@@ -15,12 +14,7 @@ import { errorResponse, handleError, validationErrorHook } from './http/errors'
 import { createReadinessProbe } from './http/readiness'
 import { createFixedWindowRateLimit, createIngressSecurity } from './http/security'
 import { createAuthModule, type AuthHttpEnv } from './modules/auth'
-// Subscriptions are turned off; see docs/IAP.md before uncommenting.
-// import {
-//   createBillingModule,
-//   type AppStoreSubscriptionVerifier,
-//   type GooglePlaySubscriptionVerifier,
-// } from './modules/billing'
+import { createBillingModule, type AppStoreSubscriptionVerifier, type GooglePlaySubscriptionVerifier } from './modules/billing'
 import { createNotificationsModule } from './modules/notifications'
 import { createUploadsModule } from './modules/uploads'
 import { createUsersModule } from './modules/users'
@@ -33,12 +27,10 @@ import {
 } from './storage'
 
 type CreateAppOptions = {
-  backgroundTasks?: TaskDeferrer
   emailDelivery?: EmailDelivery
   env: AppEnv
-  // Uncomment together with the billing module:
-  // appStoreIapVerifier?: AppStoreSubscriptionVerifier
-  // googlePlayIapVerifier?: GooglePlaySubscriptionVerifier
+  appStoreIapVerifier?: AppStoreSubscriptionVerifier
+  googlePlayIapVerifier?: GooglePlaySubscriptionVerifier
   prisma: DbClient
   /**
    * Storage is never absent: the filesystem driver always works. Injectable so tests can point
@@ -47,26 +39,18 @@ type CreateAppOptions = {
   privateStorage?: PrivateStorageRuntime
 }
 
-// Defaults for the App Store webhook ingress; uncomment with the billing routes.
-// const defaultWebhookBodyLimitBytes = 256 * 1024
-// const defaultWebhookRateLimitMax = 600
-// const defaultWebhookRateLimitWindowSeconds = 60
-
 export function createApp({
-  // appStoreIapVerifier,
-  backgroundTasks = createBackgroundTasks(),
+  appStoreIapVerifier,
   emailDelivery = disabledEmailDelivery,
   env,
-  // googlePlayIapVerifier,
+  googlePlayIapVerifier,
   prisma,
   privateStorage,
 }: CreateAppOptions) {
-  // const billing = createBillingModule({
-  //   appStoreVerifier: appStoreIapVerifier,
-  //   db: prisma,
-  //   env,
-  //   googlePlayVerifier: googlePlayIapVerifier,
-  // })
+  const billing = env.BILLING_ENABLED ? createBillingModule({
+    appStoreVerifier: appStoreIapVerifier, db: prisma, env,
+    googlePlayVerifier: googlePlayIapVerifier,
+  }) : null
   const storage = privateStorage ?? createPrivateStorage(env)
   const notifications = createNotificationsModule({ db: prisma, env })
   const auth = createAuthModule({
@@ -92,7 +76,6 @@ export function createApp({
     requireAuth: auth.requireAuth,
   })
   const uploads = createUploadsModule({
-    backgroundTasks,
     db: prisma,
     requireAuth: auth.requireAuth,
     storage: storage.storage,
@@ -147,35 +130,21 @@ export function createApp({
   })) {
     app.use('/api/notifications/*', middleware)
   }
-  // Ingress budget for the subscription routes, uncomment together with them. Without a `store`
-  // they count in process memory whatever RATE_LIMIT_STORE says; add their policies to
-  // RateLimitPolicy (rate-limit/port.ts) and pass `store: rateLimitStore(...)` when enabling.
-  // for (const middleware of createIngressSecurity({
-  //   ...publicWriteSecurity,
-  //   bodyLimitBytes: env.IAP_BODY_LIMIT_BYTES,
-  //   rateLimitMax: env.IAP_RATE_LIMIT_MAX,
-  //   rateLimitWindowSeconds: env.IAP_RATE_LIMIT_WINDOW_SECONDS,
-  // })) {
-  //   app.use('/api/iap/*', middleware)
-  // }
-  // // The only webhook producer today is the App Store, so this group goes with billing.
-  // for (const middleware of createIngressSecurity({
-  //   ...publicWriteSecurity,
-  //   bodyLimitBytes: env.WEBHOOK_BODY_LIMIT_BYTES ?? defaultWebhookBodyLimitBytes,
-  //   rateLimitMax: env.WEBHOOK_RATE_LIMIT_MAX ?? defaultWebhookRateLimitMax,
-  //   rateLimitWindowSeconds:
-  //     env.WEBHOOK_RATE_LIMIT_WINDOW_SECONDS ?? defaultWebhookRateLimitWindowSeconds,
-  // })) {
-  //   app.use('/api/webhooks/*', middleware)
-  // }
-  // Every other API route shares the account budget, so a new route is limited without an edit.
-  const routesWithOwnBudget = [
-    '/api/auth/*',
-    '/api/notifications/*',
-    // Uncomment together with the subscription budgets above:
-    // '/api/iap/*',
-    // '/api/webhooks/*',
-  ]
+  const routesWithOwnBudget = ['/api/auth/*', '/api/notifications/*']
+  if (billing) {
+    for (const middleware of createIngressSecurity({
+      ...publicWriteSecurity, bodyLimitBytes: env.IAP_BODY_LIMIT_BYTES,
+      rateLimitMax: env.IAP_RATE_LIMIT_MAX, rateLimitWindowSeconds: env.IAP_RATE_LIMIT_WINDOW_SECONDS,
+      store: rateLimitStore('iap'),
+    })) app.use('/api/iap/*', middleware)
+    for (const middleware of createIngressSecurity({
+      ...publicWriteSecurity, bodyLimitBytes: env.WEBHOOK_BODY_LIMIT_BYTES ?? 256 * 1024,
+      rateLimitMax: env.WEBHOOK_RATE_LIMIT_MAX ?? 600,
+      rateLimitWindowSeconds: env.WEBHOOK_RATE_LIMIT_WINDOW_SECONDS ?? 60,
+      store: rateLimitStore('webhooks'),
+    })) app.use('/api/webhooks/*', middleware)
+    routesWithOwnBudget.push('/api/iap/*', '/api/webhooks/*')
+  }
   app.use(
     '/api/*',
     except(
@@ -218,10 +187,10 @@ export function createApp({
   app.route('/api/auth', auth.routes)
   app.route('/api/users', users.userRoutes)
   app.route('/api/admin', users.adminRoutes)
-  // app.route('/api/iap', billing.createRoutes(auth.authenticateAccessToken))
+  if (billing) app.route('/api/iap', billing.createRoutes(auth.authenticateAccessToken))
   app.route('/api/notifications', notifications.createRoutes(auth.authenticateAccessToken))
   app.route('/api/uploads', uploads.routes)
-  // app.route('/api/webhooks', billing.webhookRoutes)
+  if (billing) app.route('/api/webhooks', billing.webhookRoutes)
 
   // Only the filesystem driver needs the backend to serve the URLs it signs. With an S3 driver
   // the browser uploads straight to the bucket and there is nothing to mount here.

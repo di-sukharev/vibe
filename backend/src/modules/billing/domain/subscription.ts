@@ -2,6 +2,8 @@ import type { SubscriptionSnapshot } from '@web-app-demo/contracts'
 
 export type SubscriptionStateValue = SubscriptionSnapshot['state']
 
+export const googlePlayTokenRetentionAfterExpiryMs = 60 * 24 * 60 * 60 * 1000
+
 export type EntitlementRecord = {
   platform: 'android' | 'ios' | null
   state: SubscriptionStateValue
@@ -11,16 +13,62 @@ export type EntitlementRecord = {
   expiresAt: Date | null
   willAutoRenew: boolean | null
   updatedAt: Date
+  googlePlayPurchaseId?: string | null
+  appStoreSignedAt?: Date | null
 }
 
-export type IncomingEntitlement = {
+export type SubscriptionSource = EntitlementRecord & {
   platform: 'android' | 'ios'
-  transactionId: string | null
-  originalTransactionId: string | null
   purchaseDate: Date | null
-  expiresAt: Date | null
   revokedAt: Date | null
-  state: SubscriptionStateValue
+  environment: string | null
+  webOrderLineItemId: string | null
+}
+
+/** Select a paid period per Apple chain before comparing independent subscriptions. */
+export function selectSubscriptionSource(
+  sources: SubscriptionSource[],
+  current: EntitlementRecord | null,
+  now: Date,
+): SubscriptionSource | null {
+  const appleChains = new Map<string, SubscriptionSource>()
+  const candidates: SubscriptionSource[] = []
+  for (const source of sources) {
+    if (source.platform === 'android') {
+      candidates.push(source)
+      continue
+    }
+    const key = source.originalTransactionId!
+    const previous = appleChains.get(key)
+    if (!previous || isLaterAppStorePeriod(previous, source, now)) {
+      appleChains.set(key, source)
+    }
+  }
+  candidates.push(...appleChains.values())
+  const isCurrent = (source: SubscriptionSource) => source.platform === current?.platform && (
+    source.platform === 'android'
+      ? source.googlePlayPurchaseId === current.googlePlayPurchaseId
+      : source.transactionId === current.transactionId
+  )
+  let selected = candidates.find(isCurrent) ?? null
+  for (const candidate of candidates) {
+    if (!selected) {
+      selected = candidate
+      continue
+    }
+    const selectedActive = isActiveSubscriptionState(selected.state, selected.expiresAt, now)
+    const candidateActive = isActiveSubscriptionState(candidate.state, candidate.expiresAt, now)
+    if (selectedActive !== candidateActive) {
+      if (candidateActive) selected = candidate
+      continue
+    }
+    // Keep the current inactive source for diagnostics until another source grants access.
+    if (!candidateActive && isCurrent(selected)) continue
+    if ((candidate.expiresAt?.getTime() ?? 0) > (selected.expiresAt?.getTime() ?? 0)) {
+      selected = candidate
+    }
+  }
+  return selected
 }
 
 export function inactiveSubscriptionSnapshot(): SubscriptionSnapshot {
@@ -71,31 +119,34 @@ export function effectiveSubscriptionState(
   return entitlement.state
 }
 
-export function shouldUpdateEntitlement(input: {
-  existing: EntitlementRecord
-  incoming: IncomingEntitlement
-  now: Date
-}) {
-  const { existing, incoming, now } = input
-  if (!existing.transactionId) return true
-  if (incoming.transactionId && existing.transactionId === incoming.transactionId) return true
+function isLaterAppStorePeriod(
+  existing: SubscriptionSource,
+  incoming: SubscriptionSource,
+  now: Date,
+) {
+  // An upgrade can replace an annual period with a shorter monthly period.
+  if (existing.purchaseDate && incoming.purchaseDate &&
+    incoming.purchaseDate.getTime() !== existing.purchaseDate.getTime()) {
+    return incoming.purchaseDate > existing.purchaseDate
+  }
+  if (existing.appStoreSignedAt && incoming.appStoreSignedAt &&
+    incoming.appStoreSignedAt < existing.appStoreSignedAt) return false
 
-  const sameOriginalTransaction =
-    Boolean(incoming.originalTransactionId) &&
-    existing.originalTransactionId === incoming.originalTransactionId
-  if ((incoming.revokedAt || incoming.state === 'revoked') && sameOriginalTransaction) return true
+  // A refund affects its paid period. Older refunded periods cannot displace
+  // a later period when the store did not provide comparable purchase dates.
+  if (incoming.revokedAt) {
+    if (existing.purchaseDate && incoming.purchaseDate) {
+      return incoming.purchaseDate >= existing.purchaseDate
+    }
+    return !(existing.expiresAt && incoming.expiresAt && incoming.expiresAt < existing.expiresAt)
+  }
+  if (incoming.state === 'revoked') return true
 
   const existingActive = isActiveSubscriptionState(existing.state, existing.expiresAt, now)
   const incomingActive = isActiveSubscriptionState(incoming.state, incoming.expiresAt, now)
-  if (!incomingActive && existingActive && !sameOriginalTransaction) return false
   if (incomingActive && !existingActive) return true
-
-  const existingFreshness = existing.expiresAt?.getTime() ?? 0
-  const incomingFreshness =
-    incoming.expiresAt?.getTime() ?? incoming.purchaseDate?.getTime() ?? 0
-  if (incomingFreshness > existingFreshness) return true
-  if (incomingFreshness < existingFreshness) return false
-  return incomingActive || sameOriginalTransaction || existing.platform === incoming.platform
+  return (incoming.expiresAt?.getTime() ?? incoming.purchaseDate?.getTime() ?? 0) >=
+    (existing.expiresAt?.getTime() ?? 0)
 }
 
 export function resolveGooglePlaySubscriptionState(

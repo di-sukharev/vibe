@@ -11,6 +11,7 @@ import {
   userAuthorityTransitionTransactionOptions,
 } from '../../db'
 import { loadEnv } from '../../env'
+import { cleanupAuthState } from '../auth'
 import {
   assertLoginCapableAdmin,
   bootstrapAdmin,
@@ -52,6 +53,23 @@ describe('users and admin API integration', () => {
 
   afterAll(async () => {
     await prisma.$disconnect()
+  })
+
+  test('auth maintenance preserves retention boundaries and removes expired reset tokens', async () => {
+    const session = await register('retention@example.com')
+    const now = new Date()
+    const retentionMs = env.SESSION_RETENTION_DAYS * 86_400_000
+    const expiresAt = new Date(now.getTime() - retentionMs)
+    await prisma.authSession.updateMany({ where: { userId: session.user.id }, data: { expiresAt } })
+    await prisma.passwordResetToken.create({ data: {
+      userId: session.user.id, tokenHash: 'retention-test', expiresAt: now,
+    } })
+    expect(await cleanupAuthState({ prisma, env }, now)).toEqual({
+      sessionsDeleted: 0, passwordResetTokensDeleted: 0,
+    })
+    expect(await cleanupAuthState({ prisma, env }, new Date(now.getTime() + 1))).toEqual({
+      sessionsDeleted: 1, passwordResetTokensDeleted: 1,
+    })
   })
 
   test('registers users with the user role and persists profile updates', async () => {

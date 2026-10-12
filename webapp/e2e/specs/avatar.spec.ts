@@ -53,3 +53,46 @@ test('uploads an avatar, keeps it across a reload, replaces it, and removes it',
   await expect(page.getByTestId('avatar-remove')).toHaveCount(0)
   await expect(avatarImage(page)).toHaveCount(0)
 })
+
+test('avatar query exposes loading, failure, and retry', async ({ page }) => {
+  await signUp(page, uniqueEmail('avatar-query'))
+  let release = () => {}
+  const pending = new Promise<void>((resolve) => { release = resolve })
+  let fail = true
+  await page.route('**/api/uploads/avatar', async (route) => {
+    if (route.request().method() !== 'GET') return route.continue()
+    await pending
+    if (fail) return route.fulfill({ status: 503, json: { error: { code: 'UNAVAILABLE', message: 'Unavailable' } } })
+    return route.continue()
+  })
+  await page.getByTestId('nav-link-app-profile').click()
+  await expect(page.getByTestId('avatar-loading')).toBeVisible()
+  release()
+  await expect(page.getByTestId('avatar-query-error')).toBeVisible()
+  fail = false
+  await page.getByTestId('avatar-query-retry').click()
+  await expect(page.getByTestId('avatar-query-error')).toHaveCount(0)
+  await expect(page.getByTestId('avatar-fallback')).toBeVisible()
+})
+
+test('avatar query keeps a cached preview when background refresh fails', async ({ page }) => {
+  await signUp(page, uniqueEmail('avatar-cached'))
+  await page.getByTestId('nav-link-app-profile').click()
+  await expect(page.getByTestId('avatar-fallback')).toBeVisible()
+  await pickFile(page, pngImage)
+  await expect(avatarImage(page)).toBeVisible()
+  await page.clock.install()
+  await page.route('**/api/uploads/avatar', async (route) => {
+    if (route.request().method() !== 'GET') return route.continue()
+    return route.fulfill({ status: 503, json: { error: { code: 'UNAVAILABLE', message: 'Unavailable' } } })
+  })
+  await page.clock.fastForward(65_000)
+  await page.clock.resume()
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event('offline'))
+    window.dispatchEvent(new Event('online'))
+  })
+  await expect(page.getByTestId('avatar-query-error')).toBeVisible()
+  await expect(avatarImage(page)).toBeVisible()
+  await expect(page.getByTestId('avatar-remove')).toBeEnabled()
+})

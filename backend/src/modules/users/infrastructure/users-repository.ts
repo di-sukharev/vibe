@@ -18,7 +18,6 @@ import type {
   ProfileWriter,
   UserRoleUpdater,
 } from '../application/ports'
-import { UsersFailure } from '../domain/errors'
 
 const userSummarySelect = {
   id: true,
@@ -81,58 +80,28 @@ export function createPrismaUsersRepository(db: DbClient): UsersRepository {
       }
     },
 
-    updateRole(input) {
+    withRoleMutation(targetUserId, run) {
       return db.$transaction(async (tx) => {
-        await acquirePushTokenUserLock(tx, input.targetUserId)
+        await acquirePushTokenUserLock(tx, targetUserId)
         await acquireUserRoleMutationLock(tx)
-        await acquireUserAuthenticationAuthorityLock(tx, input.targetUserId)
-
-        const actor = await tx.user.findUnique({
-          where: { id: input.actorUserId },
-          select: { id: true, role: true },
+        await acquireUserAuthenticationAuthorityLock(tx, targetUserId)
+        return run({
+          findUser: (id) => tx.user.findUnique({ where: { id }, select: userSummarySelect }),
+          countAdmins: () => tx.user.count({ where: { role: 'admin' } }),
+          async updateRoleAndRevoke(userId, role, now) {
+            const updated = await tx.user.update({
+              where: { id: userId }, data: { role }, select: userSummarySelect,
+            })
+            await tx.authSession.updateMany({
+              where: { userId, revokedAt: null }, data: { revokedAt: now },
+            })
+            await tx.pushToken.deleteMany({ where: { userId } })
+            await tx.passwordResetToken.updateMany({
+              where: { userId, usedAt: null }, data: { usedAt: now },
+            })
+            return toAdminUserSummary(updated)
+          },
         })
-        if (actor?.role !== 'admin') {
-          throw new UsersFailure('forbidden', 'Administrator access is required')
-        }
-
-        const target = await tx.user.findUnique({
-          where: { id: input.targetUserId },
-          select: userSummarySelect,
-        })
-        if (!target) {
-          throw new UsersFailure('not_found', 'User not found')
-        }
-        if (target.role === input.role) {
-          return toAdminUserSummary(target)
-        }
-        if (target.id === actor.id && input.role !== 'admin') {
-          throw new UsersFailure('role_conflict', 'You cannot remove your own administrator role')
-        }
-
-        if (target.role === 'admin' && input.role === 'user') {
-          const adminCount = await tx.user.count({ where: { role: 'admin' } })
-          if (adminCount <= 1) {
-            throw new UsersFailure('role_conflict', 'At least one administrator must remain')
-          }
-        }
-
-        const updated = await tx.user.update({
-          where: { id: target.id },
-          data: { role: input.role },
-          select: userSummarySelect,
-        })
-        await tx.authSession.updateMany({
-          where: { userId: target.id, revokedAt: null },
-          data: { revokedAt: input.now },
-        })
-        await tx.pushToken.deleteMany({
-          where: { userId: target.id },
-        })
-        await tx.passwordResetToken.updateMany({
-          where: { userId: target.id, usedAt: null },
-          data: { usedAt: input.now },
-        })
-        return toAdminUserSummary(updated)
       }, userAuthorityTransitionTransactionOptions)
     },
   }

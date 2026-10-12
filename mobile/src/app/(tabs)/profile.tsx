@@ -9,16 +9,12 @@ import {
   useAuth,
 } from '@/features/auth';
 import { avatarImageSource, AvatarControls, useAvatar } from '@/features/avatar';
-// Subscriptions are turned off; see docs/IAP.md before uncommenting.
-// import {
-//   SubscriptionSummary,
-//   useSubscriptionIap,
-// } from '@/features/billing';
+import { SubscriptionSummary, useSubscriptionIap } from '@/features/billing';
 
 export default function ProfileScreen() {
   const auth = useAuth();
   const avatar = useAvatar();
-  // const iap = useSubscriptionIap();
+  const iap = useSubscriptionIap();
 
   // Kept stable across renders on purpose. On web this object identity is what expo-image keys
   // its fetch effect on, so a fresh one per render would re-download the signed photo on every
@@ -49,16 +45,14 @@ export default function ProfileScreen() {
 
       <AuthSessionErrorNotice />
 
-      {/* Uncomment with the billing provider (docs/IAP.md). The optional chaining is required:
-          useSubscriptionIap() returns null whenever IapProvider is not mounted.
-      <SubscriptionSummary
-        error={iap?.error ?? null}
-        isConnected={Boolean(iap?.isConnected)}
-        isManaging={Boolean(iap?.isManagingSubscriptions)}
-        isSupported={Boolean(iap?.isSupported)}
-        onManage={() => void iap?.manageSubscriptions()}
-        subscription={iap?.subscription ?? null}
-      /> */}
+      {iap && <SubscriptionSummary
+        error={iap.error}
+        isConnected={iap.isConnected}
+        isManaging={iap.isManagingSubscriptions}
+        isSupported={iap.isSupported}
+        onManage={() => void iap.manageSubscriptions()}
+        subscription={iap.subscription}
+      />}
 
       <SessionControls
         isLoggingOut={auth.isTransitioning}

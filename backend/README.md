@@ -79,4 +79,4 @@ The notifications module owns installation registration and the durable push que
 
 Keep push locks in the order used by the implementation: user, token, then installation. Sending rechecks active session ownership while holding these locks. Account and role changes must preserve that synchronization. Token-only compatibility routes remain until supported older applications stop using them.
 
-Apple and Google sign-in and store subscriptions are implemented but not mounted. Enable or remove them through [Social sign-in](../docs/SOCIAL_AUTH.md) and [Subscriptions](../docs/IAP.md).
+Store subscriptions are configured with `BILLING_ENABLED` and remain disabled by default. Apple and Google sign-in remain unmounted. Enable or remove them through [Social sign-in](../docs/SOCIAL_AUTH.md) and [Subscriptions](../docs/IAP.md).

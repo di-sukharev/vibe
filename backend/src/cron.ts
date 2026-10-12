@@ -1,5 +1,7 @@
 import { createBackgroundRuntime, type BackendRuntime } from './runtime'
 import { backgroundJobNames, isBackgroundJobName } from './jobs'
+import { defaultJobLockTimeoutMs } from './db'
+import scheduleDefinitions from './job-schedules.json' with { type: 'json' }
 import {
   runLockedBackgroundJob,
   schedules,
@@ -91,8 +93,12 @@ export function startProviderJobServer(jobName: string) {
     )
   }
 
+  const timeoutSeconds = scheduleDefinitions.find((entry) => entry.job === jobName)
+    ?.yandexExecutionTimeoutSeconds ?? defaultJobLockTimeoutMs / 1000
   const server = Bun.serve({
     port: Number(Bun.env.PORT ?? 8080),
+    // Bun permits at most 255 seconds. Longer jobs use the provider's finite execution deadline.
+    idleTimeout: timeoutSeconds <= 255 ? timeoutSeconds : 0,
     fetch: (request) => handleProviderJobRequest(request, jobName),
   })
   console.log(`Provider timer for ${jobName} listening on ${server.url}`)

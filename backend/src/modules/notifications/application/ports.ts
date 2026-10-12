@@ -91,3 +91,7 @@ export type NotificationServiceDependencies = {
   receipts: PushReceipts
   tokens: PushTokenRepository
 }
+
+export type PushMaintenanceStore = {
+  cleanup(now: Date, absoluteSessionNotBefore: Date): Promise<void>
+}

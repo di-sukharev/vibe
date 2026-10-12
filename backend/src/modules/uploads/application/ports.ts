@@ -34,38 +34,17 @@ export type StartAvatarUploadInput = {
 }
 
 export type AvatarRepository = {
-  /**
-   * Replaces any upload already in flight for this user and returns the new pending row, plus
-   * the object key that was abandoned so the caller can clean it up.
-   */
-  startUpload(input: StartAvatarUploadInput): Promise<{
-    pending: AvatarRecord
-    replacedObjectKey: string | null
-  }>
-
+  /** Each removal or replacement also queues object cleanup in its transaction. */
+  startUpload(input: StartAvatarUploadInput): Promise<AvatarRecord>
   findPending(userId: string, uploadId: string): Promise<AvatarRecord | null>
-
   findReady(userId: string): Promise<AvatarRecord | null>
-
-  /**
-   * Promotes the pending row to ready, returning the previous avatar's key to delete.
-   * Resolves to `null` when the upload is no longer pending, which is what a concurrent
-   * finalize of the same upload looks like from the loser's side.
-   */
   promoteToReady(input: {
     userId: string
     uploadId: string
     readyAt: Date
-  }): Promise<{ avatar: AvatarRecord; replacedObjectKey: string | null } | null>
-
-  /**
-   * Removes a still-pending upload by id and reports the key it pointed at, or `null` when it is
-   * no longer pending. Never touches a published avatar.
-   */
-  removePending(userId: string, uploadId: string): Promise<string | null>
-
-  /** Removes every row for the user and reports the keys to delete. */
-  removeAll(userId: string): Promise<string[]>
+  }): Promise<AvatarRecord | null>
+  removePending(userId: string, uploadId: string): Promise<boolean>
+  removeAll(userId: string): Promise<void>
 }
 
 export type Clock = {
@@ -74,4 +53,9 @@ export type Clock = {
 
 export type ObjectKeyFactory = {
   createAvatarKey(now: Date): string
+}
+
+export type AvatarMaintenanceStore = {
+  findAbandoned(before: Date, limit: number): Promise<Array<{ id: string; objectKey: string }>>
+  removeAbandoned(ids: string[]): Promise<number>
 }

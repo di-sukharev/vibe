@@ -1,7 +1,38 @@
 import { expect, spyOn, test } from 'bun:test'
 
-import { handleProviderJobInvocation, handleProviderJobRequest } from './cron'
+import { handleProviderJobInvocation, handleProviderJobRequest, startProviderJobServer } from './cron'
+import scheduleDefinitions from './job-schedules.json' with { type: 'json' }
+import { defaultJobLockTimeoutMs } from './db'
 import type { BackendRuntime } from './runtime'
+
+test.each([
+  ...scheduleDefinitions,
+  { job: 'db:ping', yandexExecutionTimeoutSeconds: defaultJobLockTimeoutMs / 1000 },
+])('the HTTP entrypoint permits the provider budget for $job', async (schedule) => {
+  let options: { idleTimeout?: number; fetch?: (request: Request) => Response | Promise<Response> } | undefined
+  const serve = spyOn(Bun, 'serve').mockImplementation((input) => {
+    options = input as typeof options
+    return { url: new URL('http://jobs.internal') } as ReturnType<typeof Bun.serve>
+  })
+  const log = spyOn(console, 'log').mockImplementation(() => {})
+  try {
+    startProviderJobServer(schedule.job)
+    const timeout = options?.idleTimeout
+    expect(timeout).toBeDefined()
+    if (schedule.yandexExecutionTimeoutSeconds <= 255) {
+      expect(timeout).toBeGreaterThanOrEqual(schedule.yandexExecutionTimeoutSeconds)
+      expect(timeout).toBeLessThanOrEqual(255)
+    } else {
+      expect(timeout).toBe(0)
+    }
+    // Starting the entrypoint must retain its request guard, not bypass the job handler.
+    const response = await options!.fetch!(new Request('http://jobs.internal/', { method: 'GET' }))
+    expect(response.status).toBe(405)
+  } finally {
+    serve.mockRestore()
+    log.mockRestore()
+  }
+})
 
 function runtimeWithLock() {
   const calls = { closes: 0, jobs: 0, transactionTimeouts: [] as number[] }

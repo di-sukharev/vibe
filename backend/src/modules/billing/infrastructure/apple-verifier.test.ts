@@ -1,11 +1,3 @@
-// @parked-test
-//
-// Subscriptions ship switched off: the tables are commented out in prisma/schema/billing.prisma,
-// the routes are not mounted in src/app.ts, and this module is typed through hand-written
-// stand-ins. Until docs/IAP.md is followed and billing is turned on, these suites assert a
-// feature nobody runs, so they are parked rather than deleted - remove the marker above and they
-// come back with the capability.
-
 import { generateKeyPairSync, X509Certificate } from 'node:crypto'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -13,6 +5,7 @@ import { join, resolve } from 'node:path'
 
 import { expect, test } from 'bun:test'
 import { CompactSign } from 'jose'
+import { Environment } from '@apple/app-store-server-library'
 
 import { loadEnv } from '../../../env'
 import { createAppStoreSubscriptionVerifier } from './apple-verifier'
@@ -138,7 +131,27 @@ test('bounds a stalled App Store subscription status lookup', async () => {
   expect(aborted).toBe(true)
 })
 
-test('aborts the underlying App Store request when its deadline elapses', async () => {
+test('uses the configured production environment for status lookups', async () => {
+  const environments: Environment[] = []
+  const verifier = createAppStoreSubscriptionVerifier({
+    ...baseEnv,
+    APPLE_IAP_BUNDLE_ID: 'com.example.app',
+    APPLE_IAP_ENVIRONMENT: 'Production',
+    APPLE_IAP_APP_APPLE_ID: 123456789,
+    APPLE_IAP_ISSUER_ID: 'issuer-id',
+    APPLE_IAP_KEY_ID: 'key-id',
+    APPLE_IAP_PRIVATE_KEY_BASE64: 'private-key',
+  }, {
+    apiClientFactory: ({ environment }) => {
+      environments.push(environment)
+      return { getAllSubscriptionStatuses: async () => ({ data: [] }) }
+    },
+  })
+  await verifier.getSubscriptionStatuses({ transactionId: 'original' })
+  expect(environments).toEqual([Environment.PRODUCTION])
+})
+
+test.each(['headers', 'body'] as const)('aborts App Store requests stalled on %s when their deadline elapses', async (phase) => {
   const { privateKey } = generateKeyPairSync('ec', {
     namedCurve: 'P-256',
     privateKeyEncoding: { format: 'pem', type: 'pkcs8' },
@@ -154,11 +167,21 @@ test('aborts the underlying App Store request when its deadline elapses', async 
       APPLE_IAP_PRIVATE_KEY_BASE64: privateKey,
     },
     {
-      fetchImpl: (_input, init) => new Promise<Response>((_resolve, reject) => {
+      fetchImpl: (_input, init) => new Promise<Response>((resolve, reject) => {
         observedSignal.current = init?.signal ?? null
-        observedSignal.current?.addEventListener('abort', () => {
-          reject(new Error('App Store request aborted'))
-        }, { once: true })
+        if (phase === 'headers') {
+          observedSignal.current?.addEventListener('abort', () => {
+            reject(new Error('App Store request aborted'))
+          }, { once: true })
+          return
+        }
+        resolve(new Response(new ReadableStream({
+          start(controller) {
+            observedSignal.current?.addEventListener('abort', () => {
+              controller.error(new Error('App Store response body aborted'))
+            }, { once: true })
+          },
+        })))
       }),
       statusLookupTimeoutMs: 5,
     },
