@@ -61,6 +61,8 @@ Test denied access as well as successful requests. For session and query changes
 
 Use the existing design system and generated shadcn primitives. Change generated primitives through the pinned CLI. Product components own colors, typography, padding, borders, and radius. Use theme tokens. Parents control placement through wrappers, padding, and gaps. Do not pass `className` or `style` into product components.
 
+Use the application's existing icon library. Identify it from UI configuration, dependencies, and current imports. Keep icon style consistent within each application. Do not recreate standard UI icons with custom SVG, CSS, or emoji.
+
 Show real data, loading and empty states, errors with retry, and feedback for writes. Keep screens usable on phones and with a keyboard. Follow [UI](docs/UI.md) for theme generation and scripted screenshots. The user performs the final visual check. Interactive browser use requires an explicit request.
 
 ## Verification and documentation
