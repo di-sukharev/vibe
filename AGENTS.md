@@ -75,7 +75,7 @@ Code and configuration are the source of truth. Document only decisions, constra
 
 Inspect Git status and remotes before Git operations. Stay on the current branch unless asked to switch. Branches, worktrees, commits, pushes, rebases, and resets require explicit requests. Never stash or discard another person's work. Do not add AI attribution to commits. New projects must not push to the template repository.
 
-Ask before destructive actions, spending, new dependencies, or changes to data access. A request that names a dependency authorizes it. Never print or commit secrets or personal data. Never weaken authentication, permissions, validation, encryption, rate limits, or auditing.
+Ask before destructive actions, spending, or changes to data access. Never print or commit secrets or personal data. Never weaken authentication, permissions, validation, encryption, rate limits, or auditing.
 
 Keep temporary files in the system temp directory and delete them afterward. Use your own ports and stop only processes you started.
 
@@ -84,6 +84,8 @@ Keep temporary files in the system temp directory and delete them afterward. Use
 Deploy only on request through `scripts/infra.mjs`. Follow [Deployment](docs/DEPLOYMENT.md) and the selected provider guide. Stop for a dirty tree, an unpushed branch, or an unclear release commit. Never run raw `terraform apply`, use `-target`, or edit state outside documented recovery.
 
 ## Maintenance
+
+Choose and add the npm packages the task needs without asking for permission. Prefer the most popular, actively maintained open-source solutions that meet the requirements. Do not reinvent the wheel.
 
 No slop. Write clear, declarative code. Prefer the smallest solution that meets the requirement and stays easy to read. Remove code your changes make unused.
 
