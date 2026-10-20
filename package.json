@@ -82,7 +82,7 @@
     "test:infra": "bun test ./scripts/",
     "test:terraform": "bun scripts/terraform-test.mjs",
     "test:backend": "bun run --cwd backend test",
-    "test:backend:unit": "bun run --cwd backend test:unit",
+    "test:backend:local": "bun run --cwd backend test:local",
     "test:backend:integration": "bun run --cwd backend test:integration",
     "test:storage:s3": "bun scripts/storage-local.mjs test",
     "test:webapp": "bun run --cwd webapp test",

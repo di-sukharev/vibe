@@ -12,7 +12,7 @@ import { createResendDelivery } from './resend-delivery'
  * the cheapest possible check on the one thing the live suites would otherwise own alone.
  *
  * Not a `*.live.test.ts`: it starts its own server on an ephemeral port and needs nothing
- * installed, so it belongs in the unit run.
+ * installed, so it belongs in the local integration run.
  */
 
 type CapturedRequest = { method: string; path: string; headers: Record<string, string>; body: string }

@@ -8,8 +8,8 @@ import { backendTestFiles } from './test-files.mjs'
 /**
  * Runs the backend tests that need a real external service.
  *
- * Unlike the unit and integration runners, this one starts nothing: every suite below needs
- * credentials or a container the repository cannot conjure. Running against an unconfigured
+ * Unlike the local and database integration runners, this one starts nothing. Each suite needs
+ * credentials or a container the caller provides. Running against an unconfigured
  * environment is refused rather than silently skipped, because a live contract test that quietly
  * passes without contacting anything proves nothing.
  *

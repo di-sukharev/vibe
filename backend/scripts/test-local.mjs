@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { backendTestFiles, selectBackendTestRun } from './test-files.mjs'
 
 /**
- * Runs selected backend tests that do not need a database, or all of them without CLI filters.
+ * Runs backend integration tests that do not need a database.
  *
  * `bun test` with no arguments would also pick up the `*.integration.test.ts` files, which need the
  * Docker Postgres that `test-integration.mjs` starts. Both runners take their file lists from
@@ -14,17 +14,17 @@ import { backendTestFiles, selectBackendTestRun } from './test-files.mjs'
  */
 const backendRoot = resolve(fileURLToPath(new URL('.', import.meta.url)), '..')
 
-const { unit: discoveredUnitTestFiles } = backendTestFiles(backendRoot)
+const { local: discoveredLocalTestFiles } = backendTestFiles(backendRoot)
 
-if (discoveredUnitTestFiles.length === 0) {
-  console.error('No backend unit tests found. That is almost certainly a glob or layout problem.')
+if (discoveredLocalTestFiles.length === 0) {
+  console.error('No local backend integration tests found. Check the test filenames and directories.')
   process.exit(1)
 }
 
 let selectedTestRun
 try {
   selectedTestRun = selectBackendTestRun(
-    discoveredUnitTestFiles,
+    discoveredLocalTestFiles,
     process.argv.slice(2),
   )
 } catch (error) {
