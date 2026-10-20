@@ -53,9 +53,13 @@ Correct shared defects where the wrong result originates. Do not add separate wo
 
 Use test-driven development for behavior changes and bug fixes. Run the test and confirm the expected failure. Implement the change, then refactor while tests pass. Copy and styling changes do not need test-first development.
 
-Prefer HTTP integration tests with real PostgreSQL. Replace external providers with test doubles; keep internal services and the database real. Add unit tests only for cases that integration tests cannot cover efficiently. Do not duplicate the same coverage at several levels.
+Use integration tests as the primary test level. Test backend behavior through HTTP API endpoints with a real, isolated PostgreSQL test database. Test background jobs directly through their production entry points with the same test database. Replace external providers with test doubles; keep internal services and the database real.
 
-Test denied access as well as successful requests. For session and query changes, check sign-out, account changes, and responses from obsolete requests. Use Playwright when verification needs browser behavior. Do not assert UI wording, CSS, markup, or snapshots. Runner instructions are in [Testing](docs/TESTING.md).
+Do not add unit tests or component tests. Assert observable outcomes and meaningful failure cases. Do not duplicate the same coverage at several levels.
+
+Test denied access as well as successful requests. For session and query changes, check sign-out, account changes, and responses from obsolete requests.
+
+Keep useful browser E2E and infrastructure tests. Use Playwright for critical browser behavior that backend integration tests cannot cover. Do not assert UI wording, CSS, markup, or snapshots. Runner instructions are in [Testing](docs/TESTING.md).
 
 ## UI
 
