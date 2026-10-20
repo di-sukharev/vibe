@@ -5,7 +5,13 @@ test('brace expansion handles deeply nested patterns without exhausting the stac
   // CVE-2026-93687: these patterns fit the input limit but overflow the old walkers.
   execFileSync('node', ['--stack-size=512', '--input-type=commonjs', '-e', `
     const assert = require('node:assert/strict')
-    const braces = require('braces')
+    const { createRequire } = require('node:module')
+    const { resolve } = require('node:path')
+    let dependency = createRequire(resolve('webapp/package.json'))
+    for (const name of ['shadcn', 'fast-glob', 'micromatch']) {
+      dependency = createRequire(dependency.resolve(name))
+    }
+    const braces = dependency('braces')
 
     assert.deepEqual(braces.expand('src/{api,ui}/{01..02}.ts'), [
       'src/api/01.ts', 'src/api/02.ts', 'src/ui/01.ts', 'src/ui/02.ts',
