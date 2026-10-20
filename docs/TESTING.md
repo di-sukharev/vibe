@@ -1,6 +1,6 @@
 # Testing
 
-[AGENTS.md](../AGENTS.md#tests-and-tdd) defines the test policy. Package scripts define commands. Prefer HTTP integration tests for backend behavior. Keep unit tests for cases that those tests cannot cover efficiently.
+[AGENTS.md](../AGENTS.md#tests-and-tdd) defines the test policy. Package scripts define commands.
 
 ## Focused runs
 
@@ -31,11 +31,9 @@ TEST_SKIP_DOCKER=1 TEST_DATABASE_URL='<kept test database URL>' \
 
 Find its project and port with `docker compose ls` and `docker ps`. After the last iteration, remove that run's `postgres_test`, named test volume, and network. Never use `docker compose down -v`: it can also delete storage data.
 
-## Client and build tests
+## Client tests
 
 Test client behavior through the browser journeys in `webapp/e2e/specs`. `bun run test:webapp` runs these journeys against the test backend and database. Test shared request schemas through backend HTTP integration tests.
-
-`bun run test:build-contracts` builds both web applications and checks the website output. Use these tests for published metadata, static fallbacks, and asset loading. Running a contract file alone checks the existing build.
 
 ## Browser tests and screenshots
 
