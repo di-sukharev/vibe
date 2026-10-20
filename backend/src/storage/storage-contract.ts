@@ -7,8 +7,8 @@ import type { PrivateStorage } from './port'
  * The one behavioural contract both drivers must satisfy.
  *
  * This file is the reason the filesystem driver is trustworthy. It is executed twice: once
- * against the local disk in the fast unit run, and once against a real SeaweedFS container in
- * the live run. If the two drivers ever diverge — on status codes, on write-once semantics, on
+ * against the local disk in the local integration run, and once against a real SeaweedFS
+ * container in the live run. If the two drivers ever diverge — on status codes, on write-once semantics, on
  * what an unsigned request gets — one of the two runs fails, instead of the difference being
  * discovered in production.
  *

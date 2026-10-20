@@ -8,12 +8,12 @@ From the repository root:
 
 ```bash
 bun run test:backend:integration -- src/modules/users/users.integration.test.ts -t 'name'
-bun run test:backend:unit -- src/path.test.ts -t 'name'
+bun run test:backend:local -- src/storage/filesystem-storage.test.ts -t 'name'
 bun run test:webapp
 bun run e2e:webapp -- auth.spec.ts -g 'name'
 ```
 
-Backend runners accept paths relative to `backend/`. Name database tests `*.integration.test.ts` and provider tests `*.live.test.ts`. Run them through their package scripts. Plain `bun test` does not prepare their environment. The local `test:backend:unit` command runs filesystem and loopback HTTP integrations without Docker.
+Backend runners accept paths relative to `backend/`. Name database tests `*.integration.test.ts` and provider tests `*.live.test.ts`. Run them through their package scripts. Plain `bun test` does not prepare their environment. `test:backend:local` runs filesystem and loopback HTTP integrations without Docker or a database. `test:backend:integration` runs integrations with a real PostgreSQL test database.
 
 ## Integration database
 
