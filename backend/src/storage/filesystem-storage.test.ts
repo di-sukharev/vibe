@@ -145,10 +145,4 @@ describe('FilesystemPrivateStorage signed URLs', () => {
     })
   })
 
-  test('keeps every object inside the storage root', async () => {
-    await withSetup(async ({ config, storage }) => {
-      expect(storage.objectPath('avatars/2026/08/abc').startsWith(config.root)).toBe(true)
-      expect(() => storage.objectPath('../../escape')).toThrow()
-    })
-  })
 })

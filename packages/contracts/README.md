@@ -8,4 +8,4 @@ Put each schema in its feature file and export it from `src/index.ts`. Update th
 
 Restrict URL schemes explicitly. `z.url()` also accepts `javascript:` and `data:`. Use `https:` unless the product requires another scheme. [src/uploads.ts](src/uploads.ts) permits HTTP for local signed URLs.
 
-Run `bun run test:contracts` from the root. [package.json](package.json) defines the other scripts.
+Run `bun run test:backend:integration` from the root to verify API behavior with the shared schemas. [package.json](package.json) defines the package checks.

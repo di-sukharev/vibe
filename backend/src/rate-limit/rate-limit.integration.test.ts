@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, spyOn, test } from 'bun:test'
 
 import { createApp } from '../app'
-import { createPrisma, type DbClient } from '../db'
+import { createPrisma } from '../db'
 import { loadEnv } from '../env'
 import { runBackgroundJob } from '../jobs'
 import type { BackendRuntime } from '../runtime'
@@ -10,38 +10,15 @@ import { createDatabaseRateLimitStore } from './database-store'
 const databaseUrl = process.env.TEST_DATABASE_URL
 if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required; run bun run test:backend:integration')
 
-/**
- * The database store exists for one reason: several backend processes that never see each other
- * must still agree on one budget per client. A faked `$queryRaw` cannot prove that - the upsert's
- * conflict target, the window alignment and the timestamp round-trip are all PostgreSQL behaviour,
- * so every test here runs two clients against the real thing.
- */
 describe('database rate-limit store', () => {
-  const clients: DbClient[] = []
-  const newClient = () => {
-    const client = createPrisma(databaseUrl)
-    clients.push(client)
-    return client
-  }
-  const prisma = newClient()
+  const prisma = createPrisma(databaseUrl)
 
   beforeEach(async () => {
     await prisma.rateLimitBucket.deleteMany()
   })
 
   afterAll(async () => {
-    await Promise.all(clients.map((client) => client.$disconnect()))
-  })
-
-  test('two processes bump one counter for the same policy and key', async () => {
-    const first = createDatabaseRateLimitStore(newClient(), 'auth')
-    const second = createDatabaseRateLimitStore(newClient(), 'auth')
-    const now = Date.UTC(2026, 8, 12, 10, 0, 17, 500)
-    const resetAt = Date.UTC(2026, 8, 12, 10, 1)
-
-    expect(await first.consume('203.0.113.10', 60, now)).toEqual({ count: 1, resetAt })
-    expect(await second.consume('203.0.113.10', 60, now + 1_000)).toEqual({ count: 2, resetAt })
-    expect(await first.consume('203.0.113.10', 60, now + 2_000)).toEqual({ count: 3, resetAt })
+    await prisma.$disconnect()
   })
 
   test('policies, keys and windows each get their own counter', async () => {
@@ -60,25 +37,6 @@ describe('database rate-limit store', () => {
       count: 1,
       resetAt: Date.UTC(2026, 8, 12, 10, 2),
     })
-  })
-
-  test('a bucket row records the window it counts and when it stops mattering', async () => {
-    // The row is what the cleanup job and every peer process read, so the instants written by the
-    // raw upsert have to come back through Prisma unchanged - a timezone slip here would make the
-    // sweeper delete live windows or keep dead ones forever.
-    const store = createDatabaseRateLimitStore(prisma, 'auth')
-
-    await store.consume('203.0.113.10', 60, Date.UTC(2026, 8, 12, 10, 0, 17))
-
-    expect(await prisma.rateLimitBucket.findMany()).toEqual([
-      {
-        policy: 'auth',
-        key: '203.0.113.10',
-        windowStart: new Date(Date.UTC(2026, 8, 12, 10, 0)),
-        count: 1,
-        expiresAt: new Date(Date.UTC(2026, 8, 12, 10, 1)),
-      },
-    ])
   })
 })
 

@@ -138,8 +138,6 @@ export type PasswordResetTaskQueue = {
  * Exported because two other things are pinned to it: the outbox retry delay has to clear it, or
  * a retry is silently swallowed as a cooldown hit and the user never gets a link; and the dedupe
  * bucket matches it, so a collapsed burst and a refused token mean the same thing.
- * `password-reset-cooldown.test.ts` pins the retry delay; `password-reset-task-queue.test.ts`
- * pins the bucket.
  */
 export const passwordResetCooldownSeconds = 60
 

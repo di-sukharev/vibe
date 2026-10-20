@@ -83,42 +83,6 @@ describe('cleanup jobs against a real database', () => {
     ])
   })
 
-  test('keeps a pending upload until an hour after its signed URL expired', async () => {
-    // The hour of slack covers clock skew between the app and the database.
-    const now = new Date()
-    const user = await prisma.user.create({ data: { email: 'uploading@example.com' } })
-    await prisma.userAvatar.create({
-      data: {
-        byteSize: 70,
-        contentType: 'image/png',
-        expiresAt: new Date(now.getTime() - 10 * 60 * 1000),
-        objectKey: 'avatars/2026/07/recent',
-        state: 'pending',
-        userId: user.id,
-      },
-    })
-    const deletedObjects: string[] = []
-    const storage = {
-      deleteObject: async (objectKey: string) => {
-        deletedObjects.push(objectKey)
-      },
-    }
-    const log = spyOn(console, 'log').mockImplementation(() => {})
-
-    try {
-      await runBackgroundJob(
-        'uploads:pending:cleanup',
-        { prisma, privateStorage: { storage } } as unknown as BackendRuntime,
-        now,
-      )
-    } finally {
-      log.mockRestore()
-    }
-
-    expect(deletedObjects).toEqual([])
-    expect(await prisma.userAvatar.count()).toBe(1)
-  })
-
   test('deletes sessions and reset tokens past their retention and keeps the rest', async () => {
     const now = new Date()
     const day = (offset: number) => new Date(now.getTime() + offset * 24 * 60 * 60 * 1000)

@@ -13,7 +13,7 @@ bun run test:webapp
 bun run e2e:webapp -- auth.spec.ts -g 'name'
 ```
 
-Backend runners accept paths relative to `backend/`. Name database tests `*.integration.test.ts` and provider tests `*.live.test.ts`. Run them through their package scripts. Plain `bun test` does not prepare their environment.
+Backend runners accept paths relative to `backend/`. Name database tests `*.integration.test.ts` and provider tests `*.live.test.ts`. Run them through their package scripts. Plain `bun test` does not prepare their environment. The local `test:backend:unit` command runs filesystem and loopback HTTP integrations without Docker.
 
 ## Integration database
 
@@ -33,7 +33,7 @@ Find its project and port with `docker compose ls` and `docker ps`. After the la
 
 ## Client and build tests
 
-Test client session, transport, validation, and navigation behavior in `webapp/tests`. Reuse the existing provider test setup when React must mount. Do not add jsdom or another DOM library.
+Test client behavior through the browser journeys in `webapp/e2e/specs`. `bun run test:webapp` runs these journeys against the test backend and database. Test shared request schemas through backend HTTP integration tests.
 
 `bun run test:build-contracts` builds both web applications and checks the website output. Use these tests for published metadata, static fallbacks, and asset loading. Running a contract file alone checks the existing build.
 
@@ -58,3 +58,5 @@ E2E and screenshots share a Compose project. Run them separately or set differen
 `bun run audit` runs `bun audit` and fails on advisories. Run it after dependency updates and before release. Fix advisories with compatible updates. Skip an advisory only with the user's approval. Apply the approved exception for that run unless a persistent exception was requested.
 
 Keep transitive overrides only while needed. Upgrade the three Prisma packages together and verify backend types, tests, and affected client behavior.
+
+The `braces` override pins the API-compatible [`@zklogic/braces` fork](https://github.com/ArfanKhalilMughal/braces) for [CVE-2026-93687](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm). Upstream has no patched release. The fork limits parser nesting and keeps deeper input as literal text. `scripts/glob-security.test.mjs` checks the exploit and normal range expansion in Node. Remove the override when the dependency tree uses an upstream fix or no longer needs `braces`.

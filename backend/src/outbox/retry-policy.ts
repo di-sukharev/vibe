@@ -11,7 +11,7 @@ export const defaultMaxAttempts = 5
 /**
  * The first retry must land outside the 60-second password-reset cooldown, or the retry would be
  * swallowed as a cooldown hit and the user would never get a second link. Two minutes leaves
- * margin; `retry-policy.test.ts` asserts it, so lowering this fails loudly.
+ * margin.
  */
 const baseDelayMs = 2 * 60 * 1000
 const maxDelayMs = 15 * 60 * 1000

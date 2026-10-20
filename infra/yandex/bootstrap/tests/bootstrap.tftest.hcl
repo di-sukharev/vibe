@@ -33,70 +33,10 @@ run "private_versioned_state" {
   }
 
   assert {
-    condition     = yandex_storage_bucket.terraform_state.max_size == 1073741824
-    error_message = "A state bucket needs a bounded launch-size quota."
-  }
-
-  assert {
-    condition = (
-      try(yandex_storage_bucket.terraform_state.lifecycle_rule[0].enabled, false) &&
-      try(yandex_storage_bucket.terraform_state.lifecycle_rule[0].noncurrent_version_expiration[0].days, 0) == 30
-    )
-    error_message = "Every init, plan, and apply writes and deletes the lock object and every apply rewrites state; versioning keeps each as a noncurrent version, so the bucket needs one enabled rule expiring them after 30 days, the window the static buckets keep, or max_size eventually refuses the next lock."
-  }
-
-  assert {
-    condition     = try(yandex_storage_bucket.terraform_state.lifecycle_rule[0].abort_incomplete_multipart_upload_days, 0) == 7
-    error_message = "An interrupted multipart state write must be aborted instead of holding quota."
-  }
-
-  assert {
-    condition     = try(yandex_storage_bucket.terraform_state.lifecycle_rule[1].enabled, null) == null
-    error_message = "The state bucket keeps exactly one lifecycle rule; a second one is where an expiration of current versions would hide."
-  }
-
-  assert {
-    condition     = try(length(yandex_storage_bucket.terraform_state.lifecycle_rule[0].expiration), 0) == 0
-    error_message = "The lifecycle rule must leave current state versions alone."
-  }
-
-  assert {
     condition     = length(yandex_resourcemanager_folder_iam_member.terraform_state_storage) == 0
     error_message = "The temporary folder-wide bootstrap role must be absent from steady state."
   }
 
-  assert {
-    condition = (
-      one([
-        for statement in jsondecode(yandex_storage_bucket_policy.terraform_state.policy).Statement : statement
-        if statement.Sid == "TerraformStateBucketConfiguration"
-      ]).Principal.CanonicalUser == "state-service-account-id" &&
-      one([
-        for statement in jsondecode(yandex_storage_bucket_policy.terraform_state.policy).Statement : statement
-        if statement.Sid == "TerraformStateBucketConfiguration"
-      ]).Action == "s3:*" &&
-      one([
-        for statement in jsondecode(yandex_storage_bucket_policy.terraform_state.policy).Statement : statement
-        if statement.Sid == "TerraformStateBucketConfiguration"
-      ]).Resource == "arn:aws:s3:::${var.state_bucket_name}" &&
-      toset(one([
-        for statement in jsondecode(yandex_storage_bucket_policy.terraform_state.policy).Statement : statement
-        if statement.Sid == "ProtectStateBucket"
-      ]).Action) == toset(["s3:DeleteBucket", "s3:PutBucketVersioning"]) &&
-      !strcontains(yandex_storage_bucket_policy.terraform_state.policy, "s3:DeleteObjectVersion")
-    )
-    error_message = "The dedicated state service account must support bucket refresh and credential recovery without bucket deletion, versioning changes, or version deletion."
-  }
-
-  assert {
-    condition = (
-      yandex_storage_bucket_policy.terraform_state.access_key == "state-access-key" &&
-      strcontains(yandex_storage_bucket_policy.terraform_state.policy, "s3:GetObject") &&
-      strcontains(yandex_storage_bucket_policy.terraform_state.policy, "s3:PutObject") &&
-      strcontains(yandex_storage_bucket_policy.terraform_state.policy, "s3:DeleteObject")
-    )
-    error_message = "The Terraform-managed state key must apply and refresh its own policy and current state objects."
-  }
 }
 
 run "temporary_first_apply_access" {

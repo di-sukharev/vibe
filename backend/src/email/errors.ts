@@ -10,8 +10,7 @@
  * The message is deliberately narrow: provider name, HTTP status, provider error code. Never the
  * recipient, the subject, or the body. Whatever escapes a handler lands in `task_outbox.last_error`,
  * which outlives the payload the drain blanks on purpose - so a chatty error message would put
- * back exactly the data the redaction removes. `email-contract.ts` asserts it against fixtures
- * carrying the real provider prose.
+ * back exactly the data the redaction removes.
  */
 
 export type EmailErrorKind =
