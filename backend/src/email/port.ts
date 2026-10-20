@@ -1,7 +1,7 @@
 /**
  * The provider-neutral email port.
  *
- * Four drivers implement it and one contract suite proves the two real ones behave the same:
+ * Four drivers implement it:
  * `disabled` sends nothing, `console` prints, and Yandex Cloud Postbox and Resend talk to a
  * provider. Product code depends on this file only, so choosing a provider is a configuration
  * change rather than a code change.

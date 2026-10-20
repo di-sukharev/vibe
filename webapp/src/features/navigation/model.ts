@@ -2,8 +2,7 @@ import type { UserRole } from '@web-app-demo/contracts'
 
 // Every path pattern registered under the role's workspace layout in `src/routes.tsx`, in TanStack
 // syntax (`$param` segments). This is the return-path allow-list: a protected route survives the
-// login round-trip whether or not the sidebar links to it. `tests/navigation.test.ts` fails when
-// this table and the router drift apart.
+// login round-trip whether or not the sidebar links to it.
 export const workspaceRoutesByRole = {
   user: ['/app', '/app/profile', '/app/settings'],
   admin: ['/admin', '/admin/users', '/admin/settings'],

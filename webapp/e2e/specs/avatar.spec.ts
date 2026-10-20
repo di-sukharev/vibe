@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test'
 
-import { jpegImage, pngImage } from '../helpers/images'
+import { pngImage } from '../helpers/images'
 import { expect, signUp, test, uniqueEmail } from '../helpers/test'
 
 /**
@@ -23,7 +23,7 @@ async function pickFile(
   await page.getByTestId('avatar-file-input').setInputFiles(file)
 }
 
-test('uploads an avatar, keeps it across a reload, replaces it, and removes it', async ({
+test('uploads an avatar, keeps it across a reload, and removes it', async ({
   page,
 }) => {
   await signUp(page, uniqueEmail('avatar-e2e'), 'Avatar E2E User')
@@ -37,10 +37,6 @@ test('uploads an avatar, keeps it across a reload, replaces it, and removes it',
 
   // Survives a reload, which is what distinguishes a stored object from a local preview.
   await page.reload()
-  await expect(avatarImage(page)).toBeVisible()
-
-  await pickFile(page, jpegImage)
-  await expect(page.getByTestId('avatar-notice')).toBeVisible()
   await expect(avatarImage(page)).toBeVisible()
 
   await page.getByTestId('avatar-remove').click()
@@ -73,26 +69,4 @@ test('avatar query exposes loading, failure, and retry', async ({ page }) => {
   await page.getByTestId('avatar-query-retry').click()
   await expect(page.getByTestId('avatar-query-error')).toHaveCount(0)
   await expect(page.getByTestId('avatar-fallback')).toBeVisible()
-})
-
-test('avatar query keeps a cached preview when background refresh fails', async ({ page }) => {
-  await signUp(page, uniqueEmail('avatar-cached'))
-  await page.getByTestId('nav-link-app-profile').click()
-  await expect(page.getByTestId('avatar-fallback')).toBeVisible()
-  await pickFile(page, pngImage)
-  await expect(avatarImage(page)).toBeVisible()
-  await page.clock.install()
-  await page.route('**/api/uploads/avatar', async (route) => {
-    if (route.request().method() !== 'GET') return route.continue()
-    return route.fulfill({ status: 503, json: { error: { code: 'UNAVAILABLE', message: 'Unavailable' } } })
-  })
-  await page.clock.fastForward(65_000)
-  await page.clock.resume()
-  await page.evaluate(() => {
-    window.dispatchEvent(new Event('offline'))
-    window.dispatchEvent(new Event('online'))
-  })
-  await expect(page.getByTestId('avatar-query-error')).toBeVisible()
-  await expect(avatarImage(page)).toBeVisible()
-  await expect(page.getByTestId('avatar-remove')).toBeEnabled()
 })

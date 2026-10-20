@@ -15,13 +15,3 @@ export const pngImage = {
     'base64',
   ),
 }
-
-/** A real 1x1 JPEG, used to prove the stored content type actually changes on replace. */
-export const jpegImage = {
-  name: 'avatar.jpg',
-  mimeType: 'image/jpeg',
-  buffer: Buffer.from(
-    '/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==',
-    'base64',
-  ),
-}

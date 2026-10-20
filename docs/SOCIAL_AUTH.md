@@ -4,7 +4,7 @@ Apple sign-in supports iOS. Google sign-in supports iOS and Android. Expo Web us
 
 ## Enable sign-in
 
-Mount `tokenSocialAuthRoute` in the backend auth routes. Render `SocialAuthButtons` in the mobile auth screen. Remove `@parked-test` from the social integration suite, then configure the providers below.
+Mount `tokenSocialAuthRoute` in the backend auth routes. Render `SocialAuthButtons` in the mobile auth screen. Add HTTP integration tests for provider identity, account ownership, and rejected credentials. Then configure the providers below.
 
 Run types, tests, and lint. Verify each provider on a development build.
 

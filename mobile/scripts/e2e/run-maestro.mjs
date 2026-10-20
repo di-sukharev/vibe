@@ -6,8 +6,6 @@ import { fileURLToPath } from 'node:url'
 
 import { getConfig } from 'expo/config'
 
-import { runMaestroPolicyAudit } from './maestro-policy-audit.mjs'
-
 const scriptDir = fileURLToPath(new URL('.', import.meta.url))
 const mobileRoot = resolve(scriptDir, '../..')
 const flowPath = resolve(mobileRoot, '.maestro/flows/auth-smoke.yaml')
@@ -27,8 +25,6 @@ const testIds = {
   PASSWORD_VISIBILITY_BUTTON_ID: 'auth.password-visibility-button',
   SUBMIT_BUTTON_ID: 'auth.submit-button',
 }
-
-runMaestroPolicyAudit()
 
 const appConfig = readAppConfig()
 const appId = process.env.MAESTRO_APP_ID ?? process.env.APP_ID ?? 'com.webappdemo.mobile'

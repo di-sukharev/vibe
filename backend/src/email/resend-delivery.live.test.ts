@@ -7,9 +7,7 @@ import { EmailDeliveryError } from './errors'
 /**
  * The Resend driver against the real API.
  *
- * This is the half `resend-delivery.test.ts` cannot prove: that the endpoint, the bearer header
- * and the body shape are what Resend actually accepts. A fake transport agrees with whatever the
- * driver sends it, so only this run can catch a renamed field or a wrong path.
+ * This verifies that Resend accepts the endpoint, the bearer header, and the body shape.
  *
  * Started by `bun run --cwd backend test:live` with the variables in docs/EMAIL.md,
  * "Proving it works". `test-live.mjs` refuses to run without them.
@@ -61,8 +59,7 @@ maybeDescribe('Resend delivery against the live API', () => {
 
     expect(error).toBeInstanceOf(EmailDeliveryError)
     expect((error as EmailDeliveryError).kind).toBe('permanent')
-    // The same PII rule the unit contract asserts, proven against a real provider message: the
-    // provider names the address it refused, and none of that may reach our error.
+    // The provider names the address it refused. None of that may reach our error.
     expect(`${(error as Error).message} ${JSON.stringify((error as EmailDeliveryError).details)}`).not.toContain(
       'not-an-address',
     )

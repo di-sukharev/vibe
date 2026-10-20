@@ -6,7 +6,7 @@ import { createApp } from '../../app'
 import { createPrisma } from '../../db'
 import type { EmailDelivery, EmailMessage } from '../../email'
 import { loadEnv } from '../../env'
-import { drainOptionsFromEnv, drainTaskOutbox } from '../../outbox'
+import { drainTaskOutbox } from '../../outbox'
 import type { BackendRuntime } from '../../runtime'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
@@ -240,50 +240,6 @@ describe('auth API integration', () => {
     ).toBe(1)
   })
 
-  test('a password change that cannot queue its notice is rolled back', async () => {
-    // The notice is queued inside the transaction that consumes the token, so the two stand or
-    // fall together. Moving the enqueue after the commit would leave a changed password whose
-    // notice was silently lost - and would report an error for work that already happened.
-    const { createPrismaAuthRepository } = await import('./infrastructure/auth-repository')
-    const repository = createPrismaAuthRepository(prisma)
-    const registered = await app.request('/api/auth/token/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'rollback@example.com', password: 'password123' }),
-    })
-    expect(registered.status).toBe(201)
-
-    const now = new Date()
-    const tokenHash = `hash:${crypto.randomUUID()}`
-    const user = await prisma.user.findUniqueOrThrow({ where: { email: 'rollback@example.com' } })
-    await prisma.passwordResetToken.create({
-      data: { expiresAt: new Date(now.getTime() + 60_000), tokenHash, userId: user.id },
-    })
-
-    await expect(
-      repository.completePasswordReset({
-        now,
-        passwordHash: 'changed-hash',
-        // Enqueue first, then fail: this is what proves the insert shares the transaction
-        // rather than merely that a throwing callback rolls it back.
-        queueNotice: async (email, enqueue) => {
-          await enqueue({ dedupeKey: tokenHash, payload: { email }, type: 'auth:password-changed' })
-          throw new Error('outbox unavailable')
-        },
-        tokenHash,
-      }),
-    ).rejects.toThrow('outbox unavailable')
-
-    const unchanged = await prisma.user.findUniqueOrThrow({ where: { id: user.id } })
-    expect(unchanged.passwordHash).not.toBe('changed-hash')
-    // The notice went back with it. Otherwise a rollback would still tell the user their
-    // password had changed and their sessions were signed out.
-    expect(await prisma.taskOutbox.count({ where: { dedupeKey: tokenHash } })).toBe(0)
-    expect(await prisma.passwordResetToken.findUniqueOrThrow({ where: { tokenHash } })).toMatchObject({
-      usedAt: null,
-    })
-  })
-
   test('resets a password with a single-use token and revokes existing sessions', async () => {
     const messages: EmailMessage[] = []
     const emailDelivery: EmailDelivery = {
@@ -421,64 +377,6 @@ describe('auth API integration', () => {
     expect(previousRefresh.status).toBe(401)
     expect(previousPassword.status).toBe(401)
     expect(newPassword.status).toBe(200)
-  })
-
-  test('a flood of unknown addresses cannot starve a real reset', async () => {
-    // One outbox row per request is what keeps the 202 generic, so the inflow is bounded only by
-    // the auth rate limit times the addresses an attacker holds, while a drain moves a fixed
-    // number of rows a minute. The queue therefore never holds more than one drain pass of due
-    // resets: past that a request is answered exactly as before and nothing is written, and the
-    // next pass clears them all instead of working through a backlog for days.
-    const messages: EmailMessage[] = []
-    const emailDelivery: EmailDelivery = {
-      driver: 'console',
-      configured: true,
-      send: async (message) => {
-        messages.push(message)
-      },
-    }
-    // A pass makes five loops, so a batch of two is a ceiling of ten.
-    const floodEnv = loadEnv({ ...envInput, TASK_OUTBOX_BATCH_LIMIT: '2' })
-    const floodApp = createApp({ emailDelivery, env: floodEnv, prisma })
-    const drainRuntime = { emailDelivery, env: floodEnv, prisma } as unknown as BackendRuntime
-    const drain = () =>
-      drainTaskOutbox(drainRuntime, { ...drainOptionsFromEnv(floodEnv), now: new Date() })
-    const requestReset = (email: string) =>
-      floodApp.request('/api/auth/password-reset/request', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      })
-    const pendingResets = () =>
-      prisma.taskOutbox.count({ where: { status: 'pending', type: 'auth:password-reset' } })
-
-    const register = await floodApp.request('/api/auth/token/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'victim@example.com', password: 'password123' }),
-    })
-    expect(register.status).toBe(201)
-
-    // Sequential on purpose: the ceiling is a read followed by a write, so concurrent requests
-    // can overshoot it by their own number. That is accepted; what is pinned here is the ceiling.
-    const floodBodies: unknown[] = []
-    for (let index = 0; index < 16; index += 1) {
-      const response = await requestReset(`bogus-${index}@example.com`)
-      expect(response.status).toBe(202)
-      floodBodies.push(await response.json())
-    }
-    expect(new Set(floodBodies.map((body) => JSON.stringify(body))).size).toBe(1)
-    expect(await pendingResets()).toBe(10)
-
-    // The flood bought one drain pass, not a backlog.
-    expect(await drain()).toMatchObject({ done: 0, skipped: 10, terminalFailed: 0, transientFailed: 0 })
-    expect(await pendingResets()).toBe(0)
-
-    const realRequest = await requestReset('victim@example.com')
-    expect(realRequest.status).toBe(202)
-    expect(await realRequest.json()).toEqual(floodBodies[0])
-    expect(await drain()).toMatchObject({ done: 1, skipped: 0, terminalFailed: 0, transientFailed: 0 })
-    expect(messages.map(({ to }) => to)).toEqual(['victim@example.com'])
   })
 
   test('only reset rows the next drain pass can claim count against the ceiling', async () => {

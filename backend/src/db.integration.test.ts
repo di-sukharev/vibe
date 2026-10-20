@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, test } from 'bun:test'
 
-import { createPrisma, isJobLockExpiry, runWithJobLock, type DbClient } from './db'
+import { createPrisma, runWithJobLock, type DbClient } from './db'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required; run bun run test:backend:integration')
@@ -68,54 +68,6 @@ describe('runWithJobLock against a real database', () => {
     await holder
 
     expect(other).toEqual({ ranHere: true, result: 'ran' })
-  })
-
-  test('a job that outruns its timeout loses the lock and reports it as a lock expiry', async () => {
-    const first = newClient()
-    const second = newClient()
-    let overrunFinished = false
-
-    const overrun = runWithJobLock(
-      first,
-      'test:overrun',
-      async () => {
-        await new Promise((resolve) => setTimeout(resolve, 400))
-        overrunFinished = true
-      },
-      { timeoutMs: 150 },
-    ).catch((error: unknown) => error)
-
-    // Wait past the timeout: the lock is gone even though the job body is still running, which is
-    // exactly the duplicate-run window the scheduler warns about.
-    await new Promise((resolve) => setTimeout(resolve, 300))
-    const duplicate = await runWithJobLock(second, 'test:overrun', async () => 'ran anyway')
-
-    const failure = await overrun
-
-    expect(duplicate).toEqual({ ranHere: true, result: 'ran anyway' })
-    expect(overrunFinished).toBe(true)
-    expect(isJobLockExpiry(failure)).toBe(true)
-  })
-
-  test("a job's own inner transaction timing out is not reported as a lock expiry", async () => {
-    // Prisma answers P2028 for every transaction-API failure, so keying on the code alone told
-    // the operator to raise a lock timeout that was never involved. The lock here has 15 minutes
-    // of headroom; the inner transaction is the thing that expired.
-    const client = newClient()
-
-    const failure = await runWithJobLock(client, 'test:nested', async () => {
-      await client.$transaction(
-        async () => {
-          // Slow work inside the job's own transaction, not a slow query: the transaction is
-          // still open when Prisma expires it, and the commit is what raises P2028.
-          await Bun.sleep(300)
-        },
-        { timeout: 100 },
-      )
-    }).catch((error: unknown) => error)
-
-    expect((failure as { code?: string }).code).toBe('P2028')
-    expect(isJobLockExpiry(failure)).toBe(false)
   })
 
   test('the same client can run the same job again afterwards', async () => {

@@ -105,7 +105,6 @@ const envSchema = z.object({
   // raised value cannot be wholly inert. It is a ceiling, not a guarantee: the deadline covers the
   // account lookup and the token write as well as the send, so at the very top of this range the
   // drain can still abort first and report its own timeout instead of the provider's.
-  // `config.test.ts` pins the ceiling against the deadline.
   EMAIL_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().max(14_000).default(10_000),
   EMAIL_POSTBOX_ENDPOINT: stringWithDefault('https://postbox.cloud.yandex.net'),
   EMAIL_POSTBOX_REGION: stringWithDefault('ru-central1'),

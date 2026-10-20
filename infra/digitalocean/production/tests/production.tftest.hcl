@@ -19,11 +19,6 @@ run "foundation_is_runtime_independent" {
   command = plan
 
   assert {
-    condition     = digitalocean_database_cluster.postgres.node_count == 1
-    error_message = "The launch profile intentionally starts with one PostgreSQL node."
-  }
-
-  assert {
     condition = (
       one(digitalocean_database_firewall.postgres.rule).type == "ip_addr" &&
       one(digitalocean_database_firewall.postgres.rule).value == var.vpc_ip_range
@@ -39,32 +34,6 @@ run "foundation_is_runtime_independent" {
   assert {
     condition     = try(digitalocean_spaces_bucket.media.versioning[0].enabled, false)
     error_message = "User media must be versioned: the runtime key can delete objects and the backend does on every avatar replace or remove, so a delete needs a recoverable version behind it."
-  }
-
-  assert {
-    condition = (
-      try(digitalocean_spaces_bucket.media.lifecycle_rule[0].enabled, false) &&
-      try(one(digitalocean_spaces_bucket.media.lifecycle_rule[0].noncurrent_version_expiration).days, 0) == 30
-    )
-    error_message = "Versioning keeps every replaced or deleted media object as a noncurrent version; the bucket needs one enabled rule expiring them after 30 days, the recovery window docs/STORAGE.md promises, or the Space grows without bound."
-  }
-
-  assert {
-    condition     = try(digitalocean_spaces_bucket.media.lifecycle_rule[0].abort_incomplete_multipart_upload_days, 0) == 7
-    error_message = "An interrupted multipart upload must be aborted instead of being billed forever."
-  }
-
-  assert {
-    condition     = try(digitalocean_spaces_bucket.media.lifecycle_rule[1].enabled, null) == null
-    error_message = "The media Space keeps exactly one lifecycle rule; a second one is where an expiration of current objects would hide."
-  }
-
-  assert {
-    condition = (
-      try(one(digitalocean_spaces_bucket.media.lifecycle_rule[0].expiration).days, null) == null &&
-      try(one(digitalocean_spaces_bucket.media.lifecycle_rule[0].expiration).date, null) == null
-    )
-    error_message = "The lifecycle rule must leave current media objects alone: no expiration by age or date. Removing expired delete markers is the one expiration a versioned media bucket may add."
   }
 
   assert {

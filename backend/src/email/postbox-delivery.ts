@@ -63,8 +63,7 @@ export function createPostboxDelivery(
           'content-type': 'application/json',
           // The signer signs the headers it is given and adds none of its own beyond the AWS
           // ones, so `host` has to be set here. Without it `host` drops out of SignedHeaders and
-          // the endpoint rejects the signature - a failure that only shows up against the real
-          // service, which is why `postbox-delivery.test.ts` asserts it.
+          // the endpoint rejects the signature.
           host: endpoint.host,
         },
         body,

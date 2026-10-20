@@ -10,7 +10,7 @@ Disabled billing mounts no API routes or mobile IAP provider. Enabled routes use
 
 For hosted environments, pass billing settings through `extra_runtime_env`. Google credentials and `BILLING_ENABLED` must reach the API, maintenance, and outbox jobs. Keep the existing schedules active. See [Deployment](DEPLOYMENT.md#extra-runtime-variables).
 
-To remove billing, remove the module, Prisma schema, contracts, mobile feature, native plugin, configuration, and tests together. Generate the migration. Keep `google-auth-library` if social sign-in uses it. Run types, tests, and the Maestro audit.
+To remove billing, remove the module, Prisma schema, contracts, mobile feature, native plugin, configuration, and tests together. Generate the migration. Keep `google-auth-library` if social sign-in uses it. Run types, tests, and the Maestro journey.
 
 ## Store configuration
 

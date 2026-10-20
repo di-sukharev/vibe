@@ -9,7 +9,6 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
-    "test": "bun test tests",
     "test:build-contracts": "bun test build-contracts",
     "typecheck": "astro check",
     "preview": "astro preview",

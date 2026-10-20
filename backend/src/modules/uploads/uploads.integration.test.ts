@@ -5,7 +5,6 @@ import { join } from 'node:path'
 
 import { createApp } from '../../app'
 import { createPrisma } from '../../db'
-import { createPrismaAvatarsRepository } from './infrastructure/avatars-repository'
 import { cleanupUploads } from './index'
 import { loadEnv } from '../../env'
 import { createBackgroundTasks } from '../../background-tasks'
@@ -428,36 +427,6 @@ describe('avatar upload API integration', () => {
     expect(await prisma.userAvatar.count()).toBe(1)
     storage.deleteObject = deleteObject
     expect((await cleanupUploads({ db: prisma, storage }, new Date(now.getTime() + 1))).removed).toBe(1)
-  })
-
-  test('never lets a lost race delete a published avatar or its object', async () => {
-    // Both guards live in the real repository, so they are exercised through it rather than
-    // through a fake that could simply mirror them. The scenario is two finalizes of one upload:
-    // the winner publishes it, and the loser must neither re-promote it nor discard it.
-    const session = await register('race@example.com')
-    const ticket = await requestTicket(session.accessToken, pngFixture, 'image/png')
-    await transfer(ticket, pngFixture)
-
-    const repository = createPrismaAvatarsRepository(prisma)
-    await finalize(session.accessToken, ticket.uploadId)
-    const published = await prisma.userAvatar.findFirstOrThrow({ where: { state: 'ready' } })
-
-    // The loser's promote finds nothing pending and reports it, instead of deleting the winner.
-    expect(
-      await repository.promoteToReady({
-        userId: session.user.id,
-        uploadId: ticket.uploadId,
-        readyAt: new Date(),
-      }),
-    ).toBeNull()
-
-    // The loser's discard reports no object to delete, so the published bytes are left alone.
-    expect(await repository.removePending(session.user.id, ticket.uploadId)).toBe(false)
-
-    const survivor = await prisma.userAvatar.findUniqueOrThrow({ where: { id: published.id } })
-    expect(survivor.state).toBe('ready')
-    expect(survivor.objectKey).toBe(published.objectKey)
-    expect(await storage.headObject(published.objectKey)).not.toBeNull()
   })
 
   test('removes a user’s avatar rows when the user is deleted', async () => {

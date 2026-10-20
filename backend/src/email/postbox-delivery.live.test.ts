@@ -9,8 +9,7 @@ import { createPostboxDelivery } from './postbox-delivery'
  *
  * This is the run that proves the SigV4 signature. A wrong service, a wrong region, or a `host`
  * header missing from `SignedHeaders` all produce a valid-looking request that only the real
- * endpoint rejects - `postbox-delivery.test.ts` can assert the shape of the signature but never
- * that Postbox accepts it.
+ * endpoint rejects.
  *
  * Started by `bun run --cwd backend test:live` with the variables in docs/EMAIL.md,
  * "Proving it works". `test-live.mjs` refuses to run without them.
@@ -65,8 +64,7 @@ maybeDescribe('Postbox delivery against the live API', () => {
 
     expect(error).toBeInstanceOf(EmailDeliveryError)
     expect((error as EmailDeliveryError).kind).toBe('permanent')
-    // The same PII rule the unit contract asserts, proven against a real provider message: the
-    // provider names the address it refused, and none of that may reach our error.
+    // The provider names the address it refused. None of that may reach our error.
     expect(`${(error as Error).message} ${JSON.stringify((error as EmailDeliveryError).details)}`).not.toContain(
       'not-an-address',
     )

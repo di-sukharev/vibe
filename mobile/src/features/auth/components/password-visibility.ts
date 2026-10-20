@@ -11,11 +11,6 @@ export type PasswordVisibilityPresentation = {
 /**
  * Derives the password field's non-security presentation (action label, accessibility value, and
  * the platform icon name) from the single `isVisible` flag it depends on.
- *
- * `secureTextEntry` stays out of this function and inline at the call site: the Maestro policy
- * audit (`scripts/e2e/maestro-policy-audit.mjs`) statically checks for the literal
- * `secureTextEntry={!isVisible}` in the component source, so that guarantee must stay visible
- * there instead of arriving through a spread.
  */
 export function getPasswordVisibilityPresentation(
   isVisible: boolean,

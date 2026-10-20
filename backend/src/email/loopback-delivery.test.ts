@@ -7,8 +7,7 @@ import { createResendDelivery } from './resend-delivery'
 /**
  * Both drivers against a real HTTP server, over the real global `fetch`.
  *
- * The contract suite injects a transport, so it proves what the driver *decides* but never that
- * the runtime sends what the driver built. This closes that gap without an account: a wrong
+ * This checks the request without a provider account: a wrong
  * method, a header the runtime strips, or a body that never reaches the wire shows up here. It is
  * the cheapest possible check on the one thing the live suites would otherwise own alone.
  *

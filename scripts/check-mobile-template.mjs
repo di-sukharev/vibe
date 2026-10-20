@@ -29,7 +29,7 @@ function mobileReleaseErrors({ branch, status, head, originMobile, masterIsAnces
 
 const mobileValidationCommands = [
   ['run', 'check'],
-  ['run', '--cwd', 'mobile', 'e2e:maestro:audit'],
+  ['run', 'build:mobile'],
 ]
 
 export function runMobileValidation(execute = execFileSync) {

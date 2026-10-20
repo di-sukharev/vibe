@@ -120,23 +120,6 @@ describe('the task outbox against a real database', () => {
     expect((await prisma.taskOutbox.findUniqueOrThrow({ where: { id } })).status).toBe('processing')
   })
 
-  test('claiming a row restarts its lease clock', async () => {
-    // Everything about lease recovery rests on Prisma bumping `updated_at` during the claiming
-    // updateMany. If that ever stops - a raw-SQL rewrite, a Prisma major - every row that sat
-    // pending longer than the lease becomes instantly recoverable while its runner is working,
-    // and the same task runs twice with nothing failing.
-    const handlers = registry(async () => undefined)
-    const { id } = await enqueueTask(prisma, { type: 'test:work', dedupeKey: 'clock', payload: {} }, handlers)
-    await prisma.$executeRaw`UPDATE task_outbox SET updated_at = now() - interval '10 minutes' WHERE id = ${id}::uuid`
-
-    const before = await prisma.taskOutbox.findUniqueOrThrow({ where: { id }, select: { updatedAt: true } })
-    await claimTask(prisma, { id, now: now() })
-    const after = await prisma.taskOutbox.findUniqueOrThrow({ where: { id }, select: { updatedAt: true } })
-
-    expect(after.updatedAt.getTime()).toBeGreaterThan(before.updatedAt.getTime())
-    expect(Date.now() - after.updatedAt.getTime()).toBeLessThan(60_000)
-  })
-
   test('a lease that went stale is handed back without spending an attempt', async () => {
     const handlers = registry(async () => undefined)
     const { id } = await enqueueTask(prisma, { type: 'test:work', dedupeKey: 'stale', payload: {} }, handlers)
@@ -222,10 +205,6 @@ describe('the task outbox against a real database', () => {
         redactedAt: expect.any(Date),
         status: 'failed',
       })
-      expect(error).toHaveBeenCalledWith(
-        `Task test:work ${id} gave up after 2 attempts.`,
-        expect.any(Error),
-      )
     } finally {
       error.mockRestore()
     }

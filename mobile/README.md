@@ -68,10 +68,10 @@ For verification, temporarily enable `ENABLE_TEST_PUSH` and call the authenticat
 
 Use [Subscriptions](../docs/IAP.md) and [Social sign-in](../docs/SOCIAL_AUTH.md) to enable or remove those features. Check current store rules before changing purchase behavior.
 
-[Testing](../docs/TESTING.md#mobile-e2e) covers Maestro. Run `bun run --cwd mobile e2e:maestro:audit` after flow changes. Package scripts define client tests, types, lint, and web export.
+[Testing](../docs/TESTING.md#mobile-e2e) covers Maestro. Package scripts define types, lint, and bundle export for iOS, Android, and web. Run the auth journey against a development build after flow changes.
 
 ## Template maintenance
 
 Keep shared changes on master and mobile-specific changes on mobile. Merge master before publishing mobile. On a clean mobile commit, run `bun run mobile:template:check`. After pushing, add `-- --published` to verify the published commit.
 
-The gate requires master ancestry and runs all local checks plus the Maestro audit. A new product uses its own release process.
+The gate requires master ancestry and runs all repository checks plus bundle export for every platform. It does not run Maestro on a device. A new product uses its own release process.

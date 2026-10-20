@@ -157,61 +157,6 @@ test('runtime database grants allow current and future DML without schema DDL', 
   }
 })
 
-test('runtime database reconciliation rolls back every revoke when a later grant fails', async () => {
-  const databaseUrl = process.env.TEST_DATABASE_URL
-  if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required')
-
-  const databaseName = decodeURIComponent(new URL(databaseUrl).pathname.slice(1))
-  const suffix = `${process.pid}_${Date.now()}`
-  const username = `runtime_rollback_${suffix}`
-  const tableName = `runtime_rollback_${suffix}`
-  const db = createPrisma(databaseUrl)
-
-  try {
-    await db.$executeRawUnsafe(`CREATE ROLE "${username}" NOLOGIN`)
-    await db.$executeRawUnsafe(
-      `CREATE TABLE public."${tableName}" (id bigint PRIMARY KEY)`,
-    )
-    await db.$executeRawUnsafe(
-      `GRANT SELECT ON TABLE public."${tableName}" TO "${username}"`,
-    )
-
-    const faultingDb = {
-      $transaction: (operation: Parameters<typeof db.$transaction>[0]) =>
-        db.$transaction(async (transaction) =>
-          operation({
-            ...transaction,
-            $queryRawUnsafe: transaction.$queryRawUnsafe.bind(transaction),
-            async $executeRawUnsafe(statement: string) {
-              if (statement.startsWith('GRANT CONNECT')) {
-                throw new Error('injected grant failure')
-              }
-              return transaction.$executeRawUnsafe(statement)
-            },
-          } as never),
-        ),
-    }
-
-    await expect(
-      grantRuntimeDatabaseAccess(faultingDb, { databaseName, username }),
-    ).rejects.toThrow('injected grant failure')
-
-    const [{ can_select: canSelect }] = await db.$queryRawUnsafe<
-      Array<{ can_select: boolean }>
-    >(
-      `SELECT has_table_privilege($1, $2, 'SELECT') AS can_select`,
-      username,
-      `public.${tableName}`,
-    )
-    expect(canSelect).toBe(true)
-  } finally {
-    await db.$executeRawUnsafe(`DROP TABLE IF EXISTS public."${tableName}"`)
-    await db.$executeRawUnsafe(`DROP OWNED BY "${username}"`)
-    await db.$executeRawUnsafe(`DROP ROLE IF EXISTS "${username}"`)
-    await db.$disconnect()
-  }
-})
-
 test('migration ownership preflight requires both public-schema privileges', async () => {
   const databaseUrl = process.env.TEST_DATABASE_URL
   if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required')

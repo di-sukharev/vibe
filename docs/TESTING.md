@@ -13,7 +13,7 @@ bun run test:webapp
 bun run e2e:webapp -- auth.spec.ts -g 'name'
 ```
 
-Backend runners accept paths relative to `backend/`. Name database tests `*.integration.test.ts` and provider tests `*.live.test.ts`. Run them through their package scripts. Plain `bun test` does not prepare their environment.
+Backend runners accept paths relative to `backend/`. Name database tests `*.integration.test.ts` and provider tests `*.live.test.ts`. Run them through their package scripts. Plain `bun test` does not prepare their environment. The local `test:backend:unit` command runs filesystem and loopback HTTP integrations without Docker.
 
 ## Integration database
 
@@ -33,7 +33,7 @@ Find its project and port with `docker compose ls` and `docker ps`. After the la
 
 ## Client and build tests
 
-Test client session, transport, validation, and navigation behavior in `webapp/tests`. Reuse the existing provider test setup when React must mount. Do not add jsdom or another DOM library.
+Test client behavior through the browser journeys in `webapp/e2e/specs`. `bun run test:webapp` runs these journeys against the test backend and database. Test shared request schemas through backend HTTP integration tests.
 
 `bun run test:build-contracts` builds both web applications and checks the website output. Use these tests for published metadata, static fallbacks, and asset loading. Running a contract file alone checks the existing build.
 
@@ -59,9 +59,13 @@ E2E and screenshots share a Compose project. Run them separately or set differen
 
 Keep transitive overrides only while needed. Upgrade the three Prisma packages together and verify backend types, tests, and affected client behavior.
 
+The `braces` override pins the API-compatible [`@zklogic/braces` fork](https://github.com/ArfanKhalilMughal/braces) for [CVE-2026-93687](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm). Upstream has no patched release. The fork limits parser nesting and keeps deeper input as literal text. `scripts/glob-security.test.mjs` checks the exploit and normal range expansion in Node. Remove the override when the dependency tree uses an upstream fix or no longer needs `braces`.
+
+Mobile pins `node-forge` to the immutable fix commit from [upstream PR #1152](https://github.com/digitalbazaar/forge/pull/1152). This PR is not merged or released. It rejects extra elements in the RSA digest algorithm. Replace the pin when an official fixed release is available. `decode-uri-component` uses the official 0.5.0 fix. The one-line `query-string` patch reads its ESM default export from CommonJS. Remove that patch and override when Expo Router updates its query parser. `scripts/mobile-dependency-security.test.mjs` verifies malformed URL input and RSA signatures through Expo's installed dependencies. The audit has no advisory exceptions.
+
 ## Mobile tests
 
-`bun run test:mobile` checks mobile client behavior. Billing tests run even when billing is disabled. Backend integration tests cover both configuration modes with PostgreSQL. Only social sign-in tests remain parked until that feature is enabled.
+Test mobile client behavior with the Maestro journey below. Billing and push tests use the real backend and PostgreSQL. Billing tests cover both configuration modes. Add social sign-in integration tests when that feature is enabled.
 
 ### Mobile E2E
 
@@ -76,6 +80,6 @@ EXPO_PUBLIC_E2E=1 MAESTRO_DEV_SERVER_URL=http://<LAN_IP>:8081 \
 
 The runner does not install the application or start its services. Its options are in `mobile/.maestro/.env.example`. Never point it at the development database. For a renamed app, set `MAESTRO_APP_ID`.
 
-Run `bun run --cwd mobile e2e:maestro:audit` after changing flows or launch behavior. The audit checks dev-client links, selectors, password visibility, and keyboard handling. The auth flow verifies registration, session restoration after restart, and sign-out.
+The auth flow verifies registration, session restoration after restart, and sign-out. Run it after changes to flows or launch behavior. `bun run mobile:template:check --published` checks branch publication, runs the repository checks, and exports iOS, Android, and web bundles. It does not run a device journey.
 
 Use stable `testID` selectors. Reveal secure password input before typing. Dismiss the keyboard through scrolling or static content, rather than `hideKeyboard`. Keep important controls fully visible before tapping.
