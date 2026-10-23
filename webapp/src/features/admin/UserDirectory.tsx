@@ -9,24 +9,10 @@ import {
 import { useState, type FormEvent } from 'react'
 
 import { DataTableFrame } from '@/components/dashboard'
-import {
-  Alert,
-  AlertAction,
-  AlertDescription,
-  AlertTitle,
-} from '@/components/ui/alert'
+import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle,
-} from '@/components/ui/empty'
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from '@/components/ui/input-group'
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
+import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
 import { Item } from '@/components/ui/item'
 import {
   Select,
@@ -47,21 +33,16 @@ import {
 import { Typography } from '@/components/typography'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { formatDate } from '@/platform/intl'
-import {
-  adminUsersPagination,
-  adminUsersViewState,
-  roleMutationFeedback,
-} from './model'
-import {
-  useAdminUsersQuery,
-  useUpdateAdminUserRoleMutation,
-} from './queries'
+import { adminUsersPagination, adminUsersViewState, roleMutationFeedback } from './model'
+import { useAdminUsersQuery, useUpdateAdminUserRoleMutation } from './queries'
 import { RoleChangeDialog } from './RoleChangeDialog'
 
 type PendingRoleChange = {
   role: UserRole
   user: AdminUserSummary
 }
+
+const roleLabels: Record<UserRole, string> = { user: 'User', admin: 'Admin' }
 
 type DirectoryRowsProps = {
   currentUser: UserDto
@@ -95,9 +76,7 @@ export function UserDirectory({ currentUser }: { currentUser: UserDto }) {
     itemCount: usersQuery.data?.items.length,
   })
   const mutationFeedback = roleMutationFeedback(roleMutation)
-  const pagination = usersQuery.data
-    ? adminUsersPagination(usersQuery.data)
-    : null
+  const pagination = usersQuery.data ? adminUsersPagination(usersQuery.data) : null
 
   const submitSearch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -120,9 +99,7 @@ export function UserDirectory({ currentUser }: { currentUser: UserDto }) {
 
   const summary = usersQuery.data
     ? `Page ${usersQuery.data.page} of ${pagination?.totalPages ?? 1} · ${usersQuery.data.total} users${
-        pagination?.wasBounded
-          ? ` · First ${pagination.reachableUsers} matches available`
-          : ''
+        pagination?.wasBounded ? ` · First ${pagination.reachableUsers} matches available` : ''
       }`
     : viewState === 'error'
       ? 'Users unavailable'
@@ -135,8 +112,8 @@ export function UserDirectory({ currentUser }: { currentUser: UserDto }) {
           <Alert data-testid="role-change-success">
             <AlertTitle>Role changed</AlertTitle>
             <AlertDescription>
-              {mutationFeedback.user.email} is now {mutationFeedback.user.role}.
-              Their previous sessions have been revoked.
+              {mutationFeedback.user.email} is now {mutationFeedback.user.role}. Their previous
+              sessions have been revoked.
             </AlertDescription>
           </Alert>
         )}
@@ -163,20 +140,20 @@ export function UserDirectory({ currentUser }: { currentUser: UserDto }) {
                   value={draftQuery}
                 />
               </InputGroup>
-              <Button data-testid="user-search-submit" type="submit">Search</Button>
+              <Button data-testid="user-search-submit" type="submit">
+                Search
+              </Button>
             </form>
           }
         >
           {viewState === 'loading' && <DirectoryLoading />}
           {viewState === 'error' && usersQuery.isError && (
-            <DirectoryError
-              error={usersQuery.error}
-              onRetry={() => void usersQuery.refetch()}
-            />
+            <DirectoryError error={usersQuery.error} onRetry={() => void usersQuery.refetch()} />
           )}
           {viewState === 'empty' && <DirectoryEmpty hasQuery={query.length > 0} />}
-          {viewState === 'ready' && usersQuery.data && (
-            fitsTable ? (
+          {viewState === 'ready' &&
+            usersQuery.data &&
+            (fitsTable ? (
               <UserTable
                 currentUser={currentUser}
                 isRoleChangePending={roleMutation.isPending}
@@ -190,8 +167,7 @@ export function UserDirectory({ currentUser }: { currentUser: UserDto }) {
                 onRoleChange={requestRoleChange}
                 users={usersQuery.data.items}
               />
-            )
-          )}
+            ))}
         </DataTableFrame>
       </div>
 
@@ -209,12 +185,7 @@ export function UserDirectory({ currentUser }: { currentUser: UserDto }) {
   )
 }
 
-function UserTable({
-  currentUser,
-  isRoleChangePending,
-  onRoleChange,
-  users,
-}: DirectoryRowsProps) {
+function UserTable({ currentUser, isRoleChangePending, onRoleChange, users }: DirectoryRowsProps) {
   return (
     <Table>
       <TableHeader>
@@ -229,9 +200,7 @@ function UserTable({
           <TableRow data-testid="user-row" key={user.id}>
             <TableCell>
               <div className="grid">
-                <Typography variant="bodySmMedium">
-                  {user.displayName ?? user.email}
-                </Typography>
+                <Typography variant="bodySmMedium">{user.displayName ?? user.email}</Typography>
                 <Typography variant="caption" tone="muted">
                   {user.email}
                 </Typography>
@@ -262,56 +231,47 @@ function UserTable({
  * terms name the fields the table names with column headers. "User" and "Role" are visible in
  * the values themselves and stay screen-reader only; "Created" is the one a bare date needs.
  */
-function UserList({
-  currentUser,
-  isRoleChangePending,
-  onRoleChange,
-  users,
-}: DirectoryRowsProps) {
+function UserList({ currentUser, isRoleChangePending, onRoleChange, users }: DirectoryRowsProps) {
   return (
     // Explicit `role="list"`: WebKit drops list semantics from an unstyled `<ul>`, and phones
     // are exactly where this markup renders.
     <ul aria-label="Users" className="grid gap-3" role="list">
       {users.map((user) => (
-        <Item asChild key={user.id} variant="outline">
-          <li data-testid="user-row">
-            <dl className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-3">
-              <div className="grid min-w-0">
-                <Typography as="dt" variant="srOnly">
-                  User
+        <Item render={<li data-testid="user-row" />} key={user.id} variant="outline">
+          <dl className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-3">
+            <div className="grid min-w-0">
+              <Typography as="dt" variant="srOnly">
+                User
+              </Typography>
+              <dd className="grid">
+                <Typography variant="bodySmMedium">{user.displayName ?? user.email}</Typography>
+                <Typography variant="caption" tone="muted" wrap="break">
+                  {user.email}
                 </Typography>
-                <dd className="grid">
-                  <Typography variant="bodySmMedium">
-                    {user.displayName ?? user.email}
-                  </Typography>
-                  <Typography variant="caption" tone="muted" wrap="break">
-                    {user.email}
-                  </Typography>
-                </dd>
-              </div>
-              <div>
-                <Typography as="dt" variant="srOnly">
-                  Role
-                </Typography>
-                <dd>
-                  <RoleSelect
-                    currentUser={currentUser}
-                    disabled={isRoleChangePending}
-                    onRoleChange={onRoleChange}
-                    user={user}
-                  />
-                </dd>
-              </div>
-              <div className="col-span-2 flex items-center justify-between border-t pt-3">
-                <Typography as="dt" variant="caption" tone="muted">
-                  Created
-                </Typography>
-                <Typography as="dd" variant="bodySm">
-                  {formatDate(user.createdAt)}
-                </Typography>
-              </div>
-            </dl>
-          </li>
+              </dd>
+            </div>
+            <div>
+              <Typography as="dt" variant="srOnly">
+                Role
+              </Typography>
+              <dd>
+                <RoleSelect
+                  currentUser={currentUser}
+                  disabled={isRoleChangePending}
+                  onRoleChange={onRoleChange}
+                  user={user}
+                />
+              </dd>
+            </div>
+            <div className="col-span-2 flex items-center justify-between border-t pt-3">
+              <Typography as="dt" variant="caption" tone="muted">
+                Created
+              </Typography>
+              <Typography as="dd" variant="bodySm">
+                {formatDate(user.createdAt)}
+              </Typography>
+            </div>
+          </dl>
         </Item>
       ))}
     </ul>
@@ -332,6 +292,7 @@ function RoleSelect({
   return (
     <Select
       disabled={disabled}
+      items={roleLabels}
       onValueChange={(value) => {
         const parsedRole = userRoleSchema.safeParse(value)
         if (parsedRole.success && parsedRole.data !== user.role) {
@@ -355,7 +316,9 @@ function RoleSelect({
         >
           User
         </SelectItem>
-        <SelectItem data-testid="role-option-admin" value="admin">Admin</SelectItem>
+        <SelectItem data-testid="role-option-admin" value="admin">
+          Admin
+        </SelectItem>
       </SelectContent>
     </Select>
   )
@@ -371,13 +334,7 @@ function DirectoryLoading() {
   )
 }
 
-function DirectoryError({
-  error,
-  onRetry,
-}: {
-  error: Error
-  onRetry: () => void
-}) {
+function DirectoryError({ error, onRetry }: { error: Error; onRetry: () => void }) {
   return (
     <Alert variant="destructive">
       <AlertTitle>Users are unavailable</AlertTitle>
@@ -397,9 +354,7 @@ function DirectoryEmpty({ hasQuery }: { hasQuery: boolean }) {
       <EmptyHeader>
         <EmptyTitle>No users found</EmptyTitle>
         <EmptyDescription>
-          {hasQuery
-            ? 'Try a different name or email.'
-            : 'No accounts are available yet.'}
+          {hasQuery ? 'Try a different name or email.' : 'No accounts are available yet.'}
         </EmptyDescription>
       </EmptyHeader>
     </Empty>

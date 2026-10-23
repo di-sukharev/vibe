@@ -104,6 +104,8 @@
     @apply border-border outline-ring/50;
     }
   body {
+    position: relative;
+    isolation: isolate;
     @apply min-h-screen bg-background text-foreground antialiased;
     }
   html {

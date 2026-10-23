@@ -28,7 +28,9 @@ A new Yandex job creates a container and timer at the next release. Check scoped
 
 `outbox:drain` claims due `task_outbox` rows and runs handlers from [handlers.ts](../backend/src/outbox/handlers.ts). It provides retries, not strict ordering or exactly-once delivery.
 
-Add a handler to `taskHandlers`. Load its implementation inside `run`. Enqueue through `enqueueTask(tx, { type, dedupeKey, payload })` in the transaction that promises the work. Do not insert task rows through raw SQL: the enqueue helper maintains the lease timestamps.
+Add a handler to `taskHandlers`. Load its implementation inside `run`. Enqueue through `enqueueTask(tx, { type, dedupeKey, payload })` in the database transaction that saves the change requiring the task. Both writes commit or roll back together. This prevents a crash from leaving saved data without its promised background task. Do not insert task rows through raw SQL: the enqueue helper maintains the lease timestamps.
+
+If a provider call succeeds but the worker stops before recording success, the task can run again. Reuse provider idempotency keys when supported. Otherwise, design the task so another run does not repeat a harmful action. The outbox's `dedupeKey` prevents duplicate task rows, not repeated provider calls.
 
 Validate the JSON payload. Make repeated execution harmless. Pass `signal` to provider calls and keep their deadlines below the stale-lease timeout. Throw `TerminalTaskError` only when retry cannot help. Compensate before a terminal failure and on the final attempt.
 

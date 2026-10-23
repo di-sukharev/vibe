@@ -85,9 +85,9 @@
     "screens": "bun run --cwd webapp screens"
   },
   "devDependencies": {
-    "@storybook/addon-a11y": "10.6.0",
-    "@storybook/addon-docs": "10.6.0",
-    "@storybook/react-vite": "10.6.0",
-    "storybook": "10.6.0"
+    "@storybook/addon-a11y": "10.6.3",
+    "@storybook/addon-docs": "10.6.3",
+    "@storybook/react-vite": "10.6.3",
+    "storybook": "10.6.3"
   }
 }

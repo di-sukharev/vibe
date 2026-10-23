@@ -19,7 +19,13 @@ Fonts must already be installed or approved by the user. The generator does not 
 
 Product components own their visual styles. Their props describe data, state, and actions. Parents control placement through layout wrappers. Do not forward `className`, `style`, or unrestricted DOM props into product components.
 
-Use theme tokens for colors, fonts, and radius. Use the Tailwind spacing scale. Generate primitives with the application's pinned `ui:add` command and keep compositions outside `src/components/ui`.
+Use theme tokens for colors, fonts, and radius. Use the Tailwind spacing scale.
+
+Use the application's installed shadcn CLI to add or update generated primitives. See the [webapp component command](../webapp/README.md#components). Keeping the generator version fixed makes component updates reproducible. Keep product compositions outside `src/components/ui`.
+
+Both applications use the `base-vega` registry and Base UI. Use the `render` prop for component composition. Do not add Radix UI or Vaul wrappers. Import `cn` from the `cn` package. Keep application-specific variants and sizing in product compositions, so registry updates do not remove them. Each application keeps its configured icon library and theme.
+
+Review registry updates before overwriting primitives. Preserve the calendar day-button focus ref; DayPicker needs it for keyboard navigation. The Hugeicons spinner must use the icon component's prop type because native SVG props also accept string stroke widths.
 
 Webapp examples are `PageLayout`, `WorkspaceShell`, and the users and admin features. Use `Typography` for product text. Storybook shows primitives and shared compositions.
 

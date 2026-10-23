@@ -130,11 +130,16 @@
     @apply border-border outline-ring/50;
     }
   body {
+    position: relative;
     @apply bg-background text-foreground;
     }
   html {
     @apply font-sans;
     }
+}
+
+#root {
+  isolation: isolate;
 }
 
 @media (prefers-reduced-motion: reduce) {

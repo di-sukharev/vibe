@@ -49,21 +49,6 @@ function calleeName(callee) {
   return ''
 }
 
-// `<Typography asChild><span>…</span></Typography>`: the child renders Typography's own styles.
-function isTypographySlotElement(openingElement) {
-  const parent = openingElement?.parent?.parent?.openingElement
-  if (jsxNameToString(parent?.name) !== 'Typography') return false
-
-  const asChild = parent.attributes.find(
-    (attribute) =>
-      attribute.type === 'JSXAttribute' && jsxNameToString(attribute.name) === 'asChild'
-  )
-  if (!asChild) return false
-  if (!asChild.value) return true
-  const expression = asChild.value.expression
-  return expression?.type === 'Literal' && expression.value === true
-}
-
 // Text that is not product copy: form values, document metadata, and anything inside an <svg>.
 function isTechnicalTextElement(openingElement) {
   if (technicalTextElementNames.has(jsxNameToString(openingElement?.name))) return true
@@ -152,7 +137,7 @@ const typographyPolicyPlugin = {
           const parent = node.parent?.openingElement
           const name = jsxNameToString(parent?.name)
           if (!/^[a-z]/.test(name)) return
-          if (isTechnicalTextElement(parent) || isTypographySlotElement(parent)) return
+          if (isTechnicalTextElement(parent)) return
 
           context.report({ node, messageId: 'rawText', data: { name } })
         }
@@ -172,7 +157,7 @@ const typographyPolicyPlugin = {
           },
           JSXOpeningElement(node) {
             const name = jsxNameToString(node.name)
-            if (typographyElementNames.has(name) && !isTypographySlotElement(node)) {
+            if (typographyElementNames.has(name)) {
               context.report({ node, messageId: 'rawElement', data: { name } })
             }
           },
