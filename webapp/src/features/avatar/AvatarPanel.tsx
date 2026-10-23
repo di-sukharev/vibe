@@ -56,7 +56,9 @@ export function AvatarPanel({ user }: { user: UserDto }) {
       <CardContent className="grid gap-5">
         {avatarQuery.isPending && (
           <div data-testid="avatar-loading" role="status">
-            <Typography tone="muted" variant="bodySm">Loading photo…</Typography>
+            <Typography tone="muted" variant="bodySm">
+              Loading photo…
+            </Typography>
           </div>
         )}
         {avatarQuery.isError && (
@@ -78,9 +80,13 @@ export function AvatarPanel({ user }: { user: UserDto }) {
           </Alert>
         )}
         <div className="flex flex-wrap items-center gap-5">
-          <Avatar data-testid="avatar-preview" size="xl">
+          <Avatar className="size-16" data-testid="avatar-preview">
             {imageUrl && <AvatarImage alt="" src={imageUrl} />}
-            <AvatarFallback data-testid="avatar-fallback">{initials(user)}</AvatarFallback>
+            <AvatarFallback className="text-foreground" data-testid="avatar-fallback">
+              <Typography as="span" variant="lead">
+                {initials(user)}
+              </Typography>
+            </AvatarFallback>
           </Avatar>
 
           <div className="grid gap-2">

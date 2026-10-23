@@ -1,8 +1,4 @@
-import {
-  Alert02Icon,
-  FileNotFoundIcon,
-  ShieldUserIcon,
-} from '@hugeicons/core-free-icons'
+import { Alert02Icon, FileNotFoundIcon, ShieldUserIcon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 import { Link } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
@@ -10,12 +6,7 @@ import { useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import {
-  Empty,
-  EmptyContent,
-  EmptyHeader,
-  EmptyMedia,
-} from '@/components/ui/empty'
+import { Empty, EmptyContent, EmptyHeader, EmptyMedia } from '@/components/ui/empty'
 import { Spinner } from '@/components/ui/spinner'
 import { Typography } from '@/components/typography'
 
@@ -54,11 +45,7 @@ export function SessionErrorSection({ retry }: { retry: () => Promise<void> }) {
       icon={Alert02Icon}
       title="Session check is temporarily unavailable"
     >
-      <Button
-        disabled={retryPending}
-        onClick={() => void retrySession()}
-        type="button"
-      >
+      <Button disabled={retryPending} onClick={() => void retrySession()} type="button">
         {retryPending ? 'Trying again…' : 'Try again'}
       </Button>
     </RouteStateCard>
@@ -74,12 +61,17 @@ export function NotFoundSection({ destination }: { destination: HomeDestination 
       icon={FileNotFoundIcon}
       title="Page not found"
     >
-      <Button asChild>
-        {authenticated ? (
-          <Link to={destination}>Return to workspace</Link>
-        ) : (
-          <Link search={{ returnTo: undefined }} to="/login">Return to sign in</Link>
-        )}
+      <Button
+        nativeButton={false}
+        render={
+          authenticated ? (
+            <Link to={destination} />
+          ) : (
+            <Link search={{ returnTo: undefined }} to="/login" />
+          )
+        }
+      >
+        {authenticated ? 'Return to workspace' : 'Return to sign in'}
       </Button>
     </RouteStateCard>
   )
@@ -103,9 +95,9 @@ function RouteStateCard({
       <Card className="w-full max-w-lg shadow-sm">
         <CardContent>
           <Empty
+            className="p-4 sm:p-8"
             aria-live={alert ? 'assertive' : undefined}
             role={alert ? 'alert' : undefined}
-            size="sm"
           >
             <EmptyHeader>
               <EmptyMedia variant="icon">

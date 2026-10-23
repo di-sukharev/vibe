@@ -20,6 +20,8 @@ Displayed prices and availability are informational. The backend confirms them a
 
 Use [UI](../docs/UI.md) for theme generation and screenshots. The decorative hero has a static CSS fallback. Its 3D code loads only on wide screens without reduced motion. Keep product information outside the scene.
 
+Use `bun run --cwd website ui:add -- <component>` to generate primitives with the pinned shadcn CLI. Both applications use the Base UI registry. Keep product compositions outside `src/components/ui`.
+
 `bun run storybook:website` shows React primitives and compositions. It does not render Astro pages.
 
 ## Request-time rendering

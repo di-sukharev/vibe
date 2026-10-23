@@ -1,18 +1,10 @@
 import { useTheme } from 'next-themes'
 
-import {
-  Moon02Icon,
-  Sun01Icon,
-  ComputerIcon,
-} from '@hugeicons/core-free-icons'
+import { Moon02Icon, Sun01Icon, ComputerIcon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 
 import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
-import {
-  Field,
-  FieldDescription,
-  FieldLabel,
-} from '@/components/ui/field'
+import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import {
   Select,
   SelectContent,
@@ -22,14 +14,12 @@ import {
 } from '@/components/ui/select'
 import { Typography } from '@/components/typography'
 
-const themes = ['system', 'light', 'dark'] as const
-type Theme = typeof themes[number]
-
-const themeOptions = {
-  system: { icon: ComputerIcon, label: 'System' },
-  light: { icon: Sun01Icon, label: 'Light' },
-  dark: { icon: Moon02Icon, label: 'Dark' },
-} as const
+const themeOptions = [
+  { value: 'system', icon: ComputerIcon, label: 'System' },
+  { value: 'light', icon: Sun01Icon, label: 'Light' },
+  { value: 'dark', icon: Moon02Icon, label: 'Dark' },
+] as const
+type Theme = (typeof themeOptions)[number]['value']
 
 export function AppearancePanel() {
   const { theme = 'system', setTheme } = useTheme()
@@ -49,6 +39,7 @@ export function AppearancePanel() {
         <Field>
           <FieldLabel htmlFor="appearance-theme">Theme</FieldLabel>
           <Select
+            items={themeOptions}
             onValueChange={(value) => {
               if (isTheme(value)) setTheme(value)
             }}
@@ -58,10 +49,10 @@ export function AppearancePanel() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {themes.map((item) => (
-                <SelectItem key={item} value={item}>
-                  <HugeiconsIcon aria-hidden icon={themeOptions[item].icon} strokeWidth={2} />
-                  {themeOptions[item].label}
+              {themeOptions.map(({ value, icon, label }) => (
+                <SelectItem key={value} value={value}>
+                  <HugeiconsIcon aria-hidden icon={icon} strokeWidth={2} />
+                  {label}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -75,6 +66,6 @@ export function AppearancePanel() {
   )
 }
 
-function isTheme(value: string): value is Theme {
-  return themes.some((theme) => theme === value)
+function isTheme(value: string | null): value is Theme {
+  return themeOptions.some((theme) => theme.value === value)
 }

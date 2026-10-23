@@ -35,6 +35,27 @@ Find its project and port with `docker compose ls` and `docker ps`. After the la
 
 Test client behavior through the browser journeys in `webapp/e2e/specs`. `bun run test:webapp` runs these journeys against the test backend and database. Test shared request schemas through backend HTTP integration tests.
 
+## What to check
+
+Write integration tests that exercise real components together. Examples include an HTTP request that changes database records, a job that uses its repository, or a command that operates on temporary files. Replace external providers when needed. Do not replace internal components or test helper functions in isolation.
+
+Check API responses and resulting database changes. For external providers, check requests sent to their test implementations. Include successful cases, denied access, and relevant failures, such as invalid input or provider errors.
+
+An API test and a browser test can cover the same user journey. The API test checks server behavior. The browser test checks the interaction that needs a browser.
+
+Do not add unit tests, component tests, or tests of UI wording, CSS, markup, visual appearance, or snapshots. Screenshots support the user's visual review. Do not compare them against saved images as an automated test.
+
+## Session and query changes
+
+When changing session or query code, check these cases:
+
+- After successful sign-out, the previous user's data is removed from the UI and query cache.
+- After an account change, the previous user's data cannot appear in the new account, including in other tabs.
+- A delayed response from before sign-out or an account change cannot restore the previous session or its data.
+- A response for old query parameters cannot replace the results for the current parameters.
+
+For example, start a request as user A, switch to user B, then let A's response arrive. B's session and data must remain unchanged.
+
 ## Browser tests and screenshots
 
 Install Playwright once with `bun run --cwd webapp e2e:install`. Docker must be running. Specs are in `webapp/e2e/specs` and use stable `data-testid` selectors.

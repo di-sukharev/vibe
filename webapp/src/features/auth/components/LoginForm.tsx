@@ -100,14 +100,14 @@ export function LoginForm({ returnTo }: { returnTo?: string }) {
             <Field data-invalid={hasErrors(fieldErrors.password)}>
               <div className="flex items-center">
                 <FieldLabel htmlFor={passwordId}>Password</FieldLabel>
-                <Typography asChild variant="bodySm">
-                  <Link
-                    className="ml-auto underline-offset-4 hover:underline"
-                    data-testid="forgot-password-link"
-                    to="/forgot-password"
-                  >
-                    Forgot your password?
-                  </Link>
+                <Typography
+                  as={Link}
+                  className="ml-auto underline-offset-4 hover:underline"
+                  data-testid="forgot-password-link"
+                  to="/forgot-password"
+                  variant="bodySm"
+                >
+                  Forgot your password?
                 </Typography>
               </div>
               <PasswordInput

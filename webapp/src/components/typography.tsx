@@ -1,6 +1,5 @@
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
-import { Slot } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 
@@ -114,7 +113,6 @@ const defaultElementByVariant: Record<TypographyVariant, React.ElementType> = {
 type TypographyOwnProps<TElement extends React.ElementType = "span"> =
   VariantProps<typeof typographyVariants> & {
     as?: TElement
-    asChild?: boolean
   }
 
 type TypographyProps<TElement extends React.ElementType = "span"> =
@@ -126,7 +124,6 @@ type TypographyProps<TElement extends React.ElementType = "span"> =
 
 function Typography<TElement extends React.ElementType = "span">({
   as,
-  asChild = false,
   className,
   variant,
   tone,
@@ -138,12 +135,11 @@ function Typography<TElement extends React.ElementType = "span">({
   ...props
 }: TypographyProps<TElement>) {
   const resolvedVariant = variant ?? "body"
-  const Comp = asChild ? Slot.Root : (as ?? defaultElementByVariant[resolvedVariant])
-  const slotProps = asChild ? {} : { "data-slot": "typography" }
+  const Comp = as ?? defaultElementByVariant[resolvedVariant]
 
   return (
     <Comp
-      {...slotProps}
+      data-slot="typography"
       data-variant={resolvedVariant}
       className={cn(
         typographyVariants({

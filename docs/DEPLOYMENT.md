@@ -2,6 +2,8 @@
 
 Use [scripts/infra.mjs](../scripts/infra.mjs) for production changes. Terraform files define resources and defaults. Provider setup is in [DigitalOcean](DIGITALOCEAN.md) and [Yandex Cloud](YANDEX_CLOUD.md).
 
+The script checks release commits and plans and blocks protected resource deletions. It locks apply and release operations against concurrent runs. Direct Terraform commands bypass these checks.
+
 Never run raw `terraform apply`, use `-target`, edit state, or unlock a live process. The recovery steps below describe the permitted exceptions.
 
 ## Configuration and commands

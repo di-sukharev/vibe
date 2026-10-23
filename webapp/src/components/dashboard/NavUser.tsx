@@ -40,26 +40,12 @@ export function NavUser({
   settingsPath: WorkspaceRoutePath
   user: UserDto
 }) {
-  const { isMobile, setOpen } = useSidebar()
-  const [logoutError, setLogoutError] = useState(false)
-  const [logoutPending, setLogoutPending] = useState(false)
-
-  const logout = async () => {
-    setLogoutError(false)
-    setLogoutPending(true)
-    try {
-      await onLogout()
-    } catch {
-      setLogoutError(true)
-      setOpen(true)
-    } finally {
-      setLogoutPending(false)
-    }
-  }
+  const { isMobile } = useSidebar()
+  const { logout, status } = useAccountLogout(onLogout)
 
   return (
     <>
-      {logoutError && (
+      {status === 'error' && (
         <Typography data-testid="logout-error" role="alert" variant="caption" tone="destructive">
           Logout failed. Please try again.
         </Typography>
@@ -67,38 +53,41 @@ export function NavUser({
       <SidebarMenu>
         <SidebarMenuItem>
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <SidebarMenuButton
-                aria-label="Open account menu"
-                data-testid="account-menu"
-                size="lg"
-                tooltip={user.displayName ?? user.email}
-                className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
-              >
-                <Avatar className="size-8 rounded-lg">
-                  <AvatarFallback className="rounded-lg">
-                    {userInitials(user)}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="grid min-w-0 flex-1 gap-0.5 text-left">
-                  <Typography variant="control" truncate>
-                    {user.displayName ?? user.email}
-                  </Typography>
-                  <div className="flex min-w-0 items-center gap-1.5">
-                    <Typography data-testid="current-user-email" variant="caption" tone="muted" truncate>
-                      {user.email}
-                    </Typography>
-                    <Badge variant="outline" className="shrink-0 capitalize">
-                      {user.role}
-                    </Badge>
-                  </div>
-                </div>
-                <HugeiconsIcon
-                  className="ml-auto size-4 group-data-[collapsible=icon]:hidden"
-                  icon={MoreVerticalCircle01Icon}
-                  strokeWidth={2}
+            <DropdownMenuTrigger
+              render={
+                <SidebarMenuButton
+                  aria-label="Open account menu"
+                  data-testid="account-menu"
+                  size="lg"
+                  tooltip={user.displayName ?? user.email}
+                  className="data-open:bg-sidebar-accent data-open:text-sidebar-accent-foreground"
                 />
-              </SidebarMenuButton>
+              }
+            >
+              <AccountAvatar user={user} />
+              <div className="grid min-w-0 flex-1 gap-0.5 text-left">
+                <Typography variant="control" truncate>
+                  {user.displayName ?? user.email}
+                </Typography>
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <Typography
+                    data-testid="current-user-email"
+                    variant="caption"
+                    tone="muted"
+                    truncate
+                  >
+                    {user.email}
+                  </Typography>
+                  <Badge variant="outline" className="shrink-0 capitalize">
+                    {user.role}
+                  </Badge>
+                </div>
+              </div>
+              <HugeiconsIcon
+                className="ml-auto size-4 group-data-[collapsible=icon]:hidden"
+                icon={MoreVerticalCircle01Icon}
+                strokeWidth={2}
+              />
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="end"
@@ -106,55 +95,75 @@ export function NavUser({
               side={isMobile ? 'bottom' : 'right'}
               sideOffset={4}
             >
-              <DropdownMenuLabel className="p-0">
-                <div className="flex items-center gap-2 px-1 py-1.5">
-                  <Avatar className="size-8 rounded-lg">
-                    <AvatarFallback className="rounded-lg">
-                      {userInitials(user)}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="grid min-w-0 flex-1 gap-0.5">
-                    <Typography variant="bodySmMedium" truncate>
-                      {user.displayName ?? user.email}
-                    </Typography>
-                    <Typography variant="caption" tone="muted" truncate>
-                      {user.email}
-                    </Typography>
+              <DropdownMenuGroup>
+                <DropdownMenuLabel className="p-0">
+                  <div className="flex items-center gap-2 px-1 py-1.5">
+                    <AccountAvatar user={user} />
+                    <div className="grid min-w-0 flex-1 gap-0.5">
+                      <Typography variant="bodySmMedium" truncate>
+                        {user.displayName ?? user.email}
+                      </Typography>
+                      <Typography variant="caption" tone="muted" truncate>
+                        {user.email}
+                      </Typography>
+                    </div>
                   </div>
-                </div>
-              </DropdownMenuLabel>
+                </DropdownMenuLabel>
+              </DropdownMenuGroup>
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
                 {accountPath && (
-                  <DropdownMenuItem asChild>
-                    <DashboardLink to={accountPath}>
-                      <HugeiconsIcon icon={UserCircle02Icon} strokeWidth={2} />
-                      Profile
-                    </DashboardLink>
+                  <DropdownMenuItem render={<DashboardLink to={accountPath} />}>
+                    <HugeiconsIcon icon={UserCircle02Icon} strokeWidth={2} />
+                    Profile
                   </DropdownMenuItem>
                 )}
-                <DropdownMenuItem asChild>
-                  <DashboardLink to={settingsPath}>
-                    <HugeiconsIcon icon={Settings01Icon} strokeWidth={2} />
-                    Settings
-                  </DashboardLink>
+                <DropdownMenuItem render={<DashboardLink to={settingsPath} />}>
+                  <HugeiconsIcon icon={Settings01Icon} strokeWidth={2} />
+                  Settings
                 </DropdownMenuItem>
               </DropdownMenuGroup>
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 data-testid="account-menu-logout"
-                disabled={logoutPending}
-                onSelect={() => void logout()}
+                disabled={status === 'pending'}
+                onClick={() => void logout()}
                 variant="destructive"
               >
                 <HugeiconsIcon icon={Logout01Icon} strokeWidth={2} />
-                {logoutPending ? 'Logging out…' : 'Log out'}
+                {status === 'pending' ? 'Logging out…' : 'Log out'}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </SidebarMenuItem>
       </SidebarMenu>
     </>
+  )
+}
+
+function useAccountLogout(onLogout: () => Promise<void>) {
+  const { setOpen } = useSidebar()
+  const [status, setStatus] = useState<'idle' | 'pending' | 'error'>('idle')
+
+  const logout = async () => {
+    setStatus('pending')
+    try {
+      await onLogout()
+      setStatus('idle')
+    } catch {
+      setStatus('error')
+      setOpen(true)
+    }
+  }
+
+  return { logout, status }
+}
+
+function AccountAvatar({ user }: { user: UserDto }) {
+  return (
+    <Avatar className="size-8 rounded-lg">
+      <AvatarFallback className="rounded-lg">{userInitials(user)}</AvatarFallback>
+    </Avatar>
   )
 }
 

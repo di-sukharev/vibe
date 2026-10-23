@@ -20,11 +20,7 @@ export type DashboardNavigationItem = {
   to: WorkspaceRoutePath
 }
 
-export function NavMain({
-  items,
-}: {
-  items: ReadonlyArray<DashboardNavigationItem>
-}) {
+export function NavMain({ items }: { items: ReadonlyArray<DashboardNavigationItem> }) {
   return (
     <nav aria-label="Primary navigation" data-testid="primary-navigation">
       <SidebarGroup>
@@ -34,16 +30,19 @@ export function NavMain({
             {items.map((item) => (
               <SidebarMenuItem key={item.to}>
                 <SidebarMenuButton
-                  asChild
+                  render={
+                    <DashboardLink
+                      data-testid={`nav-link${item.to.replaceAll('/', '-')}`}
+                      to={item.to}
+                    />
+                  }
                   isActive={item.isActive}
                   tooltip={item.label}
                 >
-                  <DashboardLink data-testid={`nav-link${item.to.replaceAll('/', '-')}`} to={item.to}>
-                    <HugeiconsIcon icon={item.icon} strokeWidth={2} />
-                    <Typography asChild variant="control">
-                      <span>{item.label}</span>
-                    </Typography>
-                  </DashboardLink>
+                  <HugeiconsIcon icon={item.icon} strokeWidth={2} />
+                  <Typography as="span" variant="control">
+                    {item.label}
+                  </Typography>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             ))}

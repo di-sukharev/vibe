@@ -1,13 +1,26 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 
-import { uiDemos } from './demos'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { DemoSurface } from './demo-surface'
 
 const meta = {
-  component: uiDemos['label'],
+  component: LabelDemo,
   title: 'UI/Inputs/Label',
-} satisfies Meta<typeof uiDemos['label']>
+} satisfies Meta<typeof LabelDemo>
 
 export default meta
 type Story = StoryObj<typeof meta>
 
 export const Default: Story = {}
+
+function LabelDemo() {
+  return (
+    <DemoSurface>
+      <div className="grid gap-2">
+        <Label htmlFor="story-email">Email</Label>
+        <Input id="story-email" type="email" placeholder="name@example.com" />
+      </div>
+    </DemoSurface>
+  )
+}
