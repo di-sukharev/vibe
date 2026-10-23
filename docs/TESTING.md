@@ -82,6 +82,8 @@ The `braces` override pins the API-compatible [`@zklogic/braces` fork](https://g
 
 Mobile pins `node-forge` to the immutable fix commit from [upstream PR #1152](https://github.com/digitalbazaar/forge/pull/1152). This PR is not merged or released. It rejects extra elements in the RSA digest algorithm. Replace the pin when an official fixed release is available. `decode-uri-component` uses the official 0.5.0 fix. The one-line `query-string` patch reads its ESM default export from CommonJS. Remove that patch and override when Expo Router updates its query parser. `scripts/mobile-dependency-security.test.mjs` verifies malformed URL input and RSA signatures through Expo's installed dependencies. The audit has no advisory exceptions.
 
+The `zod` override requires 4.6.6 or later to fix GHSA-mrhx-c7xc-m3w5. Expo CLI still requests Zod 3. Its DevTools schemas use APIs supported by Zod 4. The mobile dependency integration test checks real plugin execution, invalid command rejection, and MCP schema conversion through the installed SDK. Remove the override when Expo CLI and the remaining dependency tree require a fixed Zod release.
+
 ## Mobile tests
 
 Test mobile client behavior with the Maestro journey below. Billing and push tests use the real backend and PostgreSQL. Billing tests cover both configuration modes. Add social sign-in integration tests when that feature is enabled.
