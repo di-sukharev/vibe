@@ -8,7 +8,7 @@ Apply migrations before releasing the API. Configure the stores and backend cred
 
 Disabled billing mounts no API routes or mobile IAP provider. Enabled routes use separate ingress limits. Define what premium unlocks and enforce access in the backend. Client state controls presentation only.
 
-For hosted environments, pass billing settings through `extra_runtime_env`. Google credentials and `BILLING_ENABLED` must reach the API, maintenance, and outbox jobs. Keep the existing schedules active. See [Deployment](DEPLOYMENT.md#extra-runtime-variables).
+Supply `BILLING_ENABLED` to the API, maintenance, and outbox processes. Keep Apple billing credentials on the API. Supply Google billing settings and credentials to the API, maintenance, and outbox processes. Keep each validated credential group complete and the existing schedules active.
 
 To remove billing, remove the module, Prisma schema, contracts, mobile feature, native plugin, configuration, and tests together. Generate the migration. Keep `google-auth-library` if social sign-in uses it. Run types, tests, and the Maestro journey.
 

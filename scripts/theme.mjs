@@ -18,8 +18,6 @@ const FONT_START = '/* THEME_FONT_START */'
 const FONT_END = '/* THEME_FONT_END */'
 const FONT_IMPORT_START_CSS = '/* THEME_FONT_IMPORT_START */'
 const FONT_IMPORT_END_CSS = '/* THEME_FONT_IMPORT_END */'
-const FONT_IMPORT_START_JS = '// THEME_FONT_IMPORT_START'
-const FONT_IMPORT_END_JS = '// THEME_FONT_IMPORT_END'
 
 /* -------------------------------------------------------------------------------------------- */
 /* Color math: hex -> OKLCH, sRGB gamut clamp, WCAG 2 relative luminance and contrast.            */
@@ -310,7 +308,6 @@ const APP_CONFIGS = {
   website: {
     cssPath: 'website/src/styles/global.css',
     packageJsonPath: 'website/package.json',
-    fontImportPath: 'website/src/layouts/BaseLayout.astro',
     hasBrandAlias: true,
     chartLightnessSteps: [0.97, 0.8, 0.63, 0.46, 0.3],
     modes: {
@@ -495,26 +492,18 @@ export function renderWebsiteCss(source, themeConfig) {
   let next = replaceMarkerBlock(source, TOKENS_START, TOKENS_END, [
     renderTokensBlock('website', 'dark', themeConfig),
   ])
+  next = replaceMarkerBlock(next, FONT_IMPORT_START_CSS, FONT_IMPORT_END_CSS, [
+    `@import "${themeConfig.website.font.package}";`,
+  ], '')
   next = replaceMarkerBlock(next, FONT_START, FONT_END, [
     `${INDENT}--font-sans: ${themeConfig.website.font.family}, sans-serif;`,
   ])
   return next
 }
 
-export function renderWebsiteFontImport(source, themeConfig) {
-  return replaceMarkerBlock(
-    source,
-    FONT_IMPORT_START_JS,
-    FONT_IMPORT_END_JS,
-    [`import '${themeConfig.website.font.package}'`],
-    '',
-  )
-}
-
 const RENDER_TARGETS = [
   { path: 'webapp/src/index.css', render: renderWebappCss },
   { path: 'website/src/styles/global.css', render: renderWebsiteCss },
-  { path: 'website/src/layouts/BaseLayout.astro', render: renderWebsiteFontImport },
 ]
 
 /* -------------------------------------------------------------------------------------------- */

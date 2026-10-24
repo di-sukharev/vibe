@@ -12,10 +12,9 @@ Use the user's language for conversation, product documents, and tasks. Write te
 | -------------------- | ------------------------------------------------------------------------- |
 | `packages/contracts` | Shared Zod schemas for API requests, responses, and errors                |
 | `backend`            | Bun/Hono API and background processes; Prisma and PostgreSQL              |
-| `webapp`             | React app for users who have signed in; pages render in the browser (CSR) |
-| `website`            | Public Astro pages rendered at build time (SSG)                           |
+| `webapp`             | React Router app for signed-in users; pages render in the browser (CSR)  |
+| `website`            | Public React Router pages rendered at build time (SSG)                   |
 | `mobile`             | Expo application for iOS, Android, and web                               |
-| `infra`              | Terraform deployment configuration                                        |
 
 Read each application's README for local setup instructions and rules for running it.
 
@@ -28,6 +27,8 @@ Keep backend features in `backend/src/modules/<feature>`. HTTP handlers call app
 Keep webapp features in `webapp/src/features/<feature>`. Features own API calls, queries, forms, and components. Routes build pages using the public exports of features. Shared platform code and UI primitives must not import features. Mobile follows the same feature boundaries; `src/composition` connects providers to their APIs. `bun run architecture:check` enforces these boundaries.
 
 Put public pages in `website`. Use `webapp` for pages that require sign-in and for order and payment pages.
+
+React Router renders the SPA root during the build, even with `ssr: false`. Keep its imports safe without browser APIs or a live backend. Check their Node startup cost.
 
 Record significant architecture and infrastructure decisions in `backend/adr/` as numbered Markdown files. Examples include changing application boundaries, choosing a database or external service, or changing how background work or deployment runs. Explain the problem, chosen approach, reasons, and tradeoffs. Read relevant records before making these changes. [Current architecture](backend/adr/0001-application-architecture.md) records the starting decisions.
 
@@ -43,7 +44,7 @@ Deployment applies migrations before switching application code. Keep migrations
 
 ## Background work
 
-Use the PostgreSQL outbox to store tasks that must survive restarts. When a database change needs a background task, save both in one transaction as per the best swe practices.
+Use the PostgreSQL outbox to store tasks that must survive restarts. When a database change needs a background task, save both in one transaction.
 
 Declare recurring jobs in `backend/src/jobs.ts` and schedules in `backend/src/job-schedules.json`. Use the existing scheduler and workers. See [Background jobs](docs/BACKGROUND_JOBS.md) for handlers and operations.
 
@@ -63,6 +64,8 @@ Use the existing design system and generated shadcn primitives. Keep styles insi
 
 Use the application's icon library. Keep one icon style per application. Never recreate standard UI icons with custom SVG, CSS, or emoji.
 
+Contain failures in optional renderers. Keep page content and navigation usable when initialization or rendering fails.
+
 Show real data. Follow [UI](docs/UI.md) for UI states, accessibility, component generation, theme changes, and scripted screenshots. The user performs the final visual check. Interactive browser use requires an explicit request.
 
 ## Verification and documentation
@@ -81,9 +84,9 @@ Keep temporary files in the system temp/ directory. Delete them after use. Start
 
 ## Deployment
 
-Deploy only on request through `scripts/infra.mjs`. Follow [Deployment](docs/DEPLOYMENT.md) and the selected provider guide. Stop if there are uncommitted changes or the branch has not been fully pushed. Stop if the commit to deploy is unclear.
+Deploy only on request. Follow [Deployment](docs/DEPLOYMENT.md) and the chosen host's procedures. Stop if there are uncommitted changes or the selected commit has not been fully pushed. Stop if the commit to deploy is unclear. Build from that immutable revision.
 
-Never run `terraform apply` directly or use `-target`. Edit Terraform state only as instructed in the documented recovery procedures.
+Publish the website and webapp independently as static files. Run the backend image as separate API and background processes. Apply database migrations before replacing those processes. Production infrastructure and deployment tooling belong to the derived project.
 
 ## Maintenance
 

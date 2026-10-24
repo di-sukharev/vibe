@@ -1,7 +1,5 @@
 import { createBackgroundRuntime, type BackendRuntime } from './runtime'
 import { backgroundJobNames, isBackgroundJobName } from './jobs'
-import { defaultJobLockTimeoutMs } from './db'
-import scheduleDefinitions from './job-schedules.json' with { type: 'json' }
 import {
   runLockedBackgroundJob,
   schedules,
@@ -27,84 +25,6 @@ export async function runOneShotJob(
   await runLockedBackgroundJob(runtime, entry)
 }
 
-/**
- * Provider timers need the job outcome as an HTTP status. Yandex task-mode containers always
- * return HTTP 200 and hide the process result in a header, so a failed command would never reach
- * the trigger's retry policy. HTTP mode keeps the same one-shot executor while exposing failure
- * as non-2xx to the platform.
- */
-export async function handleProviderJobInvocation(
-  jobName: string,
-  createRuntime: () => BackendRuntime = createBackgroundRuntime,
-  entries: ScheduleEntry[] = schedules,
-) {
-  let runtime: BackendRuntime | undefined
-
-  try {
-    runtime = createRuntime()
-    await runOneShotJob(runtime, jobName, entries)
-    await runtime.close()
-    return new Response(null, { status: 204 })
-  } catch (error) {
-    if (runtime) {
-      try {
-        await runtime.close()
-      } catch (closeError) {
-        console.error(
-          `Provider job ${jobName} also failed to close cleanly.`,
-          closeError,
-        )
-      }
-    }
-    console.error(`Provider job ${jobName} failed.`, error)
-    return new Response('Background job failed', { status: 503 })
-  }
-}
-
-/**
- * The container is built for one invocation: the timer trigger's `POST /`. Yandex sends a trigger
- * event as an HTTP POST to the container address, and `infra/yandex/runtime/containers.tf` sets no
- * trigger path, so the root is the only request that may run the job. IAM decides who may reach
- * the container; this decides which request is the job. A probe, a warm-up, or a stray
- * `GET /favicon.ico` from an identity with invoker rights gets 405/404 and runs nothing.
- */
-export async function handleProviderJobRequest(
-  request: Request,
-  jobName: string,
-  createRuntime: () => BackendRuntime = createBackgroundRuntime,
-  entries: ScheduleEntry[] = schedules,
-) {
-  if (new URL(request.url).pathname !== '/') {
-    return new Response('Not Found', { status: 404 })
-  }
-  if (request.method !== 'POST') {
-    return new Response('Method Not Allowed', {
-      headers: { Allow: 'POST' },
-      status: 405,
-    })
-  }
-  return handleProviderJobInvocation(jobName, createRuntime, entries)
-}
-
-export function startProviderJobServer(jobName: string) {
-  if (!isBackgroundJobName(jobName)) {
-    throw new Error(
-      `Unknown job "${jobName}". Available jobs: ${backgroundJobNames().join(', ')}`,
-    )
-  }
-
-  const timeoutSeconds = scheduleDefinitions.find((entry) => entry.job === jobName)
-    ?.yandexExecutionTimeoutSeconds ?? defaultJobLockTimeoutMs / 1000
-  const server = Bun.serve({
-    port: Number(Bun.env.PORT ?? 8080),
-    // Bun permits at most 255 seconds. Longer jobs use the provider's finite execution deadline.
-    idleTimeout: timeoutSeconds <= 255 ? timeoutSeconds : 0,
-    fetch: (request) => handleProviderJobRequest(request, jobName),
-  })
-  console.log(`Provider timer for ${jobName} listening on ${server.url}`)
-  return server
-}
-
 export async function main(argv: string[] = Bun.argv.slice(2)) {
   const [jobName] = argv
 
@@ -124,22 +44,10 @@ export async function main(argv: string[] = Bun.argv.slice(2)) {
 }
 
 if (import.meta.main) {
-  const [mode, jobName] = Bun.argv.slice(2)
-
-  if (mode === '--http') {
-    try {
-      if (!jobName) throw new Error('HTTP provider mode requires a job name')
-      startProviderJobServer(jobName)
-    } catch (error) {
-      console.error(error instanceof Error ? error.message : String(error))
-      process.exit(1)
-    }
-  } else {
-    try {
-      await main()
-    } catch (error) {
-      console.error(error instanceof Error ? error.message : String(error))
-      process.exit(1)
-    }
+  try {
+    await main()
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error))
+    process.exit(1)
   }
 }

@@ -1,46 +1,87 @@
-import { useEffect, useRef, useState, type ComponentType } from 'react'
+import { Component, useEffect, useRef, useState, type ComponentType, type ReactNode } from 'react'
 
 import { watchHeroSceneEnhancement } from './hero-scene-loading'
 
 type CanvasSceneComponent = ComponentType<{ onReady: () => void }>
 
+class HeroSceneErrorBoundary extends Component<
+  { children: ReactNode; onError: () => void },
+  { failed: boolean }
+> {
+  state = { failed: false }
+
+  static getDerivedStateFromError() {
+    return { failed: true }
+  }
+
+  componentDidCatch() {
+    this.props.onError()
+  }
+
+  render() {
+    return this.state.failed ? null : this.props.children
+  }
+}
+
 export default function HeroScene() {
-  const [eligible, setEligible] = useState(false)
-  const [CanvasScene, setCanvasScene] = useState<CanvasSceneComponent | null>(null)
+  const [{ eligible, generation }, setEligibility] = useState({
+    eligible: false,
+    generation: 0,
+  })
+  const [CanvasScene, setCanvasScene] = useState<CanvasSceneComponent | null>(
+    null,
+  )
   const [canvasReady, setCanvasReady] = useState(false)
   const eligibilityGeneration = useRef(0)
 
   useEffect(() => {
     let active = true
-    const stopWatching = watchHeroSceneEnhancement({
-      media: {
-        desktop: window.matchMedia('(min-width: 1024px)'),
-        motion: window.matchMedia('(prefers-reduced-motion: no-preference)'),
-      },
-      load: () => import('./HeroSceneCanvas'),
-      onEligibilityChange: (nextEligible) => {
-        eligibilityGeneration.current += 1
-        setEligible(nextEligible)
-        setCanvasReady(false)
-      },
-      onLoaded: ({ default: Scene }) => {
-        if (active) setCanvasScene(() => Scene)
-      },
-      onLoadError: () => {
-        // The static scene remains the complete, usable fallback.
-      },
-    })
+    let stopWatching: (() => void) | undefined
+    const initialize = () => {
+      if (!active) return
+      stopWatching = watchHeroSceneEnhancement({
+        media: {
+          desktop: window.matchMedia('(min-width: 1024px)'),
+          motion: window.matchMedia('(prefers-reduced-motion: no-preference)'),
+        },
+        load: () => import('./HeroSceneCanvas'),
+        onEligibilityChange: (nextEligible) => {
+          eligibilityGeneration.current += 1
+          setEligibility({
+            eligible: nextEligible,
+            generation: eligibilityGeneration.current,
+          })
+          setCanvasReady(false)
+        },
+        onLoaded: ({ default: Scene }) => {
+          if (active) setCanvasScene(() => Scene)
+        },
+        onLoadError: () => {
+          // The static scene remains the complete, usable fallback.
+        },
+      })
+    }
+    // Match the former idle island: defer initialization until idle, at most 2.5 seconds.
+    const idleId =
+      'requestIdleCallback' in window
+        ? window.requestIdleCallback(initialize, { timeout: 2500 })
+        : undefined
+    const timeoutId =
+      idleId === undefined ? setTimeout(initialize, 2500) : undefined
 
     return () => {
       active = false
-      stopWatching()
+      if (idleId !== undefined) window.cancelIdleCallback(idleId)
+      if (timeoutId !== undefined) clearTimeout(timeoutId)
+      stopWatching?.()
     }
   }, [])
 
-  const canvasGeneration = eligibilityGeneration.current
-
   return (
-    <div className="relative h-full min-h-[25rem] w-full overflow-hidden bg-[#0d0d0d]" data-hero-scene>
+    <div
+      className="relative h-full min-h-[25rem] w-full overflow-hidden bg-[#0d0d0d]"
+      data-hero-scene
+    >
       <div
         className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_48%,rgba(255,255,255,0.13),transparent_46%),linear-gradient(145deg,rgba(23,23,23,0.98),rgba(7,7,7,1))]"
         aria-hidden="true"
@@ -63,11 +104,14 @@ export default function HeroScene() {
       </div>
 
       {eligible && CanvasScene ? (
-        <CanvasScene
-          onReady={() => {
-            if (canvasGeneration === eligibilityGeneration.current) setCanvasReady(true)
-          }}
-        />
+        <HeroSceneErrorBoundary onError={() => setCanvasReady(false)}>
+          <CanvasScene
+            onReady={() => {
+              if (generation === eligibilityGeneration.current)
+                setCanvasReady(true)
+            }}
+          />
+        </HeroSceneErrorBoundary>
       ) : null}
     </div>
   )

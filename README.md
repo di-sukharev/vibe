@@ -1,8 +1,19 @@
 # Vibe Coding Template
 
-<p align="center">
-  <img src="docs/assets/vibe_tmpl_schema.png" alt="Vibe Coding Template architecture diagram" width="100%">
-</p>
+```mermaid
+flowchart LR
+  Website[Website: React Router SSG] --> Webapp[Webapp: React Router CSR]
+  Webapp --> API[Backend: Bun and Hono]
+  Mobile[Mobile: Expo] --> API
+  API --> Database[(PostgreSQL)]
+  Jobs[Scheduler or one-shot jobs] --> Database
+  API --> Storage[Private S3 storage]
+  Jobs --> Storage
+  Jobs --> Email[Email provider]
+  Contracts[Shared Zod contracts] -.-> Webapp
+  Contracts -.-> API
+  Contracts -.-> Mobile
+```
 
 A web and mobile product template for work with coding agents. Expo serves iOS, Android, and web.
 
@@ -26,7 +37,7 @@ Use this section only when creating a new project. Keep it and `CHECKLIST.md` wh
 4. Install with the Bun version in `package.json`. Configure the selected applications from their `.env.example` files. Generate `JWT_SECRET` locally. Keep secrets out of Git and tool output. Leave unselected applications unconfigured.
 5. Set branding in `theme.json` and run `bun run theme`. Rename the template identifiers in packages, databases, cookies, Docker configuration, and page metadata. Search for `web_app_demo`, `web-app-demo`, `webappdemo`, `vibecoding-template`, and `Vibe Coding Template`. Regenerate `bun.lock` after package changes.
 6. For mobile, select the user's Expo account and initialize EAS only when builds are needed. Do not configure Expo, EAS, or Maestro for a web-only project.
-7. If deployment is requested, choose hosting from audience, data location, and operating needs. Remove unused provider directories and guides. Remove links to deleted files. Follow [Deployment](docs/DEPLOYMENT.md).
+7. If deployment is requested, choose hosting from audience, data location, and operating needs. Use the independent static builds and backend image described in [Deployment](docs/DEPLOYMENT.md). Configure the chosen host in the new project.
 8. Run the relevant checks and verify local startup. Keep required operating details in the project README and configuration. Delete `CHECKLIST.md` and this entire block, including its markers. Report local URLs, check results, and any remaining user actions.
 <!-- BOOTSTRAP_ONLY_END -->
 
@@ -35,8 +46,8 @@ Use this section only when creating a new project. Keep it and `CHECKLIST.md` wh
 | Path | Purpose | Guide |
 | --- | --- | --- |
 | `backend` | API, PostgreSQL, authentication, jobs, email, and files | [Backend](backend/README.md) |
-| `webapp` | React CSR for signed-in users | [Webapp](webapp/README.md) |
-| `website` | Astro SSG for public pages and SEO | [Website](website/README.md) |
+| `webapp` | React Router CSR for signed-in users | [Webapp](webapp/README.md) |
+| `website` | React Router SSG for public pages and SEO | [Website](website/README.md) |
 | `packages/contracts` | Shared API schemas and types | [Contracts](packages/contracts/README.md) |
 | `mobile` | Expo application | [Mobile](mobile/README.md) |
 
@@ -61,7 +72,7 @@ The backend permits only origins in `CORS_ORIGINS`. `localhost` and `127.0.0.1` 
 
 Package scripts define the available commands. [AGENTS.md](AGENTS.md) defines architecture and working rules. [CLAUDE.md](CLAUDE.md) imports those rules for Claude.
 
-Run focused checks during development. `bun run check` runs the full local checks and needs Docker and package registry access. Terraform tests run separately with `bun run test:terraform`.
+Run focused checks during development. `bun run check` runs the full local checks and needs Docker and package registry access.
 
 [Testing](docs/TESTING.md) explains database tests and E2E. [UI](docs/UI.md) explains theme generation and screenshots. [Deployment](docs/DEPLOYMENT.md) covers production setup and recovery.
 

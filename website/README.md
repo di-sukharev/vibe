@@ -1,35 +1,27 @@
 # Website
 
-Astro renders public pages at build time (SSG). Signed-in pages belong to [webapp](../webapp/README.md). Scripts and dependencies are in [package.json](package.json).
+React Router Framework Mode renders public pages at build time. Public pages use React and Vite. Signed-in pages belong to [webapp](../webapp/README.md). Scripts and dependencies are in [package.json](package.json).
 
-Run `bun run dev:website` from the root. The website can run without the backend. When Astro starts a background server, use `bun run --cwd website astro dev status`, `logs`, or `stop` to manage it.
+Run `bun run dev:website` from the root. The development server uses port 4321. The website can run without the backend.
 
 ## Pages and data
 
-Keep SEO content in the initial HTML. Put pages in `src/pages`, sections in `src/components/landing`, and metadata in `src/layouts/BaseLayout.astro`.
+Register routes in [src/routes.ts](src/routes.ts). Put route modules in `src/routes` and sections in `src/components/landing`. The root document is [src/root.tsx](src/root.tsx). Route modules render React 19 `title`, `meta`, and `link` elements so metadata is included in the initial HTML.
 
-Use SSG until the required freshness or personalization needs request-time rendering. React components remain static unless they have a `client:*` directive.
+[react-router.config.ts](react-router.config.ts) sets `ssr: false` and `prerender: true`. Builds produce static files in `build/client`. Deploy that directory to a static host. No production React Router server is required. `bun run preview` serves the build locally through Vite.
 
-For data fetched during a build, define a public schema in `packages/contracts`. Include only data safe to publish in static files. Keep credentials out of `PUBLIC_*` variables and build output. Fail the build when required data is missing or invalid.
+For data fetched during a build, define a public schema in `packages/contracts`. Include only data safe to publish in static files. Keep credentials out of `VITE_*` variables and build output. Fail the build when required data is missing or invalid.
 
 Displayed prices and availability are informational. The backend confirms them at checkout. Browser checkout belongs to `webapp`; the public site can hand off selected IDs and quantities through a shared, versioned contract. Do not trust client totals or payment results.
 
 ## Configuration and UI
 
-[.env.example](.env.example) defines canonical website and webapp origins. A release embeds these values in the static output. `PUBLIC_*` values are public.
+[.env.example](.env.example) defines `VITE_WEBSITE_URL` and `VITE_WEBAPP_URL`. A build embeds these public values in the static output. Empty values omit canonical metadata and keep the local next-step link. A nonempty invalid webapp URL fails the build.
 
-Use [UI](../docs/UI.md) for theme generation and screenshots. The decorative hero has a static CSS fallback. Its 3D code loads only on wide screens without reduced motion. Keep product information outside the scene.
+Use [UI](../docs/UI.md) for theme generation and screenshots. The decorative hero has a static CSS fallback. Its 3D code loads at browser idle, with a 2500 ms timeout, only on wide screens without reduced motion. Keep product information outside the scene.
 
 Use `bun run --cwd website ui:add -- <component>` to generate primitives with the pinned shadcn CLI. Both applications use the Base UI registry. Keep product compositions outside `src/components/ui`.
 
-`bun run storybook:website` shows React primitives and compositions. It does not render Astro pages.
+`bun run storybook:website` shows React primitives and compositions. Storybook uses a separate Vite configuration so it does not load the application router.
 
-## Request-time rendering
-
-Start with static pages and rebuilds. Add an Astro adapter only when a route needs server rendering. The steps are next to the configuration in [astro.config.mjs](astro.config.mjs).
-
-An adapter requires a runtime host and changes the build directories. Update the deployment with the rendering change. A static bucket cannot execute server routes or server islands.
-
-Cache only anonymous public output in a shared CDN. Keep personalized output private. Server islands need a stable secret `ASTRO_KEY` at build time and runtime during cached or gradual releases.
-
-References: [Astro rendering](https://docs.astro.build/en/guides/on-demand-rendering/), [server islands](https://docs.astro.build/en/guides/server-islands/).
+References: [React Router pre-rendering](https://reactrouter.com/how-to/pre-rendering), [SPA mode](https://reactrouter.com/how-to/spa).

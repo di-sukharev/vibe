@@ -73,4 +73,4 @@ Remove optional mobile features that the product excludes. Follow the mobile bra
 | Which domains and applications must be published? | _unanswered_ |
 | Is there an existing hosting account or operating constraint? | _unanswered_ |
 
-Choose hosting from these answers. Use Yandex Cloud for a Russian data-location requirement. DigitalOcean is the default alternative. Choose a private server only when someone will operate it. Select email and resource sizes to match the deployment.
+Choose hosting from these answers and the product's data-location requirements. Confirm who will operate the deployment. Choose email independently of hosting. Size resources for the expected load. Follow [Deployment](docs/DEPLOYMENT.md) for artifact and runtime requirements.

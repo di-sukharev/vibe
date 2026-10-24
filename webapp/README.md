@@ -1,6 +1,6 @@
 # Webapp
 
-React and Vite render the signed-in application in the browser (CSR). Public SEO pages belong to [website](../website/README.md). Scripts and dependencies are in [package.json](package.json).
+React Router Framework Mode, React, and Vite render the signed-in application in the browser (CSR). Public SEO pages belong to [website](../website/README.md). Scripts and dependencies are in [package.json](package.json).
 
 Run `bun run dev:webapp` from the root. Authentication needs the [backend](../backend/README.md#local-development).
 
@@ -18,7 +18,7 @@ Call protected endpoints through `useAuth().transport`. Pass the query cancellat
 
 ## Routes and features
 
-[src/routes.tsx](src/routes.tsx) registers routes. [src/pages.tsx](src/pages.tsx) composes public feature APIs. Add workspace routes to `workspaceRoutesByRole` in [navigation/model.ts](src/features/navigation/model.ts) as well as the router.
+[src/routes.ts](src/routes.ts) registers route modules in `src/routes`. Route modules compose public feature APIs. [src/root.tsx](src/root.tsx) owns the document and application providers. Add workspace routes to `workspaceRoutesByRole` in [navigation/model.ts](src/features/navigation/model.ts) as well as the router.
 
 Guards wait for session restoration. Return paths must be local routes in the user's permitted workspace. Enforce access in the backend even when a client guard exists.
 
@@ -34,8 +34,10 @@ bun run --cwd webapp ui:add -- <component>
 
 Keep product compositions outside `src/components/ui`. Render product text through `Typography`. Follow [UI](../docs/UI.md) for styling and screenshots.
 
-`bun run storybook:webapp` shows primitives and shared compositions. It excludes application routes and authenticated features.
+`bun run storybook:webapp` shows primitives and shared compositions. It excludes application routes and authenticated features. A separate Vite configuration keeps Storybook independent of the application router.
 
 ## Hosting
+
+[react-router.config.ts](react-router.config.ts) sets `ssr: false` with no pre-rendered routes. Builds generate the existing session loading screen in `build/client/index.html`. They do not restore sessions or call the API. Deploy `build/client` to a static host; no production React Router server is required. `bun run preview` serves that directory through Vite.
 
 The host must serve `index.html` for unknown paths. Otherwise direct navigation to a client route fails. Follow [Deployment](../docs/DEPLOYMENT.md).

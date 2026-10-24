@@ -1,45 +1,14 @@
-import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-
+import { reactRouter } from '@react-router/dev/vite'
 import tailwindcss from '@tailwindcss/vite'
-import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-
-// https://vite.dev/config/
-export default defineConfig({
-  build: {
-    rolldownOptions: {
-      output: {
-        strictExecutionOrder: true,
-        codeSplitting: {
-          groups: [
-            {
-              name: 'react-vendor',
-              test: /node_modules[\\/](?:react|react-dom|scheduler)[\\/]/,
-              priority: 30,
-            },
-            {
-              name: 'tanstack-vendor',
-              test: /node_modules[\\/]@tanstack[\\/]/,
-              priority: 20,
-            },
-            {
-              name: 'vendor',
-              test: /node_modules/,
-              priority: 10,
-            },
-          ],
-        },
-      },
-    },
-  },
-  plugins: [react(), tailwindcss()],
-  resolve: {
-    alias: {
-      '@': path.resolve(__dirname, './src'),
-    },
-    dedupe: ['react', 'react-dom'],
-  },
-})
+export default defineConfig(({ command }) => ({
+  plugins: [reactRouter(), tailwindcss()],
+  resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
+  // Bundle used icons so the SPA shell does not load the full icon catalog in Node.
+  ssr: { noExternal: command === 'build' ? ['@hugeicons/core-free-icons'] : [] },
+  // Crawl lazy route imports before the first page loads to avoid stale optimized dependencies.
+  optimizeDeps: { entries: ['src/root.tsx', 'src/routes/**/*.tsx'] },
+  server: { port: 5173 },
+}))

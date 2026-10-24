@@ -168,7 +168,7 @@ const typographyPolicyPlugin = {
 }
 
 export default defineConfig([
-  globalIgnores(['dist', 'storybook-static', 'e2e/.artifacts']),
+  globalIgnores(['dist', 'build', '.react-router', 'storybook-static', 'e2e/.artifacts']),
   {
     files: ['**/*.{ts,tsx}'],
     plugins: {
@@ -206,6 +206,12 @@ export default defineConfig([
     rules: {
       'react-refresh/only-export-components': 'off',
       'typographyPolicy/use-typography-component': 'off',
+    },
+  },
+  {
+    files: ['src/root.tsx', 'src/route-guards.tsx'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
     },
   },
   {

@@ -4,11 +4,9 @@ export const TEMPLATE_ACTION = {
 } as const
 
 /**
- * `PUBLIC_WEBAPP_URL` is build-time configuration read by `src/pages/index.astro`. The unified
- * release always sets it to the web app's `https://` origin, and a local or webapp-less build
- * leaves it unset. A value that is set but is not an absolute http(s) URL is a configuration
- * mistake, so this throws and fails `astro build` instead of shipping a call to action that links
- * nowhere.
+ * `VITE_WEBAPP_URL` is public build-time configuration read by `src/routes/home.tsx`.
+ * Leave it unset for the local next-step link. A nonempty value must be an absolute
+ * http(s) URL. Invalid values fail `react-router build` so the published link is usable.
  */
 export function resolvePublicWebappUrl(value: string | undefined): string | undefined {
   const webappUrl = value?.trim()
@@ -16,7 +14,7 @@ export function resolvePublicWebappUrl(value: string | undefined): string | unde
 
   if (!isAbsoluteHttpUrl(webappUrl)) {
     throw new Error(
-      `PUBLIC_WEBAPP_URL must be an absolute http(s) URL such as https://app.example.com, got "${webappUrl}". ` +
+      `VITE_WEBAPP_URL must be an absolute http(s) URL such as https://app.example.com, got "${webappUrl}". ` +
         'Leave it unset to build the website without a link to the web app.',
     )
   }

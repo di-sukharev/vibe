@@ -5,5 +5,5 @@
     "lib": ["ES2023", "DOM"],
     "allowJs": true
   },
-  "include": ["e2e", "playwright.config.ts", "playwright.screens.config.ts"]
+  "include": ["e2e", "playwright.config.ts", "playwright.screens.config.ts", "playwright.website.config.ts"]
 }

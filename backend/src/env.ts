@@ -88,11 +88,8 @@ const envSchema = z.object({
   WEBHOOK_BODY_LIMIT_BYTES: optionalPositiveIntegerSchema,
   WEBHOOK_RATE_LIMIT_MAX: optionalPositiveIntegerSchema,
   WEBHOOK_RATE_LIMIT_WINDOW_SECONDS: optionalPositiveIntegerSchema,
-  // Where the auth and admin limiters count. `memory` is one process's own table and the whole
-  // truth while one API instance serves every request: DigitalOcean's launch profile, an own
-  // server, local development. `database` counts in PostgreSQL through one upsert per limited
-  // request, so any number of instances share one budget; Terraform sets it for Yandex Serverless
-  // Containers, which scale out per concurrent request. See docs/DEPLOYMENT.md.
+  // Memory counters apply to one API process. Database counters share a budget across processes.
+  // Use the database store when more than one API process handles requests.
   RATE_LIMIT_STORE: z.enum(['memory', 'database']).default('memory'),
   SHUTDOWN_GRACE_SECONDS: z.coerce.number().int().positive().max(60).default(20),
   // Which email adapter createEmailDelivery builds. 'console' prints the message instead of
@@ -183,24 +180,7 @@ const envSchema = z.object({
 export type AppEnv = z.infer<typeof envSchema>
 
 export function loadEnv(source: Record<string, string | undefined>) {
-  rejectRemovedSettings(source)
   return envSchema.parse(source)
-}
-
-/**
- * `INGRESS_RATE_LIMIT_PROVIDER=yandex-sws` once switched the per-address write limits off for
- * an edge profile that nothing provisioned. The limits are always on now. Refusing the
- * old value, rather than dropping it with the other unknown keys, tells the operator that the
- * setting no longer does what their deployment notes say. `local` changes nothing and still loads.
- */
-function rejectRemovedSettings(source: Record<string, string | undefined>) {
-  if (source.INGRESS_RATE_LIMIT_PROVIDER?.trim() !== 'yandex-sws') return
-
-  throw new Error(
-    'INGRESS_RATE_LIMIT_PROVIDER=yandex-sws was removed: the API always enforces its ' +
-      'per-address write limits. Delete INGRESS_RATE_LIMIT_PROVIDER from the environment ' +
-      '(Yandex Cloud: extra_runtime_env; see docs/YANDEX_CLOUD.md#removed-smart-web-security-mode).',
-  )
 }
 
 const backgroundNonSigningJwtPlaceholder = '0123456789abcdef'.repeat(4)

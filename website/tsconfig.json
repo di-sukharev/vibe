@@ -1,19 +1,48 @@
 {
-  "extends": "astro/tsconfigs/strict",
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": [
+      "vite/client",
+      "node"
+    ],
+    "skipLibCheck": true,
+    "strict": true,
+    "ignoreDeprecations": "6.0",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ]
+    },
+    "rootDirs": [
+      ".",
+      "./.react-router/types"
+    ],
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true
+  },
   "include": [
-    ".astro/types.d.ts",
-    "**/*"
+    "src",
+    "*.config.ts",
+    ".storybook",
+    ".react-router/types/**/*"
   ],
   "exclude": [
-    "dist",
+    "build",
     "storybook-static"
-  ],
-  "compilerOptions": {
-    "baseUrl": ".",
-    "jsx": "react-jsx",
-    "jsxImportSource": "react",
-    "paths": {
-      "@/*": ["./src/*"]
-    }
-  }
+  ]
 }

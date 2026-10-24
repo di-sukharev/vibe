@@ -119,7 +119,9 @@ export default defineConfig({
     },
     {
       name: 'web',
-      command: `bun run dev --host 127.0.0.1 --port ${frontendPort}`,
+      command: process.env.E2E_WEB_MODE === 'preview'
+        ? `bun run build && bun run preview --host 127.0.0.1 --port ${frontendPort}`
+        : `bun run dev --host 127.0.0.1 --port ${frontendPort}`,
       cwd: frontendRoot,
       env: normalizeEnv({
         ...process.env,

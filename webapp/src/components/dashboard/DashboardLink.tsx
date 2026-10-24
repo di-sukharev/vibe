@@ -1,4 +1,4 @@
-import { Link } from '@tanstack/react-router'
+import { Link } from 'react-router'
 import {
   forwardRef,
   type ComponentPropsWithoutRef,
@@ -21,7 +21,6 @@ export const DashboardLink = forwardRef<HTMLAnchorElement, DashboardLinkProps>(
     return (
       <Link
         {...props}
-        activeOptions={{ exact: true }}
         onClick={(event) => {
           onClick?.(event)
           if (!event.defaultPrevented) setOpenMobile(false)

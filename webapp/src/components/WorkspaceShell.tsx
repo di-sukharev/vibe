@@ -5,7 +5,7 @@ import {
   UserGroupIcon,
   UserIcon,
 } from '@hugeicons/core-free-icons'
-import { useLocation } from '@tanstack/react-router'
+import { useLocation } from 'react-router'
 import type { UserDto } from '@web-app-demo/contracts'
 import type { PropsWithChildren } from 'react'
 
@@ -30,6 +30,8 @@ const iconsByPath = {
 } as const
 
 function getSidebarDefaultOpen() {
+  if (typeof document === 'undefined') return true
+
   const persistedState = document.cookie
     .split('; ')
     .find((entry) => entry.startsWith('sidebar_state='))
@@ -46,7 +48,7 @@ export function WorkspaceShell({
   onLogout: () => Promise<void>
   user: UserDto
 }>) {
-  const pathname = useLocation({ select: (location) => location.pathname })
+  const pathname = useLocation().pathname
   const navigationItems = navigationItemsForRole(user.role)
   const activeItem = navigationItems.find((item) => item.to === pathname)
   const homePath = homePathForRole(user.role)
