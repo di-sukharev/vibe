@@ -28,6 +28,7 @@ function mobileReleaseErrors({ branch, status, head, originMobile, masterIsAnces
 }
 
 const mobileValidationCommands = [
+  ['run', '--cwd', 'mobile', 'doctor'],
   ['run', 'check'],
   ['run', 'build:mobile'],
 ]

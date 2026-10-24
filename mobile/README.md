@@ -19,9 +19,7 @@ Use the local user account from `DEV_SEED_*`. The seed does not grant premium ac
 
 Every `EXPO_PUBLIC_*` value enters the client bundle. Keep secrets out of these variables. `EXPO_PUBLIC_E2E=1` and `EXPO_PUBLIC_DISABLE_PUSH_NOTIFICATIONS=1` disable push registration.
 
-Bun uses isolated dependencies. When switching between master and mobile, remove root and workspace `node_modules` and reinstall. Keep `bun.lock`.
-
-Expo Doctor can report duplicate packages from the isolated peer cycle between Expo, its CLI, and Router. Verify native autolinking and the Metro singleton resolver before changing dependency structure.
+Bun uses hoisted dependencies to keep native modules in one installation. Metro uses the default Expo configuration. When switching between master and mobile, remove root and workspace `node_modules` and reinstall. Keep `bun.lock`.
 
 ## Development build
 
@@ -76,4 +74,4 @@ Use [Subscriptions](../docs/IAP.md) and [Social sign-in](../docs/SOCIAL_AUTH.md)
 
 Keep shared changes on master and mobile-specific changes on mobile. Merge master before publishing mobile. On a clean mobile commit, run `bun run mobile:template:check`. After pushing, add `-- --published` to verify the published commit.
 
-The gate requires master ancestry and runs all repository checks plus bundle export for every platform. It does not run Maestro on a device. A new product uses its own release process.
+The gate requires master ancestry and runs Expo Doctor, all repository checks, and bundle export for every platform. It does not run Maestro on a device. A new product uses its own release process.

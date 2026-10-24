@@ -51,7 +51,7 @@ bun run dev:website
 bun run dev:mobile
 ```
 
-Bun uses isolated dependencies so Expo and webapp retain their own React versions. When switching from master, remove root and workspace `node_modules`, then install again. Keep `bun.lock`.
+Bun uses hoisted dependencies to keep native modules in one installation. When switching from master, remove root and workspace `node_modules`, then install again. Keep `bun.lock`.
 
 Run each application in its own terminal. Authentication and data need the [backend and local PostgreSQL](backend/README.md#local-development). The website can run alone.
 
