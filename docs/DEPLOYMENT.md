@@ -15,7 +15,7 @@ Run these commands from the repository root after `bun install --frozen-lockfile
 
 Set the variables before building. They are public and embedded in the output. Keep secrets out of `VITE_*` variables. Changing these values requires a rebuild of the affected application. Website URLs control canonical links and navigation to the webapp. `VITE_API_URL` selects the backend API.
 
-Both applications use React Router Framework Mode on Vite. The website prerenders its routes at build time. Serve its files with ordinary missing-page handling and an HTTP 404 for unknown paths. The webapp renders in the browser. Its host must return `index.html` for application deep links, including a direct visit to `/users`, while serving existing assets normally. Do not rewrite missing assets to HTML.
+Both applications use React Router Framework Mode on Vite. The website prerenders its routes at build time. Serve its files with ordinary missing-page handling and an HTTP 404 for unknown paths. The webapp renders in the browser. Its host must return `index.html` for application deep links, including a direct visit to `/app/profile`, while serving existing assets normally. Do not rewrite missing assets to HTML.
 
 Publish the directories independently. Neither application needs a production React Router server. Vite development and preview servers are local tools. `bun run static:precompress -- <directory>` can create compressed assets when the chosen static host supports them.
 
