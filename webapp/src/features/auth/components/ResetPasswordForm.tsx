@@ -1,5 +1,5 @@
 import { useForm } from '@tanstack/react-form'
-import { Link } from '@tanstack/react-router'
+import { Link } from 'react-router'
 import { passwordResetConfirmRequestSchema } from '@web-app-demo/contracts'
 import { useId, useState } from 'react'
 
@@ -168,7 +168,7 @@ export function ResetPasswordForm({ token }: { token: string }) {
         )}
 
         <Typography align="center" variant="bodySm">
-          <Link className="underline underline-offset-4" search={{ returnTo: undefined }} to="/login">
+          <Link className="underline underline-offset-4" to="/login">
             Back to login
           </Link>
         </Typography>

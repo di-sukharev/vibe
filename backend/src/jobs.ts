@@ -18,7 +18,7 @@ import type { BackendRuntime } from './runtime'
  * importing a service at the top.
  *
  * Jobs say what to do; they never say when or where. Three processes run this same registry:
- *   - `cron.ts`      - one-job executor for CLI/system cron or Yandex's HTTP timer adapter
+ *   - `cron.ts`      - one-job executor for CLI or an external scheduler
  *   - `scheduler.ts` - a timer inside a long-running process, for a VPS or a cloud worker
  *   - `worker.ts`    - a loop, for work that must run more often than once a minute or in parallel
  *
@@ -74,7 +74,7 @@ export function backgroundJobNames(): BackgroundJobName[] {
 
 export function isBackgroundJobName(value: string): value is BackgroundJobName {
   // `value in backgroundJobs` would also accept 'constructor', 'toString' and the rest of
-  // Object.prototype, and those would then run nothing and exit 0 - a provider timer would
+  // Object.prototype, and those would then run nothing and exit 0 - a scheduler would
   // report a healthy job every night while doing no work.
   return Object.hasOwn(backgroundJobs, value)
 }

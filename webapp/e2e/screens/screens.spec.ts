@@ -10,7 +10,6 @@ import { pngImage } from '../helpers/images'
 // when a page cannot be opened. Filter with `-g`, for example `-g "/admin/users"` or `-g website`.
 
 const outputDirectory = fileURLToPath(new URL('../.artifacts/screens/', import.meta.url))
-const websitePagesDirectory = fileURLToPath(new URL('../../../website/src/pages/', import.meta.url))
 
 const viewports = {
   mobile: { width: 375, height: 812 },
@@ -18,9 +17,6 @@ const viewports = {
 } as const
 
 const colorSchemes = ['light', 'dark'] as const
-
-// Dev-only overlays that the production build does not ship.
-const hideDevOverlays = 'astro-dev-toolbar { display: none !important; }'
 
 // global-setup seeds both accounts with the same password.
 const accounts = {
@@ -36,8 +32,8 @@ const webappRoutes: ReadonlyArray<{ path: string; audience: Audience }> = [
   ...guestRoutes.map((path) => ({ path, audience: 'guest' as const })),
   ...(['user', 'admin'] as const).flatMap((audience) =>
     workspaceRoutesByRole[audience]
-      // A `$param` route needs a concrete record; capture it from its parent page instead.
-      .filter((path) => !path.includes('$'))
+      // A `:param` route needs a concrete record; capture it from its parent page instead.
+      .filter((path) => !path.includes(':'))
       .map((path) => ({ path, audience })),
   ),
 ]
@@ -59,10 +55,8 @@ const extraWebappRoutes: ReadonlyArray<{
   },
 ]
 
-// Static website pages, read from the Astro pages directory. Dynamic `[param]` pages are skipped.
-const websiteRoutes = readdirSync(websitePagesDirectory, { recursive: true, encoding: 'utf8' })
-  .filter((file) => /\.(astro|md|mdx)$/.test(file) && !file.includes('['))
-  .map((file) => `/${file.replace(/\.(astro|md|mdx)$/, '').replace(/(^|\/)index$/, '')}`.replace(/\/$/, '') || '/')
+// Keep the tour aligned with website/src/routes.ts.
+const websiteRoutes = ['/']
 
 async function signIn(page: Page, audience: keyof typeof accounts) {
   const response = await page.request.post(`${process.env.E2E_BACKEND_URL}/api/auth/login`, {
@@ -105,7 +99,7 @@ async function capture(
   await beforeShot?.(page)
 
   const path = `${outputDirectory}${file}`
-  await page.screenshot({ path, fullPage: true, animations: 'disabled', style: hideDevOverlays })
+  await page.screenshot({ path, fullPage: true, animations: 'disabled' })
   console.log(path)
 
   // One image of a tall page shrinks until details are unreadable; add two-screen tiles.
@@ -117,7 +111,7 @@ async function capture(
   for (let top = 0, part = 1; top < pageHeight; top += tileHeight, part += 1) {
     const tilePath = path.replace(/\.png$/, `-part${part}.png`)
     const clip = { x: 0, y: top, width, height: Math.min(tileHeight, pageHeight - top) }
-    await page.screenshot({ path: tilePath, fullPage: true, clip, animations: 'disabled', style: hideDevOverlays })
+    await page.screenshot({ path: tilePath, fullPage: true, clip, animations: 'disabled' })
     console.log(tilePath)
   }
 }

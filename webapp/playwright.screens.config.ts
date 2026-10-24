@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { defineConfig } from '@playwright/test'
 import e2eConfig from './playwright.config'
 
-// `bun run screens`: the E2E stack (test database, backend, Vite) and the Astro website run a
+// `bun run screens`: the E2E stack (test database, backend, Vite) and the public website run a
 // screenshot tour instead of the specs. Images land in e2e/.artifacts/screens. See docs/UI.md.
 
 function freePort() {
@@ -41,15 +41,8 @@ export default defineConfig({
     ...e2eServers,
     {
       name: 'website',
-      // Astro 7 moves `astro dev` to the background when it detects an AI agent. The runner needs a
-      // foreground child of its own, separate from any dev server the developer already runs.
-      command: `bun run dev --host 127.0.0.1 --port ${process.env.SCREENS_WEBSITE_PORT} --ignore-lock`,
+      command: `bun run dev --host 127.0.0.1 --port ${process.env.SCREENS_WEBSITE_PORT}`,
       cwd: fileURLToPath(new URL('../website', import.meta.url)),
-      env: Object.fromEntries(
-        Object.entries({ ...process.env, ASTRO_DEV_BACKGROUND: '1' }).filter(
-          (entry): entry is [string, string] => typeof entry[1] === 'string',
-        ),
-      ),
       url: websiteUrl,
       reuseExistingServer: false,
       timeout: 120_000,

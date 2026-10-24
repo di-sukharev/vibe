@@ -1,6 +1,6 @@
 # 0001: Application architecture
 
-Status: Current baseline. Recorded: 2026-10-20.
+Status: Current baseline. Recorded: 2026-10-24.
 
 ## Context
 
@@ -10,7 +10,7 @@ This record describes the architecture already used by the template. Public cont
 
 ### Separate public pages, browser application, and backend
 
-Astro builds public pages as static HTML. React renders the authenticated application in the browser. Order and payment pages belong to the browser application. The backend owns permissions, authoritative prices, and payment verification when payments are added.
+Both frontends use React Router Framework Mode on Vite. The website sets `ssr: false` and `prerender: true` to build public pages as static HTML. The webapp sets `ssr: false` without prerendering and renders signed-in pages in the browser. Both use explicit route configuration in `src/routes.ts`. Order and payment pages belong to the browser application. The backend owns permissions, authoritative prices, and payment verification when payments are added.
 
 This keeps public content available in the initial HTML and puts protected operations behind one API. Client navigation and static content cannot grant access or confirm a payment.
 
@@ -28,9 +28,13 @@ Use Prisma with PostgreSQL. Store durable tasks in the PostgreSQL outbox. Save a
 
 This avoids a separate broker for tasks that PostgreSQL can already handle. Outbox tasks can run more than once, so handlers must prevent harmful duplicate actions. Add another service only when measurements show that the existing system is insufficient.
 
-### Deploy through the repository script
+### Provide independent, portable artifacts
 
-Terraform defines infrastructure. `scripts/infra.mjs` controls infrastructure changes and releases for the supported providers. It checks release inputs, protects resources, and coordinates concurrent operations. Operational steps belong in [Deployment](../../docs/DEPLOYMENT.md) and the provider guides.
+Build the website and webapp independently into their own `build/client` directories. Serve website pages as static documents with normal 404 responses. Serve webapp deep links through an `index.html` fallback. Neither frontend needs a production React Router server.
+
+Build one backend Docker image for the API, scheduler, one-shot jobs, and database deployment. Hono and Bun remain a separate API. Hosting and production deployment tools belong to the derived project. The template does not provision cloud resources or choose an email provider from the hosting provider.
+
+This keeps local development and application contracts independent of a particular host. Operators must supply infrastructure, secrets, static routing, backups, and release coordination. See [Deployment](../../docs/DEPLOYMENT.md) for the artifact and runtime contract.
 
 Migrations run before application replacement. The previous application version must work with the migrated schema until the new version takes over.
 

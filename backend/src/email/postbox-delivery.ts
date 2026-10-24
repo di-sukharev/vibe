@@ -10,7 +10,7 @@ import { Sha256 } from './sha256'
 const outboundEmailsPath = '/v2/email/outbound-emails'
 
 /**
- * Yandex Cloud Postbox, the provider for installs hosted in Russia.
+ * Yandex Cloud Postbox transactional email delivery.
  *
  * Postbox speaks the Amazon SESv2 API, so the request is an SESv2 document signed with AWS
  * SigV4 under service `ses` and the Yandex region. That is why this driver reuses the signer the

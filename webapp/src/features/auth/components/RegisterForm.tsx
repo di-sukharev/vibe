@@ -1,5 +1,5 @@
 import { useForm } from '@tanstack/react-form'
-import { Link } from '@tanstack/react-router'
+import { Link } from 'react-router'
 import { registerRequestSchema, type RegisterRequest } from '@web-app-demo/contracts'
 import { useId, useState } from 'react'
 
@@ -204,7 +204,7 @@ export function RegisterForm({ returnTo }: { returnTo?: string }) {
 
         <FieldDescription className="text-center">
           Already have an account?{' '}
-          <Link search={{ returnTo }} to="/login">
+          <Link to={returnTo ? `/login?returnTo=${encodeURIComponent(returnTo)}` : "/login"}>
             Sign in
           </Link>
         </FieldDescription>

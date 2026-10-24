@@ -48,6 +48,6 @@ The script starts the test stack and captures webapp and website pages. It uses 
 
 Inspect the captures and fix visible problems. The user performs the final visual check. Interactive browser control requires an explicit request.
 
-Workspace routes come from `workspaceRoutesByRole`. Add guest routes to `webapp/e2e/screens/screens.spec.ts`. Website pages come from `website/src/pages`. Create fixture records in the screenshot spec when a filled state matters.
+Workspace routes come from `workspaceRoutesByRole`. Add guest routes to `webapp/e2e/screens/screens.spec.ts`. Website routes come from the explicit configuration in `website/src/routes.ts`. Create fixture records in the screenshot spec when a filled state matters.
 
 Screenshots share the checkout's E2E Docker project. Run them separately from E2E, or use a distinct `COMPOSE_PROJECT_NAME`.

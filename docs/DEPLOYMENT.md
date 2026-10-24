@@ -1,108 +1,63 @@
 # Deployment
 
-Use [scripts/infra.mjs](../scripts/infra.mjs) for production changes. Terraform files define resources and defaults. Provider setup is in [DigitalOcean](DIGITALOCEAN.md) and [Yandex Cloud](YANDEX_CLOUD.md).
+The template provides two independent static builds and one backend Docker image. Choose hosting and deployment tools for the product's audience, data location, and operating needs. This repository does not provision production resources or publish releases.
 
-The script checks release commits and plans and blocks protected resource deletions. It locks apply and release operations against concurrent runs. Direct Terraform commands bypass these checks.
+Build each artifact from a known, immutable source revision with the Bun version in [package.json](../package.json) and the committed lockfile. Record the revision, image digest, and public build configuration with the release. Deploy only on request, from a clean checkout whose selected commit is fully pushed.
 
-Never run raw `terraform apply`, use `-target`, edit state, or unlock a live process. The recovery steps below describe the permitted exceptions.
+## Static applications
 
-## Configuration and commands
+Run these commands from the repository root after `bun install --frozen-lockfile`:
 
-Only `bootstrap/` and `production/` take `terraform.tfvars`. The script supplies temporary inputs to the other roots. Keep secrets in `TF_VAR_*`, not tfvars: a tfvars value overrides the environment.
+| Application | Build command | Publish directory | Public build variables |
+| --- | --- | --- | --- |
+| Website | `bun run build:website` | `website/build/client` | `VITE_WEBSITE_URL`, `VITE_WEBAPP_URL` |
+| Webapp | `bun run build:webapp` | `webapp/build/client` | `VITE_API_URL` |
 
-`bootstrap/` creates remote state access. `production/`, called foundation by the CLI, creates persistent resources. Runtime, migration, and static roots publish releases. `operations/` holds the mutation lease.
+Set the variables before building. They are public and embedded in the output. Keep secrets out of `VITE_*` variables. Changing these values requires a rebuild of the affected application. Website URLs control canonical links and navigation to the webapp. `VITE_API_URL` selects the backend API.
 
-```bash
-bun run infra:bootstrap -- <provider> --new --dry-run
-bun run infra:bootstrap -- <provider> --new
-bun run infra:plan -- <provider>
-bun run infra:apply -- <provider>
-bun run release -- <provider> --dry-run
-bun run release -- <provider>
-bun run infra:output -- <provider>
-```
+Both applications use React Router Framework Mode on Vite. The website prerenders its routes at build time. Serve its files with ordinary missing-page handling and an HTTP 404 for unknown paths. The webapp renders in the browser. Its host must return `index.html` for application deep links, including a direct visit to `/users`, while serving existing assets normally. Do not rewrite missing assets to HTML.
 
-Use `digitalocean` or `yandex` for `<provider>`. Pass `--new` only for the first bootstrap. Apply foundation changes before releasing. A release requires a foundation plan with no changes.
+Publish the directories independently. Neither application needs a production React Router server. Vite development and preview servers are local tools. `bun run static:precompress -- <directory>` can create compressed assets when the chosen static host supports them.
 
-Each apply uses a saved, reviewed plan. Deletion or replacement needs an exact `--allow-destroy=<address>`. Protected resources remain blocked. Rotate protected credentials by adding a replacement, releasing, verifying, and removing the old credential in a later change.
+## Backend image and processes
 
-## Release requirements
-
-Use the pushed branch selected in Terraform. The worktree must be clean and HEAD must equal its upstream commit. DigitalOcean also checks the GitHub repository. Keep the checkout unchanged throughout the release.
-
-The script builds from an archive of that commit. DigitalOcean static builds use an immutable `infra-release/<commit>` branch. Do not edit those branches or enable deploy-on-push.
-
-A release builds the image, applies migrations, switches the API and jobs, publishes static sites, and checks public URLs. Migration failure stops the switch. Static publication can fail after the backend switches; rerun the same release after correcting the cause.
-
-Migrations go forward. Keep the previous runtime compatible with the migrated schema. Roll back through a reviewed revert and a new release.
-
-## Initial setup
-
-Use the tool versions required by the configuration and provider guide. Prepare Docker, Git, Bun, Terraform, provider access, HTTPS domains, and a strong JWT secret.
-
-Bootstrap starts with local state, creates a private state bucket, and migrates state into it. It writes ignored files with mode `0600`: `.env.terraform-state` and each root's `backend.backend.hcl`. Keep the state credentials in a secret manager.
-
-If bootstrap stops before migration, rerun without `--new`. Local state remains authoritative until remote migration and output verification succeed.
-
-For the first release, supply the first administrator:
+Build from the repository root:
 
 ```bash
-export ADMIN_SEED_EMAIL='owner@example.com'
-export ADMIN_SEED_PASSWORD='<random one-time password>'
-bun run release -- <provider>
-unset ADMIN_SEED_EMAIL ADMIN_SEED_PASSWORD
+docker build -f backend/Dockerfile -t <registry>/<project>-backend:<revision> .
 ```
 
-Change that password after first sign-in. The seed can remain in deployment history, secret versions, and state. Do not resend it: a new seed can reset the administrator and revoke sessions.
+Resolve and deploy the resulting image by digest. The image's working directory is `/app/backend`. Use the same image for the following processes:
 
-Only the API receives `JWT_SECRET`. Jobs and migrations must not receive the signing key.
+| Process | Container command | Configuration |
+| --- | --- | --- |
+| Database deployment | `bun run db:deploy` | Migration-owner `DATABASE_URL`, runtime role name in `DATABASE_RUNTIME_USER`, initial administrator seed when needed |
+| API | Default image command | Production API environment, runtime-role `DATABASE_URL`, `JWT_SECRET` |
+| Scheduler | `bun run start:scheduler` | Production background environment, runtime-role `DATABASE_URL` |
+| One job | `bun run start:cron -- <job>` | Same background environment as the scheduler |
 
-## Extra runtime variables
+Run `db:deploy` to completion before replacing the API or background processes. The API does not apply migrations at startup. Keep migrations compatible with the running version until replacement finishes. A failed database deployment must stop promotion. Schema changes go forward; rollback requires an application version that works with the current schema.
 
-Use `extra_runtime_env` for non-secret settings. Use `extra_runtime_secret_env` on DigitalOcean or `extra_secret_bindings` on Yandex for secrets.
+Run the scheduler under a supervisor, or configure an external scheduler to invoke the individual jobs in [Background jobs](BACKGROUND_JOBS.md). Allow graceful shutdown for active jobs.
 
-By default, extra variables reach the API and every job. Narrow them with `extra_env_components`:
+Only the API needs `JWT_SECRET`. The API and all background processes initialize storage and email adapters. Supply production S3 configuration and credentials to each process, including jobs that only use the database. Enabled email delivery requires provider configuration and credentials in each process. Keep these settings the same for the API and email-draining runners. `db:deploy` needs neither storage nor email configuration.
 
-```hcl
-extra_env_components = {
-  STORE_BUNDLE_ID  = ["api"]
-  STORE_API_SECRET = ["api"]
-}
-```
+### Database roles and first administrator
 
-Targets are `api`, `jobs`, or keys from `backend/src/job-schedules.json`. Keep related variables and secrets on the same targets. Keep variables required by every process on all processes.
+Create a migration owner and a separate runtime login in PostgreSQL. Use the owner only for database deployment. `db:deploy` checks schema ownership, applies migrations, removes unsafe PUBLIC privileges, and grants the runtime role the required data access. It refuses elevated runtime roles and roles that own database objects. Always supply `DATABASE_RUNTIME_USER` when using a separate runtime login. A missing value skips runtime-role grants.
 
-DigitalOcean runs all jobs in one worker. Yandex gives each job a container, but all containers share one runtime identity. Binding scope does not restrict that identity's secret-read permission.
+The command also requires a login-capable administrator. On the first deployment, supply `ADMIN_SEED_EMAIL` and a strong `ADMIN_SEED_PASSWORD` together to this process. Remove them after success and change the password after first sign-in. Reusing the seed can reset the administrator password and revoke sessions. Never use the development seed in production.
 
-For an existing deployment, apply the foundation output change, then release. Old revisions keep previous secret values. Rotate secrets when removing historical exposure matters.
-
-## Existing infrastructure
-
-Import existing resources before applying configuration over them:
+An existing database can need an ownership transfer. This utility is independent of hosting. First inventory through the legacy owner or another connection permitted to transfer ownership:
 
 ```bash
-bun run infra:import -- <provider> <root> <address> <resource-id>
-bun run infra:plan -- <provider>
-```
-
-Use exact provider IDs. Matching names do not prove ownership. Import bootstrap resources into local state when necessary, then bootstrap without `--new`.
-
-Release-root imports need immutable inputs. Use `--runtime-image-digest=sha256:<64-hex>` for runtime and Yandex migration. DigitalOcean static imports also need `--release-revision=<40-char-sha>` and `--source-branch=infra-release/<40-char-sha>`.
-
-Access keys cannot be imported. Import the surrounding resources, create new scoped keys, apply, release, and verify. Revoke old keys afterward. For state keys, require another successful init and plan before revocation.
-
-### Database ownership
-
-An imported database can retain a legacy owner. `db:deploy` stops until the migration owner owns the schema and objects. Inventory them through a privileged legacy connection:
-
-```bash
-export DATABASE_URL='<legacy privileged connection>'
-export DATABASE_LEGACY_OWNER='<inventory owner>'
-export DATABASE_MIGRATION_USER='<Terraform migration owner>'
+export DATABASE_URL='<privileged connection>'
+export DATABASE_LEGACY_OWNER='<current owner>'
+export DATABASE_MIGRATION_USER='<new migration owner>'
 bun run --cwd backend db:adopt-owner
 ```
 
-Review the inventory and obtain approval before transfer:
+Review the inventory and obtain approval before applying it:
 
 ```bash
 export CONFIRM_DATABASE_OWNER_ADOPTION="${DATABASE_LEGACY_OWNER}->${DATABASE_MIGRATION_USER}"
@@ -110,58 +65,12 @@ bun run --cwd backend db:adopt-owner -- --apply
 unset DATABASE_URL DATABASE_LEGACY_OWNER DATABASE_MIGRATION_USER CONFIRM_DATABASE_OWNER_ADOPTION
 ```
 
-The command excludes extension objects and refuses mixed legacy owners. Deployment then restricts runtime and PUBLIC privileges.
+The utility excludes extension objects and refuses mixed legacy owners. Run `db:deploy` with the new migration-owner connection after the transfer.
 
-## Recovery
+## Operator responsibilities
 
-A lost runtime state must be recovered or imported. Never treat an existing deployment as a first release. After an interrupted apply, correct the configuration and plan again.
+Configure HTTPS, domains, trusted ingress headers, API CORS origins, and secure cookies. Set `RATE_LIMIT_STORE=database` when multiple API processes handle requests. Follow [backend configuration](../backend/README.md#configuration) and the validated environment schema. Keep credentials in a secret manager and separate migration, runtime, and operator access.
 
-If foundation outputs changed, run `infra:apply`, review `infra:plan` again, then release. This refreshes the outputs used by release roots.
+Provide PostgreSQL 18 or later, private S3-compatible storage, and any selected email service. Database ID defaults require the native `uuidv7()` function. Configure bucket CORS, version retention, database and object backups, and restore tests. [Storage](STORAGE.md) and [Email](EMAIL.md) describe their application contracts. Hosting choice does not select an email provider.
 
-External DNS can make the first URL check fail. Add the required records, wait for propagation, and rerun. Do not recreate infrastructure for a DNS failure.
-
-### Lost state credentials
-
-If both local bootstrap state and credentials are lost, use a temporary key for the existing state bucket. On Yandex, it must belong to the `<project_slug>-tf-state` service account.
-
-```bash
-export TF_STATE_RECOVERY_ACCESS_KEY_ID='<temporary key id>'
-export TF_STATE_RECOVERY_SECRET_ACCESS_KEY='<temporary secret>'
-bun run infra:bootstrap -- <provider> \
-  --recover-state-bucket=<existing bucket> \
-  --recover-state-region=<existing region>
-unset TF_STATE_RECOVERY_ACCESS_KEY_ID TF_STATE_RECOVERY_SECRET_ACCESS_KEY
-```
-
-Retry with the same key after interruption. Recovery has no dry-run. Revoke the temporary key immediately after success.
-
-### Yandex state policy updates
-
-A state policy update needs temporary folder-level storage access. Add `bootstrap_folder_storage_access = true` to the bootstrap tfvars and run `infra:bootstrap -- yandex`. The command grants, uses, and removes the role. Delete the setting afterward.
-
-If IAM propagation delays the apply, retry with the setting retained. Do not start state recovery while it is present.
-
-### Stale locks
-
-Real foundation applies, releases, and non-bootstrap imports hold a provider-wide lease. Never unlock it while the owning process runs.
-
-After confirming that the run has stopped, enter the locked root. Set `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` from its saved `TF_STATE_*` credentials without printing them. Initialize and unlock:
-
-```bash
-terraform init -reconfigure -backend-config=backend.backend.hcl
-terraform force-unlock <LOCK_ID>
-```
-
-For the mutation lease, use `infra/<provider>/operations`. Other root locks need the same procedure in their own directories. Verify `Who`, `Created`, and `Operation` against the stopped run before unlocking.
-
-## Private servers
-
-Run the backend Docker image with PostgreSQL and private S3 storage. Apply `db:deploy` before switching the runtime. Run `start:scheduler` under a supervisor.
-
-Serve static builds with Caddy or nginx. Webapp fallback routes must return `index.html`. `bun run static:precompress` creates compressed assets for hosts configured to serve them.
-
-The operator owns TLS, backups, restore tests, updates, monitoring, and rollback. Cloud release commands do not manage this setup.
-
-## Local verification
-
-After infrastructure changes, run `bun run test:infra` and `bun run test:terraform`. Mocked tests verify configuration shape. Before release, a real `infra:plan` verifies credentials and current cloud state.
+Monitor API readiness, scheduler failures, outbox backlog, storage failures, and backup recovery. The operator owns resource sizing, updates, release coordination, and rollback procedures. Run `bun run check` and `bun run smoke:backend:docker` before a release. Verify the deployed API and static routing on the chosen host.

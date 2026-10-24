@@ -14,9 +14,9 @@ Production refuses console delivery. `disabled` sends nothing and creates no pas
 
 ## Providers
 
-Use Postbox with Yandex Cloud and Resend with DigitalOcean. Both require a verified sender. Variables and valid combinations are defined in [backend/src/env.ts](../backend/src/env.ts).
+Choose Postbox or Resend independently of hosting, based on delivery requirements and service availability. Both require a verified sender. Variables and valid combinations are defined in [backend/src/env.ts](../backend/src/env.ts).
 
-Provider setup is in [DigitalOcean](DIGITALOCEAN.md#setup) and [Yandex Cloud](YANDEX_CLOUD.md#setup). Keep credentials in environment secrets. The Postbox driver uses SESv2 with SigV4; do not reuse storage keys.
+Configure the sender and credentials with the selected email service. Keep credentials in environment secrets. The Postbox driver uses SESv2 with SigV4; do not reuse storage keys.
 
 ## Delivery and privacy
 

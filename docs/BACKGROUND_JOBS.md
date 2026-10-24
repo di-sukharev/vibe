@@ -12,7 +12,7 @@ bun run --cwd backend start:cron -- outbox:drain
 
 `start:scheduler` runs the schedule in a persistent process. `start:worker` runs `workerLoops`, which are empty by default. Use worker loops for intervals below one minute or independent loops.
 
-`start:cron -- --http <job>` accepts provider timer calls. Only `POST /` runs the job. Success returns 204; failure returns 503 so the timer can retry.
+An external scheduler can invoke the same CLI command. A failed job exits with a nonzero status. Configure retries and alerts in the scheduler. The one-shot process closes its runtime before exiting.
 
 Scheduled jobs hold PostgreSQL advisory locks. A run that exceeds its lock timeout can overlap another run. Keep jobs safe to repeat. Worker loops take the lock only with `singleInstance: true`.
 
@@ -20,9 +20,7 @@ Scheduled jobs hold PostgreSQL advisory locks. A run that exceeds its lock timeo
 
 Add the implementation to `backgroundJobs`. Use the supplied runtime or load adapters inside the job. Keep top-level imports in `jobs.ts` type-only.
 
-For a schedule, add a unique key to `job-schedules.json`. Keep both cron expressions on the same UTC schedule. Set `lockTimeoutMs` above the provider execution timeout. Update the Yandex timer tests when the number or limits change.
-
-A new Yandex job creates a container and timer at the next release. Check scoped environment targets in [Deployment](DEPLOYMENT.md#extra-runtime-variables).
+For a schedule, add its `job`, cron `expression`, and `lockTimeoutMs` to `job-schedules.json`. The scheduler uses UTC. Leave lock-timeout headroom above the slowest expected run. Keep an external scheduler aligned with these definitions when using one.
 
 ## Outbox tasks
 
@@ -48,9 +46,7 @@ Password reset returns the same 202 when the queue is full. Without a working dr
 
 ## Operations
 
-Local backend development starts the scheduler. DigitalOcean runs it as an App Platform worker. Yandex runs each scheduled job through a timer and HTTP container.
-
-On a private server, run `start:scheduler` under a supervisor with `NODE_ENV=production`. Allow shutdown time for running jobs. An empty schedule exits immediately and can cause a supervisor restart loop. Run maintenance even when email is disabled.
+Local backend development starts the scheduler. In production, run `start:scheduler` under a supervisor with `NODE_ENV=production`, or invoke the scheduled jobs with an external scheduler. Allow shutdown time for running jobs. An empty schedule exits immediately and can cause a supervisor restart loop. Run maintenance even when email is disabled.
 
 Read drain metrics in the job logs:
 
@@ -61,4 +57,4 @@ Read drain metrics in the job logs:
 | `unhandled` | Deploy a runner that supports the queued type |
 | `recoveredStale` | Investigate a runner that stopped while holding tasks |
 
-Provider alerts are in [DigitalOcean](DIGITALOCEAN.md) and [Yandex Cloud](YANDEX_CLOUD.md). They do not inspect outbox metrics.
+Configure alerts for failed runs and outbox metrics in the chosen monitoring system. Process liveness alone does not show that queued work is completing.

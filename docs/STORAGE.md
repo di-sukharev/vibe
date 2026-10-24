@@ -35,14 +35,14 @@ Restrict stored and returned URL schemes explicitly. Use the shared upload schem
 
 Avatar changes queue object deletion in the same database transaction. The outbox retries failed deletions after a restart. A second deletion after the old upload URL expires removes late uploads. Run the outbox worker or scheduled drain. Direct database user deletion can still orphan an avatar; it needs a separate deletion workflow. Existing orphaned objects need reconciliation.
 
-Cloud media buckets retain noncurrent versions for 30 days. Recovery restores bytes, not ownership. Back up PostgreSQL separately. Reconciliation must preserve delete markers.
+The operator configures bucket versioning, retention, backups, and recovery access. The template does not configure or guarantee version retention. Test recovery with the chosen storage service. Recovery restores bytes, not ownership. Back up PostgreSQL separately. Reconciliation must preserve delete markers.
 
-An operator can remove a delete marker or copy an old version. DigitalOcean expiry needs verification; see [DigitalOcean](DIGITALOCEAN.md#spaces-version-expiry). Yandex requires separate operator access; see [Yandex Cloud](YANDEX_CLOUD.md#media-version-recovery).
+When versioning is enabled, recovery can require removing a delete marker or copying an older version. Use separate operator credentials and verify that expired versions are removed as intended.
 
 ## Permissions and CORS
 
-Keep buckets private and scope runtime keys to the application bucket. Keep operator keys separate. Verify provider permissions before relying on version retention.
+Keep buckets private and scope runtime keys to the application bucket. Allow object PUT, GET/HEAD, and DELETE. Cleanup jobs need DELETE access to the same objects. Keep bucket administration and version recovery on separate operator credentials. Verify provider permissions before relying on version retention.
 
-[browserUploadAllowedHeaders](../backend/src/storage/config.ts) defines upload headers. The local script applies them automatically. Keep Terraform CORS aligned with the webapp origin and signed upload headers.
+[browserUploadAllowedHeaders](../backend/src/storage/config.ts) defines upload headers. The local script applies them automatically. Configure the production bucket to allow the webapp origin and these signed upload headers.
 
 Public files require a separate bucket. Do not expose the private media bucket through a public CDN.

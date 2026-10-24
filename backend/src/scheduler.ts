@@ -25,9 +25,8 @@ export type ScheduleEntry = {
 /**
  * What this process runs, and the worked example for adding your own.
  *
- * Both cloud Terraform stacks deploy a runner for these definitions. An own server must supervise
- * this scheduler under systemd or Docker; otherwise durable work queues but never drains. See
- * docs/BACKGROUND_JOBS.md, "Running the drain".
+ * Run this scheduler under a process supervisor. Without a runner, durable work queues but
+ * never drains. See docs/BACKGROUND_JOBS.md.
  */
 export const schedules: ScheduleEntry[] = scheduleDefinitions.map(
   ({ expression, job, lockTimeoutMs }) => {

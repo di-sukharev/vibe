@@ -189,9 +189,8 @@ export async function grantRuntimeDatabaseAccess(
           `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO ${role}`,
         ]
 
-  // PUBLIC is inherited by every login, so harden its current and default ACLs for both providers.
-  // DigitalOcean additionally needs explicit DML grants because its Terraform provider cannot
-  // express object privileges. Keep the preflight and every ACL change atomic so a failed
+  // PUBLIC is inherited by every login, so harden its current and default ACLs.
+  // Keep the runtime-role preflight and every ACL change atomic so a failed
   // deployment cannot strand the active runtime after its old grants were revoked.
   await db.$transaction(
     async (transaction) => {
@@ -380,7 +379,7 @@ export async function assertMigrationSchemaOwnership(
     .map(({ kind, identity, owner }) => `${kind} ${identity} is owned by ${owner}`)
     .join('; ')
   throw new Error(
-    `Database migration ownership preflight failed for ${expectedOwner}: ${preview}. Run the documented db:adopt-owner inventory and transfer before the first Terraform-managed migration.`,
+    `Database migration ownership preflight failed for ${expectedOwner}: ${preview}. Run the documented db:adopt-owner inventory and transfer before applying migrations with the new owner.`,
   )
 }
 

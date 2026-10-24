@@ -1,0 +1,10 @@
+export default function BrandMark() {
+  return (
+    <span
+      className="glow-surface grid size-8 place-items-center rounded-lg bg-primary text-[0.7rem] font-bold tracking-[-0.08em] text-primary-foreground"
+      aria-label="ЙЙ"
+    >
+      ЙЙ
+    </span>
+  )
+}

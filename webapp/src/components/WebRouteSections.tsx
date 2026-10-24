@@ -1,6 +1,6 @@
 import { Alert02Icon, FileNotFoundIcon, ShieldUserIcon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
-import { Link } from '@tanstack/react-router'
+import { Link } from 'react-router'
 import type { ReactNode } from 'react'
 import { useState } from 'react'
 
@@ -67,7 +67,7 @@ export function NotFoundSection({ destination }: { destination: HomeDestination 
           authenticated ? (
             <Link to={destination} />
           ) : (
-            <Link search={{ returnTo: undefined }} to="/login" />
+            <Link to="/login" />
           )
         }
       >

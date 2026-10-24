@@ -4,21 +4,10 @@ import { fileURLToPath } from 'node:url'
 import { brotliCompressSync, constants, gzipSync } from 'node:zlib'
 
 export const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-export const defaultTargets = ['webapp/dist', 'website/dist']
+export const defaultTargets = ['webapp/build/client', 'website/build/client']
 
-/**
- * An allow-list, not a deny-list, and every entry is UTF-8 text.
- *
- * A deny-list silently starts spending CPU and disk on whatever new binary format lands in a build
- * next, and the size check below cannot be relied on to catch it. The Inter font in `website/dist`
- * is the case to keep in mind: 48256 bytes, which `gzipSync` turns into 48254. Two bytes, 0.004%,
- * is enough to pass "the variant is smaller" and ship a second copy of a file that has to be
- * fetched, stored, and decoded for nothing. (Brotli grows it to 48260 and is caught, and `gzip -9`
- * on the command line reports 48288 because it stores the filename in the header - neither is what
- * this script runs, so neither is what the decision can rest on.) Already-compressed formats have
- * no entropy left to remove; the allow-list is what keeps them out, and the size check only cleans
- * up after high-entropy files that slip through it with a compressible extension.
- */
+// Compress text formats only. Already-compressed binaries can produce smaller variants
+// with negligible savings, which do not justify a second copy.
 const compressibleExtensions = new Set([
   '.css',
   '.cjs',
@@ -35,10 +24,7 @@ const compressibleExtensions = new Set([
 
 export const variantExtensions = ['.br', '.gz']
 
-/**
- * Below this, a sibling costs more than it saves: the response already fits in a single segment,
- * and the gzip envelope alone is ~20 bytes before the deflate stream starts.
- */
+// Small files do not save enough bytes to justify extra variants.
 export const minimumCompressibleBytes = 1024
 
 export function shouldCompress(filePath, byteLength) {
@@ -46,18 +32,8 @@ export function shouldCompress(filePath, byteLength) {
   return compressibleExtensions.has(path.extname(filePath).toLowerCase())
 }
 
-/**
- * Is this a sibling we wrote, rather than a file the build meant to publish?
- *
- * The base name has to be compressible too, so a genuine `archive.gz` in `public/` is left alone
- * instead of being deleted as a stale variant of nothing.
- *
- * That protection stops at the extension, and it has to: a published `public/data.json.gz` is
- * indistinguishable from our own leftover for `data.json`, so it is claimed and deleted on every
- * run. Nothing in this template publishes such a file. If a project starts to, give it a name this
- * cannot claim, or keep it out of the precompressed targets - the alternative is keeping stale
- * variants, which serves the previous release and is the worse failure.
- */
+// Only text-file siblings are generated variants. Do not publish precompressed text files
+// in these targets: cleanup cannot distinguish them from generated siblings.
 export function isVariantPath(filePath) {
   const extension = path.extname(filePath).toLowerCase()
   if (!variantExtensions.includes(extension)) return false
@@ -65,31 +41,14 @@ export function isVariantPath(filePath) {
   return compressibleExtensions.has(path.extname(base).toLowerCase())
 }
 
-/**
- * Compress once, at the highest level each codec offers, and keep only what actually shrank.
- *
- * The size check catches high-entropy files that carry a compressible extension - an inlined data
- * blob in a `.js`, say - where a variant would come out larger than its source and a proxy would
- * happily serve it to make the page slower. It is a backstop for the allow-list, not a substitute:
- * see why on `compressibleExtensions` above.
- *
- * Both codecs are deterministic under one runtime - its zlib writes the gzip header's mtime field
- * as zeros rather than the current time - so rerunning this produces byte-identical output and no
- * spurious re-uploads or CDN invalidations. The guarantee is per runtime, not absolute: bun and
- * node ship different zlib builds, and on the largest asset here their gzip output differs by
- * about a kilobyte, so running this script with the other one rewrites every `.gz`. Brotli output
- * is identical across both. Nothing depends on this beyond avoiding pointless uploads.
- */
+// Output is deterministic within one runtime. Bun and Node can emit different gzip bytes,
+// so use the same runtime when comparing artifacts or avoiding redundant uploads.
 export function compressedVariants(source) {
   const variants = {}
 
   const gzip = gzipSync(source, { level: constants.Z_BEST_COMPRESSION })
   if (gzip.length < source.length) variants['.gz'] = gzip
 
-  // Quality is the only parameter that earns its place. `BROTLI_MODE_TEXT` and a
-  // `BROTLI_PARAM_SIZE_HINT` were both measured across every file in `webapp/dist` and
-  // `website/dist` and changed not one byte: the mode matters below maximum quality, and the hint
-  // tells a whole-buffer call something it already knows. Re-measure before adding either back.
   const brotli = brotliCompressSync(source, {
     params: { [constants.BROTLI_PARAM_QUALITY]: constants.BROTLI_MAX_QUALITY },
   })
@@ -106,8 +65,7 @@ export async function precompressDirectory(directory) {
   for (const filePath of files) {
     if (isVariantPath(filePath)) continue
 
-    // Decide from the name and the size on disk, before reading. A `dist` holding a hero video
-    // would otherwise be buffered in full only to be discarded on the next line.
+    // Inspect metadata before buffering large binary assets.
     if (!shouldCompress(filePath, (await stat(filePath)).size)) {
       summary.skipped += 1
       continue
@@ -132,11 +90,7 @@ export async function precompressDirectory(directory) {
     }
   }
 
-  /**
-   * Anything left is from an earlier build. It has to go: `gzip_static` and Caddy's `precompressed`
-   * prefer the sibling whenever it exists, so a stale `index.html.gz` would keep serving the last
-   * release while the plain `index.html` next to it is current.
-   */
+  // Remove stale variants so static hosts cannot serve an older release.
   for (const filePath of files) {
     if (!isVariantPath(filePath) || currentVariants.has(filePath)) continue
     await rm(filePath)
@@ -192,11 +146,7 @@ function savedPercent(rawBytes, compressedBytes) {
   return (100 - (compressedBytes / rawBytes) * 100).toFixed(1)
 }
 
-/**
- * Decimal units, because these numbers get compared against the Vite and Astro build summaries
- * printed moments earlier, and both of those are decimal. Reporting 864.5 KB for the file Vite
- * just called 885 kB reads as a discrepancy to chase.
- */
+// Match the decimal units in Vite build summaries.
 function formatBytes(bytes) {
   if (bytes < 1000) return `${bytes} B`
   if (bytes < 1_000_000) return `${(bytes / 1000).toFixed(1)} KB`
