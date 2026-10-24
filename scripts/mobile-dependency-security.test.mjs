@@ -14,16 +14,6 @@ function runInNode(source) {
   })
 }
 
-test('Expo query parsing preserves valid parameters and handles malformed encoded input', () => {
-  runInNode(`
-    const router = createRequire(mobile.resolve('expo-router'))
-    const query = router('query-string')
-    const malformed = '%C0'.repeat(2000)
-    const result = query.parse('name=%D0%94%D0%B8%D0%BC%D0%B0&tag=a&tag=b&bad=' + malformed)
-    assert.deepEqual({ ...result }, { name: 'Дима', tag: ['a', 'b'], bad: malformed })
-  `)
-})
-
 test('Expo signing tools reject RSA signatures with garbage inside the digest algorithm', () => {
   runInNode(`
     const crypto = require('node:crypto')

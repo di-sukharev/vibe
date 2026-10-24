@@ -13,7 +13,6 @@ import {
   useWindowDimensions,
   type ViewStyle,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   BottomNavigationItem,
@@ -27,16 +26,15 @@ import { TEST_IDS } from '@/constants/testIds';
 
 export default function AppTabs() {
   const theme = useUiTheme();
-  const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const navigationMode = dashboardNavigationMode(width);
   const usesRail = navigationMode === 'rail';
-  const bottomPadding = Math.max(insets.bottom, theme.spacing.sm);
+  const bottomPadding = `max(${theme.spacing.sm}px, env(safe-area-inset-bottom, 0px))`;
   const slotStyle = StyleSheet.flatten([
     styles.slot,
     usesRail
       ? styles.slotWithRail
-      : { paddingBottom: 56 + bottomPadding },
+      : { paddingBottom: `calc(56px + ${bottomPadding})` } as ViewStyle,
   ]);
   const tabBarStyle = StyleSheet.flatten([
     styles.tabBar,
@@ -47,7 +45,7 @@ export default function AppTabs() {
       paddingBottom: bottomPadding,
       paddingHorizontal: theme.spacing.lg,
       paddingTop: theme.spacing.sm,
-    },
+    } as ViewStyle,
   ]);
 
   return (

@@ -1,3 +1,4 @@
+import type { TypographyProps } from './typography';
 import type { ReactNode } from 'react';
 import { ScrollView, StyleSheet, View, type ViewProps } from 'react-native';
 
@@ -66,7 +67,7 @@ export function TableCell({ children, style, ...props }: ViewProps & { children?
   );
 }
 
-export function TableCaption({ children, style, ...props }: ViewProps & { children?: ReactNode }) {
+export function TableCaption({ children, style, ...props }: TypographyProps) {
   return (
     <Typography {...props} variant="bodySm" muted style={[styles.caption, style]}>
       {children}

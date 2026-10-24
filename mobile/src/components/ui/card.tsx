@@ -1,3 +1,4 @@
+import type { TypographyProps } from './typography';
 import type { ReactNode } from 'react';
 import { StyleSheet, View, type ViewProps } from 'react-native';
 
@@ -33,7 +34,7 @@ export function CardHeader({ children, style, ...props }: ViewProps & { children
   );
 }
 
-export function CardTitle({ children, style, ...props }: ViewProps & { children?: ReactNode }) {
+export function CardTitle({ children, style, ...props }: TypographyProps) {
   return (
     <Typography {...props} variant="body" weight="600" style={style}>
       {children}
@@ -41,7 +42,7 @@ export function CardTitle({ children, style, ...props }: ViewProps & { children?
   );
 }
 
-export function CardDescription({ children, style, ...props }: ViewProps & { children?: ReactNode }) {
+export function CardDescription({ children, style, ...props }: TypographyProps) {
   return (
     <Typography {...props} variant="bodySm" muted style={style}>
       {children}

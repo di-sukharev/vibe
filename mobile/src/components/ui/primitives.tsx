@@ -12,7 +12,7 @@ import {
   type ViewProps,
   type ViewStyle,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView } from './safe-area-view';
 
 import { mapTextChildren } from './text-utils';
 import { useUiTheme, withAlpha, type UiTheme } from './theme';

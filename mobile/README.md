@@ -25,7 +25,7 @@ Expo Doctor can report duplicate packages from the isolated peer cycle between E
 
 ## Development build
 
-Native module, plugin, capability, or URL-scheme changes require a new development build. JavaScript reload cannot update the installed native client.
+Expo SDK, native module, plugin, capability, or URL-scheme changes require a new development build. JavaScript reload cannot update the installed native client.
 
 For a product project, authenticate with EAS and initialize it under the user's Expo account:
 
@@ -51,6 +51,8 @@ Session changes must cancel user queries and pending requests. Use the existing 
 Routes compose public feature APIs. `src/composition` wires each provider to its own API. Platform code owns HTTP and file mechanics without product endpoints.
 
 Use native UI primitives and `Typography`. Theme tokens belong to `src/components/ui`. Product components own visual styles; routes place them through layout wrappers. Do not forward `style` or `className` into product components.
+
+Use CSS safe-area insets on web. Expo Router does not measure web insets during streamed hydration. Keep native safe-area handling in the native component implementation.
 
 [Storage](../docs/STORAGE.md#mobile-transfer) explains native and web upload differences. The profile picker and file transfer still need device verification.
 

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import React, { createContext, useContext, useRef } from 'react';
-import { ScrollView, StyleSheet, View, type ScrollViewProps, type ViewProps } from 'react-native';
+import { ScrollView, StyleSheet, View, type ScrollViewInstance, type ScrollViewProps, type ViewProps } from 'react-native';
 
 import { Button } from './button';
 
@@ -11,7 +11,7 @@ export type CarouselApi = {
 
 type CarouselContextValue = {
   orientation: 'horizontal' | 'vertical';
-  scrollRef: React.RefObject<ScrollView | null>;
+  scrollRef: React.RefObject<ScrollViewInstance | null>;
   pageSize: number;
 };
 
@@ -36,7 +36,7 @@ export function Carousel({
   setApi?: (api: CarouselApi) => void;
   pageSize?: number;
 }) {
-  const scrollRef = useRef<ScrollView | null>(null);
+  const scrollRef = useRef<ScrollViewInstance | null>(null);
   const context = { orientation, scrollRef, pageSize };
 
   React.useEffect(() => {

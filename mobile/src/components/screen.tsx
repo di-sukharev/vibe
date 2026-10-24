@@ -12,8 +12,9 @@ import {
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
-import { SafeAreaView, type Edge } from 'react-native-safe-area-context';
+import type { Edge } from 'react-native-safe-area-context';
 
+import { SafeAreaView } from '@/components/ui/safe-area-view';
 import { useUiTheme } from '@/components/ui/theme';
 import { TEST_IDS } from '@/constants/testIds';
 

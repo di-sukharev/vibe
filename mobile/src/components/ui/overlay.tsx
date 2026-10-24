@@ -1,3 +1,4 @@
+import type { TypographyProps } from './typography';
 import type { ReactNode } from 'react';
 import React, { createContext, useContext } from 'react';
 import { StyleSheet, View, type PressableProps, type ViewProps } from 'react-native';
@@ -103,7 +104,7 @@ export function OverlayFooter({ children, style, ...props }: ViewProps & { child
   );
 }
 
-export function OverlayTitle({ children, style, ...props }: ViewProps & { children?: ReactNode }) {
+export function OverlayTitle({ children, style, ...props }: TypographyProps) {
   return (
     <Typography {...props} variant="h5" weight="700" style={style}>
       {children}
@@ -111,7 +112,7 @@ export function OverlayTitle({ children, style, ...props }: ViewProps & { childr
   );
 }
 
-export function OverlayDescription({ children, style, ...props }: ViewProps & { children?: ReactNode }) {
+export function OverlayDescription({ children, style, ...props }: TypographyProps) {
   return (
     <Typography {...props} variant="bodySm" muted style={style}>
       {children}

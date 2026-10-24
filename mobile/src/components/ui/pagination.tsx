@@ -1,3 +1,4 @@
+import type { TypographyProps } from './typography';
 import type { ReactNode } from 'react';
 import { StyleSheet, View, type ViewProps } from 'react-native';
 
@@ -28,7 +29,7 @@ export function PaginationNext(props: ButtonProps) {
   return <Button {...props} variant="outline">{props.children ?? 'Next >'}</Button>;
 }
 
-export function PaginationEllipsis({ style, ...props }: ViewProps) {
+export function PaginationEllipsis({ style, ...props }: TypographyProps) {
   return <Typography {...props} muted style={style}>...</Typography>;
 }
 

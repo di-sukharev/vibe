@@ -1,3 +1,4 @@
+import type { TypographyProps } from './typography';
 import type { ReactNode } from 'react';
 import { StyleSheet, View, type PressableProps, type StyleProp, type ViewProps, type ViewStyle } from 'react-native';
 
@@ -37,7 +38,7 @@ export function CommandList({ children, style, ...props }: ViewProps & { childre
   );
 }
 
-export function CommandEmpty({ children, style, ...props }: ViewProps & { children?: ReactNode }) {
+export function CommandEmpty({ children, style, ...props }: TypographyProps) {
   return (
     <Typography {...props} variant="bodySm" muted style={[styles.empty, style]}>
       {children}
@@ -66,7 +67,7 @@ export function CommandItem({
   );
 }
 
-export function CommandShortcut({ children, style, ...props }: ViewProps & { children?: ReactNode }) {
+export function CommandShortcut({ children, style, ...props }: TypographyProps) {
   return (
     <Typography {...props} variant="caption" muted style={[styles.shortcut, style]}>
       {children}

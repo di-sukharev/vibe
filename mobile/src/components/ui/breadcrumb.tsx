@@ -1,3 +1,4 @@
+import type { TypographyProps } from './typography';
 import type { ReactNode } from 'react';
 import { StyleSheet, View, type PressableProps, type ViewProps } from 'react-native';
 
@@ -31,7 +32,7 @@ export function BreadcrumbLink({ children, style, ...props }: PressableProps & {
   );
 }
 
-export function BreadcrumbPage({ children, style, ...props }: ViewProps & { children?: ReactNode }) {
+export function BreadcrumbPage({ children, style, ...props }: TypographyProps) {
   return (
     <Typography {...props} variant="bodySm" weight="700" style={style}>
       {children}
@@ -39,7 +40,7 @@ export function BreadcrumbPage({ children, style, ...props }: ViewProps & { chil
   );
 }
 
-export function BreadcrumbSeparator({ children = '>', style, ...props }: ViewProps & { children?: ReactNode }) {
+export function BreadcrumbSeparator({ children = '>', style, ...props }: TypographyProps) {
   return (
     <Typography {...props} variant="bodySm" muted style={style}>
       {children}
@@ -47,7 +48,7 @@ export function BreadcrumbSeparator({ children = '>', style, ...props }: ViewPro
   );
 }
 
-export function BreadcrumbEllipsis({ style, ...props }: ViewProps) {
+export function BreadcrumbEllipsis({ style, ...props }: TypographyProps) {
   return (
     <Typography {...props} variant="bodySm" muted style={style}>
       ...

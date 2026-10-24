@@ -1,3 +1,4 @@
+import type { TypographyProps } from './typography';
 import type { ReactNode } from 'react';
 import { StyleSheet, View, type ViewProps } from 'react-native';
 
@@ -30,7 +31,7 @@ export function InputGroupButton(props: ButtonProps) {
   return <Button {...props} />;
 }
 
-export function InputGroupText({ children, style, ...props }: ViewProps & { children?: ReactNode }) {
+export function InputGroupText({ children, style, ...props }: TypographyProps) {
   return (
     <Typography {...props} variant="bodySm" muted style={style}>
       {children}

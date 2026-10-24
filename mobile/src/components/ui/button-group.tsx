@@ -1,3 +1,4 @@
+import type { TypographyProps } from './typography';
 import type { ReactNode } from 'react';
 import { StyleSheet, View, type ViewProps } from 'react-native';
 
@@ -31,7 +32,7 @@ export function ButtonGroup({
 
 export const ButtonGroupSeparator = Separator;
 
-export function ButtonGroupText({ children, style, ...props }: ViewProps & { children?: ReactNode }) {
+export function ButtonGroupText({ children, style, ...props }: TypographyProps) {
   return (
     <Typography {...props} variant="bodySm" muted style={style}>
       {children}

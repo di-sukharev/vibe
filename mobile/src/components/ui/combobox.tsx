@@ -1,3 +1,4 @@
+import type { TypographyProps } from './typography';
 import type { ReactNode } from 'react';
 import {
   StyleSheet,
@@ -30,7 +31,7 @@ export function ComboboxInput(props: TextInputProps) {
   return <Input {...props} />;
 }
 
-export function ComboboxLabel({ children, style, ...props }: ViewProps & { children?: ReactNode }) {
+export function ComboboxLabel({ children, style, ...props }: TypographyProps) {
   return (
     <Typography {...props} variant="caption" weight="700" muted style={[styles.label, style]}>
       {children}

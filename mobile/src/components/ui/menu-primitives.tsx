@@ -1,3 +1,4 @@
+import type { TypographyProps } from './typography';
 import type { ReactNode } from 'react';
 import { StyleSheet, View, type PressableProps, type StyleProp, type ViewProps, type ViewStyle } from 'react-native';
 
@@ -17,7 +18,7 @@ export function MenuGroup({ children, style, ...props }: ViewProps & { children?
   );
 }
 
-export function MenuLabel({ children, style, ...props }: ViewProps & { children?: ReactNode }) {
+export function MenuLabel({ children, style, ...props }: TypographyProps) {
   return (
     <Typography {...props} variant="caption" weight="700" muted style={[styles.label, style]}>
       {children}
@@ -103,7 +104,7 @@ export function MenuSeparator(props: ViewProps) {
   return <Separator {...props} />;
 }
 
-export function MenuShortcut({ children, style, ...props }: ViewProps & { children?: ReactNode }) {
+export function MenuShortcut({ children, style, ...props }: TypographyProps) {
   return (
     <Typography {...props} variant="caption" muted style={[styles.shortcut, style]}>
       {children}

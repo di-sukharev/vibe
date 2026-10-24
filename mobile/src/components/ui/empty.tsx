@@ -1,3 +1,4 @@
+import type { TypographyProps } from './typography';
 import type { ReactNode } from 'react';
 import { StyleSheet, View, type ViewProps } from 'react-native';
 
@@ -21,7 +22,7 @@ export function EmptyHeader({ children, style, ...props }: ViewProps & { childre
   );
 }
 
-export function EmptyTitle({ children, style, ...props }: ViewProps & { children?: ReactNode }) {
+export function EmptyTitle({ children, style, ...props }: TypographyProps) {
   return (
     <Typography {...props} variant="bodyLg" weight="700" style={style}>
       {children}
@@ -29,7 +30,7 @@ export function EmptyTitle({ children, style, ...props }: ViewProps & { children
   );
 }
 
-export function EmptyDescription({ children, style, ...props }: ViewProps & { children?: ReactNode }) {
+export function EmptyDescription({ children, style, ...props }: TypographyProps) {
   return (
     <Typography {...props} variant="bodySm" muted style={style}>
       {children}

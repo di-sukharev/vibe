@@ -1,3 +1,4 @@
+import type { TypographyProps } from './typography';
 import type { ReactNode } from 'react';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View, type PressableProps, type StyleProp, type ViewProps, type ViewStyle } from 'react-native';
@@ -216,7 +217,7 @@ function SelectOptionRow({
   );
 }
 
-export function SelectLabel({ children, style, ...props }: ViewProps & { children?: ReactNode }) {
+export function SelectLabel({ children, style, ...props }: TypographyProps) {
   return (
     <Typography {...props} variant="caption" weight="700" muted style={[styles.label, style]}>
       {children}

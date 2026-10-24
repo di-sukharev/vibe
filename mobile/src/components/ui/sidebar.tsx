@@ -1,3 +1,4 @@
+import type { TypographyProps } from './typography';
 import type { ReactNode } from 'react';
 import React, { createContext, useContext } from 'react';
 import {
@@ -96,7 +97,7 @@ export function SidebarGroupContent({ children, style, ...props }: ViewProps & {
   return <View {...props} style={[styles.groupContent, style]}>{children}</View>;
 }
 
-export function SidebarGroupLabel({ children, style, ...props }: ViewProps & { children?: ReactNode }) {
+export function SidebarGroupLabel({ children, style, ...props }: TypographyProps) {
   return <Typography {...props} variant="caption" weight="700" muted style={style}>{children}</Typography>;
 }
 
@@ -120,7 +121,7 @@ export function SidebarMenuAction(props: ButtonProps) {
   return <Button {...props} size="icon-sm" variant="ghost" />;
 }
 
-export function SidebarMenuBadge({ children, style, ...props }: ViewProps & { children?: ReactNode }) {
+export function SidebarMenuBadge({ children, style, ...props }: TypographyProps) {
   return <Typography {...props} variant="caption" muted style={style}>{children}</Typography>;
 }
 

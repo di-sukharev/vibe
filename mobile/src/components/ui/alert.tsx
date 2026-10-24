@@ -1,3 +1,4 @@
+import type { TypographyProps } from './typography';
 import type { ReactNode } from 'react';
 import { StyleSheet, View, type ViewProps } from 'react-native';
 
@@ -44,7 +45,7 @@ export function Alert({
   );
 }
 
-export function AlertTitle({ children, style, ...props }: ViewProps & { children?: ReactNode }) {
+export function AlertTitle({ children, style, ...props }: TypographyProps) {
   return (
     <Typography {...props} variant="bodySm" weight="700" style={style}>
       {children}
@@ -52,7 +53,7 @@ export function AlertTitle({ children, style, ...props }: ViewProps & { children
   );
 }
 
-export function AlertDescription({ children, style, ...props }: ViewProps & { children?: ReactNode }) {
+export function AlertDescription({ children, style, ...props }: TypographyProps) {
   return (
     <Typography {...props} variant="bodySm" muted style={style}>
       {children}

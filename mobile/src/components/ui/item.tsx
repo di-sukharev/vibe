@@ -1,3 +1,4 @@
+import type { TypographyProps } from './typography';
 import type { ReactNode } from 'react';
 import { StyleSheet, View, type ViewProps } from 'react-native';
 
@@ -56,7 +57,7 @@ export function ItemSeparator(props: ViewProps) {
   return <Separator {...props} />;
 }
 
-export function ItemTitle({ children, style, ...props }: ViewProps & { children?: ReactNode }) {
+export function ItemTitle({ children, style, ...props }: TypographyProps) {
   return (
     <Typography {...props} variant="bodySm" weight="700" style={style}>
       {children}
@@ -64,7 +65,7 @@ export function ItemTitle({ children, style, ...props }: ViewProps & { children?
   );
 }
 
-export function ItemDescription({ children, style, ...props }: ViewProps & { children?: ReactNode }) {
+export function ItemDescription({ children, style, ...props }: TypographyProps) {
   return (
     <Typography {...props} variant="bodySm" muted style={style}>
       {children}

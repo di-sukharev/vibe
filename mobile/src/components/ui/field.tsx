@@ -1,3 +1,4 @@
+import type { TypographyProps } from './typography';
 import type { ReactNode } from 'react';
 import { StyleSheet, View, type ViewProps } from 'react-native';
 
@@ -19,7 +20,7 @@ export function FieldLabel({ children, ...props }: LabelProps) {
   return <Label {...props}>{children}</Label>;
 }
 
-export function FieldDescription({ children, style, ...props }: ViewProps & { children?: ReactNode }) {
+export function FieldDescription({ children, style, ...props }: TypographyProps) {
   return (
     <Typography {...props} variant="bodySm" muted style={style}>
       {children}
@@ -27,7 +28,7 @@ export function FieldDescription({ children, style, ...props }: ViewProps & { ch
   );
 }
 
-export function FieldError({ children, errors, style, ...props }: ViewProps & { children?: ReactNode; errors?: unknown[] }) {
+export function FieldError({ children, errors, style, ...props }: TypographyProps & { errors?: unknown[] }) {
   const theme = useUiTheme();
   const content = children ?? errors?.map(formatFieldError).join(', ');
   if (!content) return null;
@@ -48,7 +49,7 @@ export function FieldGroup({ children, style, ...props }: ViewProps & { children
   );
 }
 
-export function FieldLegend({ children, style, ...props }: ViewProps & { children?: ReactNode }) {
+export function FieldLegend({ children, style, ...props }: TypographyProps) {
   return (
     <Typography {...props} variant="body" weight="700" style={style}>
       {children}
@@ -76,7 +77,7 @@ export function FieldContent({ children, style, ...props }: ViewProps & { childr
   );
 }
 
-export function FieldTitle({ children, style, ...props }: ViewProps & { children?: ReactNode }) {
+export function FieldTitle({ children, style, ...props }: TypographyProps) {
   return (
     <Typography {...props} variant="bodySm" weight="700" style={style}>
       {children}
