@@ -49,17 +49,18 @@
     "isbot": "^5"
   },
   "devDependencies": {
-    "@types/three": "^0.185.4",
-    "typescript": "~6.0.3",
-    "vite": "^8.3.4",
-    "@react-router/dev": "8.5.0",
     "@eslint/js": "^10.0.1",
+    "@react-router/dev": "8.5.0",
     "@types/node": "^24.19.2",
+    "@types/three": "^0.185.4",
     "@vitejs/plugin-react": "^6.1.2",
+    "@web-app-demo/eslint-config": "workspace:*",
     "eslint": "^10.12.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.7",
     "globals": "^17.13.0",
-    "typescript-eslint": "^8.71.1"
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.71.1",
+    "vite": "^8.3.4"
   }
 }

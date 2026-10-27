@@ -1,7 +1,5 @@
 import { emailSchema, passwordSchema } from '@web-app-demo/contracts'
 
-import type { DevelopmentSeedAccounts } from '../src/modules/users/infrastructure/development-bootstrap'
-
 type DevelopmentSeedCredentials = {
   email: string
   password: string

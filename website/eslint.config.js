@@ -4,18 +4,20 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
+import { codeStyle, generatedPrimitives } from '@web-app-demo/eslint-config'
 
 export default defineConfig([
   globalIgnores(['build', '.react-router', 'storybook-static']),
   {
     files: ['**/*.{ts,tsx}'],
-    extends: [js.configs.recommended, tseslint.configs.recommended, reactHooks.configs.flat.recommended, reactRefresh.configs.vite],
+    extends: [js.configs.recommended, tseslint.configs.recommended, reactHooks.configs.flat.recommended, reactRefresh.configs.vite, codeStyle],
     languageOptions: { globals: { ...globals.browser, ...globals.node } },
   },
   {
     files: ['src/components/ui/**/*.{ts,tsx}', 'src/stories/**/*.{ts,tsx}', 'src/root.tsx'],
     rules: { 'react-refresh/only-export-components': 'off' },
   },
+  { files: ['src/components/ui/**/*.{ts,tsx}'], extends: [generatedPrimitives] },
   {
     files: ['src/components/ui/carousel.tsx', 'src/hooks/use-mobile.ts'],
     rules: { 'react-hooks/set-state-in-effect': 'off' },

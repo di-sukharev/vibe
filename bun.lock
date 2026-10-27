@@ -30,8 +30,13 @@
         "zod": "^4.6.6",
       },
       "devDependencies": {
+        "@eslint/js": "^10.0.1",
         "@types/bun": "^1.4.3",
+        "@web-app-demo/eslint-config": "workspace:*",
+        "eslint": "^10.12.0",
+        "globals": "^17.13.0",
         "typescript": "~6.0.3",
+        "typescript-eslint": "^8.71.1",
       },
     },
     "packages/contracts": {
@@ -44,6 +49,10 @@
         "@types/bun": "^1.4.3",
         "typescript": "~6.0.3",
       },
+    },
+    "packages/eslint-config": {
+      "name": "@web-app-demo/eslint-config",
+      "version": "0.0.0",
     },
     "webapp": {
       "name": "@web-app-demo/webapp",
@@ -84,6 +93,7 @@
         "@types/react": "^19.3.0",
         "@types/react-dom": "^19.3.0",
         "@vitejs/plugin-react": "^6.1.2",
+        "@web-app-demo/eslint-config": "workspace:*",
         "eslint": "^10.12.0",
         "eslint-plugin-react-hooks": "^7.1.1",
         "eslint-plugin-react-refresh": "^0.5.7",
@@ -134,6 +144,7 @@
         "@types/node": "^24.19.2",
         "@types/three": "^0.185.4",
         "@vitejs/plugin-react": "^6.1.2",
+        "@web-app-demo/eslint-config": "workspace:*",
         "eslint": "^10.12.0",
         "eslint-plugin-react-hooks": "^7.1.1",
         "eslint-plugin-react-refresh": "^0.5.7",
@@ -160,7 +171,7 @@
     "mysql2": "^3.24.3",
     "nanoid": "^3.3.18",
     "postcss": "^8.5.26",
-    "qs": "^6.16.0",
+    "qs": "^6.17.0",
     "sharp": "^0.35.5",
     "undici": "^7.30.1",
     "valibot": "^1.4.2",
@@ -840,6 +851,8 @@
     "@web-app-demo/backend": ["@web-app-demo/backend@workspace:backend"],
 
     "@web-app-demo/contracts": ["@web-app-demo/contracts@workspace:packages/contracts"],
+
+    "@web-app-demo/eslint-config": ["@web-app-demo/eslint-config@workspace:packages/eslint-config"],
 
     "@web-app-demo/webapp": ["@web-app-demo/webapp@workspace:webapp"],
 
@@ -1535,7 +1548,7 @@
 
     "qified": ["qified@0.10.1", "", { "dependencies": { "hookified": "^2.1.1" } }, "sha512-+Owyggi9IxT1ePKGafcI87ubSmxol6smwJ+RAHDQlx9+9cPwFWDiKFFCPuWhr9ignlGpZ9vDQLw67N4dcTVFEA=="],
 
-    "qs": ["qs@6.16.0", "", { "dependencies": { "es-define-property": "^1.0.1", "side-channel": "^1.1.1" } }, "sha512-h6fhOIaRrID2CbEY2fqs+7t+UXZo+MLAnU5gRIq85uFtdiUPCdsApMlHhXogKVM4HM2DVbIjGNTTYH2OcmP1vA=="],
+    "qs": ["qs@6.17.0", "", { "dependencies": { "es-define-property": "^1.0.1", "side-channel": "^1.1.1" } }, "sha512-5LK5BZ2XDHMvcUJaf0CQ5HL3aVgKbpklvByC7qLSxYkfE8COEEbJg5xCHWCTqzqi0Gs4Jn5Mv5v3R38W6edscA=="],
 
     "queue-microtask": ["queue-microtask@1.2.3", "", {}, "sha512-NuaNSa6flKT5JaSYQzJok04JzTL1CA6aGhv5rfLW3PgqA+M2ChpZQnAC8h8i4ZFkBS8X5RqkDBHA7r4hej3K9A=="],
 
