@@ -88,6 +88,5 @@ E2E and screenshots share a Compose project. Run them separately or set differen
 
 `bun run audit` runs `bun audit` and fails on advisories. Run it after dependency updates and before release. Fix advisories with compatible updates. Skip an advisory only with the user's approval. Apply the approved exception for that run unless a persistent exception was requested.
 
-Keep transitive overrides only while needed. Upgrade the three Prisma packages together and verify backend types, tests, and affected client behavior.
+Keep transitive overrides only while needed. `prisma` pins vulnerable `deepmerge-ts` and `mysql2` versions, so the root `overrides` replace them. Upgrade the three Prisma packages together and verify backend types, tests, and affected client behavior.
 
-The `braces` override pins the API-compatible [`@zklogic/braces` fork](https://github.com/ArfanKhalilMughal/braces) for [CVE-2026-93687](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm). Upstream has no patched release. The fork limits parser nesting and keeps deeper input as literal text. `scripts/glob-security.test.mjs` checks the exploit and normal range expansion in Node. Remove the override when the dependency tree uses an upstream fix or no longer needs `braces`.
