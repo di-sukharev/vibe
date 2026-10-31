@@ -1,14 +1,15 @@
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 // Turns the structured answer in `theme.json` into the shadcn theme tokens in
-// `webapp/src/index.css` and `website/src/styles/global.css`, plus the font import lines. See
+// `webapp/src/index.css` and `website/src/styles/global.css`, plus the font import lines. A derived
+// project may remove either application; the generator then handles only the remaining one. See
 // "Visual style" in docs/UI.md. Brand colors are adjusted in OKLCH lightness only, enough to meet
 // WCAG 2 AA contrast; hue and chroma come straight from the brand color. `brand: null` reproduces
 // the template's neutral theme. `bun run theme` writes; `bun run theme -- --check` only verifies.
 
-export const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 const INDENT = '    '
 
@@ -23,7 +24,7 @@ const FONT_IMPORT_END_CSS = '/* THEME_FONT_IMPORT_END */'
 /* Color math: hex -> OKLCH, sRGB gamut clamp, WCAG 2 relative luminance and contrast.            */
 /* -------------------------------------------------------------------------------------------- */
 
-export function clamp01(value) {
+function clamp01(value) {
   return Math.min(1, Math.max(0, value))
 }
 
@@ -31,7 +32,7 @@ function srgbChannelToLinear(value) {
   return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
 }
 
-export function hexToLinearSrgb(hex) {
+function hexToLinearSrgb(hex) {
   const match = /^#([0-9a-fA-F]{6})$/.exec(hex)
   if (!match) throw new Error(`Not a 6-digit hex color: ${JSON.stringify(hex)}`)
   const int = Number.parseInt(match[1], 16)
@@ -42,7 +43,7 @@ export function hexToLinearSrgb(hex) {
 }
 
 // https://bottosson.github.io/posts/oklab/
-export function linearSrgbToOklab([r, g, b]) {
+function linearSrgbToOklab([r, g, b]) {
   const l = 0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b
   const m = 0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b
   const s = 0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b
@@ -56,7 +57,7 @@ export function linearSrgbToOklab([r, g, b]) {
   ]
 }
 
-export function oklabToLinearSrgb([L, a, b]) {
+function oklabToLinearSrgb([L, a, b]) {
   const l_ = L + 0.3963377774 * a + 0.2158037573 * b
   const m_ = L - 0.1055613458 * a - 0.0638541728 * b
   const s_ = L - 0.0894841775 * a - 1.291485548 * b
@@ -70,7 +71,7 @@ export function oklabToLinearSrgb([L, a, b]) {
   ]
 }
 
-export function oklabToOklch([l, a, b]) {
+function oklabToOklch([l, a, b]) {
   const c = Math.sqrt(a * a + b * b)
   if (c < 1e-6) return { l, c: 0, h: 0 }
   let h = (Math.atan2(b, a) * 180) / Math.PI
@@ -78,12 +79,12 @@ export function oklabToOklch([l, a, b]) {
   return { l, c, h }
 }
 
-export function oklchToOklab({ l, c, h }) {
+function oklchToOklab({ l, c, h }) {
   const radians = (h * Math.PI) / 180
   return [l, c * Math.cos(radians), c * Math.sin(radians)]
 }
 
-export function hexToOklch(hex) {
+function hexToOklch(hex) {
   return oklabToOklch(linearSrgbToOklab(hexToLinearSrgb(hex)))
 }
 
@@ -91,7 +92,7 @@ const GAMUT_EPSILON = 1e-4
 
 // Whether an OKLCH color converts to a linear sRGB triple inside [0, 1] (with a small tolerance
 // for floating-point error at the boundary).
-export function isInGamut(oklch) {
+function isInGamut(oklch) {
   const [r, g, b] = oklabToLinearSrgb(oklchToOklab(oklch))
   return (
     r >= -GAMUT_EPSILON &&
@@ -105,7 +106,7 @@ export function isInGamut(oklch) {
 
 // Reduces chroma at fixed lightness and hue until the color is representable in sRGB. Lightness
 // and hue never change, so this only ever desaturates a color, never darkens or shifts it.
-export function clampChromaToGamut({ l, c, h }) {
+function clampChromaToGamut({ l, c, h }) {
   if (c <= 0 || isInGamut({ l, c, h })) return { l, c, h }
   let lo = 0
   let hi = c
@@ -117,20 +118,20 @@ export function clampChromaToGamut({ l, c, h }) {
   return { l, c: lo, h }
 }
 
-export function oklchToLinearSrgb(oklch) {
+function oklchToLinearSrgb(oklch) {
   const [r, g, b] = oklabToLinearSrgb(oklchToOklab(clampChromaToGamut(oklch)))
   return [clamp01(r), clamp01(g), clamp01(b)]
 }
 
 // WCAG 2 relative luminance (https://www.w3.org/TR/WCAG21/#dfn-relative-luminance).
-export function relativeLuminance(oklch) {
+function relativeLuminance(oklch) {
   const [r, g, b] = oklchToLinearSrgb(oklch)
   return 0.2126 * r + 0.7152 * g + 0.0722 * b
 }
 
 // WCAG 2 contrast ratio (https://www.w3.org/TR/WCAG21/#dfn-contrast-ratio). Symmetric: order does
 // not matter.
-export function contrastRatio(a, b) {
+function contrastRatio(a, b) {
   const lighter = Math.max(relativeLuminance(a), relativeLuminance(b))
   const darker = Math.min(relativeLuminance(a), relativeLuminance(b))
   return (lighter + 0.05) / (darker + 0.05)
@@ -142,7 +143,7 @@ function round(value, decimals = 3) {
   return Object.is(rounded, -0) ? 0 : rounded
 }
 
-export function formatOklch(oklch) {
+function formatOklch(oklch) {
   // Round lightness and hue first, then clamp chroma at those *rounded* values, so the printed
   // triple is itself in gamut. Chroma is rounded down, not to the nearest value: rounding a
   // boundary chroma up, even by half a unit in the last decimal, can print a color that is
@@ -156,7 +157,7 @@ export function formatOklch(oklch) {
 
 // Reads the first three numbers out of a literal `oklch(...)` string. Any alpha suffix
 // (`/ 10%`) is ignored: it never carries brand color and contrast math does not need it here.
-export function parseOklch(value) {
+function parseOklch(value) {
   const match = /oklch\(\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)/.exec(value)
   if (!match) throw new Error(`Not an oklch(...) color: ${JSON.stringify(value)}`)
   return { l: Number(match[1]), c: Number(match[2]), h: Number(match[3]) }
@@ -375,7 +376,7 @@ const APP_CONFIGS = {
 // Brand-driven tokens for one app/mode: `primary` and `sidebar-primary` (with their foregrounds),
 // `ring` and `sidebar-ring`, the chart ramp, and (website) `brand`. Everything else in the file
 // comes from `neutrals`, untouched by the brand color.
-export function computeBrandTokens(appKey, mode, brandHex) {
+function computeBrandTokens(appKey, mode, brandHex) {
   const appConfig = APP_CONFIGS[appKey]
   const modeConfig = appConfig.modes[mode]
   if (brandHex === null) return { ...modeConfig.neutralBrandDefaults }
@@ -421,7 +422,7 @@ export function computeBrandTokens(appKey, mode, brandHex) {
   return tokens
 }
 
-export function computeAppTokens(appKey, mode, brandHex) {
+function computeAppTokens(appKey, mode, brandHex) {
   const modeConfig = APP_CONFIGS[appKey].modes[mode]
   return { ...modeConfig.neutrals, ...computeBrandTokens(appKey, mode, brandHex) }
 }
@@ -470,7 +471,7 @@ function replaceMarkerBlock(source, startMarker, endMarker, contents, indent = I
   })
 }
 
-export function renderWebappCss(source, themeConfig) {
+function renderWebappCss(source, themeConfig) {
   let next = replaceMarkerBlock(source, TOKENS_START, TOKENS_END, [
     renderTokensBlock('webapp', 'light', themeConfig),
     renderTokensBlock('webapp', 'dark', themeConfig),
@@ -488,7 +489,7 @@ export function renderWebappCss(source, themeConfig) {
   return next
 }
 
-export function renderWebsiteCss(source, themeConfig) {
+function renderWebsiteCss(source, themeConfig) {
   let next = replaceMarkerBlock(source, TOKENS_START, TOKENS_END, [
     renderTokensBlock('website', 'dark', themeConfig),
   ])
@@ -501,16 +502,16 @@ export function renderWebsiteCss(source, themeConfig) {
   return next
 }
 
-const RENDER_TARGETS = [
-  { path: 'webapp/src/index.css', render: renderWebappCss },
-  { path: 'website/src/styles/global.css', render: renderWebsiteCss },
-]
+const RENDERERS = { webapp: renderWebappCss, website: renderWebsiteCss }
 
 /* -------------------------------------------------------------------------------------------- */
 /* theme.json validation.                                                                        */
 /* -------------------------------------------------------------------------------------------- */
 
-const APP_KEYS = ['webapp', 'website']
+// Ignored build output can keep the directory of a removed application, so detect its package.json.
+const APP_KEYS = Object.keys(APP_CONFIGS).filter((appKey) =>
+  existsSync(path.join(repositoryRoot, APP_CONFIGS[appKey].packageJsonPath)),
+)
 const APP_SCHEMA_KEYS = ['brand', 'radius', 'font']
 const FONT_SCHEMA_KEYS = ['family', 'package']
 const HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/
@@ -518,16 +519,19 @@ const FONTSOURCE_PACKAGE_PATTERN = /^@fontsource(-variable)?\/[a-z0-9][a-z0-9-]*
 
 // Strict: every key must be recognized, and every value must have the right shape. Returns a list
 // of human-readable errors; an empty list means the config is valid.
-export function validateThemeConfig(config) {
+function validateThemeConfig(config) {
   if (typeof config !== 'object' || config === null || Array.isArray(config)) {
-    return ['theme.json must be a JSON object with "webapp" and "website" keys.']
+    return [`theme.json must be a JSON object with the keys ${APP_KEYS.join(', ')}.`]
   }
 
   const errors = []
   for (const key of Object.keys(config)) {
-    if (!APP_KEYS.includes(key)) {
-      errors.push(`theme.json has an unexpected top-level key "${key}"; only ${APP_KEYS.join(', ')} are allowed.`)
-    }
+    if (APP_KEYS.includes(key)) continue
+    errors.push(
+      key in APP_CONFIGS
+        ? `theme.json has "${key}", but ${APP_CONFIGS[key].packageJsonPath} does not exist. Remove the "${key}" key from theme.json.`
+        : `theme.json has an unexpected top-level key "${key}"; only ${APP_KEYS.join(', ')} are allowed.`,
+    )
   }
 
   for (const appKey of APP_KEYS) {
@@ -588,10 +592,8 @@ export function validateThemeConfig(config) {
 }
 
 // Whether `fontPackage` is absent from a package.json's dependencies and devDependencies. The
-// generator never installs anything (AGENTS.md: "A new dependency needs the user's approval");
-// naming the package in theme.json is that approval, but it still has to actually be installed
-// first.
-export function missingFontDependency(packageJson, fontPackage) {
+// generator never installs packages, so the font package must already be a dependency.
+function missingFontDependency(packageJson, fontPackage) {
   const dependencies = { ...(packageJson.dependencies ?? {}), ...(packageJson.devDependencies ?? {}) }
   return !(fontPackage in dependencies)
 }
@@ -600,10 +602,10 @@ export function missingFontDependency(packageJson, fontPackage) {
 /* CLI.                                                                                          */
 /* -------------------------------------------------------------------------------------------- */
 
-function checkFontDependencies(root, config) {
+function checkFontDependencies(config) {
   const errors = []
   for (const appKey of APP_KEYS) {
-    const packageJsonPath = path.join(root, APP_CONFIGS[appKey].packageJsonPath)
+    const packageJsonPath = path.join(repositoryRoot, APP_CONFIGS[appKey].packageJsonPath)
     const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8'))
     const fontPackage = config[appKey].font.package
     if (missingFontDependency(packageJson, fontPackage)) {
@@ -617,39 +619,36 @@ function checkFontDependencies(root, config) {
 
 // Renders every target before it writes any, so a target that cannot be rendered (a lost marker)
 // leaves all of them untouched. Returns the process exit code.
-export function runTheme({
-  root = repositoryRoot,
-  check = false,
-  log = (message) => console.log(message),
-  error = (message) => console.error(`[theme] ${message}`),
-} = {}) {
+function runTheme(check) {
+  const error = (message) => console.error(`[theme] ${message}`)
   let config
   try {
-    config = JSON.parse(readFileSync(path.join(root, 'theme.json'), 'utf8'))
+    config = JSON.parse(readFileSync(path.join(repositoryRoot, 'theme.json'), 'utf8'))
   } catch (parseError) {
     error(`theme.json is not valid JSON: ${parseError.message}`)
     return 1
   }
 
   const errors = validateThemeConfig(config)
-  if (errors.length === 0) errors.push(...checkFontDependencies(root, config))
+  if (errors.length === 0) errors.push(...checkFontDependencies(config))
   if (errors.length > 0) {
     for (const message of errors) error(message)
     return 1
   }
 
   const drifted = []
-  for (const target of RENDER_TARGETS) {
-    const absolutePath = path.join(root, target.path)
+  for (const appKey of APP_KEYS) {
+    const targetPath = APP_CONFIGS[appKey].cssPath
+    const absolutePath = path.join(repositoryRoot, targetPath)
     const current = readFileSync(absolutePath, 'utf8')
     let next
     try {
-      next = target.render(current, config)
+      next = RENDERERS[appKey](current, config)
     } catch (renderError) {
-      error(`${target.path}: ${renderError.message} Restore the marker comments (docs/UI.md), then re-run. Nothing was written.`)
+      error(`${targetPath}: ${renderError.message} Restore the marker comments (docs/UI.md), then re-run. Nothing was written.`)
       return 1
     }
-    if (next !== current) drifted.push({ absolutePath, next, path: target.path })
+    if (next !== current) drifted.push({ absolutePath, next, path: targetPath })
   }
 
   const driftedPaths = drifted.map((target) => target.path).join(', ')
@@ -658,13 +657,13 @@ export function runTheme({
       error(`Generated tokens are out of date in: ${driftedPaths}. Run "bun run theme".`)
       return 1
     }
-    log('Theme tokens are up to date.')
+    console.log('Theme tokens are up to date.')
     return 0
   }
 
   for (const target of drifted) writeFileSync(target.absolutePath, target.next)
-  log(drifted.length > 0 ? `Theme tokens written to: ${driftedPaths}.` : 'Theme tokens already up to date; nothing written.')
+  console.log(drifted.length > 0 ? `Theme tokens written to: ${driftedPaths}.` : 'Theme tokens already up to date; nothing written.')
   return 0
 }
 
-if (import.meta.main) process.exitCode = runTheme({ check: process.argv.includes('--check') })
+process.exitCode = runTheme(process.argv.includes('--check'))

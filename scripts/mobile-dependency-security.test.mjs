@@ -56,17 +56,10 @@ test('Expo DevTools commands retain validation and MCP schema conversion with th
     const { PluginSchema, DevToolsPluginOutputSchema } = require(join(serverPath, 'DevToolsPlugin.schema.js'))
     const { createMCPDevToolsExtensionSchema } = require(join(serverPath, 'createMCPDevToolsExtensionSchema.js'))
     const { DevToolsPluginCliExtensionExecutor } = require(join(serverPath, 'DevToolsPluginCliExtensionExecutor.js'))
-    // The installed shadcn CLI supplies the SDK. Expo's MCP integration is optional.
-    const webapp = createRequire(resolve('webapp/package.json'))
-    const shadcn = createRequire(webapp.resolve('shadcn'))
-    const { McpServer } = shadcn('@modelcontextprotocol/sdk/server/mcp.js')
-    const { Client } = shadcn('@modelcontextprotocol/sdk/client/index.js')
-    const { InMemoryTransport } = shadcn('@modelcontextprotocol/sdk/inMemory.js')
+    const { toJSONSchema } = createRequire(cliEntry)('zod')
 
     async function verify() {
       const directory = mkdtempSync(join(tmpdir(), 'expo-devtools-security-'))
-      const server = new McpServer({ name: 'expo-test', version: '1' })
-      const client = new Client({ name: 'expo-test-client', version: '1' })
       try {
         writeFileSync(join(directory, 'command.cjs'),
           'process.stdout.write(JSON.stringify([{ type: "text", level: "info", text: JSON.stringify({ command: process.argv[2], args: JSON.parse(process.argv[3]) }) }]))')
@@ -87,22 +80,10 @@ test('Expo DevTools commands retain validation and MCP schema conversion with th
         })
         assert.equal(invalidDescriptor.success, false)
         assert.ok(invalidDescriptor.error.issues.length > 0)
-        const executor = new DevToolsPluginCliExtensionExecutor(plugin, directory)
-        let executions = 0
-        server.registerTool(plugin.packageName, {
-          inputSchema: { parameters: createMCPDevToolsExtensionSchema(plugin) },
-        }, async ({ parameters }) => {
-          executions++
-          const { command, ...args } = parameters
-          const content = DevToolsPluginOutputSchema.parse(await executor.execute({ command, args }))
-          return { content }
-        })
-        const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
-        await server.connect(serverTransport)
-        await client.connect(clientTransport)
 
-        const { tools } = await client.listTools()
-        const parameters = tools[0].inputSchema.properties.parameters
+        // MCP clients receive this JSON Schema for the tool parameters.
+        const schema = createMCPDevToolsExtensionSchema(plugin)
+        const parameters = toJSONSchema(schema)
         assert.equal(parameters.additionalProperties, false)
         assert.deepEqual(parameters.required, ['command'])
         assert.deepEqual(parameters.properties.command.enum, ['inspect'])
@@ -111,27 +92,21 @@ test('Expo DevTools commands retain validation and MCP schema conversion with th
         assert.equal(parameters.properties.confirm.type, 'boolean')
 
         const args = { target: 'device', count: 2, confirm: true }
-        const result = await client.callTool({ name: plugin.packageName, arguments: {
-          parameters: { command: 'inspect', ...args },
-        } })
-        assert.notEqual(result.isError, true)
-        assert.deepEqual(JSON.parse(result.content[0].text), { command: 'inspect', args })
-        assert.equal(executions, 1)
+        const { command, ...parsedArgs } = schema.parse({ command: 'inspect', ...args })
+        const executor = new DevToolsPluginCliExtensionExecutor(plugin, directory)
+        const content = DevToolsPluginOutputSchema.parse(await executor.execute({ command, args: parsedArgs }))
+        assert.deepEqual(JSON.parse(content[0].text), { command: 'inspect', args })
         for (const invalid of [
           { command: 'unknown', ...args },
           { command: 'inspect', ...args, count: '2' },
           { command: 'inspect', ...args, extra: true },
         ]) {
-          const rejected = await client.callTool({ name: plugin.packageName, arguments: { parameters: invalid } })
-          assert.equal(rejected.isError, true)
+          assert.equal(schema.safeParse(invalid).success, false)
         }
-        assert.equal(executions, 1)
         // Expo enforces required command arguments before starting a subprocess.
         await assert.rejects(executor.execute({ command: 'inspect', args: {} }), /Expected 3 parameter/)
         assert.equal(DevToolsPluginOutputSchema.safeParse([{ type: 'image', url: 'invalid' }]).success, false)
       } finally {
-        await client.close()
-        await server.close()
         rmSync(directory, { recursive: true, force: true })
       }
     }

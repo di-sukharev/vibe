@@ -4,6 +4,7 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
+import { codeStyle, generatedPrimitives } from '@web-app-demo/eslint-config'
 
 /**
  * Product text styling goes through <Typography>. The rule reports only what it can see for
@@ -179,6 +180,7 @@ export default defineConfig([
       tseslint.configs.recommended,
       reactHooks.configs.flat.recommended,
       reactRefresh.configs.vite,
+      codeStyle,
     ],
     languageOptions: {
       globals: globals.browser,
@@ -203,6 +205,7 @@ export default defineConfig([
     // Official shadcn registry output is regenerated as a unit. Product-specific
     // composition and typography policy stay outside this directory.
     files: ['src/components/ui/**/*.{ts,tsx}'],
+    extends: [generatedPrimitives],
     rules: {
       'react-refresh/only-export-components': 'off',
       'typographyPolicy/use-typography-component': 'off',

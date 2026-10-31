@@ -37,12 +37,14 @@
   },
   "include": [
     "src",
+    "e2e",
     "*.config.ts",
     ".storybook",
     ".react-router/types/**/*"
   ],
   "exclude": [
     "build",
-    "storybook-static"
+    "storybook-static",
+    "e2e/.artifacts"
   ]
 }

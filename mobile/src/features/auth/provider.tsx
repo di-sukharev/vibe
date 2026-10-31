@@ -334,7 +334,7 @@ export function AuthProvider({
 
   const socialAuth = useCallback(
     (provider: SocialAuthProvider, input: SocialAuthRequest) =>
-      establishSession((generation) => api.socialAuth(provider, input, generation)),
+      establishSession(() => api.socialAuth(provider, input)),
     [api, establishSession],
   );
 

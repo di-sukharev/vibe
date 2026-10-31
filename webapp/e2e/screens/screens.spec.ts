@@ -7,7 +7,7 @@ import { e2eAdminEmail, e2eAdminPassword } from '../env'
 import { pngImage } from '../helpers/images'
 
 // Screenshot tour for visual self-review. Nothing here asserts UI details; a test fails only
-// when a page cannot be opened. Filter with `-g`, for example `-g "/admin/users"` or `-g website`.
+// when a page cannot be opened. Filter with `-g`, for example `-g "/admin/users"`.
 
 const outputDirectory = fileURLToPath(new URL('../.artifacts/screens/', import.meta.url))
 
@@ -55,9 +55,6 @@ const extraWebappRoutes: ReadonlyArray<{
   },
 ]
 
-// Keep the tour aligned with website/src/routes.ts.
-const websiteRoutes = ['/']
-
 async function signIn(page: Page, audience: keyof typeof accounts) {
   const response = await page.request.post(`${process.env.E2E_BACKEND_URL}/api/auth/login`, {
     data: accounts[audience],
@@ -74,8 +71,7 @@ function slug(path: string) {
 
 async function capture(
   page: Page,
-  url: string,
-  expectedPath: string,
+  path: string,
   file: string,
   beforeShot?: (page: Page) => Promise<void>,
 ) {
@@ -87,20 +83,20 @@ async function capture(
     }
   }
 
-  await page.goto(url)
+  await page.goto(path)
   await page.waitForLoadState('networkidle')
   await page.evaluate(() => document.fonts.ready)
 
   const openedPath = new URL(page.url()).pathname.replace(/(.)\/$/, '$1')
-  if (openedPath !== expectedPath) {
-    throw new Error(`${expectedPath} redirected to ${openedPath}`)
+  if (openedPath !== path) {
+    throw new Error(`${path} redirected to ${openedPath}`)
   }
 
   await beforeShot?.(page)
 
-  const path = `${outputDirectory}${file}`
-  await page.screenshot({ path, fullPage: true, animations: 'disabled' })
-  console.log(path)
+  const screenshotPath = `${outputDirectory}${file}`
+  await page.screenshot({ path: screenshotPath, fullPage: true, animations: 'disabled' })
+  console.log(screenshotPath)
 
   // One image of a tall page shrinks until details are unreadable; add two-screen tiles.
   const { width, height } = page.viewportSize() ?? viewports.desktop
@@ -109,7 +105,7 @@ async function capture(
   if (pageHeight <= tileHeight * 1.5) return
 
   for (let top = 0, part = 1; top < pageHeight; top += tileHeight, part += 1) {
-    const tilePath = path.replace(/\.png$/, `-part${part}.png`)
+    const tilePath = screenshotPath.replace(/\.png$/, `-part${part}.png`)
     const clip = { x: 0, y: top, width, height: Math.min(tileHeight, pageHeight - top) }
     await page.screenshot({ path: tilePath, fullPage: true, clip, animations: 'disabled' })
     console.log(tilePath)
@@ -184,7 +180,7 @@ for (const [viewportName, viewport] of Object.entries(viewports)) {
       for (const route of webappRoutes) {
         test(route.path, async ({ page }) => {
           if (route.audience !== 'guest') await signIn(page, route.audience)
-          await capture(page, route.path, route.path, `${slug(route.path)}--${viewportName}-${colorScheme}.png`)
+          await capture(page, route.path, `${slug(route.path)}--${viewportName}-${colorScheme}.png`)
         })
       }
 
@@ -194,7 +190,6 @@ for (const [viewportName, viewport] of Object.entries(viewports)) {
           await capture(
             page,
             route.path,
-            route.path,
             `${route.name}--${viewportName}-${colorScheme}.png`,
             async (capturedPage) => {
               await capturedPage.getByTestId('user-search-input').fill(route.searchQuery)
@@ -202,16 +197,6 @@ for (const [viewportName, viewport] of Object.entries(viewports)) {
               await capturedPage.getByTestId('user-directory-empty').waitFor()
             },
           )
-        })
-      }
-
-      // The website has one dark theme, so it is captured once per viewport.
-      if (colorScheme !== 'dark') return
-
-      for (const path of websiteRoutes) {
-        test(`website ${path}`, async ({ page }) => {
-          const name = ['website', slug(path)].filter(Boolean).join('-')
-          await capture(page, `${process.env.SCREENS_WEBSITE_URL}${path}`, path, `${name}--${viewportName}-dark.png`)
         })
       }
     })

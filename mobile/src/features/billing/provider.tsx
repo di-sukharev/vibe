@@ -1,8 +1,8 @@
 import type { SubscriptionSnapshot } from '@web-app-demo/contracts';
 import {
   deepLinkToSubscriptions,
-  fetchProducts as fetchProductsFromStore,
-  getAvailablePurchases as getAvailablePurchasesFromStore,
+  fetchProducts,
+  getAvailablePurchases,
   presentCodeRedemptionSheetIOS,
   syncIOS,
   useIAP,
@@ -450,7 +450,7 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
     setError(null);
 
     try {
-      const fetched = await retryIapOperation(() => fetchProductsFromStore({ skus: productIds, type: 'subs' }));
+      const fetched = await retryIapOperation(() => fetchProducts({ skus: productIds, type: 'subs' }));
       if (!ownsOperation()) return;
       setProducts((fetched ?? []) as ProductSubscription[]);
     } catch (caughtError) {
@@ -643,8 +643,8 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
         try {
           const purchases = await retryIapOperation(() =>
             platform === 'ios'
-              ? getAvailablePurchasesFromStore(allIosAvailablePurchaseOptions)
-              : getAvailablePurchasesFromStore(),
+              ? getAvailablePurchases(allIosAvailablePurchaseOptions)
+              : getAvailablePurchases(),
           );
           if (!isOperationScopeCurrent(syncScope)) return;
           await reconcileAndFinishPurchases({
@@ -838,8 +838,8 @@ function NativeIapProvider({ api, children, platform }: PropsWithChildren<{
         : undefined;
       const purchases = await retryIapOperation(() =>
         platform === 'ios'
-          ? getAvailablePurchasesFromStore(allIosAvailablePurchaseOptions)
-          : getAvailablePurchasesFromStore(),
+          ? getAvailablePurchases(allIosAvailablePurchaseOptions)
+          : getAvailablePurchases(),
       );
       if (!isOperationScopeCurrent(restoreScope)) return;
       const restoredSubscription = await reconcileAndFinishPurchases({

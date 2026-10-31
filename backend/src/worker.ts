@@ -294,13 +294,12 @@ function delay(ms: number, signal: AbortSignal | undefined) {
   if (signal?.aborted) return Promise.resolve()
 
   return new Promise<void>((resolve) => {
-    let timeout: ReturnType<typeof setTimeout>
     const finish = () => {
       clearTimeout(timeout)
       signal?.removeEventListener('abort', finish)
       resolve()
     }
-    timeout = setTimeout(finish, ms)
+    const timeout = setTimeout(finish, ms)
     signal?.addEventListener('abort', finish, { once: true })
   })
 }

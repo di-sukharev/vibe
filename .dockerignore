@@ -36,6 +36,8 @@ GoogleService-Info.plist
 backend/certs
 .aws
 .gcloud
+backend/.storage
 webapp/e2e/.artifacts
+website/e2e/.artifacts
 mobile/.maestro/reports
 *.log

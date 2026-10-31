@@ -26,8 +26,7 @@ export function createBackgroundTasks({
   return {
     defer(task) {
       const controller = new AbortController()
-      let pendingTask: Promise<void>
-      pendingTask = new Promise<void>((resolve) => {
+      const pendingTask = new Promise<void>((resolve) => {
         setTimeout(() => {
           const taskTimeout = setTimeout(() => {
             controller.abort()

@@ -68,13 +68,13 @@ Inspect browser requests before diagnosing a stuck loading fallback as an authen
 
 ## Browser tests and screenshots
 
-Install Playwright once with `bun run --cwd webapp e2e:install`. Docker must be running. Specs are in `webapp/e2e/specs` and use stable `data-testid` selectors.
+Install Playwright Chromium once with `bun run e2e:install`. Webapp E2E needs Docker. Webapp specs are in `webapp/e2e/specs` and use stable `data-testid` selectors.
 
 The runner starts a test database, backend, and the React Router development server. `e2e:preview` builds the webapp with the test backend origin and runs the same journeys through Vite production preview. Both modes use the real backend and an isolated test database. It seeds test accounts and removes its database afterward. Reports and failure artifacts are in `webapp/e2e/.artifacts`.
 
-`test:website` reuses the webapp's Playwright tooling to build the public website and check its browser behavior through production preview. It needs no backend or database. The root `test` command includes this check.
+`test:website` builds the public website and checks its browser behavior through production preview. Its specs are in `website/e2e/specs`. It needs no backend or database. The root `test` command includes this check.
 
-E2E and screenshots share a Compose project. Run them separately or set different `COMPOSE_PROJECT_NAME` values. `E2E_KEEP_DOCKER=1` keeps the database; `E2E_SKIP_DOCKER=1` uses an existing test database.
+Webapp E2E and webapp screenshots share a Compose project. Run them separately or set different `COMPOSE_PROJECT_NAME` values. `E2E_KEEP_DOCKER=1` keeps the database; `E2E_SKIP_DOCKER=1` uses an existing test database.
 
 `bun run e2e:webapp:s3` runs the avatar journey against local S3. [UI](UI.md#visual-check) explains screenshots. See [Mobile E2E](#mobile-e2e) for Maestro.
 
@@ -88,13 +88,9 @@ E2E and screenshots share a Compose project. Run them separately or set differen
 
 `bun run audit` runs `bun audit` and fails on advisories. Run it after dependency updates and before release. Fix advisories with compatible updates. Skip an advisory only with the user's approval. Apply the approved exception for that run unless a persistent exception was requested.
 
-Keep transitive overrides only while needed. Upgrade the three Prisma packages together and verify backend types, tests, and affected client behavior.
+Keep transitive overrides only while needed. `prisma` pins vulnerable `deepmerge-ts` and `mysql2` versions, so the root `overrides` replace them. Upgrade the three Prisma packages together and verify backend types, tests, and affected client behavior.
 
-The `braces` override pins the API-compatible [`@zklogic/braces` fork](https://github.com/ArfanKhalilMughal/braces) for [CVE-2026-93687](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm). Upstream has no patched release. The fork limits parser nesting and keeps deeper input as literal text. `scripts/glob-security.test.mjs` checks the exploit and normal range expansion in Node. Remove the override when the dependency tree uses an upstream fix or no longer needs `braces`.
-
-Mobile pins `node-forge` to the immutable fix commit from [upstream PR #1152](https://github.com/digitalbazaar/forge/pull/1152). This PR is not merged or released. It rejects extra elements in the RSA digest algorithm. Replace the pin when an official fixed release is available. `scripts/mobile-dependency-security.test.mjs` verifies RSA signatures through Expo's installed dependencies. The audit has no advisory exceptions.
-
-The `zod` override requires 4.6.6 or later to fix GHSA-mrhx-c7xc-m3w5. Expo CLI still requests Zod 3. Its DevTools schemas use APIs supported by Zod 4. The mobile dependency integration test checks real plugin execution, invalid command rejection, and MCP schema conversion through the installed SDK. Remove the override when Expo CLI and the remaining dependency tree require a fixed Zod release.
+The `zod` override requires 4.6.6 or later to fix GHSA-mrhx-c7xc-m3w5. Expo CLI still requests Zod 3. Its DevTools schemas use APIs supported by Zod 4. The mobile dependency integration test checks real plugin execution, invalid command rejection, and the JSON Schema that MCP clients receive. Remove the override when Expo CLI and the remaining dependency tree require a fixed Zod release.
 
 ## Mobile tests
 

@@ -32,7 +32,7 @@ const innerLayerAllowedPackages = [`${workspaceScope}/contracts`, 'zod']
 const contractAllowedPackages = ['zod']
 const transportForbiddenPackages = ['@prisma/', '@aws-sdk/', 'jose', 'pg']
 
-export function checkArchitectureSources(files) {
+function checkArchitectureSources(files) {
   const violations = []
 
   for (const file of files) {
@@ -384,4 +384,4 @@ function packageAllowed(specifier, allowedPackages, filePath) {
   return allowedPackages.some((allowed) => packageMatches(specifier, allowed))
 }
 
-if (import.meta.main) await main()
+await main()

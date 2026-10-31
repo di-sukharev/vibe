@@ -1,11 +1,17 @@
 // https://docs.expo.dev/guides/using-eslint/
 const { defineConfig } = require('eslint/config');
 const expoConfig = require("eslint-config-expo/flat");
+const { codeStyle, generatedPrimitives } = require("@web-app-demo/eslint-config");
 
 module.exports = defineConfig([
   expoConfig,
+  codeStyle,
   {
     ignores: ["dist/*"],
+  },
+  {
+    files: ["src/components/ui/**/*.{ts,tsx}"],
+    ...generatedPrimitives,
   },
   {
     // These components intentionally use refs as imperative native/store bridges.

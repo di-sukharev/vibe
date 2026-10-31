@@ -3,8 +3,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { brotliCompressSync, constants, gzipSync } from 'node:zlib'
 
-export const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-export const defaultTargets = ['webapp/build/client', 'website/build/client']
+const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const defaultTargets = ['webapp/build/client', 'website/build/client']
 
 // Compress text formats only. Already-compressed binaries can produce smaller variants
 // with negligible savings, which do not justify a second copy.
@@ -22,19 +22,19 @@ const compressibleExtensions = new Set([
   '.xml',
 ])
 
-export const variantExtensions = ['.br', '.gz']
+const variantExtensions = ['.br', '.gz']
 
 // Small files do not save enough bytes to justify extra variants.
-export const minimumCompressibleBytes = 1024
+const minimumCompressibleBytes = 1024
 
-export function shouldCompress(filePath, byteLength) {
+function shouldCompress(filePath, byteLength) {
   if (byteLength < minimumCompressibleBytes) return false
   return compressibleExtensions.has(path.extname(filePath).toLowerCase())
 }
 
 // Only text-file siblings are generated variants. Do not publish precompressed text files
 // in these targets: cleanup cannot distinguish them from generated siblings.
-export function isVariantPath(filePath) {
+function isVariantPath(filePath) {
   const extension = path.extname(filePath).toLowerCase()
   if (!variantExtensions.includes(extension)) return false
   const base = filePath.slice(0, -extension.length)
@@ -43,7 +43,7 @@ export function isVariantPath(filePath) {
 
 // Output is deterministic within one runtime. Bun and Node can emit different gzip bytes,
 // so use the same runtime when comparing artifacts or avoiding redundant uploads.
-export function compressedVariants(source) {
+function compressedVariants(source) {
   const variants = {}
 
   const gzip = gzipSync(source, { level: constants.Z_BEST_COMPRESSION })

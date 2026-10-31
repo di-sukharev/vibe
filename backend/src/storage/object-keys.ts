@@ -39,6 +39,7 @@ export function assertSafeObjectKey(key: string) {
     throw new StorageError('invalid_key', 'Storage object key must be relative')
   }
 
+  // eslint-disable-next-line no-control-regex -- The pattern rejects control characters on purpose.
   if (/[\u0000-\u001F\\]/.test(normalizedKey)) {
     throw new StorageError('invalid_key', 'Storage object key contains unsupported characters')
   }

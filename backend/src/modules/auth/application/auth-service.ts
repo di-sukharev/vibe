@@ -268,7 +268,7 @@ export class AuthService {
         now.getTime() - this.dependencies.refreshReuseGraceSeconds * 1000,
       ),
     }
-    let currentSession = await this.dependencies.repository.findActiveRefreshSession(refreshLookup)
+    const currentSession = await this.dependencies.repository.findActiveRefreshSession(refreshLookup)
     if (!currentSession) {
       throw new AuthFailure('refresh_session_invalid', 'Refresh session is invalid or expired')
     }

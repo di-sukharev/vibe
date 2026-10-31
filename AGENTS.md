@@ -6,15 +6,18 @@ The user is not a programmer. The user owns the product. You own all the enginee
 
 Use the user's language for conversation, product documents, and tasks. Write technical documents and agent instructions in English. Follow ASD-STE100: short sentences, active voice, and consistent terms. Use complete sentences and enough words to make each instruction clear.
 
+Before you add complexity for an unlikely race condition or security case, explain the failure, its probability, and its cost to the user in plain words. Wait for approval.
+
 ## Project
 
-| Path                 | Purpose                                                                   |
-| -------------------- | ------------------------------------------------------------------------- |
-| `packages/contracts` | Shared Zod schemas for API requests, responses, and errors                |
-| `backend`            | Bun/Hono API and background processes; Prisma and PostgreSQL              |
-| `webapp`             | React Router app for signed-in users; pages render in the browser (CSR)  |
-| `website`            | Public React Router pages rendered at build time (SSG)                   |
-| `mobile`             | Expo application for iOS, Android, and web                               |
+| Path                     | Purpose                                                                 |
+| ------------------------ | ----------------------------------------------------------------------- |
+| `packages/contracts`     | Shared Zod schemas for API requests, responses, and errors              |
+| `packages/eslint-config` | Shared ESLint rules for the code style of all applications              |
+| `backend`                | Bun/Hono API and background processes; Prisma and PostgreSQL            |
+| `webapp`                 | React Router app for signed-in users; pages render in the browser (CSR) |
+| `website`                | Public React Router pages rendered at build time (SSG)                  |
+| `mobile`                 | Expo application for iOS, Android, and web                              |
 
 Read each application's README for local setup instructions and rules for running it.
 
@@ -31,6 +34,21 @@ Put public pages in `website`. Use `webapp` for pages that require sign-in and f
 React Router renders the SPA root during the build, even with `ssr: false`. Keep its imports safe without browser APIs or a live backend. Check their Node startup cost.
 
 Record significant architecture and infrastructure decisions in `backend/adr/` as numbered Markdown files. Examples include changing application boundaries, choosing a database or external service, or changing how background work or deployment runs. Explain the problem, chosen approach, reasons, and tradeoffs. Read relevant records before making these changes. [Current architecture](backend/adr/0001-application-architecture.md) records the starting decisions.
+
+## Code style
+
+- Validate unknown input once, at the boundary that receives it. Pass typed values inward. Do not check again what a schema or type already guarantees.
+- Keep code in one function. Extract a helper only if the code is reused or the helper names a real concept.
+- Write the main function as the success path. Put validation and supporting details in helpers below it.
+- Inline a value that is used only once.
+- Use `const`. Use a ternary or an early return instead of reassignment or `else`.
+- Use `map`, `filter`, and `flatMap` for transformations. Use `for…of` for sequential `await` or an early exit.
+- Rely on type inference. Add explicit types to exports or where inference is unclear. Never use `any`.
+- Do not rename imports. Do not use `import * as` for project modules.
+- Load heavy modules with dynamic `import()` only in the code paths that need them.
+- Catch an error only where the code handles it: retry, clean up, return an API error, or contain an optional renderer. Let other errors propagate.
+- Prefer Bun APIs in new `backend` and `scripts` code. Browser code and frontend builds do not run on Bun.
+- Write comments only for constraints and behavior that the code does not make clear.
 
 ## Database
 
@@ -52,7 +70,7 @@ Declare recurring jobs in `backend/src/jobs.ts` and schedules in `backend/src/jo
 
 Use TDD for behavior changes and bug fixes. Run the test and confirm the expected failure. Copy and styling changes never need TDD.
 
-Write only integration tests. Test backend behavior through HTTP APIs. Test jobs by calling the functions used in production. Run both with real internal services and an isolated PostgreSQL test database. Replace external providers with test implementations.
+Write only integration tests. Write expected values as literal results. Do not repeat the production calculation in a test. Test backend behavior through HTTP APIs. Test jobs by calling the functions used in production. Run both with real internal services and an isolated PostgreSQL test database. Replace external providers with test implementations.
 
 Never add unit tests, component tests, or cosmetic tests. Do not test UI wording, CSS, markup, visual appearance, or snapshots.
 

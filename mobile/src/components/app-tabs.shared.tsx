@@ -1,6 +1,4 @@
-import {
-  Tabs as RouterTabs,
-} from 'expo-router';
+import { Tabs } from 'expo-router';
 import type { BottomTabBarButtonProps } from 'expo-router/js-tabs';
 import { PlatformPressable } from 'expo-router/react-navigation';
 import { SymbolView } from 'expo-symbols';
@@ -17,7 +15,7 @@ export default function AppTabs() {
   const tabBarHeight = 56 + Math.max(insets.bottom, theme.spacing.sm);
 
   return (
-    <RouterTabs
+    <Tabs
       screenOptions={{
         headerShown: false,
         sceneStyle: { backgroundColor: theme.colors.background },
@@ -46,7 +44,7 @@ export default function AppTabs() {
           },
         ],
       }}>
-      <RouterTabs.Screen
+      <Tabs.Screen
         name="components"
         options={{
           title: 'Components',
@@ -65,7 +63,7 @@ export default function AppTabs() {
           ),
         }}
       />
-      <RouterTabs.Screen
+      <Tabs.Screen
         name="profile"
         options={{
           title: 'Profile',
@@ -84,7 +82,7 @@ export default function AppTabs() {
           ),
         }}
       />
-    </RouterTabs>
+    </Tabs>
   );
 }
 

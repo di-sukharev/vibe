@@ -175,6 +175,7 @@ const tokenLoginRoute = createRoute({
   },
 })
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- Social sign-in ships switched off; see the handler below.
 const tokenSocialAuthRoute = createRoute({
   method: 'post',
   path: '/token/social/{provider}',

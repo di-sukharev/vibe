@@ -120,7 +120,6 @@ export class AuthApi {
   socialAuth(
     provider: SocialAuthProvider,
     input: SocialAuthRequest,
-    _generation = this.options.getGeneration(),
   ): Promise<AuthSessionResponse> {
     if (this.kind === 'cookie') {
       throw new ApiRequestError(
