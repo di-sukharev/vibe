@@ -12,6 +12,8 @@ coverage
 .env.*
 **/.env
 **/.env.*
+backend/.storage
 webapp/e2e/.artifacts
+website/e2e/.artifacts
 mobile/.maestro/reports
 *.log

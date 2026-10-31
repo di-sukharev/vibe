@@ -7,7 +7,7 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 import { codeStyle, generatedPrimitives } from '@web-app-demo/eslint-config'
 
 export default defineConfig([
-  globalIgnores(['build', '.react-router', 'storybook-static']),
+  globalIgnores(['build', '.react-router', 'storybook-static', 'e2e/.artifacts']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [js.configs.recommended, tseslint.configs.recommended, reactHooks.configs.flat.recommended, reactRefresh.configs.vite, codeStyle],

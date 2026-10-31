@@ -68,13 +68,13 @@ Inspect browser requests before diagnosing a stuck loading fallback as an authen
 
 ## Browser tests and screenshots
 
-Install Playwright once with `bun run --cwd webapp e2e:install`. Docker must be running. Specs are in `webapp/e2e/specs` and use stable `data-testid` selectors.
+Install Playwright Chromium once with `bun run e2e:install`. Webapp E2E needs Docker. Webapp specs are in `webapp/e2e/specs` and use stable `data-testid` selectors.
 
 The runner starts a test database, backend, and the React Router development server. `e2e:preview` builds the webapp with the test backend origin and runs the same journeys through Vite production preview. Both modes use the real backend and an isolated test database. It seeds test accounts and removes its database afterward. Reports and failure artifacts are in `webapp/e2e/.artifacts`.
 
-`test:website` reuses the webapp's Playwright tooling to build the public website and check its browser behavior through production preview. It needs no backend or database. The root `test` command includes this check.
+`test:website` builds the public website and checks its browser behavior through production preview. Its specs are in `website/e2e/specs`. It needs no backend or database. The root `test` command includes this check.
 
-E2E and screenshots share a Compose project. Run them separately or set different `COMPOSE_PROJECT_NAME` values. `E2E_KEEP_DOCKER=1` keeps the database; `E2E_SKIP_DOCKER=1` uses an existing test database.
+Webapp E2E and webapp screenshots share a Compose project. Run them separately or set different `COMPOSE_PROJECT_NAME` values. `E2E_KEEP_DOCKER=1` keeps the database; `E2E_SKIP_DOCKER=1` uses an existing test database.
 
 `bun run e2e:webapp:s3` runs the avatar journey against local S3. [UI](UI.md#visual-check) explains screenshots. Maestro instructions are on the mobile branch.
 

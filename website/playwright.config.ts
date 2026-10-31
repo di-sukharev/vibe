@@ -1,7 +1,7 @@
 import { createServer } from 'node:net'
-import { fileURLToPath } from 'node:url'
 import { defineConfig, devices } from '@playwright/test'
 
+// Workers load this file again; the environment keeps them on the port the runner chose.
 process.env.E2E_WEBSITE_PORT ??= String(await new Promise<number>((resolve, reject) => {
   const server = createServer()
   server.once('error', reject)
@@ -17,8 +17,8 @@ const websitePort = Number(process.env.E2E_WEBSITE_PORT)
 const websiteUrl = `http://127.0.0.1:${websitePort}`
 
 export default defineConfig({
-  testDir: './e2e/website',
-  outputDir: './e2e/.artifacts/website-results',
+  testDir: './e2e/specs',
+  outputDir: './e2e/.artifacts/results',
   forbidOnly: true,
   retries: 0,
   reporter: 'list',
@@ -29,7 +29,6 @@ export default defineConfig({
   },
   webServer: {
     command: `bun run build && bun run preview --host 127.0.0.1 --port ${websitePort} --strictPort`,
-    cwd: fileURLToPath(new URL('../website', import.meta.url)),
     url: websiteUrl,
     reuseExistingServer: false,
     timeout: 120_000,

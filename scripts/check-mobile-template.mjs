@@ -32,33 +32,27 @@ const mobileValidationCommands = [
   ['run', '--cwd', 'mobile', 'e2e:maestro:audit'],
 ]
 
-export function runMobileValidation(execute = execFileSync) {
-  for (const args of mobileValidationCommands) {
-    execute('bun', args, { cwd: repositoryRoot, stdio: 'inherit' })
-  }
+const ancestor = spawnSync('git', ['merge-base', '--is-ancestor', 'origin/master', 'HEAD'], {
+  cwd: repositoryRoot,
+  stdio: 'ignore',
+})
+if (ancestor.error) throw ancestor.error
+
+const errors = mobileReleaseErrors({
+  branch: git(['branch', '--show-current']),
+  status: git(['status', '--porcelain=v1']),
+  head: git(['rev-parse', 'HEAD']),
+  originMobile: git(['rev-parse', 'origin/mobile']),
+  masterIsAncestor: ancestor.status === 0,
+  requirePublished: process.argv.includes('--published'),
+})
+
+if (errors.length > 0) {
+  console.error(`Mobile template check failed:\n- ${errors.join('\n- ')}`)
+  process.exit(1)
 }
 
-if (import.meta.main) {
-  const ancestor = spawnSync('git', ['merge-base', '--is-ancestor', 'origin/master', 'HEAD'], {
-    cwd: repositoryRoot,
-    stdio: 'ignore',
-  })
-  if (ancestor.error) throw ancestor.error
-
-  const errors = mobileReleaseErrors({
-    branch: git(['branch', '--show-current']),
-    status: git(['status', '--porcelain=v1']),
-    head: git(['rev-parse', 'HEAD']),
-    originMobile: git(['rev-parse', 'origin/mobile']),
-    masterIsAncestor: ancestor.status === 0,
-    requirePublished: process.argv.includes('--published'),
-  })
-
-  if (errors.length > 0) {
-    console.error(`Mobile template check failed:\n- ${errors.join('\n- ')}`)
-    process.exit(1)
-  }
-
-  runMobileValidation()
-  console.log('Mobile template check passed.')
+for (const args of mobileValidationCommands) {
+  execFileSync('bun', args, { cwd: repositoryRoot, stdio: 'inherit' })
 }
+console.log('Mobile template check passed.')

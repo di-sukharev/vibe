@@ -45,7 +45,6 @@
     "build",
     "storybook-static",
     "playwright.config.ts",
-    "playwright.screens.config.ts",
-    "playwright.website.config.ts"
+    "playwright.screens.config.ts"
   ]
 }

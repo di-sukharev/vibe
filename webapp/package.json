@@ -19,8 +19,7 @@
     "ui": "bunx shadcn@4.22.1",
     "ui:add": "bun run ui add",
     "ui:info": "bun run ui info",
-    "e2e:preview": "E2E_WEB_MODE=preview playwright test",
-    "e2e:website": "playwright test --config playwright.website.config.ts"
+    "e2e:preview": "E2E_WEB_MODE=preview playwright test"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",

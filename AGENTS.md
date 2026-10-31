@@ -47,7 +47,7 @@ Record significant architecture and infrastructure decisions in `backend/adr/` a
 - Do not rename imports. Do not use `import * as` for project modules.
 - Load heavy modules with dynamic `import()` only in the code paths that need them.
 - Catch an error only where the code handles it: retry, clean up, return an API error, or contain an optional renderer. Let other errors propagate.
-- Use Bun APIs in `backend` and `scripts`. Browser code and frontend builds do not run on Bun.
+- Prefer Bun APIs in new `backend` and `scripts` code. Browser code and frontend builds do not run on Bun.
 - Write comments only for constraints and behavior that the code does not make clear.
 
 ## Database

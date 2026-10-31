@@ -5,14 +5,14 @@ import { fileURLToPath } from 'node:url'
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
-export function validateAgentInstructions(claude) {
+function validateAgentInstructions(claude) {
   const lines = withoutFencedCode(claude).split('\n').map((line) => line.trim())
   return lines.includes('@AGENTS.md')
     ? []
     : ['CLAUDE.md must load the shared instructions with a standalone `@AGENTS.md` import line.']
 }
 
-export function validateMarkdownLinks(files, trackedPaths) {
+function validateMarkdownLinks(files, trackedPaths) {
   const errors = []
   const metadata = new Map(files.map((file) => [file.path, markdownMetadata(file.source)]))
 
@@ -67,10 +67,10 @@ export function validateMarkdownLinks(files, trackedPaths) {
 }
 
 // Tracked and untracked files that exist on disk; ignored and deleted files are excluded.
-export function worktreePaths(root = repositoryRoot) {
+function worktreePaths() {
   const args = ['ls-files', '--cached', '--others', '--exclude-standard', '-z']
-  const candidates = execFileSync('git', args, { cwd: root, encoding: 'utf8' }).split('\0').filter(Boolean)
-  return new Set(candidates.filter((filePath) => existsSync(path.join(root, filePath))))
+  const candidates = execFileSync('git', args, { cwd: repositoryRoot, encoding: 'utf8' }).split('\0').filter(Boolean)
+  return new Set(candidates.filter((filePath) => existsSync(path.join(repositoryRoot, filePath))))
 }
 
 function withoutFencedCode(source) {
@@ -148,9 +148,9 @@ function githubHeadingSlug(value) {
     .replace(/\s/g, '-')
 }
 
-export function validateRepository(root = repositoryRoot) {
-  const paths = worktreePaths(root)
-  const read = (filePath) => readFileSync(path.join(root, filePath), 'utf8')
+function validateRepository() {
+  const paths = worktreePaths()
+  const read = (filePath) => readFileSync(path.join(repositoryRoot, filePath), 'utf8')
   const markdownFiles = [...paths]
     .filter((filePath) => filePath.toLowerCase().endsWith('.md'))
     .map((filePath) => ({ path: filePath, source: read(filePath) }))
@@ -160,12 +160,10 @@ export function validateRepository(root = repositoryRoot) {
   ]
 }
 
-if (import.meta.main) {
-  const errors = validateRepository()
-  if (errors.length > 0) {
-    for (const error of errors) console.error(`[template-check] ${error}`)
-    process.exitCode = 1
-  } else {
-    console.log('Template check passed.')
-  }
+const errors = validateRepository()
+if (errors.length > 0) {
+  for (const error of errors) console.error(`[template-check] ${error}`)
+  process.exitCode = 1
+} else {
+  console.log('Template check passed.')
 }

@@ -43,7 +43,7 @@ prefix_rule(
 prefix_rule(
     pattern = ["terraform", ["apply", "destroy", "state", "import"]],
     decision = "forbidden",
-    justification = "Change infrastructure only through scripts/infra.mjs (infra:apply, release, infra:import). See docs/DEPLOYMENT.md.",
+    justification = "This changes real infrastructure. Ask the user to run it.",
     match = ["terraform apply -auto-approve", "terraform state rm module.media"],
     not_match = ["terraform fmt -check"],
 )

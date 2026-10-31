@@ -3,7 +3,7 @@ import type { UserRole } from '@web-app-demo/contracts'
 import type { DbClient } from '../src/db'
 
 /**
- * Fixed fixture data for the screenshot tour (`bun run screens`) and local demo seeding
+ * Fixed fixture data for the screenshot tour (`bun run screens:webapp`) and local demo seeding
  * (`DEV_SEED_DEMO=1 bun run dev:seed`). Two seeded accounts alone leave the admin dashboard and
  * user directory looking empty, so this adds a realistic, deterministic population: no randomness,
  * so the same names, roles, and relative ordering appear on every run.

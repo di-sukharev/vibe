@@ -128,6 +128,19 @@ async function waitForHealth() {
   throw new Error(`Timed out waiting for ${url}`)
 }
 
+// Local development uploads must never ship in the image. .dockerignore excludes them.
+function assertNoLocalUploads() {
+  const result = spawnSync(
+    'docker',
+    ['run', '--rm', imageName, 'test', '!', '-e', '/app/backend/.storage'],
+    { stdio: 'inherit' },
+  )
+
+  if (result.status !== 0) {
+    throw new Error('The backend image contains /app/backend/.storage. Exclude it in .dockerignore.')
+  }
+}
+
 async function smokeAuthApi() {
   const baseUrl = `http://127.0.0.1:${hostPort}`
   const email = `docker-smoke-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`
@@ -211,6 +224,7 @@ try {
   })
 
   run('docker', ['build', '-f', 'backend/Dockerfile', '-t', imageName, '.'])
+  assertNoLocalUploads()
   spawnSync('docker', ['rm', '-f', containerName], { stdio: 'ignore' })
 
   run('docker', [

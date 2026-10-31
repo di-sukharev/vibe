@@ -13,7 +13,7 @@ bun run theme -- --check
 
 The generator updates marked sections of application CSS and the website font import. Do not edit those sections manually. Use the configuration and [generator](../scripts/theme.mjs) for supported values and contrast rules.
 
-Fonts must already be installed or approved by the user. The generator does not install dependencies.
+Add the chosen font package to the application before you run the generator. The generator does not install dependencies.
 
 ## Components and layout
 
@@ -40,14 +40,14 @@ Keep layouts usable at 375 px and 1280 px. Actions need keyboard access and visi
 For new screens, layout changes, or branding changes, capture the affected routes:
 
 ```bash
-bun run screens -- -g '/admin/users'
-bun run screens -- -g website
+bun run screens:webapp -- -g '/admin/users'
+bun run screens:website
 ```
 
-The script starts the test stack and captures webapp and website pages. It uses the themes configured for each application. Images are in `webapp/e2e/.artifacts/screens`. Tall pages also produce numbered tiles.
+`screens:webapp` starts the test stack and captures webapp pages in light and dark themes. Images are in `webapp/e2e/.artifacts/screens`. `screens:website` builds the website and captures its pages through production preview. Images are in `website/e2e/.artifacts/screens`. Tall pages also produce numbered tiles.
 
 Inspect the captures and fix visible problems. The user performs the final visual check. Interactive browser control requires an explicit request.
 
-Workspace routes come from `workspaceRoutesByRole`. Add guest routes to `webapp/e2e/screens/screens.spec.ts`. Website routes come from the explicit configuration in `website/src/routes.ts`. Create fixture records in the screenshot spec when a filled state matters.
+Workspace routes come from `workspaceRoutesByRole`. Add guest routes to `webapp/e2e/screens/screens.spec.ts`. Add website routes to `website/e2e/screens/screens.spec.ts` when you add them to `website/src/routes.ts`. Create fixture records in the screenshot spec when a filled state matters.
 
-Screenshots share the checkout's E2E Docker project. Run them separately from E2E, or use a distinct `COMPOSE_PROJECT_NAME`.
+Webapp screenshots share the checkout's E2E Docker project. Run them separately from E2E, or use a distinct `COMPOSE_PROJECT_NAME`.

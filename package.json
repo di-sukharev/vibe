@@ -54,11 +54,13 @@
     "test:backend:integration": "bun run --cwd backend test:integration",
     "test:storage:s3": "bun scripts/storage-local.mjs test",
     "test:webapp": "bun run --cwd webapp test",
-    "test:website": "bun run --cwd webapp e2e:website",
+    "test:website": "bun run --cwd website test",
     "smoke:backend:docker": "bun run --cwd backend smoke:docker",
+    "e2e:install": "bun run --filter '*' --sequential e2e:install",
     "e2e:webapp": "bun run --cwd webapp e2e",
     "e2e:webapp:s3": "bun scripts/storage-local.mjs e2e",
-    "screens": "bun run --cwd webapp screens"
+    "screens:webapp": "bun run --cwd webapp screens",
+    "screens:website": "bun run --cwd website screens"
   },
   "devDependencies": {
     "@storybook/addon-a11y": "10.6.3",
