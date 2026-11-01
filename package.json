@@ -11,10 +11,6 @@
     "backend",
     "packages/*"
   ],
-  "overrides": {
-    "deepmerge-ts": "^8.0.2",
-    "mysql2": "^3.24.3"
-  },
   "scripts": {
     "dev": "bun run --filter '*' --parallel dev",
     "dev:webapp": "bun run --cwd webapp dev",

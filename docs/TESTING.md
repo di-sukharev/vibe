@@ -95,5 +95,5 @@ The `audit` script has these approved temporary exceptions:
 
 The fixed versions are new major versions that these tools do not support yet. The packages run only in development tools and do not go into built applications. Remove each `--ignore` flag when the tools release compatible versions.
 
-Keep transitive overrides only while needed. `prisma` pins vulnerable `deepmerge-ts` and `mysql2` versions, so the root `overrides` replace them. Upgrade the three Prisma packages together and verify backend types, tests, and affected client behavior.
+Keep transitive overrides only while needed. Upgrade the three Prisma packages together and verify backend types, tests, and affected client behavior.
 
