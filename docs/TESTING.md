@@ -88,5 +88,12 @@ Webapp E2E and webapp screenshots share a Compose project. Run them separately o
 
 `bun run audit` runs `bun audit` and fails on advisories. Run it after dependency updates and before release. Fix advisories with compatible updates. Skip an advisory only with the user's approval. Apply the approved exception for that run unless a persistent exception was requested.
 
+The `audit` script has these approved temporary exceptions:
+
+- `GHSA-g3hv-75wg-m249` for `minimatch`. ESLint, `typescript-eslint`, and Storybook use it.
+- `GHSA-3g3m-2fjr-6pw4` for `glob`. Storybook uses it.
+
+The fixed versions are new major versions that these tools do not support yet. The packages run only in development tools and do not go into built applications. Remove each `--ignore` flag when the tools release compatible versions.
+
 Keep transitive overrides only while needed. `prisma` pins vulnerable `deepmerge-ts` and `mysql2` versions, so the root `overrides` replace them. Upgrade the three Prisma packages together and verify backend types, tests, and affected client behavior.
 

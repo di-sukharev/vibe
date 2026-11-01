@@ -34,7 +34,7 @@
     "check": "bun run template:check && bun run architecture:check && bun run typecheck && bun run lint && bun run test && bun run build:webapp && bun run build:website && bun run audit",
     "template:check": "bun scripts/template-check.mjs",
     "architecture:check": "bun scripts/architecture-check.mjs",
-    "audit": "bun audit",
+    "audit": "bun audit --ignore=GHSA-g3hv-75wg-m249 --ignore=GHSA-3g3m-2fjr-6pw4",
     "static:precompress": "bun scripts/precompress-static.mjs",
     "theme": "bun scripts/theme.mjs",
     "lint": "bun run --cwd backend lint && bun run --cwd webapp lint && bun run --cwd website lint",
