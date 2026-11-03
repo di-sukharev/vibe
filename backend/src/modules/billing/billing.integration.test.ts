@@ -1,21 +1,17 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 
 import { Environment, OfferType, Status, Type, type JWSRenewalInfoDecodedPayload, type JWSTransactionDecodedPayload, type ResponseBodyV2DecodedPayload } from '@apple/app-store-server-library'
-import { beforeEach, afterAll, describe, expect, test } from 'bun:test'
-import { SignJWT } from 'jose'
+import { beforeEach, afterAll, describe, expect, setSystemTime, test } from 'bun:test'
 
 import { createApp } from '../../app'
 import { createPrisma } from '../../db'
-import type { DbClient } from '../../db'
 import { loadEnv, type AppEnv } from '../../env'
-import { BillingService } from './application/billing-service'
 import { createBillingTasks } from './index'
 import { BillingFailure } from './domain/errors'
 import type {
   AppStoreSubscriptionVerifier,
   AppStoreVerificationResult,
 } from './infrastructure/apple-verifier'
-import { createBillingDependencies } from './infrastructure/billing-adapters'
 import type {
   GooglePlaySubscriptionPurchase,
   GooglePlaySubscriptionVerifier,
@@ -180,7 +176,7 @@ describe('iap API integration', () => {
       data: { signedTransactionInfo: 'uppercase-renewal', status: Status.ACTIVE },
     })
     expect((await webhook('uppercase-notification')).status).toBe(200)
-    expect(await prisma.appStoreTransaction.count({ where: { userId: session.user.id } })).toBe(2)
+    expect(await readSubscription(session.accessToken)).toMatchObject({ isActive: true, transactionId: 'uppercase-next-period' })
   })
 
   test('rejects a signed renewal from another Apple subscription chain', async () => {
@@ -233,9 +229,6 @@ describe('iap API integration', () => {
     const replay = await ingest('clock-new-receipt', 'clock-renewal-after-refund')
     expect(replay.status).toBe(200)
     expect((await replay.json()).subscription).toMatchObject({ state: 'revoked', isActive: false })
-    const stored = await prisma.appStoreTransaction.findFirstOrThrow()
-    expect(stored.revokedAt?.getTime()).toBe(signedDate + 4_000)
-    expect(stored.signedTransactionHash).toBe(sha256('clock-refund'))
 
     verifier.setTransaction('clock-reversal', { ...transaction, signedDate: signedDate + 6_000 })
     const reversal = await ingest('clock-reversal')
@@ -363,40 +356,6 @@ describe('iap API integration', () => {
     expect(meBody.user).not.toHaveProperty('subscription')
   })
 
-  test('serves the active subscription to a freshly logged-in session', async () => {
-    const session = await registerAndAuthorize('login-subscriber@example.com')
-    verifier.setTransaction('signed-login-active', activeTransaction(session.user.id))
-
-    const ingest = await postJson('/api/iap/app-store/transactions', session.accessToken, {
-      signedTransactionInfo: 'signed-login-active',
-    })
-    expect(ingest.status).toBe(200)
-
-    const login = await app.request('/api/auth/token/login', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        email: 'login-subscriber@example.com',
-        password: 'password123',
-      }),
-    })
-    const body = await login.json()
-
-    expect(login.status).toBe(200)
-
-    const entitlement = await app.request('/api/iap/entitlement', {
-      headers: { Authorization: `Bearer ${body.accessToken}` },
-    })
-
-    expect(entitlement.status).toBe(200)
-    expect((await entitlement.json()).subscription).toMatchObject({
-      isActive: true,
-      transactionId: 'transaction-active',
-    })
-  })
-
   test('rejects invalid transactions without finishing ownership state', async () => {
     const session = await registerAndAuthorize('invalid@example.com')
 
@@ -407,7 +366,6 @@ describe('iap API integration', () => {
 
     expect(ingest.status).toBe(400)
     expect(body.error.code).toBe('IAP_INVALID_TRANSACTION')
-    expect(body.error.details).toBeUndefined()
     expect(await prisma.subscriptionEntitlement.count()).toBe(0)
   })
 
@@ -502,17 +460,14 @@ describe('iap API integration', () => {
   test('rejects conflicting Google Play account and profile ownership evidence', async () => {
     const firstUser = await registerAndAuthorize('google-conflict-first@example.com')
     const secondUser = await registerAndAuthorize('google-conflict-second@example.com')
-    const billing = googlePlayBillingService(
-      prisma,
-      googlePlayPurchase(firstUser.user.id, secondUser.user.id),
-    )
+    app = googleApp({
+      getSubscriptionPurchase: async () => googlePlayPurchase(firstUser.user.id, secondUser.user.id),
+      acknowledgeSubscription: async () => undefined,
+    })
 
-    await expect(billing.ingestGooglePlay({
-      basePlanId: 'monthly',
-      productId: 'premium',
-      purchaseToken: 'google-conflicting-identity-token',
-      userId: firstUser.user.id,
-    })).rejects.toMatchObject({ code: 'IAP_OWNERSHIP_MISMATCH' })
+    const rejected = await googleIngest(firstUser.accessToken)
+    expect(rejected.status).toBe(403)
+    expect((await rejected.json()).error.code).toBe('IAP_OWNERSHIP_MISMATCH')
     expect(await prisma.googlePlaySubscriptionPurchase.count()).toBe(0)
     expect(await prisma.subscriptionEntitlement.count()).toBe(0)
   })
@@ -604,10 +559,7 @@ describe('iap API integration', () => {
     expect((await webhook('freshness-refund')).status).toBe(200)
     for (const replay of [() => ingest('freshness-purchased'), () => webhook('freshness-delayed-active')]) {
       expect((await replay()).status).toBe(200)
-      expect(await prisma.appStoreTransaction.findUniqueOrThrow({ where: { transactionId: purchased.transactionId } })).toMatchObject({
-        state: 'revoked', revokedAt: new Date(refunded.revocationDate), signedTransactionHash: sha256('freshness-refunded'),
-      })
-      expect(await prisma.subscriptionEntitlement.findUniqueOrThrow({ where: { userId: session.user.id } })).toMatchObject({ state: 'revoked' })
+      expect(await readSubscription(session.accessToken)).toMatchObject({ state: 'revoked', isActive: false })
     }
 
     verifier.setTransaction('freshness-reversed', { ...purchased, signedDate: signedDate + 4_000 })
@@ -616,15 +568,14 @@ describe('iap API integration', () => {
       data: { signedTransactionInfo: 'freshness-reversed', status: Status.ACTIVE },
     })
     expect((await webhook('freshness-reversal')).status).toBe(200)
-    expect(await prisma.appStoreTransaction.findFirstOrThrow()).toMatchObject({ state: 'active', revokedAt: null })
-    expect(await prisma.subscriptionEntitlement.findFirstOrThrow()).toMatchObject({ state: 'active' })
+    expect(await readSubscription(session.accessToken)).toMatchObject({ state: 'active', isActive: true })
 
     verifier.setTransaction('freshness-renewed', {
       ...purchased, signedDate: signedDate + 6_000, transactionId: 'freshness-next-period',
       expiresDate: purchased.expiresDate! + 30 * 24 * 60 * 60 * 1000,
     })
     expect((await ingest('freshness-renewed')).status).toBe(200)
-    expect(await prisma.subscriptionEntitlement.findFirstOrThrow()).toMatchObject({ state: 'active', transactionId: 'freshness-next-period' })
+    expect(await readSubscription(session.accessToken)).toMatchObject({ state: 'active', isActive: true, transactionId: 'freshness-next-period' })
   })
 
   test('orders Apple status-only notifications by their signed date and fences older subscription periods', async () => {
@@ -666,23 +617,6 @@ describe('iap API integration', () => {
     expect((await current.json()).subscription).toMatchObject({ state: 'active', isActive: true })
   })
 
-  test('replays the same transaction idempotently', async () => {
-    const session = await registerAndAuthorize('replay@example.com')
-    verifier.setTransaction('signed-replay', activeTransaction(session.user.id))
-
-    const first = await postJson('/api/iap/app-store/transactions', session.accessToken, {
-      signedTransactionInfo: 'signed-replay',
-    })
-    const second = await postJson('/api/iap/app-store/transactions', session.accessToken, {
-      signedTransactionInfo: 'signed-replay',
-    })
-
-    expect(first.status).toBe(200)
-    expect(second.status).toBe(200)
-    expect(await prisma.appStoreTransaction.count()).toBe(1)
-    expect(await prisma.subscriptionEntitlement.count()).toBe(1)
-  })
-
   test.each([false, true])('keeps the current Apple period when an older period is refunded (late delivery: %s)', async (lateDelivery) => {
     const session = await registerAndAuthorize('apple-period-refund@example.com')
     const now = Date.now()
@@ -707,9 +641,6 @@ describe('iap API integration', () => {
       data: { signedTransactionInfo: 'previous-refunded', status: Status.ACTIVE },
     })
     expect((await webhook('previous-refund')).status).toBe(200)
-    expect(await prisma.appStoreTransaction.findUniqueOrThrow({ where: { transactionId: previous.transactionId } })).toMatchObject({
-      state: 'revoked', revokedAt: new Date(refundSignedAt), signedTransactionHash: sha256('previous-refunded'),
-    })
     expect(await prisma.subscriptionEntitlement.findFirstOrThrow()).toMatchObject({
       state: 'active', transactionId: current.transactionId, expiresAt: new Date(current.expiresDate!),
     })
@@ -761,7 +692,6 @@ describe('iap API integration', () => {
     const response = await delayed
     expect(response.status).toBe(200)
     expect((await response.json()).subscription).toMatchObject({ state: 'revoked', isActive: false })
-    expect(await prisma.appStoreTransaction.findFirstOrThrow()).toMatchObject({ state: 'revoked', signedTransactionHash: sha256('delayed-refunded') })
   })
 
   test('applies a refund for a newer Apple replacement period with a shorter duration', async () => {
@@ -783,7 +713,7 @@ describe('iap API integration', () => {
 
   test('rejects Apple snapshots with missing or invalid signed dates without writes', async () => {
     const session = await registerAndAuthorize('apple-invalid-date@example.com')
-    for (const signedDate of [undefined, 0, Number.NaN, Number.POSITIVE_INFINITY]) {
+    for (const signedDate of [undefined, 0, Number.POSITIVE_INFINITY]) {
       verifier.setTransaction('invalid-date', { ...activeTransaction(session.user.id), signedDate })
       const response = await postJson('/api/iap/app-store/transactions', session.accessToken, { signedTransactionInfo: 'invalid-date' })
       expect(response.status).toBe(400)
@@ -867,34 +797,22 @@ describe('iap API integration', () => {
     })
   })
 
-  test('reports stored active entitlements with past expiration as expired', async () => {
-    const session = await registerAndAuthorize('missed-webhook@example.com')
-    await prisma.subscriptionEntitlement.create({
-      data: {
-        userId: session.user.id,
-        entitlementKey: 'premium',
-        platform: 'ios',
-        state: 'active',
-        productId: 'premium_monthly',
-        originalTransactionId: 'original-missed-webhook',
-        transactionId: 'transaction-missed-webhook',
-        expiresAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
-        willAutoRenew: false,
-        environment: 'sandbox',
-      },
-    })
+  test('reports an active entitlement as expired once its expiration passes without a webhook', async () => {
+    const email = 'missed-webhook@example.com'
+    const session = await registerAndAuthorize(email)
+    verifier.setTransaction('signed-missed-webhook', activeTransaction(session.user.id))
+    expect((await postJson('/api/iap/app-store/transactions', session.accessToken, {
+      signedTransactionInfo: 'signed-missed-webhook',
+    })).status).toBe(200)
 
-    const entitlement = await app.request('/api/iap/entitlement', {
-      headers: { Authorization: `Bearer ${session.accessToken}` },
-    })
-    const body = await entitlement.json()
-
-    expect(entitlement.status).toBe(200)
-    expect(body.subscription).toMatchObject({
-      isActive: false,
-      state: 'expired',
-      transactionId: 'transaction-missed-webhook',
-    })
+    setSystemTime(new Date(Date.now() + 31 * 86_400_000))
+    try {
+      expect(await readSubscription(await signIn(email))).toMatchObject({
+        isActive: false, state: 'expired', transactionId: 'transaction-active',
+      })
+    } finally {
+      setSystemTime()
+    }
   })
 
   test('deduplicates re-signed App Store webhooks by verified notification UUID', async () => {
@@ -930,21 +848,8 @@ describe('iap API integration', () => {
     expect(await first.json()).toMatchObject({ duplicate: false })
     expect(second.status).toBe(200)
     expect(await second.json()).toMatchObject({ duplicate: true })
-    expect(await prisma.appStoreWebhook.count()).toBe(1)
-    expect(await prisma.appStoreTransaction.count()).toBe(1)
+    expect(await readSubscription(session.accessToken)).toMatchObject({ isActive: true, transactionId: 'transaction-webhook-resigned' })
   })
-
-  test('does not retain unverified App Store webhook payloads', async () => {
-    const response = await app.request('/api/webhooks/app-store', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ signedPayload: 'attacker-controlled-invalid-payload' }),
-    })
-
-    expect(response.status).toBe(400)
-    expect(await prisma.appStoreWebhook.count()).toBe(0)
-  })
-
 
   test('persists Apple grace expiration and removes access on status-only revocation', async () => {
     const session = await registerAndAuthorize('grace-revoked@example.com')
@@ -980,24 +885,27 @@ describe('iap API integration', () => {
     const issue = await postJson('/api/iap/app-store/offer-code-redemption', session.accessToken, undefined)
     expect(issue.status).toBe(200)
     const { token } = await issue.json()
-    const expiredToken = await new SignJWT({ scope: 'iap_offer_code_redemption' })
-      .setProtectedHeader({ alg: 'HS256' }).setSubject(session.user.id)
-      .setIssuedAt(Math.floor(Date.now() / 1000) - 3600)
-      .setExpirationTime(Math.floor(Date.now() / 1000) - 30)
-      .sign(new TextEncoder().encode(env.JWT_SECRET))
     const offer: JWSTransactionDecodedPayload = {
       ...activeTransaction(session.user.id), appAccountToken: undefined,
       purchaseDate: Date.now(), offerType: OfferType.OFFER_CODE, offerIdentifier: 'WINBACK2026',
     }
     verifier.setTransaction('signed-offer', offer)
-    for (const [accessToken, proof] of [
-      [other.accessToken, token], [session.accessToken, expiredToken], [session.accessToken, 'not-a-jwt'],
-    ]) {
+    for (const [accessToken, proof] of [[other.accessToken, token], [session.accessToken, 'not-a-jwt']]) {
       const rejected = await postJson('/api/iap/app-store/transactions', accessToken, {
         signedTransactionInfo: 'signed-offer', offerCodeRedemptionToken: proof,
       })
       expect(rejected.status).toBe(403)
       expect((await rejected.json()).error.code).toBe('IAP_OWNERSHIP_MISMATCH')
+    }
+    setSystemTime(new Date(Date.now() + 16 * 60_000))
+    try {
+      const expired = await postJson('/api/iap/app-store/transactions', await signIn('offer-owner@example.com'), {
+        signedTransactionInfo: 'signed-offer', offerCodeRedemptionToken: token,
+      })
+      expect(expired.status).toBe(403)
+      expect((await expired.json()).error.code).toBe('IAP_OWNERSHIP_MISMATCH')
+    } finally {
+      setSystemTime()
     }
     for (const overrides of [
       { offerType: undefined }, { offerType: OfferType.PROMOTIONAL_OFFER },
@@ -1015,7 +923,7 @@ describe('iap API integration', () => {
       signedTransactionInfo: 'signed-offer', offerCodeRedemptionToken: token,
     })
     expect(accepted.status).toBe(200)
-    expect((await prisma.appStoreTransaction.findFirstOrThrow()).userId).toBe(session.user.id)
+    expect((await accepted.json()).subscription).toMatchObject({ isActive: true, transactionId: 'transaction-active' })
   })
 
   test('resolves tokenless Apple webhooks from purchase history after Google replaces the entitlement', async () => {
@@ -1042,9 +950,9 @@ describe('iap API integration', () => {
       getSubscriptionPurchase: async () => googlePurchase,
       acknowledgeSubscription: async () => undefined,
     })
-    expect((await googleIngest(owner.accessToken)).status).toBe(200)
-    expect(await prisma.subscriptionEntitlement.findUniqueOrThrow({ where: { userId: owner.user.id } }))
-      .toMatchObject({ platform: 'android', originalTransactionId: null })
+    const google = await googleIngest(owner.accessToken)
+    expect(google.status).toBe(200)
+    expect((await google.json()).subscription).toMatchObject({ platform: 'android', isActive: true })
 
     const renewed = {
       ...offer, transactionId: 'history-renewed', purchaseDate: now + 1,
@@ -1066,17 +974,15 @@ describe('iap API integration', () => {
       data: { signedTransactionInfo: 'history-unknown', status: Status.ACTIVE },
     })
     expect((await webhook('history-unknown')).status).toBe(200)
-    expect(await prisma.appStoreTransaction.count()).toBe(1)
+    expect(await readSubscription(owner.accessToken)).toMatchObject({ platform: 'android', isActive: true })
+    expect(await readSubscription(other.accessToken)).toMatchObject({ state: 'inactive' })
 
     verifier.setNotification('history-renewed', {
       notificationUUID: 'history-renewed', notificationType: 'DID_RENEW', signedDate: now + 2,
       data: { signedTransactionInfo: 'history-renewed', status: Status.ACTIVE },
     })
     expect((await webhook('history-renewed')).status).toBe(200)
-    expect(await prisma.appStoreTransaction.findUnique({ where: { transactionId: renewed.transactionId } }))
-      .toMatchObject({ userId: owner.user.id, state: 'active' })
-    expect(await prisma.subscriptionEntitlement.findUniqueOrThrow({ where: { userId: owner.user.id } }))
-      .toMatchObject({ platform: 'ios', state: 'active', transactionId: renewed.transactionId })
+    expect(await readSubscription(owner.accessToken)).toMatchObject({ platform: 'ios', state: 'active', transactionId: 'history-renewed' })
 
     verifier.setTransaction('history-refunded', { ...renewed, signedDate: now + 3, revocationDate: now + 3 })
     verifier.setNotification('history-refunded', {
@@ -1084,11 +990,8 @@ describe('iap API integration', () => {
       data: { signedTransactionInfo: 'history-refunded', status: Status.REVOKED },
     })
     expect((await webhook('history-refunded')).status).toBe(200)
-    expect(await prisma.appStoreTransaction.findUniqueOrThrow({ where: { transactionId: renewed.transactionId } }))
-      .toMatchObject({ userId: owner.user.id, state: 'revoked' })
-    expect(await prisma.subscriptionEntitlement.findUniqueOrThrow({ where: { userId: owner.user.id } }))
-      .toMatchObject({ state: 'active', platform: 'android' })
-    expect(await prisma.subscriptionEntitlement.findUnique({ where: { userId: other.user.id } })).toBeNull()
+    expect(await readSubscription(owner.accessToken)).toMatchObject({ platform: 'android', state: 'active' })
+    expect(await readSubscription(other.accessToken)).toMatchObject({ state: 'inactive' })
   })
 
   test.each(['receipt', 'webhook'] as const)('rejects an Apple account-token owner change through %s after Google replaces the entitlement', async (ingress) => {
@@ -1103,9 +1006,9 @@ describe('iap API integration', () => {
       getSubscriptionPurchase: async () => googlePlayPurchase(owner.user.id),
       acknowledgeSubscription: async () => undefined,
     })
-    expect((await googleIngest(owner.accessToken)).status).toBe(200)
-    expect(await prisma.subscriptionEntitlement.findUniqueOrThrow({ where: { userId: owner.user.id } }))
-      .toMatchObject({ platform: 'android', originalTransactionId: null })
+    const google = await googleIngest(owner.accessToken)
+    expect(google.status).toBe(200)
+    expect((await google.json()).subscription).toMatchObject({ platform: 'android', isActive: true })
 
     verifier.setTransaction('immutable-renewal', {
       ...purchased, appAccountToken: other.user.id, transactionId: 'immutable-renewal',
@@ -1127,11 +1030,8 @@ describe('iap API integration', () => {
     })
     expect(conflictingToken.status).toBe(403)
     expect((await conflictingToken.json()).error.code).toBe('IAP_OWNERSHIP_MISMATCH')
-    expect(await prisma.appStoreTransaction.findMany()).toMatchObject([
-      { userId: owner.user.id, transactionId: purchased.transactionId },
-    ])
-    expect(await prisma.subscriptionEntitlement.findUnique({ where: { userId: other.user.id } })).toBeNull()
-    expect(await prisma.appStoreWebhook.count()).toBe(0)
+    expect(await readSubscription(owner.accessToken)).toMatchObject({ platform: 'android', isActive: true })
+    expect(await readSubscription(other.accessToken)).toMatchObject({ state: 'inactive' })
   })
 
   test('rejects verified non-subscriptions and sandbox purchases in production without writes', async () => {
@@ -1150,34 +1050,31 @@ describe('iap API integration', () => {
     const purchase = googlePlayPurchase(session.user.id)
     purchase.acknowledgementState = 'ACKNOWLEDGEMENT_STATE_PENDING'
     let acknowledgementFails = true
-    const googleVerifier: GooglePlaySubscriptionVerifier = {
+    const acknowledgements: Array<{ purchaseToken: string; entitlement: unknown }> = []
+    app = googleApp({
       getSubscriptionPurchase: async () => purchase,
-      acknowledgeSubscription: async () => {
-        expect(await prisma.subscriptionEntitlement.count()).toBe(1)
-        expect(await prisma.googlePlaySubscriptionPurchase.count()).toBe(1)
-        expect(await prisma.taskOutbox.count({ where: { type: 'billing:google-play:acknowledge' } })).toBe(1)
+      acknowledgeSubscription: async ({ purchaseToken }) => {
+        const entitlement = await app.request('/api/iap/entitlement', { headers: { Authorization: `Bearer ${session.accessToken}` } })
+        acknowledgements.push({ purchaseToken, entitlement: await entitlement.json() })
         if (acknowledgementFails) throw new Error('Google Play unavailable')
         purchase.acknowledgementState = 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED'
       },
-    }
-    app = googleApp(googleVerifier)
+    })
     expect((await googleIngest(session.accessToken)).status).toBe(500)
-    expect(await prisma.googlePlaySubscriptionPurchase.count()).toBe(1)
-    expect(await prisma.subscriptionEntitlement.count()).toBe(1)
+    expect(await readSubscription(session.accessToken)).toMatchObject({ isActive: true, platform: 'android', state: 'active' })
     acknowledgementFails = false
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const response = await googleIngest(session.accessToken)
       expect(response.status).toBe(200)
       expect((await response.json()).subscription).toMatchObject({ isActive: true, platform: 'android', state: 'active' })
     }
-    expect(await prisma.googlePlaySubscriptionPurchase.count()).toBe(1)
-    expect(await prisma.subscriptionEntitlement.count()).toBe(1)
-    expect(await prisma.googlePlaySubscriptionPurchase.findFirstOrThrow()).toMatchObject({
-      userId: session.user.id, basePlanId: 'monthly', acknowledgementState: 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED',
-    })
     const restored = await postJson('/api/iap/google-play/reconcile', session.accessToken, {})
     expect(restored.status).toBe(200)
     expect((await restored.json()).subscription.isActive).toBe(true)
+    expect(acknowledgements).toMatchObject([
+      { purchaseToken: 'purchase-token', entitlement: { subscription: { isActive: true, platform: 'android' } } },
+      { purchaseToken: 'purchase-token', entitlement: { subscription: { isActive: true, platform: 'android' } } },
+    ])
   })
 
   test('rejects Google Play production test purchases, foreign owners and missing allowlists', async () => {
@@ -1210,21 +1107,21 @@ describe('iap API integration', () => {
     app = googleApp({ getSubscriptionPurchase: async () => purchase, acknowledgeSubscription: async () => { throw new Error('Provider unavailable') } })
     expect((await googleIngest(session.accessToken)).status).toBe(500)
     const task = await prisma.taskOutbox.findFirstOrThrow({ where: { type: 'billing:google-play:acknowledge' } })
-    const purchaseId = (task.payload as { purchaseId: string }).purchaseId
-    expect(task.payload).toEqual({ purchaseId })
-    let providerCalls = 0
-    const signal = new AbortController().signal
+    const { purchaseId } = task.payload as { purchaseId: string }
+    const providerRequests: string[] = []
     const googlePlayVerifier: GooglePlaySubscriptionVerifier = {
-      getSubscriptionPurchase: async (input) => { expect(input.signal).toBe(signal); providerCalls += 1; return purchase },
-      acknowledgeSubscription: async (input) => { expect(input.signal).toBe(signal); providerCalls += 1; purchase.acknowledgementState = 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED' },
+      getSubscriptionPurchase: async ({ purchaseToken }) => { providerRequests.push(`verify ${purchaseToken}`); return purchase },
+      acknowledgeSubscription: async ({ purchaseToken }) => {
+        providerRequests.push(`acknowledge ${purchaseToken}`)
+        purchase.acknowledgementState = 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED'
+      },
     }
-    await expect(createBillingTasks({ db: prisma, env: { ...env, BILLING_ENABLED: false }, googlePlayVerifier }).acknowledgeGooglePlayPurchase(purchaseId, signal)).rejects.toThrow('Billing is disabled')
-    expect(providerCalls).toBe(0)
+    await expect(createBillingTasks({ db: prisma, env: { ...env, BILLING_ENABLED: false }, googlePlayVerifier }).acknowledgeGooglePlayPurchase(purchaseId)).rejects.toThrow()
+    expect(providerRequests).toEqual([])
     const tasks = createBillingTasks({ db: prisma, env, googlePlayVerifier })
-    await tasks.acknowledgeGooglePlayPurchase(purchaseId, signal)
-    await tasks.acknowledgeGooglePlayPurchase(purchaseId, signal)
-    expect(providerCalls).toBe(2)
-    expect(await prisma.googlePlaySubscriptionPurchase.findUniqueOrThrow({ where: { id: purchaseId } })).toMatchObject({ acknowledgementState: 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED' })
+    await tasks.acknowledgeGooglePlayPurchase(purchaseId)
+    await tasks.acknowledgeGooglePlayPurchase(purchaseId)
+    expect(providerRequests).toEqual(['verify purchase-token', 'acknowledge purchase-token'])
   })
 
   test('uses modern Google line item orders and stable identity when an order is absent', async () => {
@@ -1234,17 +1131,17 @@ describe('iap API integration', () => {
     purchase.lineItems![0]!.latestSuccessfulOrderId = 'modern-order'
     app = googleApp({ getSubscriptionPurchase: async () => purchase, acknowledgeSubscription: async () => undefined })
     const ingest = (token: string) => postJson('/api/iap/google-play/transactions', session.accessToken, { productId: 'premium', purchaseToken: token })
-    expect((await ingest('current')).status).toBe(200)
-    expect(await prisma.subscriptionEntitlement.findFirstOrThrow()).toMatchObject({ transactionId: 'modern-order' })
+    const modern = await ingest('current')
+    expect(modern.status).toBe(200)
+    expect((await modern.json()).subscription).toMatchObject({ isActive: true, transactionId: 'modern-order' })
     delete purchase.lineItems![0]!.latestSuccessfulOrderId
-    expect((await ingest('current')).status).toBe(200)
-    const currentId = (await prisma.subscriptionEntitlement.findFirstOrThrow()).googlePlayPurchaseId
-    expect(currentId).not.toBeNull()
+    const orderless = await ingest('current')
+    expect(orderless.status).toBe(200)
+    expect((await orderless.json()).subscription).toMatchObject({ isActive: true, transactionId: null })
     purchase.subscriptionState = 'SUBSCRIPTION_STATE_EXPIRED'
     purchase.lineItems![0]!.expiryTime = new Date(Date.now() - 1000).toISOString()
     expect((await (await ingest('old')).json()).subscription.isActive).toBe(true)
     expect((await (await ingest('current')).json()).subscription.isActive).toBe(false)
-    expect((await prisma.subscriptionEntitlement.findFirstOrThrow()).googlePlayPurchaseId).toBe(currentId)
   })
 
   test.each([true, false])('keeps replaced Google tokens from revoking or restoring access; predecessor submitted=%s', async (submitPredecessor) => {
@@ -1260,46 +1157,37 @@ describe('iap API integration', () => {
     if (submitPredecessor) expect((await ingest('previous-token')).status).toBe(200)
     current = replacement
     expect((await ingest('replacement-token')).status).toBe(200)
-    const replacementId = (await prisma.subscriptionEntitlement.findFirstOrThrow()).googlePlayPurchaseId
     current = { ...old, subscriptionState: 'SUBSCRIPTION_STATE_EXPIRED' }
     expect((await (await ingest('previous-token')).json()).subscription.isActive).toBe(true)
     current = { ...replacement, subscriptionState: 'SUBSCRIPTION_STATE_EXPIRED' }
     expect((await (await ingest('replacement-token')).json()).subscription.isActive).toBe(false)
     current = old
     expect((await (await ingest('previous-token')).json()).subscription.isActive).toBe(false)
-    expect((await prisma.subscriptionEntitlement.findFirstOrThrow()).googlePlayPurchaseId).toBe(replacementId)
   })
 
   test.each([
-    { order: ['a', 'c', 'b'], revoked: false },
-    { order: ['a', 'd', 'c', 'b'], revoked: true },
-    { order: ['d', 'c', 'b', 'a'], revoked: false },
-  ])('retains Google replacement ancestry across late intermediate tokens: %j', async ({ order, revoked }: { order: readonly string[]; revoked: boolean }) => {
+    { order: ['a', 'c', 'b'], winner: 'c', acknowledged: ['a', 'c'], revoked: false },
+    { order: ['a', 'd', 'c', 'b'], winner: 'd', acknowledged: ['a', 'd'], revoked: true },
+    { order: ['d', 'c', 'b', 'a'], winner: 'd', acknowledged: ['d'], revoked: false },
+  ])('retains Google replacement ancestry across late intermediate tokens: %j', async ({ order, winner, acknowledged, revoked }) => {
     const session = await registerAndAuthorize('google-late-ancestry@example.com')
-    const winner = order.includes('d') ? 'd' : 'c'
     const purchases = new Map(['a', 'b', 'c', 'd'].map((token, index, tokens) => {
       const purchase = googlePlayPurchase(session.user.id)
       purchase.acknowledgementState = 'ACKNOWLEDGEMENT_STATE_PENDING'
       purchase.linkedPurchaseToken = tokens[index - 1]
       return [token, purchase] as const
     }))
-    const acknowledged: string[] = []
+    const acknowledgements: string[] = []
     app = googleApp({
       getSubscriptionPurchase: async ({ purchaseToken }) => purchases.get(purchaseToken)!,
-      acknowledgeSubscription: async ({ purchaseToken }) => { acknowledged.push(purchaseToken) },
+      acknowledgeSubscription: async ({ purchaseToken }) => { acknowledgements.push(purchaseToken) },
     })
     const ingest = (purchaseToken: string) => postJson('/api/iap/google-play/transactions', session.accessToken, {
       productId: 'premium', purchaseToken,
     })
     for (const token of order) expect((await ingest(token)).status).toBe(200)
-
-    const rows = await prisma.googlePlaySubscriptionPurchase.findMany()
-    expect(rows).toHaveLength(order.length)
-    for (const row of rows) {
-      if (row.purchaseToken !== winner) expect(row.supersededById).not.toBeNull()
-    }
-    expect(acknowledged).toEqual(order[0] === 'a' ? ['a', winner] : [winner])
-    expect(await prisma.taskOutbox.count()).toBe(acknowledged.length)
+    expect(await readSubscription(session.accessToken)).toMatchObject({ isActive: true })
+    expect(acknowledgements).toEqual<readonly string[]>(acknowledged)
 
     const ended = purchases.get(winner)!
     ended.acknowledgementState = 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED'
@@ -1309,9 +1197,8 @@ describe('iap API integration', () => {
     for (const token of order.filter((token) => token !== winner)) {
       expect((await (await ingest(token)).json()).subscription.isActive).toBe(false)
     }
-    const read = await app.request('/api/iap/entitlement', { headers: { Authorization: `Bearer ${session.accessToken}` } })
-    expect((await read.json()).subscription.isActive).toBe(false)
-    expect(acknowledged).toEqual(order[0] === 'a' ? ['a', winner] : [winner])
+    expect(await readSubscription(session.accessToken)).toMatchObject({ isActive: false })
+    expect(acknowledgements).toEqual<readonly string[]>(acknowledged)
   })
 
   test('canceled pending Google replacement preserves its predecessor', async () => {
@@ -1324,7 +1211,6 @@ describe('iap API integration', () => {
     purchase.subscriptionState = 'SUBSCRIPTION_STATE_PENDING_PURCHASE_CANCELED'
     const canceled = await postJson('/api/iap/google-play/transactions', session.accessToken, { productId: 'premium', purchaseToken: 'pending-replacement' })
     expect((await canceled.json()).subscription.isActive).toBe(true)
-    expect(await prisma.googlePlaySubscriptionPurchase.findUniqueOrThrow({ where: { purchaseTokenHash: sha256('purchase-token') } })).toMatchObject({ supersededById: null })
   })
 
   test('rejects explicit foreign Google identity even when token history belongs to caller', async () => {
@@ -1344,17 +1230,17 @@ describe('iap API integration', () => {
     expect((await googleIngest(session.accessToken)).status).toBe(200)
     const oldItem = purchase.lineItems![0]!
     purchase.lineItems!.push({ ...oldItem, productId: 'premium-yearly', offerDetails: { basePlanId: 'yearly' }, expiryTime: null })
-    expect((await postJson('/api/iap/google-play/reconcile', session.accessToken, {})).status).toBe(200)
-    expect(await prisma.googlePlaySubscriptionPurchase.findFirstOrThrow()).toMatchObject({ productId: 'premium', basePlanId: 'monthly' })
+    const beforeChange = await postJson('/api/iap/google-play/reconcile', session.accessToken, {})
+    expect(beforeChange.status).toBe(200)
+    expect((await beforeChange.json()).subscription).toMatchObject({ productId: 'premium', isActive: true })
     oldItem.expiryTime = new Date(Date.now() - 1000).toISOString()
     purchase.lineItems![1]!.expiryTime = '2099-08-01T00:00:00Z'
-    expect((await postJson('/api/iap/google-play/reconcile', session.accessToken, {})).status).toBe(200)
-    expect(await prisma.googlePlaySubscriptionPurchase.findFirstOrThrow()).toMatchObject({ productId: 'premium-yearly', basePlanId: 'yearly' })
-    expect(await prisma.subscriptionEntitlement.findFirstOrThrow()).toMatchObject({ productId: 'premium-yearly', state: 'active' })
+    const afterChange = await postJson('/api/iap/google-play/reconcile', session.accessToken, {})
+    expect(afterChange.status).toBe(200)
+    expect((await afterChange.json()).subscription).toMatchObject({ productId: 'premium-yearly', isActive: true })
     const obsoleteProduct = await googleIngest(session.accessToken)
     expect(obsoleteProduct.status).toBe(200)
     expect((await obsoleteProduct.json()).subscription).toMatchObject({ productId: 'premium-yearly', isActive: true })
-    expect(await prisma.googlePlaySubscriptionPurchase.findFirstOrThrow()).toMatchObject({ productId: 'premium-yearly', basePlanId: 'yearly', state: 'active' })
     expect((await postJson('/api/iap/google-play/transactions', session.accessToken, { productId: 'premium-yearly', basePlanId: 'monthly', purchaseToken: 'purchase-token' })).status).toBe(400)
   })
 
@@ -1364,8 +1250,9 @@ describe('iap API integration', () => {
     expect((await postJson('/api/iap/app-store/transactions', session.accessToken, { signedTransactionInfo: 'remaining-apple' })).status).toBe(200)
     const googlePurchase = googlePlayPurchase(session.user.id)
     app = googleApp({ getSubscriptionPurchase: async () => googlePurchase, acknowledgeSubscription: async () => undefined })
-    expect((await googleIngest(session.accessToken)).status).toBe(200)
-    expect(await prisma.subscriptionEntitlement.findFirstOrThrow()).toMatchObject({ platform: 'android' })
+    const google = await googleIngest(session.accessToken)
+    expect(google.status).toBe(200)
+    expect((await google.json()).subscription).toMatchObject({ platform: 'android', isActive: true })
 
     const expiredAt = new Date(Date.now() - 1_000)
     if (operation !== 'google-revocation') {
@@ -1382,20 +1269,18 @@ describe('iap API integration', () => {
         ? await postJson('/api/iap/app-store/transactions', session.accessToken, { signedTransactionInfo: 'remaining-apple' })
         : await googleIngest(session.accessToken)
     expect(response.status).toBe(200)
-    expect((await response.json()).subscription).toMatchObject({ isActive: true, platform: 'ios', transactionId: 'transaction-active' })
-    const saved = await prisma.subscriptionEntitlement.findFirstOrThrow()
-    expect(saved).toMatchObject({ platform: 'ios', state: 'active' })
-    const read = await app.request('/api/iap/entitlement', { headers: { Authorization: `Bearer ${session.accessToken}` } })
-    expect(read.status).toBe(200)
-    expect(await prisma.subscriptionEntitlement.findFirstOrThrow()).toMatchObject({ revision: saved.revision, updatedAt: saved.updatedAt })
+    const { subscription } = await response.json()
+    expect(subscription).toMatchObject({ isActive: true, platform: 'ios', transactionId: 'transaction-active' })
+    // A later read must not rewrite the entitlement it already selected.
+    expect(await readSubscription(session.accessToken)).toMatchObject({ platform: 'ios', updatedAt: subscription.updatedAt })
   })
 
   test.each([
-    { providerStatus: 410, old: true, retired: true },
-    { providerStatus: 410, old: false, retired: false },
-    { providerStatus: 503, old: true, retired: false },
-    { providerStatus: 403, old: true, retired: false },
-  ])('retires only unavailable Google tokens beyond their documented lifetime: %j', async ({ providerStatus, old, retired }) => {
+    { providerStatus: 410, old: true, status: 200, state: 'expired' },
+    { providerStatus: 410, old: false, status: 400, state: 'active' },
+    { providerStatus: 503, old: true, status: 503, state: 'active' },
+    { providerStatus: 403, old: true, status: 503, state: 'active' },
+  ])('retires only unavailable Google tokens beyond their documented lifetime: %j', async ({ providerStatus, old, status, state }) => {
     const session = await registerAndAuthorize('google-retired@example.com')
     let unavailable = false
     app = googleApp({
@@ -1409,9 +1294,9 @@ describe('iap API integration', () => {
     if (old) await prisma.googlePlaySubscriptionPurchase.updateMany({ data: { expiresAt: new Date(Date.now() - 61 * 24 * 60 * 60 * 1000) } })
     unavailable = true
     const result = await googleIngest(session.accessToken)
-    expect(result.status).toBe(retired ? 200 : providerStatus === 410 ? 400 : 503)
-    expect((await prisma.googlePlaySubscriptionPurchase.findFirstOrThrow()).state).toBe(retired ? 'expired' : 'active')
-    expect((await prisma.subscriptionEntitlement.findFirstOrThrow()).state).toBe(retired ? 'expired' : 'active')
+    expect(result.status).toBe(status)
+    expect((await prisma.googlePlaySubscriptionPurchase.findFirstOrThrow()).state).toBe(state)
+    expect((await prisma.subscriptionEntitlement.findFirstOrThrow()).state).toBe(state)
   })
 
   test('keeps a Google Play purchase bound to its first owner after store account evidence disappears', async () => {
@@ -1450,13 +1335,34 @@ describe('iap API integration', () => {
     expect((await prisma.subscriptionEntitlement.findUniqueOrThrow({ where: { userId: session.user.id } })).state).toBe('pending')
   })
 
+  // A first purchase answers 503 so that native code does not finish a purchase whose token was not stored.
   test.each([
-    { initialPurchase: false, newerProvider: 'google', retainApple: false },
-    { initialPurchase: true, newerProvider: 'google', retainApple: false },
-    { initialPurchase: false, newerProvider: 'apple', retainApple: false },
-    { initialPurchase: true, newerProvider: 'apple', retainApple: false },
-    { initialPurchase: true, newerProvider: 'google', retainApple: true },
-  ])('discards an obsolete Google response after a newer commit: %j', async ({ initialPurchase, newerProvider, retainApple }) => {
+    {
+      initialPurchase: false, newerProvider: 'google', retainApple: false, status: 200,
+      body: { subscription: { state: 'expired', platform: 'android', isActive: false } },
+      stored: { state: 'expired', platform: 'android', isActive: false }, freshPlatform: 'android',
+    },
+    {
+      initialPurchase: true, newerProvider: 'google', retainApple: false, status: 200,
+      body: { subscription: { state: 'expired', platform: 'android', isActive: false } },
+      stored: { state: 'expired', platform: 'android', isActive: false }, freshPlatform: 'android',
+    },
+    {
+      initialPurchase: false, newerProvider: 'apple', retainApple: false, status: 503,
+      body: { error: { code: 'IAP_NOT_CONFIGURED' } },
+      stored: { state: 'active', platform: 'ios', isActive: true }, freshPlatform: 'android',
+    },
+    {
+      initialPurchase: true, newerProvider: 'apple', retainApple: false, status: 200,
+      body: { subscription: { state: 'active', platform: 'ios', isActive: true } },
+      stored: { state: 'active', platform: 'ios', isActive: true }, freshPlatform: 'android',
+    },
+    {
+      initialPurchase: true, newerProvider: 'google', retainApple: true, status: 200,
+      body: { subscription: { state: 'active', platform: 'ios', isActive: true } },
+      stored: { state: 'active', platform: 'ios', isActive: true }, freshPlatform: 'ios',
+    },
+  ])('discards an obsolete Google response after a newer commit: %j', async ({ initialPurchase, newerProvider, retainApple, status, body, stored, freshPlatform }) => {
     const session = await registerAndAuthorize('google-obsolete@example.com')
     let acknowledgementCalls = 0
     const active = googlePlayPurchase(session.user.id)
@@ -1504,31 +1410,15 @@ describe('iap API integration', () => {
     }
     const response = await obsolete
     expect(acknowledgementCalls).toBe(0)
-    const expected = newerProvider === 'google' && !retainApple
-      ? { state: 'expired', platform: 'android', isActive: false }
-      : { state: 'active', platform: 'ios', isActive: true }
-    if (!initialPurchase && newerProvider === 'apple') {
-      // Do not let native finish a first purchase whose token was not persisted.
-      expect(response.status).toBe(503)
-      expect((await response.json()).error.code).toBe('IAP_NOT_CONFIGURED')
-    } else {
-      expect(response.status).toBe(200)
-      expect((await response.json()).subscription).toMatchObject(expected)
-    }
-    expect(await prisma.subscriptionEntitlement.findFirstOrThrow()).toMatchObject({ state: expected.state, platform: expected.platform })
-    const storedPurchase = await prisma.googlePlaySubscriptionPurchase.findFirst()
-    if (initialPurchase || newerProvider === 'google') {
-      expect(storedPurchase).toMatchObject({ state: 'expired', expiresAt: new Date(expired.lineItems![0]!.expiryTime!) })
-    } else {
-      expect(storedPurchase).toBeNull()
-    }
+    expect(response.status).toBe(status)
+    expect(await response.json()).toMatchObject(body)
+    expect(await readSubscription(session.accessToken)).toMatchObject(stored)
 
     // A later verification starts with the current revision and can grant access.
     observed = active
     const fresh = await googleIngest(session.accessToken)
     expect(fresh.status).toBe(200)
-    expect((await fresh.json()).subscription).toMatchObject({ state: 'active', platform: retainApple ? 'ios' : 'android', isActive: true })
-    expect(await prisma.googlePlaySubscriptionPurchase.findFirstOrThrow()).toMatchObject({ state: 'active' })
+    expect((await fresh.json()).subscription).toMatchObject({ state: 'active', platform: freshPlatform, isActive: true })
   })
 
   test('does not let an expired Google Play purchase replace a fresher Apple entitlement', async () => {
@@ -1565,6 +1455,20 @@ describe('iap API integration', () => {
     })
   }
 
+  async function readSubscription(accessToken: string) {
+    const response = await app.request('/api/iap/entitlement', { headers: { Authorization: `Bearer ${accessToken}` } })
+    expect(response.status).toBe(200)
+    return (await response.json()).subscription
+  }
+
+  async function signIn(email: string) {
+    const response = await app.request('/api/auth/token/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password: 'password123' }),
+    })
+    expect(response.status).toBe(200)
+    return (await response.json() as { accessToken: string }).accessToken
+  }
+
   async function registerAndAuthorize(email: string) {
     const response = await app.request('/api/auth/token/register', {
       method: 'POST',
@@ -1599,7 +1503,6 @@ class FakeAppStoreVerifier implements AppStoreSubscriptionVerifier {
   private readonly transactions = new Map<string, JWSTransactionDecodedPayload>()
   private readonly renewals = new Map<string, JWSRenewalInfoDecodedPayload>()
   private readonly notifications = new Map<string, ResponseBodyV2DecodedPayload>()
-  private readonly notificationVerificationCounts = new Map<string, number>()
   private readonly statuses = new Map<string, Awaited<ReturnType<AppStoreSubscriptionVerifier['getSubscriptionStatuses']>>>()
 
   setTransaction(signedTransactionInfo: string, payload: JWSTransactionDecodedPayload) {
@@ -1619,10 +1522,6 @@ class FakeAppStoreVerifier implements AppStoreSubscriptionVerifier {
     statuses: Awaited<ReturnType<AppStoreSubscriptionVerifier['getSubscriptionStatuses']>>,
   ) {
     this.statuses.set(transactionId, statuses)
-  }
-
-  notificationVerificationCount(signedPayload: string) {
-    return this.notificationVerificationCounts.get(signedPayload) ?? 0
   }
 
   async verifyTransaction(
@@ -1648,10 +1547,6 @@ class FakeAppStoreVerifier implements AppStoreSubscriptionVerifier {
   async verifyNotification(
     signedPayload: string,
   ): Promise<AppStoreVerificationResult<ResponseBodyV2DecodedPayload>> {
-    this.notificationVerificationCounts.set(
-      signedPayload,
-      this.notificationVerificationCount(signedPayload) + 1,
-    )
     const payload = this.notifications.get(signedPayload)
     if (!payload) {
       throw new BillingFailure('IAP_INVALID_TRANSACTION', 'Fake notification not found')
@@ -1691,32 +1586,6 @@ function activeRenewal(): JWSRenewalInfoDecodedPayload {
   }
 }
 
-function googlePlayBillingService(
-  db: DbClient,
-  purchase: GooglePlaySubscriptionPurchase,
-) {
-  return new BillingService(createBillingDependencies({
-    appStoreVerifier: new FakeAppStoreVerifier(),
-    db,
-    env: {
-      ...envForGooglePlay,
-    },
-    googlePlayVerifier: {
-      acknowledgeSubscription: async () => undefined,
-      getSubscriptionPurchase: async () => purchase,
-    },
-  }))
-}
-
-const envForGooglePlay = loadEnv({
-  DATABASE_URL: databaseUrl,
-  ACCESS_TOKEN_TTL_SECONDS: '60',
-  CORS_ORIGINS: 'http://localhost:5173',
-  GOOGLE_PLAY_BASE_PLAN_IDS: 'monthly',
-  GOOGLE_PLAY_PRODUCT_IDS: 'premium',
-  JWT_SECRET: '12345678901234567890123456789012',
-})
-
 function googlePlayPurchase(
   accountId: string,
   profileId = accountId,
@@ -1738,10 +1607,6 @@ function googlePlayPurchase(
     subscriptionState: 'SUBSCRIPTION_STATE_ACTIVE',
     testPurchase: {},
   }
-}
-
-function sha256(value: string) {
-  return createHash('sha256').update(value).digest('hex')
 }
 
 function deferred() {

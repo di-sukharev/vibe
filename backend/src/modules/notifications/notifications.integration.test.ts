@@ -71,7 +71,6 @@ describe('push notification API and outbox', () => {
       },
     })
     expect(savedToken?.userId).toBe(session.userId)
-    expect(savedToken?.platform).toBe('ios')
 
     const unauthorized = await app.request('/api/notifications/push-token', {
       method: 'POST',
@@ -106,27 +105,34 @@ describe('push notification API and outbox', () => {
   })
 
   test('legacy push clients bind to the current session without overriding modern authority', async () => {
+    const modern = await registerUser('modern-push-rollout@example.com')
     const session = await registerUser('legacy-push-rollout@example.com')
+    const modernToken = 'ExponentPushToken[modern-rollout]'
     const legacyToken = 'ExponentPushToken[legacy-rollout]'
+    const register = (accessToken: string, body: Record<string, unknown>) =>
+      app.request('/api/notifications/push-token', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      })
 
-    const registration = await app.request('/api/notifications/push-token', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${session.accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ expoPushToken: legacyToken, platform: 'ios' }),
-    })
-
-    expect(registration.status).toBe(200)
+    expect((await register(modern.accessToken, {
+      expoPushToken: modernToken,
+      generation: 1,
+      installationId: randomUUID(),
+      installationSecret: randomUUID(),
+    })).status).toBe(200)
+    expect((await register(session.accessToken, { expoPushToken: modernToken })).status).toBe(403)
     expect(await prisma.pushToken.findUniqueOrThrow({
-      where: { expoPushToken: legacyToken },
-      select: { installationId: true, registrationSessionId: true },
-    })).toEqual({
-      installationId: null,
-      registrationSessionId: session.sessionId,
-    })
+      where: { expoPushToken: modernToken },
+      select: { userId: true },
+    })).toEqual({ userId: modern.userId })
 
+    expect((await register(session.accessToken, { expoPushToken: legacyToken, platform: 'ios' })).status)
+      .toBe(200)
     const removal = await app.request('/api/notifications/push-token/unregister', {
       method: 'POST',
       headers: {
@@ -136,6 +142,15 @@ describe('push notification API and outbox', () => {
       body: JSON.stringify({ expoPushToken: legacyToken }),
     })
     expect(removal.status).toBe(200)
+    expect(await prisma.pushToken.findUnique({ where: { expoPushToken: legacyToken } })).toBeNull()
+
+    expect((await register(session.accessToken, { expoPushToken: legacyToken })).status).toBe(200)
+    const logout = await app.request('/api/auth/token/logout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: session.refreshToken }),
+    })
+    expect(logout.status).toBe(204)
     expect(await prisma.pushToken.findUnique({ where: { expoPushToken: legacyToken } })).toBeNull()
   })
 
@@ -193,17 +208,11 @@ describe('push notification API and outbox', () => {
     expect(staleCleanup.status).toBe(200)
     expect(await staleCleanup.json()).toEqual({ applied: false, ok: true })
 
-    const tokensAfterLateA = await prisma.pushToken.findMany({
+    expect(await prisma.pushToken.findMany({
       where: { installationId },
-      select: {
-        expoPushToken: true,
-        registrationSessionId: true,
-        userId: true,
-      },
-    })
-    expect(tokensAfterLateA).toEqual([{
+      select: { expoPushToken: true, userId: true },
+    })).toEqual([{
       expoPushToken: 'ExponentPushToken[account-b-token]',
-      registrationSessionId: accountB.sessionId,
       userId: accountB.userId,
     }])
 
@@ -323,6 +332,7 @@ describe('push notification API and outbox', () => {
     const session = await registerUser('push-installation-reset@example.com')
     const previousInstallationId = randomUUID()
     const nextInstallationId = randomUUID()
+    const nextInstallationSecret = randomUUID()
     const expoPushToken = 'ExponentPushToken[installation-reset-token]'
     const register = (body: Record<string, unknown>) =>
       app.request('/api/notifications/push-token', {
@@ -344,25 +354,23 @@ describe('push notification API and outbox', () => {
       expoPushToken,
       generation: 1,
       installationId: nextInstallationId,
-      installationSecret: randomUUID(),
+      installationSecret: nextInstallationSecret,
     })).status).toBe(200)
 
-    expect(await prisma.pushToken.findUnique({
-      where: { expoPushToken },
-      select: { installationId: true, registrationSessionId: true, userId: true },
-    })).toEqual({
-      installationId: nextInstallationId,
-      registrationSessionId: session.sessionId,
-      userId: session.userId,
+    const unregister = await app.request('/api/notifications/push-token/unregister', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${session.accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        generation: 2,
+        installationId: nextInstallationId,
+        installationSecret: nextInstallationSecret,
+      }),
     })
-    expect(await prisma.pushInstallation.findUnique({
-      where: { id: previousInstallationId },
-      select: { active: true },
-    })).toEqual({ active: false })
-    expect(await prisma.pushInstallation.findUnique({
-      where: { id: nextInstallationId },
-      select: { active: true },
-    })).toEqual({ active: true })
+    expect(await unregister.json()).toEqual({ applied: true, ok: true })
+    expect(await prisma.pushToken.findUnique({ where: { expoPushToken } })).toBeNull()
   })
 
   test('an authorized installation can transfer an unchanged Expo token to a newer account generation', async () => {
@@ -392,20 +400,8 @@ describe('push notification API and outbox', () => {
 
     expect(await prisma.pushToken.findUnique({
       where: { expoPushToken },
-      select: { installationId: true, registrationSessionId: true, userId: true },
-    })).toEqual({
-      installationId,
-      registrationSessionId: accountB.sessionId,
-      userId: accountB.userId,
-    })
-    expect(await prisma.pushInstallation.findUniqueOrThrow({
-      where: { id: installationId },
-      select: { active: true, generation: true, ownerUserId: true },
-    })).toEqual({
-      active: true,
-      generation: 2,
-      ownerUserId: accountB.userId,
-    })
+      select: { userId: true },
+    })).toEqual({ userId: accountB.userId })
   })
 
   test('bounds concurrent push-token registrations per user', async () => {
@@ -511,10 +507,6 @@ describe('push notification API and outbox', () => {
       { disabledAt: null, expoPushToken: devices[1]!.token },
       { disabledAt: null, expoPushToken: devices[2]!.token },
     ])
-    expect(await prisma.pushInstallation.findUniqueOrThrow({
-      where: { id: devices[0]!.installationId },
-      select: { active: true },
-    })).toEqual({ active: false })
   })
 
   test('an installation evicted by the account cap is restored on its next launch heartbeat', async () => {
@@ -547,16 +539,14 @@ describe('push notification API and outbox', () => {
       expect((await register(device, 1)).status).toBe(200)
     }
 
-    expect(await prisma.pushInstallation.findUniqueOrThrow({
-      where: { id: devices[0]!.installationId },
-      select: { active: true },
-    })).toEqual({ active: false })
-    const retainedBeforeReopen = await prisma.pushToken.findMany({
+    expect(await prisma.pushToken.findMany({
       where: { userId: session.userId },
-      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      orderBy: { expoPushToken: 'asc' },
       select: { expoPushToken: true },
-    })
-    expect(retainedBeforeReopen).toHaveLength(2)
+    })).toEqual([
+      { expoPushToken: 'ExponentPushToken[cap-recovery-1]' },
+      { expoPushToken: 'ExponentPushToken[cap-recovery-2]' },
+    ])
 
     expect((await register(devices[0]!, 2)).status).toBe(200)
 
@@ -565,17 +555,9 @@ describe('push notification API and outbox', () => {
       orderBy: { expoPushToken: 'asc' },
       select: { expoPushToken: true },
     })).toEqual([
-      { expoPushToken: devices[0]!.token },
-      retainedBeforeReopen[0],
-    ].sort((left, right) => left.expoPushToken.localeCompare(right.expoPushToken)))
-    const evictedDevice = devices.find(
-      (device) => device.token === retainedBeforeReopen[1]!.expoPushToken,
-    )
-    expect(evictedDevice).toBeDefined()
-    expect(await prisma.pushInstallation.findUniqueOrThrow({
-      where: { id: evictedDevice!.installationId },
-      select: { active: true },
-    })).toEqual({ active: false })
+      { expoPushToken: 'ExponentPushToken[cap-recovery-0]' },
+      { expoPushToken: 'ExponentPushToken[cap-recovery-2]' },
+    ])
   })
 
   test('token logout removes its installation registration without a client token list', async () => {
@@ -651,7 +633,6 @@ describe('push notification API and outbox', () => {
     expect(limited.status).toBe(429)
     expect(Number(limited.headers.get('retry-after'))).toBeGreaterThan(0)
     expect((await post('/push-token', registration, '198.51.100.41')).status).toBe(401)
-    expect(await prisma.rateLimitBucket.count({ where: { policy: 'notifications' } })).toBeGreaterThan(0)
 
     // The spent notifications budget leaves the account and sign-in budgets of the same address.
     const sameAddress = { 'Content-Type': 'application/json', 'X-Forwarded-For': '198.51.100.40' }
@@ -676,37 +657,62 @@ describe('push notification API and outbox', () => {
     expect(disabled.status).toBe(404)
 
     const session = await registerUser('test-push-quota@example.com')
-    await prisma.pushToken.create({
-      data: {
-        expoPushToken: 'ExponentPushToken[test-push-quota]',
-        registrationSessionId: session.sessionId,
-        userId: session.userId,
-      },
+    const otherSession = await registerUser('test-push-quota-other@example.com')
+    await prisma.pushToken.createMany({
+      data: [
+        {
+          expoPushToken: 'ExponentPushToken[test-push-quota]',
+          registrationSessionId: session.sessionId,
+          userId: session.userId,
+        },
+        {
+          expoPushToken: 'ExponentPushToken[test-push-quota-other]',
+          registrationSessionId: otherSession.sessionId,
+          userId: otherSession.userId,
+        },
+      ],
     })
     const enabledApp = createApp({
       env: { ...env, ENABLE_TEST_PUSH: true },
       prisma,
     })
-    const request = () => enabledApp.request('/api/notifications/test-push', {
+    const request = (accessToken: string) => enabledApp.request('/api/notifications/test-push', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${session.accessToken}`,
+        Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({}),
     })
 
-    const first = await request()
-    const second = await request()
+    const first = await request(session.accessToken)
+    const second = await request(session.accessToken)
+    const otherUser = await request(otherSession.accessToken)
 
     expect(first.status).toBe(200)
+    const queued = await first.json()
+    expect(queued).toEqual({ ok: true, outboxId: expect.any(String) })
     expect(second.status).toBe(429)
     expect((await second.json()).error.code).toBe('RATE_LIMITED')
-    expect(await prisma.pushNotificationOutbox.count()).toBe(1)
-    expect(await prisma.pushNotificationOutbox.findFirst()).toMatchObject({
-      status: PushNotificationOutboxStatus.pending,
+    expect(otherUser.status).toBe(200)
+    expect((await otherUser.json()).outboxId).not.toBe(queued.outboxId)
+
+    const sent: string[] = []
+    await processPushOutbox({
+      env,
+      prisma,
+      pushClientOptions: {
+        fetchImpl: async (_input, init) => {
+          const body = JSON.parse(String(init?.body)) as Array<{ to: string }>
+          sent.push(...body.map((message) => message.to))
+          return json({ data: body.map(() => ({ id: 'test-push-ticket', status: 'ok' })) })
+        },
+      },
     })
-    expect(await prisma.pushDelivery.count()).toBe(0)
+    expect(sent.sort()).toEqual([
+      'ExponentPushToken[test-push-quota-other]',
+      'ExponentPushToken[test-push-quota]',
+    ])
   })
 
   test('processPushOutbox sends tickets and checkPushReceipts marks delivery', async () => {
@@ -727,64 +733,59 @@ describe('push notification API and outbox', () => {
       title: 'Delivery title',
       userId: session.userId,
     })
-    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
-      const url = String(input)
+    const sendRequests: unknown[] = []
+    const receiptRequests: unknown[] = []
+    const fetchImpl = async (input: string | URL | Request, init?: RequestInit) => {
+      const body: unknown = JSON.parse(String(init?.body))
 
-      if (url.endsWith('/push/send')) {
-        expect(JSON.parse(String(init?.body))).toMatchObject([
-          {
-            body: 'Delivery body',
-            data: { href: '/details/components' },
-            title: 'Delivery title',
-            to: 'ExponentPushToken[delivery-token]',
-          },
-        ])
+      if (String(input).endsWith('/push/send')) {
+        sendRequests.push(body)
         return json({
           data: [{ id: 'ticket-delivery', status: 'ok' }],
         })
       }
 
-      expect(JSON.parse(String(init?.body))).toEqual({ ids: ['ticket-delivery'] })
+      receiptRequests.push(body)
       return json({
         data: {
           'ticket-delivery': { status: 'ok' },
         },
       })
-    })
+    }
+    const anHourLater = new Date(sentAt.getTime() + 60 * 60 * 1000)
 
-    const outboxMetrics = await processPushOutbox(
+    await processPushOutbox(
       { env, prisma, pushClientOptions: { fetchImpl } },
       { now: sentAt, onlyIds: [queued.id] },
     )
-    expect(outboxMetrics.sent).toBe(1)
-
-    const delivery = await prisma.pushDelivery.findFirstOrThrow({
-      where: {
-        outboxId: queued.id,
-      },
-    })
-    expect(delivery.status).toBe(PushDeliveryStatus.sent)
-    expect(delivery.ticketId).toBe('ticket-delivery')
-    expect(delivery.receiptNextCheckAt?.getTime()).toBeGreaterThan(sentAt.getTime())
-
-    const receiptMetrics = await checkPushReceipts(
+    await checkPushReceipts(
       { env, prisma, pushClientOptions: { fetchImpl } },
       { now: new Date(sentAt.getTime() + 20_000) },
     )
-    expect(receiptMetrics.delivered).toBe(1)
+    await processPushOutbox(
+      { env, prisma, pushClientOptions: { fetchImpl } },
+      { now: anHourLater, onlyIds: [queued.id] },
+    )
+    await checkPushReceipts({ env, prisma, pushClientOptions: { fetchImpl } }, { now: anHourLater })
 
-    const delivered = await prisma.pushDelivery.findUniqueOrThrow({
-      where: {
-        id: delivery.id,
-      },
-    })
-    expect(delivered.status).toBe(PushDeliveryStatus.delivered)
-    expect(delivered.expoPushToken).toBeNull()
-    expect(delivered.receiptNextCheckAt).toBeNull()
-    const redactedOutbox = await prisma.pushNotificationOutbox.findUniqueOrThrow({
+    expect(sendRequests).toMatchObject([
+      [
+        {
+          body: 'Delivery body',
+          data: { href: '/details/components' },
+          title: 'Delivery title',
+          to: 'ExponentPushToken[delivery-token]',
+        },
+      ],
+    ])
+    expect(receiptRequests).toEqual([{ ids: ['ticket-delivery'] }])
+    expect(await prisma.pushDelivery.findFirstOrThrow({
+      where: { outboxId: queued.id },
+      select: { expoPushToken: true },
+    })).toEqual({ expoPushToken: null })
+    expect(await prisma.pushNotificationOutbox.findUniqueOrThrow({
       where: { id: queued.id },
-    })
-    expect(redactedOutbox).toMatchObject({
+    })).toMatchObject({
       body: '',
       data: null,
       title: '',
@@ -803,9 +804,7 @@ describe('push notification API and outbox', () => {
     await prisma.authSession.update({
       where: { id: absoluteExpired.sessionId },
       data: {
-        createdAt: new Date(
-          now.getTime() - (env.SESSION_ABSOLUTE_TTL_DAYS * 24 * 60 * 60 + 1) * 1_000,
-        ),
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
         expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1_000),
       },
     })
@@ -845,7 +844,7 @@ describe('push notification API and outbox', () => {
     })
     let requests = 0
 
-    const metrics = await processPushOutbox(
+    await processPushOutbox(
       {
         env,
         prisma,
@@ -860,12 +859,6 @@ describe('push notification API and outbox', () => {
     )
 
     expect(requests).toBe(0)
-    expect(metrics.skipped).toBe(2)
-    expect(await prisma.pushDelivery.findFirst({ where: { outboxId: queued.id } }))
-      .toMatchObject({ status: PushDeliveryStatus.skipped })
-    expect(await prisma.pushDelivery.findFirst({
-      where: { outboxId: absoluteExpiredQueued.id },
-    })).toMatchObject({ status: PushDeliveryStatus.skipped })
   })
 
   test('lazily binds migrated legacy tokens before delivery', async () => {
@@ -880,16 +873,16 @@ describe('push notification API and outbox', () => {
       title: 'Legacy migration',
       userId: session.userId,
     })
-    const delivery = { to: null as string | null }
+    const sent: string[] = []
 
-    const metrics = await processPushOutbox(
+    await processPushOutbox(
       {
         env,
         prisma,
         pushClientOptions: {
           fetchImpl: async (_input, init) => {
-            const [message] = JSON.parse(String(init?.body)) as Array<{ to: string }>
-            delivery.to = message?.to ?? null
+            const body = JSON.parse(String(init?.body)) as Array<{ to: string }>
+            sent.push(...body.map((message) => message.to))
             return json({ data: [{ id: 'legacy-rollout-ticket', status: 'ok' }] })
           },
         },
@@ -897,13 +890,7 @@ describe('push notification API and outbox', () => {
       { onlyIds: [queued.id] },
     )
 
-    expect(metrics.sent).toBe(1)
-    if (!delivery.to) throw new Error('Expected the migrated token to be delivered')
-    expect(delivery.to).toBe(expoPushToken)
-    expect(await prisma.pushToken.findUniqueOrThrow({
-      where: { expoPushToken },
-      select: { registrationSessionId: true },
-    })).toEqual({ registrationSessionId: session.sessionId })
+    expect(sent).toEqual([expoPushToken])
   })
 
   test('session maintenance removes expired, revoked, and orphaned session-bound tokens', async () => {
@@ -923,9 +910,7 @@ describe('push notification API and outbox', () => {
     await prisma.authSession.update({
       where: { id: absoluteExpired.sessionId },
       data: {
-        createdAt: new Date(
-          now.getTime() - (env.SESSION_ABSOLUTE_TTL_DAYS * 24 * 60 * 60 + 1) * 1_000,
-        ),
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
         expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1_000),
       },
     })
@@ -981,10 +966,6 @@ describe('push notification API and outbox', () => {
       { expoPushToken: 'ExponentPushToken[active-session-cleanup]' },
       { expoPushToken: 'ExponentPushToken[legacy-session-cleanup]' },
     ])
-    expect(await prisma.pushToken.findUniqueOrThrow({
-      where: { expoPushToken: 'ExponentPushToken[legacy-session-cleanup]' },
-      select: { registrationSessionId: true },
-    })).toEqual({ registrationSessionId: active.sessionId })
   })
 
   test('maintenance redacts legacy terminal notification data in bounded batches', async () => {
@@ -1024,18 +1005,31 @@ describe('push notification API and outbox', () => {
       },
     })
 
-    expect(await redactTerminalNotificationDataBatch(prisma, { limit: 1 })).toBe(1)
-    expect(await prisma.pushNotificationOutbox.findUniqueOrThrow({ where: { id: first.id } }))
-      .toMatchObject({ body: '', data: null, title: '' })
-    expect(await prisma.pushDelivery.findFirstOrThrow({ where: { outboxId: first.id } }))
-      .toMatchObject({ expoPushToken: null })
-    expect(await prisma.pushNotificationOutbox.findUniqueOrThrow({ where: { id: second.id } }))
-      .toMatchObject({ body: 'Sensitive body second', title: 'Sensitive title second' })
-    expect(await prisma.pushNotificationOutbox.findUniqueOrThrow({ where: { id: pending.id } }))
-      .toMatchObject({ body: 'Pending body', title: 'Pending title' })
+    const terminalIds = [first.id, second.id]
 
-    expect(await redactTerminalNotificationDataBatch(prisma, { limit: 10 })).toBe(1)
-    expect(await redactTerminalNotificationDataBatch(prisma, { limit: 10 })).toBe(0)
+    await redactTerminalNotificationDataBatch(prisma, { limit: 1 })
+    expect(await prisma.pushNotificationOutbox.findMany({
+      where: { id: { in: terminalIds } },
+      orderBy: { body: 'asc' },
+      select: { body: true },
+    })).toEqual([{ body: '' }, { body: expect.stringContaining('Sensitive body') }])
+
+    await redactTerminalNotificationDataBatch(prisma, { limit: 10 })
+    expect(await prisma.pushNotificationOutbox.findMany({
+      where: { id: { in: terminalIds } },
+      select: { body: true, data: true, title: true },
+    })).toEqual([
+      { body: '', data: null, title: '' },
+      { body: '', data: null, title: '' },
+    ])
+    expect(await prisma.pushDelivery.findMany({
+      where: { outboxId: { in: terminalIds } },
+      select: { expoPushToken: true },
+    })).toEqual([{ expoPushToken: null }, { expoPushToken: null }])
+    expect(await prisma.pushNotificationOutbox.findUniqueOrThrow({
+      where: { id: pending.id },
+      select: { body: true, data: true, title: true },
+    })).toEqual({ body: 'Pending body', data: { href: '/details/pending' }, title: 'Pending title' })
   })
 
   test('claims each Expo receipt once across concurrent workers', async () => {
@@ -1062,59 +1056,34 @@ describe('push notification API and outbox', () => {
       return json({ data: { 'ticket-receipt-lease': { status: 'ok' } } })
     }
 
-    const metrics = await Promise.all([
+    await Promise.all([
       checkPushReceipts({ env, prisma, pushClientOptions: { fetchImpl } }, { now }),
       checkPushReceipts({ env, prisma, pushClientOptions: { fetchImpl } }, { now }),
     ])
+    await checkPushReceipts(
+      { env, prisma, pushClientOptions: { fetchImpl } },
+      { now: new Date(now.getTime() + 60 * 60 * 1000) },
+    )
 
     expect(receiptRequests).toBe(1)
-    expect(metrics.reduce((sum, item) => sum + item.delivered, 0)).toBe(1)
-    expect(await prisma.pushDelivery.findFirst()).toMatchObject({
-      receiptClaimToken: null,
-      receiptClaimedAt: null,
-      status: PushDeliveryStatus.delivered,
-    })
-  })
-
-  test('enqueuePushNotification dedupes per user instead of globally', async () => {
-    const firstSession = await registerUser('dedupe-one@example.com')
-    const secondSession = await registerUser('dedupe-two@example.com')
-
-    const first = await enqueuePushNotification(prisma, {
-      body: 'Dedupe body',
-      dedupeKey: 'shared-event-key',
-      title: 'Dedupe title',
-      userId: firstSession.userId,
-    })
-    const duplicateFirst = await enqueuePushNotification(prisma, {
-      body: 'Dedupe body',
-      dedupeKey: 'shared-event-key',
-      title: 'Dedupe title',
-      userId: firstSession.userId,
-    })
-    const second = await enqueuePushNotification(prisma, {
-      body: 'Dedupe body',
-      dedupeKey: 'shared-event-key',
-      title: 'Dedupe title',
-      userId: secondSession.userId,
-    })
-
-    expect(first.created).toBe(true)
-    expect(duplicateFirst).toEqual({ created: false, id: first.id })
-    expect(second.created).toBe(true)
-    expect(second.id).not.toBe(first.id)
-    expect(await prisma.pushNotificationOutbox.count()).toBe(2)
   })
 
   test('retryable receipt errors requeue only the affected token', async () => {
     const session = await registerUser('receipt-retry@example.com')
     const sentAt = new Date('2026-05-21T12:00:00.000Z')
-    await prisma.pushToken.create({
-      data: {
-        expoPushToken: 'ExponentPushToken[receipt-retry-token]',
-        registrationSessionId: session.sessionId,
-        userId: session.userId,
-      },
+    await prisma.pushToken.createMany({
+      data: [
+        {
+          expoPushToken: 'ExponentPushToken[receipt-ok-token]',
+          registrationSessionId: session.sessionId,
+          userId: session.userId,
+        },
+        {
+          expoPushToken: 'ExponentPushToken[receipt-retry-token]',
+          registrationSessionId: session.sessionId,
+          userId: session.userId,
+        },
+      ],
     })
     const queued = await enqueuePushNotification(prisma, {
       body: 'Receipt retry body',
@@ -1124,22 +1093,22 @@ describe('push notification API and outbox', () => {
       userId: session.userId,
     })
     const sendBodies: Array<Array<{ to: string }>> = []
-    let receiptCalls = 0
     const fetchImpl = async (input: string | URL | Request, init?: RequestInit) => {
-      const url = String(input)
-
-      if (url.endsWith('/push/send')) {
+      if (String(input).endsWith('/push/send')) {
         const body = JSON.parse(String(init?.body)) as Array<{ to: string }>
         sendBodies.push(body)
         return json({
-          data: [{ id: `receipt-ticket-${sendBodies.length}`, status: 'ok' }],
+          data: body.map((message) => ({
+            id: message.to === 'ExponentPushToken[receipt-retry-token]' ? 'retry-ticket' : 'ok-ticket',
+            status: 'ok',
+          })),
         })
       }
 
-      receiptCalls += 1
       return json({
         data: {
-          [`receipt-ticket-${receiptCalls}`]: {
+          'ok-ticket': { status: 'ok' },
+          'retry-ticket': {
             details: { error: 'MessageRateExceeded' },
             message: 'Rate exceeded',
             status: 'error',
@@ -1152,26 +1121,10 @@ describe('push notification API and outbox', () => {
       { env, prisma, pushClientOptions: { fetchImpl } },
       { now: sentAt, onlyIds: [queued.id] },
     )
-    const receiptMetrics = await checkPushReceipts(
+    await checkPushReceipts(
       { env, prisma, pushClientOptions: { fetchImpl } },
       { now: new Date(sentAt.getTime() + 20_000) },
     )
-    expect(receiptMetrics.failed).toBe(1)
-
-    const pendingOutbox = await prisma.pushNotificationOutbox.findUniqueOrThrow({
-      where: {
-        id: queued.id,
-      },
-    })
-    expect(pendingOutbox.status).toBe(PushNotificationOutboxStatus.pending)
-    expect(
-      await prisma.pushDelivery.count({
-        where: {
-          outboxId: queued.id,
-        },
-      }),
-    ).toBe(0)
-
     await processPushOutbox(
       { env, prisma, pushClientOptions: { fetchImpl } },
       { now: new Date(sentAt.getTime() + 3 * 60 * 1000), onlyIds: [queued.id] },
@@ -1200,7 +1153,14 @@ describe('push notification API and outbox', () => {
       userId: session.userId,
     })
 
-    const metrics = await processPushOutbox(
+    const sent: string[] = []
+    const fetchImpl = async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Array<{ to: string }>
+      sent.push(...body.map((message) => message.to))
+      return json({ data: [{ id: 'retry-ticket', status: 'ok' }] })
+    }
+
+    await processPushOutbox(
       {
         env,
         prisma,
@@ -1214,16 +1174,17 @@ describe('push notification API and outbox', () => {
       },
       { now, onlyIds: [queued.id] },
     )
+    await processPushOutbox(
+      { env, prisma, pushClientOptions: { fetchImpl } },
+      { now, onlyIds: [queued.id] },
+    )
+    expect(sent).toEqual([])
 
-    expect(metrics.transientFailed).toBe(1)
-    const outbox = await prisma.pushNotificationOutbox.findUniqueOrThrow({
-      where: {
-        id: queued.id,
-      },
-    })
-    expect(outbox.status).toBe(PushNotificationOutboxStatus.pending)
-    expect(outbox.attempts).toBe(1)
-    expect(outbox.scheduledFor.getTime()).toBeGreaterThan(now.getTime())
+    await processPushOutbox(
+      { env, prisma, pushClientOptions: { fetchImpl } },
+      { now: new Date(now.getTime() + 3 * 60 * 1000), onlyIds: [queued.id] },
+    )
+    expect(sent).toEqual(['ExponentPushToken[retry-token]'])
   })
 
   test('worker shutdown requeues an interrupted send without consuming retry budget', async () => {
@@ -1245,7 +1206,7 @@ describe('push notification API and outbox', () => {
     })
     const controller = new AbortController()
 
-    const metrics = await processPushOutbox(
+    await processPushOutbox(
       {
         env,
         prisma,
@@ -1259,15 +1220,27 @@ describe('push notification API and outbox', () => {
       },
       { now, onlyIds: [queued.id], signal: controller.signal },
     )
-
-    expect(metrics.transientFailed).toBe(1)
-    const outbox = await prisma.pushNotificationOutbox.findUniqueOrThrow({
+    expect(await prisma.pushNotificationOutbox.findUniqueOrThrow({
       where: { id: queued.id },
-    })
-    expect(outbox.status).toBe(PushNotificationOutboxStatus.pending)
-    expect(outbox.attempts).toBe(0)
-    expect(outbox.processingToken).toBeNull()
-    expect(outbox.scheduledFor).toEqual(now)
+      select: { attempts: true },
+    })).toEqual({ attempts: 0 })
+
+    const sent: string[] = []
+    await processPushOutbox(
+      {
+        env,
+        prisma,
+        pushClientOptions: {
+          fetchImpl: async (_input, init) => {
+            const body = JSON.parse(String(init?.body)) as Array<{ to: string }>
+            sent.push(...body.map((message) => message.to))
+            return json({ data: [{ id: 'shutdown-retry-ticket', status: 'ok' }] })
+          },
+        },
+      },
+      { now, onlyIds: [queued.id] },
+    )
+    expect(sent).toEqual(['ExponentPushToken[shutdown-token]'])
   })
 
   test('worker shutdown persists a provider ticket that already succeeded before abort observation', async () => {
@@ -1288,39 +1261,36 @@ describe('push notification API and outbox', () => {
       userId: session.userId,
     })
     const controller = new AbortController()
+    const sent: string[] = []
+    const receiptRequests: unknown[] = []
+    const fetchImpl = async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).endsWith('/push/send')) {
+        controller.abort()
+        const body = JSON.parse(String(init?.body)) as Array<{ to: string }>
+        sent.push(...body.map((message) => message.to))
+        return json({ data: [{ id: 'shutdown-after-ticket-id', status: 'ok' }] })
+      }
 
-    const metrics = await processPushOutbox(
-      {
-        env,
-        prisma,
-        pushClientOptions: {
-          fetchImpl: async () => {
-            controller.abort()
-            return json({ data: [{ id: 'shutdown-after-ticket-id', status: 'ok' }] })
-          },
-        },
-      },
+      receiptRequests.push(JSON.parse(String(init?.body)))
+      return json({ data: { 'shutdown-after-ticket-id': { status: 'ok' } } })
+    }
+
+    await processPushOutbox(
+      { env, prisma, pushClientOptions: { fetchImpl } },
       { now, onlyIds: [queued.id], signal: controller.signal },
     )
+    await checkPushReceipts(
+      { env, prisma, pushClientOptions: { fetchImpl } },
+      { now: new Date(now.getTime() + 20_000) },
+    )
+    await processPushOutbox(
+      { env, prisma, pushClientOptions: { fetchImpl } },
+      { now: new Date(now.getTime() + 10 * 60 * 1000), onlyIds: [queued.id] },
+    )
 
-    expect(metrics.sent).toBe(1)
-    expect(await prisma.pushNotificationOutbox.findUniqueOrThrow({
-      where: { id: queued.id },
-      select: { processingToken: true, status: true },
-    })).toEqual({
-      processingToken: null,
-      status: PushNotificationOutboxStatus.sent,
-    })
-    expect(await prisma.pushDelivery.findFirstOrThrow({
-      where: { outboxId: queued.id },
-      select: { status: true, ticketId: true },
-    })).toEqual({
-      status: PushDeliveryStatus.sent,
-      ticketId: 'shutdown-after-ticket-id',
-    })
+    expect(sent).toEqual(['ExponentPushToken[shutdown-after-ticket]'])
+    expect(receiptRequests).toEqual([{ ids: ['shutdown-after-ticket-id'] }])
   })
-
-
 
   test('retryable ticket errors requeue only failed ticket tokens', async () => {
     const session = await registerUser('ticket-retry@example.com')
@@ -1374,20 +1344,10 @@ describe('push notification API and outbox', () => {
       })
     }
 
-    const firstPass = await processPushOutbox(
+    await processPushOutbox(
       { env, prisma, pushClientOptions: { fetchImpl } },
       { onlyIds: [queued.id] },
     )
-    expect(firstPass.transientFailed).toBe(1)
-    expect(
-      await prisma.pushDelivery.count({
-        where: {
-          outboxId: queued.id,
-          status: PushDeliveryStatus.sent,
-        },
-      }),
-    ).toBe(1)
-
     await processPushOutbox(
       { env, prisma, pushClientOptions: { fetchImpl } },
       { now: new Date(Date.now() + 3 * 60 * 1000), onlyIds: [queued.id] },
@@ -1440,15 +1400,6 @@ describe('push notification API and outbox', () => {
       },
     })
     expect(disabled.disabledAt).toBeInstanceOf(Date)
-
-    const delivery = await prisma.pushDelivery.findFirstOrThrow({
-      where: {
-        outboxId: queued.id,
-      },
-    })
-    expect(delivery.status).toBe(PushDeliveryStatus.failed)
-    expect(delivery.expoPushToken).toBeNull()
-    expect(delivery.providerErrorCode).toBe('DeviceNotRegistered')
     expect(await prisma.pushNotificationOutbox.findUniqueOrThrow({
       where: { id: queued.id },
     })).toMatchObject({

@@ -398,9 +398,6 @@ describe('users and admin API integration', () => {
       const body = await response.json()
       expect(body.user.role).toBe(role)
     }
-
-    // Uncomment with the billing tables (docs/IAP.md): the demo seed must grant no entitlement.
-    // expect(await prisma.subscriptionEntitlement.count()).toBe(0)
   })
 
   test('replaces development user credentials and revokes stale authentication state', async () => {
@@ -553,7 +550,6 @@ describe('users and admin API integration', () => {
         userId: existing.user.id,
       },
     })
-
 
     await bootstrapAdmin(prisma, {
       email: existing.user.email,
