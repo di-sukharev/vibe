@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, setSystemTime, test } from 'bun:test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,7 +8,7 @@ import type { DbClient } from '../db'
 import { loadEnv } from '../env'
 import { privateStorageConfigFromEnv, type FilesystemStorageConfig } from './config'
 import { createFilesystemStorageRoutes } from './filesystem-routes'
-import { signStorageUrl, storageUrlParams } from './filesystem-signing'
+import { storageUrlParams } from './filesystem-signing'
 import { FilesystemPrivateStorage } from './filesystem-storage'
 import { createStorageObjectKey } from './object-keys'
 import { describeStorageContract, pngFixture } from './storage-contract'
@@ -34,7 +34,6 @@ async function createFilesystemSetup() {
   })
 
   return {
-    config,
     storage,
     browserOrigin,
     request: async (url: string, init?: RequestInit) => app.request(url, init),
@@ -75,19 +74,17 @@ describe('FilesystemPrivateStorage signed URLs', () => {
   })
 
   test('rejects an expired URL even when the signature is genuine', async () => {
-    await withSetup(async ({ config, request }) => {
-      const key = createStorageObjectKey({ namespace: 'contract' })
-      const claims = {
-        operation: 'get' as const,
-        key,
-        expiresAt: Math.floor(Date.now() / 1000) - 1,
-      }
-      const url = new URL(`http://127.0.0.1:3000/storage/objects/${key}`)
-      url.searchParams.set(storageUrlParams.operation, claims.operation)
-      url.searchParams.set(storageUrlParams.expiresAt, String(claims.expiresAt))
-      url.searchParams.set(storageUrlParams.signature, signStorageUrl(config.signingKey, claims))
+    await withSetup(async ({ request, storage }) => {
+      const download = await storage.createDownloadUrl({
+        key: createStorageObjectKey({ namespace: 'contract' }),
+      })
 
-      expect((await request(url.toString())).status).toBe(403)
+      setSystemTime(new Date(Date.now() + 24 * 60 * 60 * 1000))
+      try {
+        expect((await request(download.url)).status).toBe(403)
+      } finally {
+        setSystemTime()
+      }
     })
   })
 

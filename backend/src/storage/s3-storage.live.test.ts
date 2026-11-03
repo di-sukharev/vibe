@@ -1,9 +1,6 @@
-import { describe, expect, test } from 'bun:test'
-
 import type { S3StorageConfig } from './config'
-import { createStorageObjectKey } from './object-keys'
 import { S3PrivateStorage } from './s3-storage'
-import { describeStorageContract, pngFixture } from './storage-contract'
+import { describeStorageContract } from './storage-contract'
 
 /**
  * The storage contract, proven against a real S3 server.
@@ -18,7 +15,6 @@ import { describeStorageContract, pngFixture } from './storage-contract'
  */
 
 const endpoint = process.env.PRIVATE_STORAGE_ENDPOINT
-const maybeDescribe = endpoint ? describe : describe.skip
 
 const config: S3StorageConfig = {
   driver: 's3',
@@ -44,25 +40,3 @@ if (endpoint) {
     request: (url: string, init?: RequestInit) => fetch(url, init),
   }))
 }
-
-maybeDescribe('S3PrivateStorage live specifics', () => {
-  const storage = new S3PrivateStorage(config)
-
-  test('serves a ranged GET with a partial-content status', async () => {
-    const key = createStorageObjectKey({ namespace: 'live' })
-    const upload = await storage.createUploadUrl({
-      key,
-      contentType: 'image/png',
-      byteSize: pngFixture.byteLength,
-    })
-    await fetch(upload.url, { method: 'PUT', headers: upload.headers, body: pngFixture })
-
-    const download = await storage.createDownloadUrl({ key })
-    const response = await fetch(download.url, { headers: { Range: 'bytes=0-7' } })
-
-    expect(response.status).toBe(206)
-    expect(Buffer.from(await response.arrayBuffer())).toEqual(pngFixture.subarray(0, 8))
-
-    await storage.deleteObject(key)
-  })
-})

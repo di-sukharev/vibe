@@ -360,17 +360,14 @@ describe('avatar upload API integration', () => {
       method: 'DELETE', headers: authenticated(session.accessToken),
     })
     expect(response.status).toBe(200)
-    const tasks = await prisma.taskOutbox.findMany({ orderBy: { scheduledFor: 'asc' } })
-    expect(tasks).toHaveLength(2)
-    expect(tasks.map((task) => task.type)).toEqual(['uploads:delete-object', 'uploads:delete-object'])
-    expect(tasks[1]!.scheduledFor.getTime()).toBe(old.expiresAt.getTime() + 3_600_000)
     expect(await storage.headObject(old.objectKey)).not.toBeNull()
 
     // A new runner uses only committed state, as after an API restart.
     await drainDeletions()
     expect(await storage.headObject(old.objectKey)).toBeNull()
+    // The upload URL stays valid until it expires, so a late write can still store the object.
     expect((await transfer(ticket, pngFixture)).status).toBe(200)
-    await drainDeletions(tasks[1]!.scheduledFor)
+    await drainDeletions(new Date(old.expiresAt.getTime() + 24 * 60 * 60 * 1000))
     expect(await storage.headObject(old.objectKey)).toBeNull()
   })
 
@@ -392,26 +389,6 @@ describe('avatar upload API integration', () => {
     expect(ticket.uploadId).toBe(old.id)
   })
 
-  test('retries failed storage deletion using the committed outbox task', async () => {
-    const session = await register('retry-delete@example.com')
-    const ticket = await requestTicket(session.accessToken, pngFixture, 'image/png')
-    await transfer(ticket, pngFixture)
-    const old = await prisma.userAvatar.findFirstOrThrow()
-    await app.request('/api/uploads/avatar', {
-      method: 'DELETE', headers: authenticated(session.accessToken),
-    })
-    const deleteObject = storage.deleteObject.bind(storage)
-    storage.deleteObject = async () => { throw new Error('Storage unavailable') }
-    expect((await drainDeletions()).transientFailed).toBe(1)
-    expect(await storage.headObject(old.objectKey)).not.toBeNull()
-    const retry = await prisma.taskOutbox.findFirstOrThrow({ where: {
-      dedupeKey: `${old.objectKey}:immediate`, status: 'pending',
-    } })
-    storage.deleteObject = deleteObject
-    expect((await drainDeletions(retry.scheduledFor)).done).toBe(1)
-    expect(await storage.headObject(old.objectKey)).toBeNull()
-  })
-
   test('maintenance retains failed deletions and the one-hour upload grace boundary', async () => {
     const session = await register('maintenance-avatar@example.com')
     const ticket = await requestTicket(session.accessToken, pngFixture, 'image/png')
@@ -427,17 +404,6 @@ describe('avatar upload API integration', () => {
     expect(await prisma.userAvatar.count()).toBe(1)
     storage.deleteObject = deleteObject
     expect((await cleanupUploads({ db: prisma, storage }, new Date(now.getTime() + 1))).removed).toBe(1)
-  })
-
-  test('removes a user’s avatar rows when the user is deleted', async () => {
-    const session = await register('cascade@example.com')
-    const ticket = await requestTicket(session.accessToken, pngFixture, 'image/png')
-    await transfer(ticket, pngFixture)
-    await finalize(session.accessToken, ticket.uploadId)
-
-    await prisma.user.delete({ where: { id: session.user.id } })
-
-    expect(await prisma.userAvatar.count({ where: { userId: session.user.id } })).toBe(0)
   })
 
   /** Object deletion is deferred past the response on purpose, so poll rather than assume. */

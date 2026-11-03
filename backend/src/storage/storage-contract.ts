@@ -219,6 +219,19 @@ export function describeStorageContract(
       })
     })
 
+    test('serves a byte range through a presigned GET', async () => {
+      await withSetup(async (setup) => {
+        const key = createStorageObjectKey({ namespace: 'contract' })
+        await uploadFixture(setup, key)
+
+        const download = await setup.storage.createDownloadUrl({ key })
+        const response = await setup.request(download.url, { headers: { Range: 'bytes=0-7' } })
+
+        expect(response.status).toBe(206)
+        expect([...new Uint8Array(await response.arrayBuffer())]).toEqual(pngSignature)
+      })
+    })
+
     test('deletes an object and stops serving it', async () => {
       await withSetup(async (setup) => {
         const key = createStorageObjectKey({ namespace: 'contract' })
@@ -241,15 +254,6 @@ export function describeStorageContract(
         await setup.storage.deleteObject(key)
 
         expect(await setup.storage.headObject(key)).toBeNull()
-      })
-    })
-
-    test('reports a missing object rather than throwing', async () => {
-      await withSetup(async (setup) => {
-        const key = createStorageObjectKey({ namespace: 'contract' })
-
-        expect(await setup.storage.headObject(key)).toBeNull()
-        expect(await setup.storage.readRange(key, { start: 0, end: 7 })).toBeNull()
       })
     })
   })

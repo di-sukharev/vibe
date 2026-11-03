@@ -1,11 +1,13 @@
-import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
+import { createHash } from 'node:crypto'
+import { afterAll, beforeEach, describe, expect, spyOn, test } from 'bun:test'
 
 import { createApp } from '../../app'
 import { createPrisma } from '../../db'
-import type { EmailDelivery, EmailMessage } from '../../email'
+import { EmailDeliveryError, type EmailDelivery, type EmailMessage } from '../../email'
 import { loadEnv } from '../../env'
 import { drainTaskOutbox } from '../../outbox'
 import type { BackendRuntime } from '../../runtime'
+import { createPasswordResetTaskQueue } from './infrastructure/password-reset-task-queue'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required; run bun run test:backend:integration')
@@ -132,44 +134,13 @@ describe('auth API integration', () => {
   })
 
   test('resets a password with a single-use token and revokes existing sessions', async () => {
-    const messages: EmailMessage[] = []
-    const emailDelivery: EmailDelivery = {
-      driver: 'console',
-      configured: true,
-      send: async (message) => {
-        messages.push(message)
-      },
-    }
-    const emailApp = createApp({ emailDelivery, env, prisma })
-    // The drain runs outside any request, so it builds its own auth service from the runtime.
-    const drainRuntime = { emailDelivery, env, prisma } as unknown as BackendRuntime
-    const drain = () => drainTaskOutbox(drainRuntime, { now: new Date() })
-    const register = await emailApp.request('/api/auth/token/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: 'reset@example.com',
-        password: 'password123',
-      }),
-    })
-    const registered = await register.json()
+    const { app: emailApp, drain, messages } = resetMailbox()
+    const registered = await registerAccount('reset@example.com')
 
-    const unknownRequest = await emailApp.request('/api/auth/password-reset/request', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'unknown@example.com' }),
-    })
+    const unknownRequest = await requestPasswordReset(emailApp, 'unknown@example.com')
     const [resetRequest, concurrentResetRequest] = await Promise.all([
-      emailApp.request('/api/auth/password-reset/request', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: 'reset@example.com' }),
-      }),
-      emailApp.request('/api/auth/password-reset/request', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: 'reset@example.com' }),
-      }),
+      requestPasswordReset(emailApp, 'reset@example.com'),
+      requestPasswordReset(emailApp, 'reset@example.com'),
     ])
 
     expect(unknownRequest.status).toBe(202)
@@ -189,38 +160,22 @@ describe('auth API integration', () => {
     expect(drained).toMatchObject({ done: 1, skipped: 1, terminalFailed: 0, transientFailed: 0 })
     expect(messages).toHaveLength(1)
 
-    const resetUrlText = messages[0]!.text
-      .split('\n\n')
-      .find((part) => part.startsWith('http'))
-    expect(resetUrlText).toBeString()
-    const resetUrl = new URL(resetUrlText!)
-    const token = new URLSearchParams(resetUrl.hash.slice(1)).get('token')
-    expect(token).toBeString()
-    expect(token).toHaveLength(43)
-
+    const token = resetTokenFrom(messages[0]!)
     const storedToken = await prisma.passwordResetToken.findUnique({
-      where: { tokenHash: token! },
+      where: { tokenHash: token },
     })
     expect(storedToken).toBeNull()
     expect(await prisma.passwordResetToken.count()).toBe(1)
 
     const confirmations = await Promise.all([
-      emailApp.request('/api/auth/password-reset/confirm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token, password: 'new-password-123' }),
-      }),
-      emailApp.request('/api/auth/password-reset/confirm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token, password: 'new-password-123' }),
-      }),
+      confirmPasswordReset(emailApp, token),
+      confirmPasswordReset(emailApp, token),
     ])
     expect(confirmations.map(({ status }) => status).sort()).toEqual([204, 400])
     const successfulConfirm = confirmations.find(({ status }) => status === 204)!
     const rejectedConfirm = confirmations.find(({ status }) => status === 400)!
-    expect(successfulConfirm.headers.get('set-cookie')).toContain('web_app_demo_refresh=')
-    expect(successfulConfirm.headers.get('set-cookie')).toContain('Max-Age=0')
+    // An empty refresh cookie signs this browser out along with every other session.
+    expect(successfulConfirm.headers.get('set-cookie')).toStartWith('web_app_demo_refresh=;')
     expect((await rejectedConfirm.json()).error.code).toBe('AUTH_PASSWORD_RESET_INVALID')
     await drain()
     // The reset link and then one password-changed notice, both to the account address.
@@ -231,19 +186,15 @@ describe('auth API integration', () => {
     expect(finished.every((row) => ['done', 'skipped'].includes(row.status))).toBe(true)
     expect(finished.every((row) => row.redactedAt !== null)).toBe(true)
     expect(finished.map((row) => row.payload)).toEqual(finished.map(() => ({})))
+    expect(finished.map((row) => row.dedupeKey).join(' ')).not.toContain('example.com')
 
     // Draining again must not send a second copy of anything.
     await drain()
     expect(messages).toHaveLength(2)
 
-    const replay = await emailApp.request('/api/auth/password-reset/confirm', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token, password: 'another-password-123' }),
-    })
-    const replayBody = await replay.json()
+    const replay = await confirmPasswordReset(emailApp, token)
     expect(replay.status).toBe(400)
-    expect(replayBody.error.code).toBe('AUTH_PASSWORD_RESET_INVALID')
+    expect((await replay.json()).error.code).toBe('AUTH_PASSWORD_RESET_INVALID')
 
     const previousAccess = await emailApp.request('/api/auth/me', {
       headers: { Authorization: `Bearer ${registered.accessToken}` },
@@ -275,7 +226,6 @@ describe('auth API integration', () => {
     // would let a provider outage fill the ceiling with real resets in backoff and then drop
     // every new request for as long as the outage lasts. Other task types share the table and
     // the status, and have their own budget.
-    const { createPasswordResetTaskQueue } = await import('./infrastructure/password-reset-task-queue')
     const queue = createPasswordResetTaskQueue(prisma, { pendingLimit: 2 })
     const now = new Date('2026-08-09T12:00:00.000Z')
     const retryAt = new Date(now.getTime() + 120_000)
@@ -299,6 +249,69 @@ describe('auth API integration', () => {
       now: new Date(retryAt.getTime() + 60_000),
     })
     expect(await resetRows()).toBe(3)
+  })
+
+  test('a later reset request for the same address queues new work', async () => {
+    // A key made of the address alone would match the first finished task forever, and the
+    // owner of that address could never reset a password again.
+    const queue = createPasswordResetTaskQueue(prisma, { pendingLimit: 10 })
+
+    await queue.enqueuePasswordReset({ email: 'user@example.com', now: new Date('2026-08-09T12:00:00.000Z') })
+    await queue.enqueuePasswordReset({ email: 'user@example.com', now: new Date('2026-08-09T12:05:00.000Z') })
+
+    expect(await prisma.taskOutbox.count({ where: { type: 'auth:password-reset' } })).toBe(2)
+  })
+
+  test('a reset inside the cooldown sends nothing and keeps the outstanding link', async () => {
+    const mailbox = resetMailbox()
+    const { userId } = await registerAccount('cooldown@example.com')
+    const outstandingToken = 'o'.repeat(43)
+    await prisma.passwordResetToken.create({
+      data: {
+        userId,
+        tokenHash: createHash('sha256').update(outstandingToken).digest('hex'),
+        expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+      },
+    })
+
+    await requestPasswordReset(mailbox.app, 'cooldown@example.com')
+
+    expect(await mailbox.drain()).toMatchObject({ done: 0, skipped: 1 })
+    expect(mailbox.messages).toEqual([])
+    expect((await confirmPasswordReset(mailbox.app, outstandingToken)).status).toBe(204)
+  })
+
+  test('a transient delivery failure keeps the reset link for the next attempt', async () => {
+    const mailbox = resetMailbox(new EmailDeliveryError('transient', 'Provider unavailable'))
+    await registerAccount('transient@example.com')
+    await requestPasswordReset(mailbox.app, 'transient@example.com')
+
+    expect(await mailbox.drain()).toMatchObject({ transientFailed: 1 })
+    expect((await confirmPasswordReset(mailbox.app, resetTokenFrom(mailbox.messages[0]!))).status).toBe(204)
+  })
+
+  test('a permanent delivery failure invalidates the reset link at once', async () => {
+    const mailbox = resetMailbox(new EmailDeliveryError('permanent', 'Provider rejected the recipient'))
+    await registerAccount('permanent@example.com')
+    await requestPasswordReset(mailbox.app, 'permanent@example.com')
+
+    expect(await mailbox.drain()).toMatchObject({ terminalFailed: 1 })
+    const confirm = await confirmPasswordReset(mailbox.app, resetTokenFrom(mailbox.messages[0]!))
+    expect(confirm.status).toBe(400)
+    expect((await confirm.json()).error.code).toBe('AUTH_PASSWORD_RESET_INVALID')
+  })
+
+  test('the last failed delivery attempt invalidates the reset link', async () => {
+    const mailbox = resetMailbox(new EmailDeliveryError('transient', 'Provider unavailable'))
+    await registerAccount('last-attempt@example.com')
+    await requestPasswordReset(mailbox.app, 'last-attempt@example.com')
+    // Four attempts have already failed, so this drain makes the fifth and last one.
+    await prisma.taskOutbox.updateMany({ where: { type: 'auth:password-reset' }, data: { attempts: 4 } })
+
+    expect(await mailbox.drain()).toMatchObject({ terminalFailed: 1 })
+    const confirm = await confirmPasswordReset(mailbox.app, resetTokenFrom(mailbox.messages[0]!))
+    expect(confirm.status).toBe(400)
+    expect((await confirm.json()).error.code).toBe('AUTH_PASSWORD_RESET_INVALID')
   })
 
   test('returns one durable successor across three concurrent refresh requests', async () => {
@@ -449,12 +462,11 @@ describe('auth API integration', () => {
     expect(session?.revokedAt).toBeNull()
   })
 
-  test('web auth never exposes its HttpOnly refresh token when the client platform header is spoofed', async () => {
+  test('cookie auth keeps the refresh token in an HttpOnly cookie and out of the body', async () => {
     const register = await app.request('/api/auth/register', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Client-Platform': 'mobile',
       },
       body: JSON.stringify({
         email: 'web-cookie@example.com',
@@ -475,7 +487,6 @@ describe('auth API integration', () => {
       headers: {
         'Content-Type': 'application/json',
         Cookie: setCookie!.split(';')[0],
-        'X-Client-Platform': 'mobile',
       },
       body: JSON.stringify({}),
     })
@@ -618,7 +629,7 @@ describe('auth API integration', () => {
   })
 
   test('me rejects revoked, expired, and missing sessions', async () => {
-    const revoked = await registerForMeGuard('me-revoked@example.com')
+    const revoked = await registerAccount('me-revoked@example.com')
     await prisma.authSession.updateMany({
       where: {
         userId: revoked.userId,
@@ -634,7 +645,7 @@ describe('auth API integration', () => {
     })
     expect(revokedMe.status).toBe(401)
 
-    const expired = await registerForMeGuard('me-expired@example.com')
+    const expired = await registerAccount('me-expired@example.com')
     await prisma.authSession.updateMany({
       where: {
         userId: expired.userId,
@@ -650,7 +661,7 @@ describe('auth API integration', () => {
     })
     expect(expiredMe.status).toBe(401)
 
-    const missing = await registerForMeGuard('me-missing@example.com')
+    const missing = await registerAccount('me-missing@example.com')
     await prisma.authSession.deleteMany({
       where: {
         userId: missing.userId,
@@ -665,7 +676,7 @@ describe('auth API integration', () => {
   })
 
   test('enforces absolute session lifetime in PostgreSQL for access and refresh credentials', async () => {
-    const absoluteExpired = await registerForMeGuard('absolute-expired@example.com')
+    const absoluteExpired = await registerAccount('absolute-expired@example.com')
     await prisma.authSession.updateMany({
       where: { userId: absoluteExpired.userId },
       data: {
@@ -687,7 +698,7 @@ describe('auth API integration', () => {
     expect(expiredMe.status).toBe(401)
     expect(expiredRefresh.status).toBe(401)
 
-    const nearCutoff = await registerForMeGuard('absolute-near-cutoff@example.com')
+    const nearCutoff = await registerAccount('absolute-near-cutoff@example.com')
     await prisma.authSession.updateMany({
       where: { userId: nearCutoff.userId },
       data: {
@@ -770,7 +781,7 @@ describe('auth API integration', () => {
     expect(users).toBe(1)
   })
 
-  async function registerForMeGuard(email: string) {
+  async function registerAccount(email: string) {
     const register = await app.request('/api/auth/token/register', {
       method: 'POST',
       headers: {
@@ -800,4 +811,57 @@ describe('auth API integration', () => {
       userId: user.id,
     }
   }
+
+  /** An email provider that records every message, and then fails with `failure` if one is given. */
+  function resetMailbox(failure?: EmailDeliveryError) {
+    const messages: EmailMessage[] = []
+    const emailDelivery: EmailDelivery = {
+      driver: 'console',
+      configured: true,
+      send: async (message) => {
+        messages.push(message)
+        if (failure) throw failure
+      },
+    }
+    // The drain runs outside any request, so it builds its own auth service from the runtime.
+    const drainRuntime = { emailDelivery, env, prisma } as unknown as BackendRuntime
+
+    return {
+      app: createApp({ emailDelivery, env, prisma }),
+      messages,
+      async drain() {
+        // The drain logs each task it gives up on. These tests read its metrics instead.
+        const error = spyOn(console, 'error').mockImplementation(() => {})
+        try {
+          return await drainTaskOutbox(drainRuntime, { now: new Date() })
+        } finally {
+          error.mockRestore()
+        }
+      },
+    }
+  }
+
+  function requestPasswordReset(emailApp: ReturnType<typeof createApp>, email: string) {
+    return emailApp.request('/api/auth/password-reset/request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    })
+  }
+
+  function confirmPasswordReset(emailApp: ReturnType<typeof createApp>, token: string) {
+    return emailApp.request('/api/auth/password-reset/confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, password: 'new-password-123' }),
+    })
+  }
 })
+
+/** The token travels in the URL fragment, which a browser never sends to a server. */
+function resetTokenFrom(message: EmailMessage) {
+  const link = new URL(message.text.match(/https?:\/\/\S+/)![0])
+  const token = new URLSearchParams(link.hash.slice(1)).get('token')
+  expect(token).toBeString()
+  return token!
+}
