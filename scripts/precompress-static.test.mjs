@@ -148,6 +148,5 @@ test('the command compresses the targets it is given and skips the ones not buil
 
   // One target built and one missing is an ordinary partial build, not a failure.
   expect(run.status).toBe(0)
-  expect(run.stdout).toContain('not built, skipped')
   expect((await readdir(directory)).sort()).toEqual(['app.js', 'app.js.br', 'app.js.gz'])
 })

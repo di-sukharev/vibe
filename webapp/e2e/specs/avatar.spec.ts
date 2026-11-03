@@ -13,7 +13,7 @@ import { expect, signUp, test, uniqueEmail } from '../helpers/test'
  */
 
 function avatarImage(page: Page) {
-  return page.getByTestId('avatar-preview').locator('img')
+  return page.getByTestId('avatar-image')
 }
 
 async function pickFile(
@@ -43,9 +43,9 @@ test('uploads an avatar, keeps it across a reload, and removes it', async ({
   await expect(avatarImage(page)).toHaveCount(0)
   await expect(page.getByTestId('avatar-fallback')).toBeVisible()
 
-  // Absence needs a settled page: wait until the avatar query and any image download are done.
+  // Absence needs a settled page. The upload button stays disabled until the avatar query answers.
   await page.reload()
-  await page.waitForLoadState('networkidle')
+  await expect(page.getByTestId('avatar-upload')).toBeEnabled()
   await expect(page.getByTestId('avatar-remove')).toHaveCount(0)
   await expect(avatarImage(page)).toHaveCount(0)
 })

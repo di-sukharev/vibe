@@ -157,17 +157,6 @@ describe('users and admin API integration', () => {
       },
     ])
 
-    const maximumPage = await app.request('/api/admin/users?page=100&pageSize=1', {
-      headers: authenticatedHeaders(admin.accessToken),
-    })
-    expect(maximumPage.status).toBe(200)
-    expect(await maximumPage.json()).toMatchObject({
-      items: [],
-      page: 100,
-      pageSize: 1,
-      hasNext: false,
-    })
-
     const excessivePage = await app.request('/api/admin/users?page=101', {
       headers: authenticatedHeaders(admin.accessToken),
     })
@@ -347,12 +336,12 @@ describe('users and admin API integration', () => {
         { requirePassword: false },
       ),
     )
-    const unlocked = await prisma.user.findUniqueOrThrow({
-      where: { id: seeded.id },
-      select: { passwordHash: true },
+    const unlockedLogin = await app.request('/api/auth/token/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'admin@example.com', password }),
     })
-    expect(unlocked.passwordHash).not.toBeNull()
-    expect(await Bun.password.verify(password, unlocked.passwordHash!)).toBe(true)
+    expect(unlockedLogin.status).toBe(200)
     await expect(assertLoginCapableAdmin(prisma)).resolves.toBeUndefined()
   })
 

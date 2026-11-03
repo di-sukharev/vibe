@@ -80,8 +80,8 @@ export function AvatarPanel({ user }: { user: UserDto }) {
           </Alert>
         )}
         <div className="flex flex-wrap items-center gap-5">
-          <Avatar className="size-16" data-testid="avatar-preview">
-            {imageUrl && <AvatarImage alt="" src={imageUrl} />}
+          <Avatar className="size-16">
+            {imageUrl && <AvatarImage alt="" data-testid="avatar-image" src={imageUrl} />}
             <AvatarFallback className="text-foreground" data-testid="avatar-fallback">
               <Typography as="span" variant="lead">
                 {initials(user)}
@@ -92,6 +92,7 @@ export function AvatarPanel({ user }: { user: UserDto }) {
           <div className="grid gap-2">
             <div className="flex flex-wrap gap-2">
               <Button
+                data-testid="avatar-upload"
                 disabled={busy}
                 onClick={() => fileInput.current?.click()}
                 type="button"

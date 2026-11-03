@@ -23,6 +23,8 @@ export default defineConfig({
   retries: 0,
   reporter: 'list',
   use: {
+    channel: 'chrome',
+    launchOptions: { chromiumSandbox: true },
     ...devices['Desktop Chrome'],
     baseURL: websiteUrl,
     reducedMotion: 'no-preference',
