@@ -96,6 +96,8 @@ export default defineConfig({
   retries: 0,
   reporter: [['list'], ['html', { open: 'never', outputFolder: 'e2e/.artifacts/report' }]],
   use: {
+    channel: 'chrome',
+    launchOptions: { chromiumSandbox: true },
     baseURL: frontendUrl,
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',

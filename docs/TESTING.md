@@ -68,7 +68,7 @@ Inspect browser requests before diagnosing a stuck loading fallback as an authen
 
 ## Browser tests and screenshots
 
-Install Playwright Chromium once with `bun run e2e:install`. Webapp E2E needs Docker. Webapp specs are in `webapp/e2e/specs` and use stable `data-testid` selectors.
+Install Google Chrome once with `bun run e2e:install`. Webapp E2E needs Docker. Webapp specs are in `webapp/e2e/specs` and use stable `data-testid` selectors.
 
 The runner starts a test database, backend, and the React Router development server. `e2e:preview` builds the webapp with the test backend origin and runs the same journeys through Vite production preview. Both modes use the real backend and an isolated test database. It seeds test accounts and removes its database afterward. Reports and failure artifacts are in `webapp/e2e/.artifacts`.
 

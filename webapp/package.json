@@ -14,7 +14,7 @@
     "storybook:build": "storybook build --output-dir storybook-static",
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
-    "e2e:install": "playwright install chromium",
+    "e2e:install": "playwright install chrome",
     "screens": "playwright test --config playwright.screens.config.ts",
     "ui": "bunx shadcn@4.22.1",
     "ui:add": "bun run ui add",
@@ -50,7 +50,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@playwright/test": "^1.64.0",
+    "@playwright/test": "1.64.1",
     "@react-router/dev": "8.5.0",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^24.19.2",

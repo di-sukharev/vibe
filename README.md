@@ -38,7 +38,7 @@ Use this section only when creating a new project. Keep it and `CHECKLIST.md` wh
 6. Replace the template's own content with the product's content. Replace `webapp/public/favicon.svg`, `website/public/favicon.svg`, and `website/public/favicon.ico` with the product's icons. In `website`, replace the landing page copy, brand mark, footer credits, page titles and descriptions, and links to the template repository. Update the website tests and screenshot tour that the new content affects.
 7. For mobile, select the user's Expo account and initialize EAS only when builds are needed. For a web-only project, delete the `mobile` directory. Remove mobile, Expo, EAS, and Maestro mentions from the documentation, agent instructions, `.gitignore`, and `.dockerignore`. Remove the Expo development origins on ports 8081 and 19006 from `backend/src/env.ts` and `backend/.env.example`. Keep responsive layout code that uses the word mobile.
 8. If deployment is requested, choose hosting from audience, data location, and operating needs. Use the independent static builds and backend image described in [Deployment](docs/DEPLOYMENT.md). Configure the chosen host in the new project.
-9. Install Playwright Chromium with `bun run e2e:install`. Run the relevant checks and verify local startup. Keep required operating details in the project README and configuration. Delete `CHECKLIST.md` and this entire block, including its markers. Report local URLs, check results, and any remaining user actions.
+9. Install Google Chrome with `bun run e2e:install`. Run the relevant checks and verify local startup. Keep required operating details in the project README and configuration. Delete `CHECKLIST.md` and this entire block, including its markers. Report local URLs, check results, and any remaining user actions.
 <!-- BOOTSTRAP_ONLY_END -->
 
 ## Applications
@@ -69,7 +69,7 @@ The backend permits only origins in `CORS_ORIGINS`. `localhost` and `127.0.0.1` 
 
 Package scripts define the available commands. [AGENTS.md](AGENTS.md) defines architecture and working rules. [CLAUDE.md](CLAUDE.md) imports those rules for Claude.
 
-Run focused checks during development. `bun run check` runs the full local checks and needs Docker and package registry access. Before the first run, install Playwright Chromium with `bun run e2e:install`.
+Run focused checks during development. `bun run check` runs the full local checks and needs Docker and package registry access. Before the first run, install Google Chrome with `bun run e2e:install`.
 
 [Testing](docs/TESTING.md) explains database tests and E2E. [UI](docs/UI.md) explains theme generation and screenshots. [Deployment](docs/DEPLOYMENT.md) covers production setup and recovery.
 
