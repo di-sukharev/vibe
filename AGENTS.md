@@ -54,7 +54,7 @@ Record significant architecture and infrastructure decisions in `backend/adr/` a
 
 Use PostgreSQL and the existing backend before adding another service. Add a queue, cache, broker, or other services only if load (RPS) grows and the existing system becomes insufficient.
 
-Generate migrations with Prisma: edit `backend/prisma/schema/`, then run `bun run --cwd backend prisma:migrate`. Use custom migration SQL only on request or for database features Prisma cannot represent. Keep `prisma`, `@prisma/client`, and `@prisma/adapter-pg` on the same exact version.
+Generate migrations with Prisma: edit `backend/prisma/schema/`, then run `bun run --cwd backend prisma:migrate`. Use custom migration SQL only on request or for database features Prisma cannot represent. Keep `prisma`, `@prisma/client`, and `@prisma/adapter-pg` on the same exact 7.x version. Always install them with an explicit version, because the npm `latest` tag can point to Prisma 8. Prisma 8 has a different API. Upgrade to it only after a separate decision.
 
 Use PostgreSQL `uuidv7()` defaults for generated primary IDs. Use `@db.Uuid` for those IDs and their foreign keys.
 
