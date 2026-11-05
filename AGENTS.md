@@ -88,7 +88,7 @@ Show real data. Follow [UI](docs/UI.md) for UI states, accessibility, component 
 
 ## Verification and documentation
 
-Run relevant type checks, lint, tests, and builds locally through package scripts. Run `bun run check` before releases or when changes affect more than one application. Never add cloud CI. Report changes, checks, failures, and required user actions. Never claim checks you did not run.
+At the end of a task, before a commit, run relevant type checks, lint, tests, and builds locally through package scripts. Do not run them after each edit. During TDD, run only the current test. Run `bun run check` before releases or when changes affect more than one application. Never add cloud CI. Report changes, checks, failures, and required user actions. Never claim checks you did not run.
 
 Document only decisions, constraints, and procedures that are not clear from code or configuration. For other documentation, update an existing document if it covers the topic. Add a new document only for a new topic. Never repeat instructions or add code inventories, such as lists of files or functions.
 
