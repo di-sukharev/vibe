@@ -18,6 +18,7 @@ Before you add complexity for an unlikely race condition or security case, expla
 | `webapp`                 | React Router app for signed-in users; pages render in the browser (CSR) |
 | `website`                | Public React Router pages rendered at build time (SSG)                  |
 | `mobile`                 | Expo application for iOS, Android, and web                              |
+| `tasks`                  | Product tasks; read its README before you create or complete a task     |
 
 Read each application's README for local setup instructions and rules for running it.
 
